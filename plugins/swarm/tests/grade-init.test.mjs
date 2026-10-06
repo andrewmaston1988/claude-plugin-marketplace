@@ -41,6 +41,19 @@ test("grade --init pre-fills a failed leaf's outcome as failed", () => {
   equal(outcomeFor({ ok: false, exit: 1, output: "boom" }), "failed", "a non-timeout non-zero exit is failed");
 });
 
+// The provider ran dry or throttled the leaf: a machinery fact the engine
+// recorded, not a judgement about the model. Pre-filling `failed` blames it.
+test("grade --init pre-fills quota and rate-limited from the recorded failureClass", () => {
+  equal(outcomeFor({ ok: false, exit: 1, failureClass: "quota", output: "usage limit reached" }), "quota");
+  equal(outcomeFor({ ok: false, exit: 1, failureClass: "rate-limited", output: "429 too many requests" }), "rate-limited");
+});
+
+// `harness` is the grader's diagnosis after reading the transcript — the engine
+// never knows it, so a stray failureClass must not smuggle it into the skeleton.
+test("grade --init never pre-fills harness — it is the grader's diagnosis", () => {
+  equal(outcomeFor({ ok: false, exit: 1, failureClass: "harness", output: "lost path" }), "failed");
+});
+
 test("grade --init never pre-fills wrong — it is the grader's judgement", () => {
   for (const result of [{ ok: true, output: "x" }, { ok: false, output: "x" }, { ok: false, timedOut: true, output: "x" }]) {
     ok(outcomeFor(result) !== "wrong", "wrong is a verdict only a human reaches; the pre-fill must never reach it");

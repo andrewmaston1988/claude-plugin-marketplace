@@ -7,7 +7,7 @@
 import { appendFileSync, readFileSync, existsSync, mkdirSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { swarmHome } from "./config.mjs";
-import { UNIVERSAL, ASPECTS, OUTCOMES, GRADED_OUTCOMES } from "./aspects.mjs";
+import { UNIVERSAL, ASPECTS, OUTCOMES, GRADED_OUTCOMES, INFRA_OUTCOMES } from "./aspects.mjs";
 import { isCloudModel, isClaudeModel, CLAUDE_ALIASES } from "./models.mjs";
 import { band, DEFAULT_COST_BANDS } from "./cost.mjs";
 import { identityOf, identityKey } from "./contracts.mjs";
@@ -264,12 +264,31 @@ export function aggregate(rows, { aspect, model, provider, domain, combineProvid
       && (!domain || r.domain === domain);
   });
 
+  const keyFor = (identity) => combineProviders
+    ? JSON.stringify([identity.model])
+    : identityKey(identity);
+  // Infra outcomes are tallied PER MODEL, in one pre-pass: counted inside the
+  // per-aspect loop they would be multiplied by the aspect count, and put on a
+  // cell they would read as the model being bad at adherence.
+  const infra = new Map();
+  for (const r of scoped) {
+    if (!INFRA_OUTCOMES.includes(r.outcome)) continue;
+    const identity = identityOf(r);
+    const key = keyFor(identity);
+    const entry = infra.get(key);
+    if (entry) entry.n += 1;
+    else {
+      infra.set(key, {
+        ...(identity.explicit && identity.provider ? { provider: identity.provider } : {}),
+        model: identity.model,
+        n: 1,
+      });
+    }
+  }
+
   return {
     aspects: wanted.map((a) => {
       const cells = new Map();
-      const keyFor = (identity) => combineProviders
-        ? JSON.stringify([identity.model])
-        : identityKey(identity);
       const cellFor = (identity) => {
         const key = keyFor(identity);
         if (!cells.has(key)) {
@@ -297,6 +316,7 @@ export function aggregate(rows, { aspect, model, provider, domain, combineProvid
         return cell;
       };
       for (const r of scoped) {
+        if (INFRA_OUTCOMES.includes(r.outcome)) continue; // tallied per model, above
         const identity = identityOf(r);
         const grade = r.grades?.[a];
         // An ungraded row declared no aspects — it could not. It still counts
@@ -326,6 +346,7 @@ export function aggregate(rows, { aspect, model, provider, domain, combineProvid
         || displayIdentity(identityOf(x)).localeCompare(displayIdentity(identityOf(y))));
       return { aspect: a, universal: UNIVERSAL.includes(a), cells: list, prior };
     }),
+    infra: [...infra.values()].sort((x, y) => y.n - x.n || displayIdentity(identityOf(x)).localeCompare(displayIdentity(identityOf(y)))),
     filters: {
       aspect: aspect ?? null,
       model: model ?? null,
@@ -351,11 +372,13 @@ function blankOutcomes() {
 export function overall(rows, { model, provider, domain, combineProviders = false } = {}) {
   const report = aggregate(rows, { model, ...(provider !== undefined && { provider }), domain, combineProviders });
   const universals = report.aspects.filter((a) => a.universal);
+  const keyFor = (v) => (combineProviders ? JSON.stringify([identityOf(v).model]) : identityKey(identityOf(v)));
+  const infraByKey = new Map(report.infra.map((e) => [keyFor(e), e.n]));
   const byModel = new Map();
   for (const a of universals) {
     for (const c of a.cells) {
       const identity = identityOf(c);
-      const key = combineProviders ? JSON.stringify([c.model]) : identityKey(identity);
+      const key = keyFor(c);
       if (!byModel.has(key)) {
         byModel.set(key, {
           ...(combineProviders ? { providers: [] }
@@ -382,9 +405,17 @@ export function overall(rows, { model, provider, domain, combineProviders = fals
       cell.provisional = cell.provisional || (c.n > 0 && c.provisional);
     }
   }
-  const cells = [...byModel.values()].map((c) => {
+  // An infra-only model has no graded cell: without this row its whole record shows nowhere.
+  const infraOnly = report.infra.filter((e) => !byModel.has(keyFor(e)) && (!model || e.model === model)).map((e) => ({ ...(e.provider ? { provider: e.provider } : {}), model: e.model, n: 0, wtds: {}, outcomes: blankOutcomes() }));
+  const cells = [...byModel.values(), ...infraOnly].map((c) => {
     const got = universals.map((a) => c.wtds[a.aspect]).filter((v) => v != null);
-    return { ...c, combined: got.length ? Number((got.reduce((x, y) => x + y, 0) / got.length).toFixed(2)) : null };
+    return {
+      ...c,
+      combined: got.length ? Number((got.reduce((x, y) => x + y, 0) / got.length).toFixed(2)) : null,
+      // Infra rides the ranked row: it is the model's whole record, and it is
+      // deliberately excluded from `combined` above.
+      infra: infraByKey.get(keyFor(c)) ?? 0,
+    };
   });
   cells.sort((x, y) => (y.combined ?? -1) - (x.combined ?? -1)
     || displayIdentity(identityOf(x)).localeCompare(displayIdentity(identityOf(y))));

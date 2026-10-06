@@ -103,7 +103,7 @@ export function createDeterministicSteps(ctx) {
       const sources = ctx.resolveIntegrateFrom(task.integrate.from).map(ctx.branchOf);
       const out = ctx.worktree.integrate(
         { ...task, worktreeName: task.integrate.into, sources }, cfg, plan.resultsDir,
-        { repo: task.originalCwd || plan.cwd });
+        { repo: task.originalCwd || plan.cwd, base: ctx.baseFor(task.originalCwd || plan.cwd) });
       const payload = { into: task.integrate.into, branch: out.branch, merged: out.merged, conflicts: out.conflicts };
       result = {
         id: task.id, model: task.model, ...ctx.durableIdentity(task), ok: true, exit: 0, durationMs: io.now() - t0,

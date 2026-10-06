@@ -116,6 +116,12 @@ export function normalizeTasks(rawTasks, { cwd, resultsDir, cfg, defaultTimeoutM
         if (!t.branch) branchScope = runScopeKey(resultsDir);
       }
     }
+    // An integrate node owns the `into` tree, so it owns that tree's branch — and
+    // a bare `swarm/<into>` makes two runs of one manifest seed the SAME branch:
+    // the second run lands on the first run's kept tree and dies on a collision.
+    // Validation bars `branch` on an integrate task, so the guard only protects a
+    // hand-built plan that skipped it.
+    if (isIntegrate && !t.branch) branchScope = runScopeKey(resultsDir);
     const worktreeName = isIntegrate ? t.integrate.into : resolveWorktreeName(t);
     const branchName = (isCompute || isManifest) ? undefined : t.branch;
     const whenBlock = t.when && typeof t.when === "object" && !Array.isArray(t.when)

@@ -5,6 +5,7 @@ import { equal, ok, deepEqual, notEqual } from "node:assert/strict";
 import { rmSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { effectivePlanDoc } from "../src/manifest.mjs";
+import { branchNameFor } from "../src/worktree.mjs";
 import { oracleSnapKey } from "./helpers/snap-key.mjs";
 import { loadManifest } from "./helpers/repo-io.mjs";
 import { CFG, writeManifest, tmp, errorsOf, claudeTask } from "./helpers/manifest-fixtures.mjs";
@@ -43,6 +44,29 @@ test("branchScope: a forEach writer synthesises worktreeName so clones can be re
     equal(fe.worktreeName, "fe");
     equal(fe.branchName, undefined);
     equal(fe.branchScope, oracleSnapKey(plan.resultsDir));
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("branchScope: an integrate node is run-scoped too, so two runs seeding one `into` cannot collide", () => {
+  const dir = tmp();
+  try {
+    const body = (resultsDir) => ({ resultsDir, tasks: [
+      bashTask({ id: "src" }),
+      { id: "seed", after: ["src"], integrate: { into: "feat", from: ["src"] } },
+    ] });
+    const a = inDir(dir, body("run-a"), "a.json");
+    const b = inDir(dir, body("run-b"), "b.json");
+    const seedA = a.tasks.find((t) => t.id === "seed");
+    const seedB = b.tasks.find((t) => t.id === "seed");
+
+    equal(seedA.worktreeName, "feat", "the node owns the `into` tree");
+    equal(seedA.branchScope, oracleSnapKey(a.resultsDir), "and a branch scoped to ITS run");
+    notEqual(seedA.branchScope, seedB.branchScope, "a second run of the same manifest resolves a different scope");
+    notEqual(branchNameFor(seedA, CFG), branchNameFor(seedB, CFG),
+      "so the second run's branch cannot collide with the first run's kept tree");
+    equal(branchNameFor(seedA, CFG), `swarm/${seedA.branchScope}/feat`);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

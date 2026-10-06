@@ -4,7 +4,7 @@
 // is unappendable by construction, so it cannot land as a grade.
 import { writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { UNIVERSAL, CAPABILITY, OUTCOMES } from "./aspects.mjs";
+import { UNIVERSAL, CAPABILITY, OUTCOMES, INFRA_OUTCOMES } from "./aspects.mjs";
 import { listLeaves as defaultListLeaves } from "./results.mjs";
 
 // The placeholder a row keeps when the leaf's own record does not settle it.
@@ -17,13 +17,20 @@ const NOTE_MAX = 200;
 
 const hasOutput = (result) => typeof result?.output === "string" && result.output.trim().length > 0;
 
+// `harness` is deliberately absent: it is the grader's diagnosis after reading
+// the transcript, never a state the engine can read off the record.
+const RECORDED_INFRA = INFRA_OUTCOMES.filter((o) => o !== "harness");
+
 // Only the leaf's own recorded state, and only where it is unambiguous.
 // `wrong` is never pre-filled — it is the judgement the grader is here to make —
 // and a leaf that produced no output cannot be called `completed` however it
 // exited, so it keeps the placeholder unless the record says timeout/failed.
+// A recorded failure class wins over the generic failure arm: the provider
+// running dry is a fact about the machinery, not about the model.
 export function outcomeFor(result) {
   if (!result || typeof result !== "object") return OUTCOME_CHOICES;
   if (result.timedOut === true) return "timeout";
+  if (RECORDED_INFRA.includes(result.failureClass)) return result.failureClass;
   if (result.ok === false) return "failed";
   if (result.ok === true && hasOutput(result)) return "completed";
   return OUTCOME_CHOICES;
@@ -63,7 +70,7 @@ export function gradeInit(dir, { listLeaves = defaultListLeaves } = {}) {
       path,
       `${leaves.length} gradeable leaf/leaves. Grade the four universal aspects 1-10 on every row; leave a`,
       "capability aspect null unless the leaf stressed it. Drop `grades` entirely on a row whose leaf",
-      "produced no output (failed / timeout / session-died / not-capable), then:",
+      "produced no output (failed / timeout / session-died / not-capable / quota / rate-limited / harness), then:",
       `  swarm grade --file ${path}`,
     ],
   };

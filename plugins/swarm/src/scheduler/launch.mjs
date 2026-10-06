@@ -82,6 +82,8 @@ export function createLaunch(ctx) {
           wt = ctx.worktree.prepareIsolation({ ...task, worktreeName: wtName }, cfg, plan.resultsDir, {
             reset: ctx.force && ctx.groupFirst.get(wtName) === task.id,
             addTimeoutMs: defaultWorktree.WORKTREE_ADD_TIMEOUT_MS,
+            // The commit the run pinned at dispatch, not whatever HEAD says now.
+            base: ctx.baseFor(task.originalCwd || task.cwd),
           });
           // Every tree-holding leaf sits at its declared depth. Unconditionally: the old
           // mode test skipped this for a hand-written tree and landed it at the root.
@@ -207,6 +209,11 @@ export function createLaunch(ctx) {
           "leaf stopped for low memory — parked; the engine resumes it automatically once memory recovers.\n",
         );
       }
+      // The terminal state is machinery, not a verdict on the model: record it
+      // so `grade --init` pre-fills an infra outcome instead of `failed`. A
+      // retry or a fallback rewrites the whole result, so a leaf that recovered
+      // never carries the class of the attempt it recovered from.
+      if (st === "quota" || st === "rate-limited") result.failureClass = st;
       if (st === "quota") {
         const resetsAt = parseQuotaReset(r.raw);
         if (resetsAt) result.quotaResetsAt = resetsAt;

@@ -20,7 +20,14 @@ export const ASPECTS = [...UNIVERSAL, ...CAPABILITY];
 
 // `not-capable` is the observed-vs-declared gap: the leaf ran, and could not do
 // the thing at all. That is an outcome, never a low grade.
-export const OUTCOMES = ["completed", "wrong", "failed", "timeout", "session-died", "not-capable"];
+// The three infra outcomes are the opposite failure: the leaf never got to try.
+// `quota` and `rate-limited` are recorded mechanically by the scheduler;
+// `harness` is the grader's diagnosis after reading the transcript (a lost path,
+// a hook firing in the leaf, a timeout mid-write). None of them is evidence
+// about the model, so none may sit on an aspect cell.
+export const OUTCOMES = ["completed", "wrong", "failed", "timeout", "session-died", "not-capable", "quota", "rate-limited", "harness"];
+
+export const INFRA_OUTCOMES = ["quota", "rate-limited", "harness"];
 
 // Outcomes where output exists, so grades are required. Everything else forbids
 // them: you cannot grade a report that was never submitted.

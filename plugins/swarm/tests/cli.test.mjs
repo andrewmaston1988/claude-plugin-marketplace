@@ -243,10 +243,10 @@ test("run: 3-task fan-out + digest end-to-end via the claude shim", () => {
     ok(summary.started && summary.finished);
     deepEqual(summary.tasks.map((t) => t.state), ["ok", "ok", "ok", "ok"]);
     deepEqual(summary.blocked, []);
-    // run.log is JSONL: run-start + 2 lines per task — no snapshot event, since
-    // isolation trees are no longer snapshotted into the run's results dir.
+    // run.log is JSONL: run-start + a bases event + 2 lines per task — no snapshot
+    // event, since isolation trees are no longer snapshotted into the run's results dir.
     const logLines = readFileSync(join(resultsDir, "run.log"), "utf8").trim().split("\n");
-    equal(logLines.length, 9);
+    equal(logLines.length, 10);
     // progressive per-leaf logs
     for (const id of ["scan-a", "scan-b", "scan-c", "__digest"]) {
       equal(readFileSync(join(resultsDir, "results", `${id}.log`), "utf8"), "leaf-output-text");
@@ -611,7 +611,7 @@ test("stop: dead engine discovers a real orphaned worktree via manifest cwd, rec
     const resultsDir = join(dir, "out");
     mkdirSync(resultsDir, { recursive: true });
     writeFileSync(join(resultsDir, "manifest.json"), JSON.stringify({ resultsDir, cwd: repo, tasks: [] }));
-    const wt = prepareIsolation({ id: "impl", originalCwd: repo, cwd: repo }, { worktreeBranchPrefix: "swarm/" }, resultsDir, { addTimeoutMs: WORKTREE_ADD_TIMEOUT_MS });
+    const wt = prepareIsolation({ id: "impl", originalCwd: repo, cwd: repo }, { worktreeBranchPrefix: "swarm/" }, resultsDir, { addTimeoutMs: WORKTREE_ADD_TIMEOUT_MS, base: gitOut(["rev-parse", "HEAD"], repo) });
 
     const lines = [
       JSON.stringify({ ts: new Date().toISOString(), event: "run-start", tasks: [{ id: "impl", provider: "claude", model: "claude-haiku-4-5-20251001" }] }),

@@ -3,7 +3,7 @@ import { deepEqual, ok, equal } from "node:assert/strict";
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { UNIVERSAL, CAPABILITY, ASPECTS, OUTCOMES, GRADED_OUTCOMES } from "../src/aspects.mjs";
+import { UNIVERSAL, CAPABILITY, ASPECTS, OUTCOMES, INFRA_OUTCOMES, GRADED_OUTCOMES } from "../src/aspects.mjs";
 
 const SRC = fileURLToPath(new URL("../src/", import.meta.url));
 
@@ -21,10 +21,18 @@ test("aspects: UNIVERSAL and CAPABILITY are disjoint, and ASPECTS is their conca
   equal(new Set(ASPECTS).size, 11);
 });
 
-test("aspects: the six outcomes, not-capable among them", () => {
-  deepEqual(OUTCOMES, ["completed", "wrong", "failed", "timeout", "session-died", "not-capable"]);
+test("aspects: the nine outcomes, not-capable and the three infra ones among them", () => {
+  deepEqual(OUTCOMES, ["completed", "wrong", "failed", "timeout", "session-died", "not-capable", "quota", "rate-limited", "harness"]);
   ok(OUTCOMES.includes("not-capable"));
+  deepEqual(INFRA_OUTCOMES, ["quota", "rate-limited", "harness"]);
+  for (const o of INFRA_OUTCOMES) ok(OUTCOMES.includes(o), `${o} must be a stored outcome, not a display-only label`);
   deepEqual(GRADED_OUTCOMES, ["completed", "wrong"]);
+});
+
+// Infra outcomes are about the machinery, never the model: they forbid grades
+// exactly as `failed` does, and they must not overlap the graded pair.
+test("aspects: an infra outcome is never a graded outcome", () => {
+  for (const o of INFRA_OUTCOMES) ok(!GRADED_OUTCOMES.includes(o), `${o} forbids grades`);
 });
 
 // Aspect inference was cut for cause and looks like an obviously helpful

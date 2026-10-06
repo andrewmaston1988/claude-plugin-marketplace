@@ -50,6 +50,13 @@ test("F3: integrate.from over a forEach parent merges exactly the clones that ex
     deepEqual(res.outputJson.merged, ["swarm/fix-0", "swarm/fix-1"]);
     ok(existsSync(join(p.resultsDir, "wt-feat", "fix0.txt")));
     ok(existsSync(join(p.resultsDir, "wt-feat", "fix1.txt")));
+    // This plan is hand-built: its tasks carry no normalisation fields, so the run
+    // must find each task's repo from the task's OWN cwd. A capture keyed off a
+    // normalisation field would pin nothing here, and every launch would have no
+    // base to cut from.
+    const bases = JSON.parse(readFileSync(join(p.resultsDir, "bases.json"), "utf8"));
+    equal(Object.values(bases).length, 1, `the hand-built plan's one repo is pinned: ${JSON.stringify(bases)}`);
+    ok(/^[0-9a-f]{40}$/.test(Object.values(bases)[0]), `a real commit is pinned: ${JSON.stringify(bases)}`);
   } finally {
     rmSync(dir, { recursive: true, force: true });
     rmSync(repo, { recursive: true, force: true });

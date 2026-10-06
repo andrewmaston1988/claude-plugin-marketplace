@@ -14,7 +14,7 @@ Defaults vary by runner: Claude and Ollama get `Read,Grep,Glob,Skill` plus the d
 | The leaf holds | It runs in | Its branch |
 |---|---|---|
 | `Read,Grep,Glob` (the default for Codex) | the live repo, at the `cwd` it was given | none — it commits nothing |
-| `Edit`, `Write` or `Bash` | a private worktree on repo HEAD | `swarm/<run>/<id>`, scoped to this run |
+| `Edit`, `Write` or `Bash` | a private worktree cut from the run's dispatch commit | `swarm/<run>/<id>`, scoped to this run |
 
 So granting `Bash` to a leaf moves it out of the live repo into a tree of its own. That is
 intended, and worth knowing when you add the tool.
@@ -56,7 +56,9 @@ no leaf, so none of this applies, and naming either key on one is refused.
 
 **To start a tree from another task's commits, use an `integrate` node** — it creates the
 target tree and merges the named branches into it. There is no key for basing one tree on
-another's branch.
+another's branch. Every tree, seed ones included, is cut from the commit the run pinned when
+it started, not the repo's HEAD at the moment the leaf launches; the node's `into` branch is
+run-scoped like a writer's.
 
 ### Provider identity
 
