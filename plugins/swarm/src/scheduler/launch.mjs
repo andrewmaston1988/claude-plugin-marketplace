@@ -209,6 +209,11 @@ export function createLaunch(ctx) {
           "leaf stopped for low memory — parked; the engine resumes it automatically once memory recovers.\n",
         );
       }
+      // The terminal state is machinery, not a verdict on the model: record it
+      // so `grade --init` pre-fills an infra outcome instead of `failed`. A
+      // retry or a fallback rewrites the whole result, so a leaf that recovered
+      // never carries the class of the attempt it recovered from.
+      if (st === "quota" || st === "rate-limited") result.failureClass = st;
       if (st === "quota") {
         const resetsAt = parseQuotaReset(r.raw);
         if (resetsAt) result.quotaResetsAt = resetsAt;

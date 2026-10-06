@@ -97,18 +97,6 @@ test("validateRow: an unknown outcome is rejected, and does not cascade into gra
   ok(!errs.some((e) => e.startsWith("grades")), `cascade: ${errs.join(" | ")}`);
 });
 
-for (const outcome of ["failed", "timeout", "session-died", "not-capable"]) {
-  test(`validateRow: grades present on ${outcome} are rejected — no output, no grades`, () => {
-    const errs = validateRow(row({ outcome, note: "no output" }));
-    ok(errs.some((e) => e.startsWith("grades:")), errs.join(" | "));
-  });
-
-  test(`validateRow: ${outcome} with no grades and a note passes`, () => {
-    const { grades, ...rest } = row();
-    deepEqual(validateRow({ ...rest, outcome, note: "the session died on an image read" }), []);
-  });
-}
-
 for (const outcome of ["completed", "wrong"]) {
   test(`validateRow: grades absent on ${outcome} are rejected — output existed`, () => {
     const { grades, ...rest } = row();

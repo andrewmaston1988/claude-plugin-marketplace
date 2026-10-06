@@ -4,9 +4,13 @@
 // widget takes its data and the page's own helpers as parameters — no
 // closure over page.html's IIFE. window.perfViews is the whole contract.
 (function () {
-  // Six-outcome palette, fixed order (never cycled), validated dark-mode
+  // Outcome palette, fixed order (never cycled), validated dark-mode
   // categorical set against this dashboard's surface (#181b24) via the
   // dataviz skill's validate_palette.js.
+  // `infra` is not a seventh data series: it is the three machinery outcomes
+  // (quota, rate-limited, harness) collapsed into one neutral segment, read
+  // from the row's `infra` count — the surface's own muted token, so a provider
+  // outage never takes a categorical colour away from a real result.
   const OUTCOME_COLOR = {
     completed: "#3987e5",
     wrong: "#d95926",
@@ -14,6 +18,7 @@
     timeout: "#c98500",
     "session-died": "#d55181",
     "not-capable": "#008300",
+    infra: "#9aa0b1",
   };
   const OUTCOME_ORDER = Object.keys(OUTCOME_COLOR);
   const HATCH_ID = "perf-hatch";
@@ -77,16 +82,17 @@
     return `<div class="covtable">${head}${rows}</div>`;
   }
 
-  // A legend row always accompanies >=2 series (six outcome buckets here) —
-  // identity never rides on color alone. Rendered here, not duplicated in
-  // page.html, since this file is the one place the palette is defined.
+  // A legend row always accompanies >=2 series (six result buckets plus the
+  // collapsed infra one) — identity never rides on color alone. Rendered here,
+  // not duplicated in page.html, since this file is the one place the palette
+  // is defined.
   function reliabilityBars(data, h) {
     const { esc } = h;
     if (!data.length) return `<div class="empty">no graded leaves yet.</div>`;
     const legend = `<div class="chips">${OUTCOME_ORDER.map((o) => `<span class="chip"><i class="dot" style="background:${OUTCOME_COLOR[o]}"></i>${esc(o)}</span>`).join("")}</div>`;
     const rows = data.map((m) => {
       const segs = OUTCOME_ORDER.map((o) => {
-        const v = m.byOutcome[o] || 0;
+        const v = o === "infra" ? (m.infra || 0) : (m.byOutcome[o] || 0);
         return v ? `<span style="flex:${v};background:${OUTCOME_COLOR[o]}"></span>` : "";
       }).join("");
       return `<li class="row" data-key="${esc(m.model)}"><div class="rail" style="width:16px"></div><div class="body"><div class="head"><span class="name">${esc(m.model)}</span><span class="val">${m.total}</span></div><div class="bar">${segs}</div></div></li>`;

@@ -1,5 +1,6 @@
-// `swarm perf --overall` through the real CLI: the needs-grades block, its order,
-// its grading gate, its immunity to filters, and the ranked table below it.
+// `swarm perf` through the real CLI: the needs-grades block, its order, its
+// grading gate, its immunity to filters, the ranked table below it, and how the
+// two views print the infra tally.
 import { test } from "node:test";
 import { equal, ok, deepEqual } from "node:assert/strict";
 import { rmSync, writeFileSync } from "node:fs";
@@ -39,7 +40,15 @@ function world({ enabled = true, cache = true } = {}) {
   return { dir, home };
 }
 
+// A leaf the provider, not the model, ended: no grades, per the outcome→grades rule.
+const infraRow = (leaf, model = "glm-5.2:cloud", outcome = "quota") => JSON.stringify({
+  resultsDir: `C:/runs/${leaf}`, leaf, model, domain: "node", outcome,
+  note: "the provider ran dry", assessedBy: { session: "s1" },
+});
+const store = (home, lines) => writeFileSync(join(home, "model-scores.jsonl"), lines.join("\n") + "\n");
+
 const perf = (w, extra = []) => runCli(["perf", "--overall", ...extra], { cwd: w.dir, env: { SWARM_HOME: w.home } });
+const perfAspects = (w) => runCli(["perf"], { cwd: w.dir, env: { SWARM_HOME: w.home } });
 const split = (stdout) => {
   const at = stdout.indexOf(HEADING);
   const tableAt = stdout.indexOf("overall  ");
@@ -63,6 +72,50 @@ test("perf --overall: the needs-grades block leads, sorted by the elder's standi
     ok(!block.includes("deep:cloud") && !block.includes("glm-5.1:cloud  n="), "past the canon, or an elder, is not asked to be seated");
     ok(r.stdout.indexOf(HEADING) < r.stdout.indexOf("overall  "), "above the ranked table");
   } finally { rmSync(w.dir, { recursive: true, force: true }); }
+});
+
+// ── the infra tally: an outcomes-only row, and one footer line ───────────────
+
+// An infra-only model has no cell to hang off, so before this row existed it was
+// simply absent from the ranking — the one place the store is read for seats.
+test("perf --overall: a model whose every row is an infra outcome still gets a row, flagged and tallied", () => {
+  const dir = tmp();
+  try {
+    const home = gateHome(join(dir, "home"));
+    store(home, [infraRow("q1")]);
+    const r = perf({ dir, home });
+    equal(r.status, 0, r.stderr);
+    const line = split(r.stdout).table.split("\n").find((l) => /^\s+glm-5\.2:cloud\s/.test(l));
+    ok(line, `the infra-only model is missing from the table:\n${r.stdout}`);
+    ok(line.includes("[no grades — outcomes only]"), line);
+    ok(line.includes("infra 1"), line);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+// The per-aspect view is eleven tables wide: a tally riding every row a model
+// appears in repeats one fact eleven times and buries the row's own outcomes.
+test("perf: the infra tally is printed once under the aspect tables, never on a row", () => {
+  const dir = tmp();
+  try {
+    const home = gateHome(join(dir, "home"));
+    store(home, [...rowsFor("glm-5.2:cloud", 2, 8), infraRow("q1"), infraRow("q2")]);
+    const r = perfAspects({ dir, home });
+    equal(r.status, 0, r.stderr);
+    ok(r.stdout.includes("infra outcomes (not graded): glm-5.2:cloud 2"), r.stdout);
+    equal((r.stdout.match(/infra \d/g) || []).length, 0, `the tally must not ride every aspect row:\n${r.stdout}`);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("perf: a model whose only rows are infra outcomes is still named exactly once, with its count", () => {
+  const dir = tmp();
+  try {
+    const home = gateHome(join(dir, "home"));
+    store(home, [infraRow("q1")]);
+    const r = perfAspects({ dir, home });
+    equal(r.status, 0, r.stderr);
+    equal((r.stdout.match(/glm-5\.2:cloud/g) || []).length, 1, `named once, on the tally line:\n${r.stdout}`);
+    ok(r.stdout.includes("infra outcomes (not graded): glm-5.2:cloud 1"), r.stdout);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
 test("perf --overall: a block model is not also listed in the ranked table; elder rows say what replaced them", () => {
