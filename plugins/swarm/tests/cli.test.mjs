@@ -1960,10 +1960,10 @@ test("prune: unlanded commit and dirty tree are preserved until explicit discard
     writeFinishedRun(f.resultsDir, [{ branch: wt.branch, path: wt.path }]);
     const env = { SWARM_HOME: join(f.dir, "home") };
     const refused = runCli(["prune", f.resultsDir], { cwd: f.dir, env });
-    equal(refused.status, 1, refused.stdout + refused.stderr);
-    ok(refused.stderr.includes(wt.path) && refused.stderr.includes("--discard-unlanded"), refused.stderr);
     ok(existsSync(wt.path), "blocked worktree must survive refusal");
     ok(gitOut(["branch", "--list", wt.branch], f.repo), "blocked branch must survive refusal");
+    equal(refused.status, 1, refused.stdout + refused.stderr);
+    ok(refused.stderr.includes(wt.path) && refused.stderr.includes("--discard-unlanded"), refused.stderr);
     const discarded = runCli(["prune", f.resultsDir, "--discard-unlanded"], { cwd: f.dir, env });
     equal(discarded.status, 0, discarded.stdout + discarded.stderr);
     ok(!existsSync(wt.path), "explicit discard removes the worktree");
@@ -2002,16 +2002,16 @@ test("prune: an unlanded-only row on a clean tree is refused, and the worktree a
     commitAll(wt.path, "unlanded work"); // committed — the tree itself is clean
     writeFinishedRun(f.resultsDir, [{ branch: wt.branch, path: wt.path }]);
     const env = { SWARM_HOME: join(f.dir, "home") };
+    const r = runCli(["prune", f.resultsDir], { cwd: f.dir, env });
+    ok(existsSync(wt.path), "unlanded-only worktree must survive refusal");
+    ok(gitOut(["branch", "--list", wt.branch], f.repo), "unlanded-only branch must survive refusal");
+    equal(r.status, 1, r.stdout + r.stderr);
+    ok(r.stderr.includes(wt.path) && r.stderr.includes("--discard-unlanded"), r.stderr);
     const dry = runCli(["prune", f.resultsDir, "--dry-run"], { cwd: f.dir, env });
     equal(dry.status, 0, dry.stdout + dry.stderr);
     ok(dry.stdout.includes("1 unlanded"), dry.stdout);
     ok(!/uncommitted/.test(dry.stdout), `a clean tree must show no uncommitted count: ${dry.stdout}`);
     ok(existsSync(wt.path), "dry-run keeps the worktree");
-    const r = runCli(["prune", f.resultsDir], { cwd: f.dir, env });
-    equal(r.status, 1, r.stdout + r.stderr);
-    ok(r.stderr.includes(wt.path) && r.stderr.includes("--discard-unlanded"), r.stderr);
-    ok(existsSync(wt.path), "unlanded-only worktree must survive refusal");
-    ok(gitOut(["branch", "--list", wt.branch], f.repo), "unlanded-only branch must survive refusal");
   } finally {
     dropSnapPrune(f);
   }
@@ -2027,10 +2027,10 @@ test("prune: a dirty-only row on a landed branch is refused, and the uncommitted
     writeFileSync(join(wt.path, "scratch.txt"), "uncommitted\n"); // untracked
     writeFinishedRun(f.resultsDir, [{ branch: wt.branch, path: wt.path }]);
     const r = runCli(["prune", f.resultsDir], { cwd: f.dir, env: { SWARM_HOME: join(f.dir, "home") } });
-    equal(r.status, 1, r.stdout + r.stderr);
-    ok(r.stderr.includes(wt.path) && r.stderr.includes("--discard-unlanded"), r.stderr);
     ok(existsSync(join(wt.path, "scratch.txt")), "the uncommitted file must survive refusal");
     ok(gitOut(["branch", "--list", wt.branch], f.repo), "landed branch must survive a dirty-tree refusal");
+    equal(r.status, 1, r.stdout + r.stderr);
+    ok(r.stderr.includes(wt.path) && r.stderr.includes("--discard-unlanded"), r.stderr);
   } finally {
     dropSnapPrune(f);
   }
