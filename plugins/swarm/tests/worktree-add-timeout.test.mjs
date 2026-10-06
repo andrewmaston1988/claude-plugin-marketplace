@@ -30,6 +30,8 @@ test("prepareIsolation names a worktree-add timeout caused by a slow reference h
     } catch (e) { error = e; }
     ok(error, "the timed-out add throws");
     ok(/timed out after/.test(error.message), error.message);
+    ok(!/checked out in another worktree/.test(error.message),
+      `a timeout must never be reported as an in-use collision: ${error.message}`);
   } finally {
     // Killing git leaves hooks alive holding the repo as cwd; wait for the first hook's marker, then retry the delete until the chained ones exit.
     const until = Date.now() + 10000;

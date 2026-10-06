@@ -848,6 +848,37 @@ test("a branch checked out in another worktree fails with a guided error naming 
   }
 });
 
+// `unlandedCount` asks whether work has landed on the branch the operator is on
+// NOW, not on the run's pinned base: a stale branch whose patch already reached
+// the live checkout must be reusable, even though the pinned base predates it.
+test("unlandedCount measures landfall against the LIVE checkout, not the pinned base", () => {
+  const repo = initRepo();
+  const results = mkdtempSync(join(tmpdir(), "swarm-wt-unlanded-"));
+  const other = mkdtempSync(join(tmpdir(), "swarm-wt-unlanded2-"));
+  try {
+    const dispatch = git(["rev-parse", "HEAD"], repo);
+    // A prior run's branch, its tree removed: the stale-branch `-B` path.
+    const stale = prepareIsolation({ id: "p1", originalCwd: repo, worktreeName: "sq" }, CFG, results, ADD(repo));
+    writeFileSync(join(stale.path, "sq.txt"), "squashed work\n");
+    commitAll(stale.path, "sq work");
+    dropWorktree(repo, stale.path);
+
+    // That work lands on the live checkout (a squash), while the pinned base stays put.
+    writeFileSync(join(repo, "sq.txt"), "squashed work\n");
+    commitAll(repo, "squashed sq");
+    ok(git(["rev-parse", "HEAD"], repo) !== dispatch, "precondition: the live checkout moved past the base");
+
+    let error;
+    let reused;
+    try {
+      reused = prepareIsolation({ id: "p2", originalCwd: repo, worktreeName: "sq" }, CFG, other,
+        { addTimeoutMs: WORKTREE_ADD_TIMEOUT_MS, base: dispatch });
+    } catch (e) { error = e; }
+    ok(!error, `a branch whose patch already landed on the live checkout is reusable: ${error?.message}`);
+    ok(existsSync(reused.path));
+  } finally { cleanup(other, results, repo); }
+});
+
 // ---- run scoping and cwd depth: what outlived the snapshot tree ----
 
 const HEXKEY = /^[0-9a-f]{12}$/;

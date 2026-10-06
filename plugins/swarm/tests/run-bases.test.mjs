@@ -108,6 +108,9 @@ test("a leaf launched after the live checkout moved is still cut from the dispat
     const secondTree = join(p.resultsDir, "wt-second");
     equal(gitInRepo(["rev-parse", "HEAD"], secondTree), dispatch,
       "the second leaf's tree must sit on the dispatch commit, not the checkout's later HEAD");
+    equal(gitInRepo(["rev-parse", "HEAD"], join(p.resultsDir, "wt-first")),
+      gitInRepo(["rev-parse", "HEAD"], secondTree),
+      "siblings launched either side of the mid-run commit share ONE base");
     equal(spawnSync("git", ["merge-base", "--is-ancestor", midRun, "HEAD"],
       { cwd: secondTree, windowsHide: true }).status, 1,
       "the mid-run merge must not be an ancestor of the second tree");
