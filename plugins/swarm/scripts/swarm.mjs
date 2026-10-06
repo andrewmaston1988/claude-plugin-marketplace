@@ -613,7 +613,7 @@ function getFlag(name, args) {
 
 async function cmdPerf(rest) {
   const { readRows, hideDisabledRows, aggregate, dedupe, scoresPath, frontier, PRIOR_WEIGHT } = await import("../src/scores.mjs");
-  const { INFRA_OUTCOMES } = await import("../src/aspects.mjs");
+  const { outcomeTail } = await import("../src/perf-tail.mjs");
   const aspect = getFlag("aspect", rest);
   const model = getFlag("model", rest);
   const domain = getFlag("domain", rest);
@@ -647,9 +647,6 @@ async function cmdPerf(rest) {
   // line count read as coverage.
   const live = dedupe(rows).length;
   const counted = live === rows.length ? `${live} row(s)` : `${live} row(s) (${rows.length} lines, re-grades superseded)`;
-  // Infra rows are excluded from every cell by scores.mjs; they are printed once
-  // per model so a quota or throttle death stays visible without reading as a grade.
-  const infraByModel = new Map(report.infra.map((e) => [e.model, e.n]));
   out(`model scores: ${counted} · ${path}`);
   if (filters) out(`filters: ${filters}`);
   out("");
@@ -666,10 +663,8 @@ async function cmdPerf(rest) {
         : costCols(candidate);
       const flag = (c.combined == null ? dim("  [no grades — outcomes only]") : c.provisional ? dim("  [provisional n<5]") : "")
         + (c.supersededBy ? dim(`  [superseded by ${c.supersededBy}]`) : "");
-      const bad = Object.entries(c.outcomes).filter(([k, v]) => v > 0 && k !== "completed" && !INFRA_OUTCOMES.includes(k));
-      const infra = infraByModel.get(c.model) || 0;
-      const tail = bad.length || infra ? dim(`  · ${[...bad.map(([k, v]) => `${k} ${v}`), ...(infra ? [`infra ${infra}`] : [])].join(", ")}`) : "";
-      out(`    ${c.model.padEnd(w)}  ${String(c.n).padStart(3)}  ${(c.combined == null ? "—" : c.combined.toFixed(2)).padStart(7)}  ${cols}  ${cost.padEnd(4)}${fm}${flag}${tail}`);
+      const tail = outcomeTail(c, report);
+      out(`    ${c.model.padEnd(w)}  ${String(c.n).padStart(3)}  ${(c.combined == null ? "—" : c.combined.toFixed(2)).padStart(7)}  ${cols}  ${cost.padEnd(4)}${fm}${flag}${tail ? dim(tail) : ""}`);
     }
     out(dim("    overall = mean of the four universal weighted scores; capability aspects excluded"));
     out(dim(LEGEND));
@@ -693,10 +688,8 @@ async function cmdPerf(rest) {
         ? { cost: "—", frontier: "provider-local" }
         : costCols(candidate);
       const flag = c.n === 0 ? dim("  [no grades — outcomes only]") : c.provisional ? dim("  [provisional n<5]") : "";
-      const bad = Object.entries(c.outcomes).filter(([k, v]) => v > 0 && k !== "completed" && !INFRA_OUTCOMES.includes(k));
-      const infra = infraByModel.get(c.model) || 0;
-      const tail = bad.length || infra ? dim(`  · ${[...bad.map(([k, v]) => `${k} ${v}`), ...(infra ? [`infra ${infra}`] : [])].join(", ")}`) : "";
-      out(`    ${c.model.padEnd(w)}  n=${String(c.n).padStart(3)}  mean ${mean.padStart(5)}  wtd ${wtd.padStart(5)}  cost ${cost.padEnd(3)}  ${fm}${flag}${tail}`);
+      const tail = outcomeTail(c, report);
+      out(`    ${c.model.padEnd(w)}  n=${String(c.n).padStart(3)}  mean ${mean.padStart(5)}  wtd ${wtd.padStart(5)}  cost ${cost.padEnd(3)}  ${fm}${flag}${tail ? dim(tail) : ""}`);
     }
     // Both columns show, ranked on wtd: the raw mean is the evidence, the
     // weighted score is what it is worth given how much of it there is.
