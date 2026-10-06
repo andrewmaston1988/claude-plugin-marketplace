@@ -76,8 +76,9 @@ test("error after exit settles as a spawn error", { timeout: 500 }, async () => 
 
 test("timeout kills the tree and preserves an exit code during drain", { timeout: 500 }, async () => {
   let killed;
-  const { io } = childIo((child) => setTimeout(() => child.emit("exit", 9), 5));
-  const result = await run({ ...io, exitDrainMs: 30, killTree: (child) => { killed = child; } }, 10);
+  // exit lands at 25 ms, INSIDE a drain the 10 ms timeout already armed.
+  const { io } = childIo((child) => setTimeout(() => child.emit("exit", 9), 25));
+  const result = await run({ ...io, exitDrainMs: 60, killTree: (child) => { killed = child; } }, 10);
   ok(killed);
   equal(result.timedOut, true);
   equal(result.exit, 9);

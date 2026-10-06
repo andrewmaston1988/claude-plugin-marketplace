@@ -45,8 +45,6 @@ Every other key (`providers.<name>.*`, `concurrency`, `timeoutMs`,
 `config.default.json` with its default — `setup` walks the ones worth touching. Swarm
 never manages credentials; auth is your provider app's ambient sign-in.
 
-A leaf settles at most `EXIT_DRAIN_MS` after its process exits, even if a child it started keeps running.
-
 **Provenance:** every fetched figure (`validate`, `run`, `models`, `ollama-usage`) says
 where it came from. A failed live fetch (expired cookie, network, timeout) still shows the
 last cached reading, but never bare — every render prefixes a `/!\ Cookie Expired` /
@@ -425,7 +423,9 @@ Transient failures recover in-run; temporal ones fail fast with the recovery nam
 
 - **Rate limits** retry with exponential backoff (`retry.rateLimited`, default 2 attempts,
   `retry.backoffMs` 30s) — the slot frees during the wait. Spawn errors get one quick
-  retry. Timeouts never auto-retry (rescope and resume instead).
+  retry. Timeouts never auto-retry (rescope and resume instead). A leaf settles within 2 s of its
+  process exiting, or of its timeout firing, even if a process it started still holds its output
+  open.
 - **`fallbackModel`** (per task) is the only substitution the engine ever makes — validated
   against `allowedRoots` like any dispatch target. Quota switches to it immediately; rate
   limits switch after retries exhaust. Logged (`↯ fallback → glm-5.2:cloud`).
