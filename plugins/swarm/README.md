@@ -393,7 +393,7 @@ dashboard read `run.log`, which carries no bill, so they show it as `≈$… api
 when a rate-card estimate, never a subscription charge. With no `display.money` no `$` appears anywhere. Running rows
 show the leaf's latest tool call; a leaf silent past `quietWarnSecs` (default 60) shows
 `⚠ quiet Ns` instead. Failed tasks block their dependents; independent branches continue;
-re-`run` resumes (`ok` work skipped, `rate-limited` retries). A live engine (heartbeat
+re-`run` resumes (`ok` work skipped, `rate-limited` retries). A Claude runner that exhausts StructuredOutput retries records the leaf as `failed`. A live engine (heartbeat
 younger than `heartbeatSecs * 3`) makes `run` — even `--force` — refuse rather than
 double-drive the same leaf; `swarm stop <resultsDir>` ends it first.
 

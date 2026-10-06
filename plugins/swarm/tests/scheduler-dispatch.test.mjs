@@ -97,6 +97,19 @@ test("returns-validation failure classifies failed, not rate-limited, despite 42
   }
 });
 
+test("structured-output runner death with 429 transcript is failed and dispatched once", async () => {
+  const dir = tmp();
+  try {
+    const output = JSON.stringify({ type: "result", subtype: "error_max_structured_output_retries", is_error: true, result: "429 Too Many Requests" }) + "\n";
+    const spawn = fakeSpawnFactory(() => ({ output }));
+    const io = makeIo(spawn);
+    const p = plan(dir, [task("a")]);
+    const r = await runPlan(p, { ...CFG, retry: { rateLimited: 2, backoffMs: 10 } }, io);
+    equal(spawn.calls.length, 1);
+    equal(r.summary.tasks[0].state, "failed");
+    ok(readResult(p.resultsDir, "a").output.includes("schema_error"));
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
 // A claude -p session that dies mid-thinking still exits 0 with an empty result — the
 // false-green that read as "ok". The signal: assistant events with no terminal result
 // event of any kind, so `includeResult: false` is what represents mid-stream death.

@@ -211,6 +211,18 @@ test("runner parser: structured_output wins over the result text, which stays th
   equal(plain.result().output, "final answer");
 });
 
+test("runner parser: structured-output retry exhaustion is a schema error; unknown errors stay runner errors", () => {
+  const failed = createRunnerParser("claude");
+  failed.feed(JSON.stringify({ type: "result", subtype: "error_max_structured_output_retries", is_error: true, result: "429 Too Many Requests" }) + "\n");
+  failed.end();
+  equal(failed.result().error.code, "schema_error");
+  ok(failed.result().error.message.includes("error_max_structured_output_retries"));
+
+  const unknown = createRunnerParser("claude");
+  unknown.feed(JSON.stringify({ type: "result", subtype: "error_other", is_error: true, result: "unknown" }) + "\n");
+  unknown.end();
+  equal(unknown.result().error.code, "runner_error");
+});
 test("runner parser registry: Codex raw JSONL without a terminal event is not a success", () => {
   const parser = createRunnerParser("codex");
   parser.feed('{"type":"thread.started","thread_id":"t-1"}\n{"type":"response.output_text.delta","delta":"partial"}\n');
