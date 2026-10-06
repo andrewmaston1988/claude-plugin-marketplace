@@ -372,14 +372,13 @@ function blankOutcomes() {
 export function overall(rows, { model, provider, domain, combineProviders = false } = {}) {
   const report = aggregate(rows, { model, ...(provider !== undefined && { provider }), domain, combineProviders });
   const universals = report.aspects.filter((a) => a.universal);
-  const infraByKey = new Map(report.infra.map((e) => [
-    combineProviders ? JSON.stringify([e.model]) : identityKey(identityOf(e)), e.n,
-  ]));
+  const keyFor = (v) => (combineProviders ? JSON.stringify([identityOf(v).model]) : identityKey(identityOf(v)));
+  const infraByKey = new Map(report.infra.map((e) => [keyFor(e), e.n]));
   const byModel = new Map();
   for (const a of universals) {
     for (const c of a.cells) {
       const identity = identityOf(c);
-      const key = combineProviders ? JSON.stringify([c.model]) : identityKey(identity);
+      const key = keyFor(c);
       if (!byModel.has(key)) {
         byModel.set(key, {
           ...(combineProviders ? { providers: [] }
@@ -406,15 +405,16 @@ export function overall(rows, { model, provider, domain, combineProviders = fals
       cell.provisional = cell.provisional || (c.n > 0 && c.provisional);
     }
   }
-  const cells = [...byModel.values()].map((c) => {
+  // An infra-only model has no graded cell: without this row its whole record shows nowhere.
+  const infraOnly = report.infra.filter((e) => !byModel.has(keyFor(e)) && (!model || e.model === model)).map((e) => ({ ...(e.provider ? { provider: e.provider } : {}), model: e.model, n: 0, wtds: {}, outcomes: blankOutcomes() }));
+  const cells = [...byModel.values(), ...infraOnly].map((c) => {
     const got = universals.map((a) => c.wtds[a.aspect]).filter((v) => v != null);
-    const key = combineProviders ? JSON.stringify([c.model]) : identityKey(identityOf(c));
     return {
       ...c,
       combined: got.length ? Number((got.reduce((x, y) => x + y, 0) / got.length).toFixed(2)) : null,
       // Infra rides the ranked row: it is the model's whole record, and it is
       // deliberately excluded from `combined` above.
-      infra: infraByKey.get(key) ?? 0,
+      infra: infraByKey.get(keyFor(c)) ?? 0,
     };
   });
   cells.sort((x, y) => (y.combined ?? -1) - (x.combined ?? -1)

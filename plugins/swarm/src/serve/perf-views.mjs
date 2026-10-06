@@ -94,8 +94,11 @@ export function reliability(liveRows) {
       if (!m.providers.includes(provider)) m.providers.push(provider);
     }
     m.providers.sort();
-    m.total += 1;
+    // `total` is the GRADED count: the page reads it as "graded", and a provider
+    // outage must not drag the completed ratio down. Infra still gets its own
+    // count, so the bar can draw it as the neutral segment it is.
     if (INFRA_OUTCOMES.includes(r.outcome)) m.infra += 1;
+    else m.total += 1;
     m.byOutcome[r.outcome] = (m.byOutcome[r.outcome] || 0) + 1;
   }
   return [...byModel.values()].sort((a, b) => b.total - a.total || compareIdentity(a, b));

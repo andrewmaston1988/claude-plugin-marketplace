@@ -4,7 +4,7 @@ import { validateRow, aggregate, overall } from "../src/scores.mjs";
 import { graded } from "./helpers/perf-rows.mjs";
 
 // The outcome → grades rule, and what an infra outcome does to the aggregate.
-// Split out of scores.test.mjs to keep both files under the 500-line bar.
+// Split out of scores.test.mjs so that file stops growing toward the 500-line bar.
 
 // A whole row, unlike perf-rows' minimal fixture: validateRow reads the model,
 // the domain and the grade set, so a rejection names the field it is about.
@@ -80,4 +80,16 @@ test("overall: a model's infra count rides its ranked row", () => {
   const cell = overall(rows).cells.find((c) => c.model === "glm-5.2:cloud");
   equal(cell.infra, 2, "overall must carry the tally, or it shows nowhere on that view");
   equal(cell.n, 1, "the graded row still sets n");
+});
+
+// A model with nothing but infra rows has no graded cell on any aspect, so
+// without an outcomes-only row its whole record vanishes from the ranking —
+// which is exactly what `swarm perf --overall` is read for.
+test("overall: an infra-only model still gets a row, carrying its tally and no grade", () => {
+  const rows = [infraRow("q1", "quota")];
+  const cell = overall(rows).cells.find((c) => c.model === "glm-5.2:cloud");
+  ok(cell, "a model that only ever hit a quota wall must not vanish from the ranking");
+  equal(cell.infra, 1, "its tally is the whole reason the row exists");
+  equal(cell.n, 0, "no grades means n=0");
+  equal(cell.combined, null, "and no score — never a zero, which would read as a bad model");
 });

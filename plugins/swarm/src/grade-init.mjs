@@ -70,7 +70,7 @@ export function gradeInit(dir, { listLeaves = defaultListLeaves } = {}) {
       path,
       `${leaves.length} gradeable leaf/leaves. Grade the four universal aspects 1-10 on every row; leave a`,
       "capability aspect null unless the leaf stressed it. Drop `grades` entirely on a row whose leaf",
-      "produced no output (failed / timeout / session-died / not-capable), then:",
+      "produced no output (failed / timeout / session-died / not-capable / quota / rate-limited / harness), then:",
       `  swarm grade --file ${path}`,
     ],
   };

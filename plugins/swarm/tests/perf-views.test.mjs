@@ -80,6 +80,25 @@ test("reliability: the three infra outcomes collapse into one per-model infra co
   equal(ma.byOutcome.quota, 1, "the raw counts stay available for audit");
 });
 
+// `total` is the GRADED count, and the hero card reads it as "graded" beside a
+// completed ratio — so a provider outage must not inflate the denominator.
+test("reliability: an infra row is not a graded leaf, so it never lowers the completed ratio", () => {
+  const rows = [
+    graded({ leaf: "ok", model: "m-a" }),
+    row({ leaf: "q", model: "m-a", outcome: "quota", note: "dry", grades: undefined }),
+  ];
+  const rel = reliability(dedupe(rows));
+  const ma = rel.find((r) => r.model === "m-a");
+  equal(ma.total, 1, "one graded leaf, however many outages sat beside it");
+  equal(ma.infra, 1, "the outage is still counted, just not as a grade");
+  equal(ma.byOutcome.quota, 1, "and the raw outcome count stays for audit");
+  const html = loadPerfViews().modelSummary(
+    { model: "m-a", overall: null, rank: null, aspects: [], reliability: rel, cost: null }, H,
+  );
+  ok(/<label>graded<\/label><b>1<\/b>/.test(html), html);
+  ok(/<label>completed<\/label><b>100%<\/b>/.test(html), `the outage must not read as half a failure — got ${html}`);
+});
+
 // The bar is the model's record, not a grade table: infra rides one neutral
 // segment so a provider outage never reads as a quality signal.
 test("dashboard: reliabilityBars draws infra as one segment, never one per infra outcome", () => {
