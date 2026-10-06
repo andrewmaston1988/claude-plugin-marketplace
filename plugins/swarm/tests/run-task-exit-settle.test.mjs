@@ -20,18 +20,27 @@ function childIo(emit) {
 }
 const run = (io, timeoutMs = 1000) => runTask(task("exit-settle", { timeoutMs }), "go", CFG, io, null, {});
 
+// runTask unrefs its timers, and a real child's stdio pipes are what keep the
+// loop alive until the drain fires. The fake child here is a bare EventEmitter
+// holding no handles, so without this the loop can empty out mid-await and the
+// test runner cancels the pending test.
+async function held(promise) {
+  const keep = setInterval(() => {}, 1000);
+  try { return await promise; } finally { clearInterval(keep); }
+}
+
 test("exit without close drains the terminal stdout and settles", { timeout: 500 }, async () => {
   const { io } = childIo((child) => {
     child.stdout.emit("data", terminal);
     child.emit("exit", 0);
   });
-  const result = await run({ ...io, exitDrainMs: 20 });
+  const result = await held(run({ ...io, exitDrainMs: 20 }));
   equal(result.ok, true);
 });
 
 test("timeout settles when neither exit nor close arrives", { timeout: 500 }, async () => {
   const { io } = childIo(() => {});
-  const result = await run({ ...io, exitDrainMs: 15 }, 20);
+  const result = await held(run({ ...io, exitDrainMs: 15 }, 20));
   equal(result.timedOut, true);
   equal(result.ok, false);
 });
@@ -42,7 +51,7 @@ test("exit drain preserves stdout that arrives before close", { timeout: 500 }, 
     setTimeout(() => child.stdout.emit("data", terminal), 5);
     setTimeout(() => child.emit("close", 0), 10);
   });
-  const result = await run({ ...io, exitDrainMs: 50 });
+  const result = await held(run({ ...io, exitDrainMs: 50 }));
   equal(result.ok, true);
   equal(result.raw, terminal, "stdout emitted after exit must be parsed before close settles");
 });
@@ -56,7 +65,7 @@ test("close wins without destroying either stream", { timeout: 500 }, async () =
     child.emit("exit", 0);
     child.emit("close", 0);
   });
-  const result = await run({ ...io, exitDrainMs: 20 });
+  const result = await held(run({ ...io, exitDrainMs: 20 }));
   equal(result.ok, true);
   await new Promise((resolve) => setTimeout(resolve, 30));
   equal(destroyed, 0);
@@ -69,7 +78,7 @@ test("error after exit settles as a spawn error", { timeout: 500 }, async () => 
     error.code = "ENOENT";
     child.emit("error", error);
   });
-  const result = await run({ ...io, exitDrainMs: 30 });
+  const result = await held(run({ ...io, exitDrainMs: 30 }));
   equal(result.ok, false);
   equal(result.errorCode, "ENOENT");
 });
@@ -78,7 +87,7 @@ test("timeout kills the tree and preserves an exit code during drain", { timeout
   let killed;
   // exit lands at 25 ms, INSIDE a drain the 10 ms timeout already armed.
   const { io } = childIo((child) => setTimeout(() => child.emit("exit", 9), 25));
-  const result = await run({ ...io, exitDrainMs: 60, killTree: (child) => { killed = child; } }, 10);
+  const result = await held(run({ ...io, exitDrainMs: 60, killTree: (child) => { killed = child; } }, 10));
   ok(killed);
   equal(result.timedOut, true);
   equal(result.exit, 9);
@@ -94,7 +103,7 @@ test("an exit before the deadline settles as success, never as a timeout", { tim
     child.stdout.emit("data", terminal);
     setTimeout(() => child.emit("exit", 0), 5);
   });
-  const result = await run({ ...io, exitDrainMs: 250, killTree: () => { killCalls++; } }, 100);
+  const result = await held(run({ ...io, exitDrainMs: 250, killTree: () => { killCalls++; } }, 100));
   equal(result.ok, true);
   ok(!result.timedOut);
   equal(result.exit, 0);
