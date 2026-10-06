@@ -3,7 +3,7 @@
 import { freemem } from "node:os";
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { spawn as nodeSpawn } from "node:child_process";
+import { spawn as nodeSpawn, spawnSync as nodeSpawnSync } from "node:child_process";
 import { toSpawnable, buildDispatch } from "../dispatch.mjs";
 import { strictSchema } from "../native-schema.mjs";
 import { resultPath, readResult } from "../results.mjs";
@@ -15,16 +15,25 @@ import { normalizeForCompare } from "../roots.mjs";
 import { hasWriteTools, resolveWorktreeName, leafWriteGuardRoots } from "../manifest-task-policy.mjs";
 
 const RATE_LIMIT_RE = /rate.?limit|429|too many requests/i;
+const EXIT_DRAIN_MS = 2000;
 
 // Default io: real spawn (with Windows .cmd resolution), real fetch/clock,
 // roster snapshots + closing lines to stdout. Every part is injectable so
 // tests never hit the network or a real claude.
-export function makeDefaultIo() {
+export function makeDefaultIo({ platform = process.platform, spawnSync = nodeSpawnSync } = {}) {
   return {
     spawn: (cmd, args, opts) => {
       const s = toSpawnable([cmd, ...args]);
       return nodeSpawn(s.cmd, s.args, opts);
     },
+    killTree: (child) => {
+      if (platform === "win32") {
+        try { spawnSync("taskkill", ["/PID", String(child.pid), "/T", "/F"], { stdio: "ignore", windowsHide: true }); } catch { /* best effort */ }
+      } else {
+        try { child.kill(); } catch { /* already gone */ }
+      }
+    },
+    exitDrainMs: EXIT_DRAIN_MS,
     fetch: (...a) => globalThis.fetch(...a),
     now: () => Date.now(),
     freeMemMb: () => freemem() / 1048576,
@@ -196,6 +205,8 @@ export function runTask(task, prompt, cfg, io, leafLog, { onTokens, onActivity, 
     let raw = "";
     let timedOut = false;
     let settled = false;
+    let drain = null;
+    let exitCode = null;
     // Every runner emits the same contract. Raw stdout/stderr is retained only
     // for diagnostics and failure classification; it never decides whether a
     // non-Claude runner completed successfully.
@@ -221,9 +232,20 @@ export function runTask(task, prompt, cfg, io, leafLog, { onTokens, onActivity, 
     // shows tool-call events live).
     child.stdout?.on("data", (d) => { raw += d; leafLog?.write(d); parser.feed(String(d)); });
     child.stderr?.on("data", (d) => { raw += d; leafLog?.write(d); });
+    const armDrain = () => {
+      if (drain || settled) return;
+      drain = setTimeout(() => {
+        child.stdout?.destroy?.();
+        child.stderr?.destroy?.();
+        settle(exitCode);
+      }, io.exitDrainMs ?? EXIT_DRAIN_MS);
+      if (drain.unref) drain.unref();
+    };
+    child.on("exit", (code) => { exitCode = code; armDrain(); });
     const timer = setTimeout(() => {
       timedOut = true;
-      try { child.kill(); } catch { /* already gone */ }
+      armDrain();
+      try { (io.killTree ?? ((c) => c.kill()))(child); } catch { /* best effort */ }
     }, task.timeoutMs);
     if (timer.unref) timer.unref();
     // The leaf log must be FLUSHED before the task resolves. end() is
@@ -240,6 +262,7 @@ export function runTask(task, prompt, cfg, io, leafLog, { onTokens, onActivity, 
       if (settled) return;
       settled = true;
       clearTimeout(timer);
+      clearTimeout(drain);
       parser.end();
       if (errMsg) raw += (raw ? "\n" : "") + errMsg;
       const parsed = parser.result();

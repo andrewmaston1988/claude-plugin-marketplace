@@ -45,6 +45,8 @@ Every other key (`providers.<name>.*`, `concurrency`, `timeoutMs`,
 `config.default.json` with its default — `setup` walks the ones worth touching. Swarm
 never manages credentials; auth is your provider app's ambient sign-in.
 
+A leaf settles at most `EXIT_DRAIN_MS` after its process exits, even if a child it started keeps running.
+
 **Provenance:** every fetched figure (`validate`, `run`, `models`, `ollama-usage`) says
 where it came from. A failed live fetch (expired cookie, network, timeout) still shows the
 last cached reading, but never bare — every render prefixes a `/!\ Cookie Expired` /
