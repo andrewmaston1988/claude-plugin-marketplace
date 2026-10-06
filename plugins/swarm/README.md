@@ -380,22 +380,24 @@ run once, in one line counting this session's worktrees and other sessions'. The
 Leaves dispatch with `--output-format stream-json`; a provider that emits plain text
 instead degrades gracefully (raw stdout becomes `output`, token columns stay empty).
 
-Stdout repaints a roster snapshot on every state change and heartbeat (`heartbeatSecs`,
-default 15): glyph, id, model, duration, work tokens, plus a counts footer. Every token headline
-— roster, footer, `tokens:` line, `swarm ask`, dashboard, status bar — is work tokens (input +
+Stdout repaints a roster snapshot on every state change and heartbeat (`heartbeatSecs`, default
+15): glyph, id, model, duration, work tokens, plus a counts footer. Every token headline —
+roster, footer, `tokens:` line, `swarm ask`, dashboard, status bar — is work tokens (input +
 output + cache writes). Cache reads are never a headline: a re-read prompt prefix grows with
 turns × context, not with the work done. They show only as a labelled `cache read` breakdown
-(the `tokens:` line, `swarm ask`, the dashboard's leaf panel). Beside the work tokens each
-leaf is priced in its own unit, and units are never summed: a `:cloud` leaf as `% of week` (its
-requests × the meter's points per request), and only with `display.money: true` a dollar
-figure — `$` when billed on a real key (the closing `tokens:` line only; the roster and
-dashboard read `run.log`, which carries no bill, so they show it as `≈$… api-eq`), `≈$… api-eq`
-when a rate-card estimate, never a subscription charge. With no `display.money` no `$` appears anywhere. Running rows
-show the leaf's latest tool call; a leaf silent past `quietWarnSecs` (default 60) shows
-`⚠ quiet Ns` instead. Failed tasks block their dependents; independent branches continue;
-re-`run` resumes (`ok` work skipped, `rate-limited` retries). A Claude runner that exhausts StructuredOutput retries records the leaf as `failed`. A live engine (heartbeat
-younger than `heartbeatSecs * 3`) makes `run` — even `--force` — refuse rather than
-double-drive the same leaf; `swarm stop <resultsDir>` ends it first.
+(the `tokens:` line, `swarm ask`, the dashboard's leaf panel). Beside the work tokens each leaf
+is priced in its own unit, and units are never summed: a `:cloud` leaf as `% of week` (its
+requests × the meter's points per request), and only with `display.money: true` a dollar figure
+— `$` when billed on a real key (the closing `tokens:` line only; the roster and dashboard read
+`run.log`, which carries no bill, so they show it as `≈$… api-eq`), `≈$… api-eq` when a
+rate-card estimate, never a subscription charge. With no `display.money` no `$` appears
+anywhere. Running rows show the leaf's latest tool call; a leaf silent past `quietWarnSecs`
+(default 60) shows `⚠ quiet Ns` instead. Failed tasks block their dependents; independent
+branches continue; re-`run` resumes (`ok` work skipped, `rate-limited` retries). A Claude
+runner that exhausts StructuredOutput retries records the leaf as `failed`, with no in-run
+retry and no `fallbackModel` switch. A live engine (heartbeat younger than `heartbeatSecs * 3`)
+makes `run` — even `--force` — refuse rather than double-drive the same leaf; `swarm stop
+<resultsDir>` ends it first.
 
 `status <resultsDir>` renders the same roster read-only (`--watch` for live repaint). Past
 that same staleness window it relabels every `running`/`retrying` row `interrupted` and

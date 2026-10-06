@@ -213,7 +213,10 @@ test("runner parser: structured_output wins over the result text, which stays th
 
 test("runner parser: structured-output retry exhaustion is a schema error; unknown errors stay runner errors", () => {
   const failed = createRunnerParser("claude");
-  failed.feed(JSON.stringify({ type: "result", subtype: "error_max_structured_output_retries", is_error: true, result: "429 Too Many Requests" }) + "\n");
+  // The vendor omits `result` on this subtype, so the 429 rides a preceding assistant
+  // text block — the shape a real transcript carries it in.
+  failed.feed(JSON.stringify({ type: "assistant", message: { id: "m1", content: [{ type: "text", text: "429 Too Many Requests" }] } }) + "\n");
+  failed.feed(JSON.stringify({ type: "result", subtype: "error_max_structured_output_retries", is_error: true }) + "\n");
   failed.end();
   equal(failed.result().error.code, "schema_error");
   ok(failed.result().error.message.includes("error_max_structured_output_retries"));
