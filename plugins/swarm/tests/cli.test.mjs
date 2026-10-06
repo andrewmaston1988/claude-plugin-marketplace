@@ -1973,6 +1973,69 @@ test("prune: unlanded commit and dirty tree are preserved until explicit discard
   }
 });
 
+test("prune: a squash-landed branch measures landed and is pruned", () => {
+  const f = pruneFixture();
+  try {
+    const wt = prepareIsolation({ id: "impl", originalCwd: f.repo, cwd: f.repo }, { worktreeBranchPrefix: "swarm/" }, f.resultsDir, { addTimeoutMs: WORKTREE_ADD_TIMEOUT_MS });
+    writeFileSync(join(wt.path, "a.txt"), "landed\n");
+    commitAll(wt.path, "landed work");
+    // Squash-land: the branch's patch is on master but its commit sha is not, so a
+    // sha-range count would call it unlanded. `git cherry` is patch-based, and the
+    // squash-merge path is the documented landing route — it must read as landed.
+    spawnSync("git", ["merge", "--squash", "-q", wt.branch], { cwd: f.repo, windowsHide: true });
+    commitAll(f.repo, "squash-land");
+    writeFinishedRun(f.resultsDir, [{ branch: wt.branch, path: wt.path }]);
+    const r = runCli(["prune", f.resultsDir], { cwd: f.dir, env: { SWARM_HOME: join(f.dir, "home") } });
+    equal(r.status, 0, r.stdout + r.stderr);
+    ok(!existsSync(wt.path), "a squash-landed worktree is pruned");
+    ok(!gitOut(["branch", "--list", wt.branch], f.repo), "a squash-landed branch is deleted");
+  } finally {
+    dropSnapPrune(f);
+  }
+});
+
+test("prune: an unlanded-only row on a clean tree is refused, and the worktree and branch both survive", () => {
+  const f = pruneFixture();
+  try {
+    const wt = prepareIsolation({ id: "impl", originalCwd: f.repo, cwd: f.repo }, { worktreeBranchPrefix: "swarm/" }, f.resultsDir, { addTimeoutMs: WORKTREE_ADD_TIMEOUT_MS });
+    writeFileSync(join(wt.path, "a.txt"), "unlanded\n");
+    commitAll(wt.path, "unlanded work"); // committed — the tree itself is clean
+    writeFinishedRun(f.resultsDir, [{ branch: wt.branch, path: wt.path }]);
+    const env = { SWARM_HOME: join(f.dir, "home") };
+    const dry = runCli(["prune", f.resultsDir, "--dry-run"], { cwd: f.dir, env });
+    equal(dry.status, 0, dry.stdout + dry.stderr);
+    ok(dry.stdout.includes("1 unlanded"), dry.stdout);
+    ok(!/uncommitted/.test(dry.stdout), `a clean tree must show no uncommitted count: ${dry.stdout}`);
+    ok(existsSync(wt.path), "dry-run keeps the worktree");
+    const r = runCli(["prune", f.resultsDir], { cwd: f.dir, env });
+    equal(r.status, 1, r.stdout + r.stderr);
+    ok(r.stderr.includes(wt.path) && r.stderr.includes("--discard-unlanded"), r.stderr);
+    ok(existsSync(wt.path), "unlanded-only worktree must survive refusal");
+    ok(gitOut(["branch", "--list", wt.branch], f.repo), "unlanded-only branch must survive refusal");
+  } finally {
+    dropSnapPrune(f);
+  }
+});
+
+test("prune: a dirty-only row on a landed branch is refused, and the uncommitted file survives", () => {
+  const f = pruneFixture();
+  try {
+    const wt = prepareIsolation({ id: "impl", originalCwd: f.repo, cwd: f.repo }, { worktreeBranchPrefix: "swarm/" }, f.resultsDir, { addTimeoutMs: WORKTREE_ADD_TIMEOUT_MS });
+    writeFileSync(join(wt.path, "a.txt"), "landed\n");
+    commitAll(wt.path, "landed work");
+    spawnSync("git", ["merge", "-q", wt.branch], { cwd: f.repo, windowsHide: true });
+    writeFileSync(join(wt.path, "scratch.txt"), "uncommitted\n"); // untracked
+    writeFinishedRun(f.resultsDir, [{ branch: wt.branch, path: wt.path }]);
+    const r = runCli(["prune", f.resultsDir], { cwd: f.dir, env: { SWARM_HOME: join(f.dir, "home") } });
+    equal(r.status, 1, r.stdout + r.stderr);
+    ok(r.stderr.includes(wt.path) && r.stderr.includes("--discard-unlanded"), r.stderr);
+    ok(existsSync(join(wt.path, "scratch.txt")), "the uncommitted file must survive refusal");
+    ok(gitOut(["branch", "--list", wt.branch], f.repo), "landed branch must survive a dirty-tree refusal");
+  } finally {
+    dropSnapPrune(f);
+  }
+});
+
 test("prune: a killed run's leftover tree (no summary.json) is removed without a branch delete, and no summary is invented", () => {
   const f = pruneFixture();
   try {
