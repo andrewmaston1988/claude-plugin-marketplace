@@ -378,9 +378,13 @@ export function createClaudeRunnerParser(options = {}) {
       // scheduler whether there is a session worth resuming.
       if (result.num_turns != null) numTurns = result.num_turns;
       if (result.is_error === true || result.subtype === "error") {
+        const schemaGiveUp = typeof result.subtype === "string"
+          && result.subtype.startsWith("error_max_structured_output");
         error = {
-          code: result.error?.code || result.error_code || "runner_error",
-          message: typeof result.result === "string" ? result.result : "Claude runner failed",
+          code: schemaGiveUp ? "schema_error" : (result.error?.code || result.error_code || "runner_error"),
+          message: schemaGiveUp
+            ? `Claude runner ended with ${result.subtype}`
+            : typeof result.result === "string" ? result.result : "Claude runner failed",
         };
         terminal = true;
         send({

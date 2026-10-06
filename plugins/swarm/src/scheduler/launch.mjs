@@ -154,7 +154,9 @@ export function createLaunch(ctx) {
         exit: r.exit,
         durationMs: r.durationMs,
         prompt, // the exact string sent — with the snapshot, the leaf's full intent
-        output: r.output,
+        output: r.errorCode === "schema_error"
+          ? `structured output rejected by the runner after its retries (schema_error)\n${r.output}`
+          : r.output,
         // A drill-down straight to results/<id>.json must see that this leaf's
         // input was cut — the run-level warning is easy to skip past.
         ...(promptTruncations.length && { promptTruncations }),
@@ -197,7 +199,7 @@ export function createLaunch(ctx) {
       ctx.memoryStopped.delete(task.id);
       const st = isMemoryStop ? "memory"
         : r.ok ? "ok"
-        : r.schemaErrors ? "failed"
+        : r.schemaErrors || r.errorCode === "schema_error" ? "failed"
         : classifyFailure({ timedOut: r.timedOut, output: r.raw, stopped: ctx.stopRequested }, cfg.quotaPatterns);
       if (isMemoryStop) {
         // runTask's generic mid-stream message tells a reader not to kill or
