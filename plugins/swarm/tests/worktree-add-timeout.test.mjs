@@ -25,7 +25,8 @@ test("prepareIsolation names a worktree-add timeout caused by a slow reference h
     git("config", "core.hooksPath", hooks);
     let error;
     try {
-      prepareIsolation({ id: "slow", originalCwd: repo }, CFG, resultsDir, { addTimeoutMs: 100 });
+      prepareIsolation({ id: "slow", originalCwd: repo }, CFG, resultsDir,
+        { addTimeoutMs: 100, base: String(git("rev-parse", "HEAD").stdout).trim() });
     } catch (e) { error = e; }
     ok(error, "the timed-out add throws");
     ok(/timed out after/.test(error.message), error.message);

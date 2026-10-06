@@ -632,7 +632,7 @@ test("prune --dry-run: a finished run with a kept worktree prints the table and 
   try {
     const resultsDir = join(dir, "out");
     mkdirSync(resultsDir, { recursive: true });
-    const wt = prepareIsolation({ id: "impl", originalCwd: repo, cwd: repo }, { worktreeBranchPrefix: "swarm/" }, resultsDir, { addTimeoutMs: WORKTREE_ADD_TIMEOUT_MS });
+    const wt = prepareIsolation({ id: "impl", originalCwd: repo, cwd: repo }, { worktreeBranchPrefix: "swarm/" }, resultsDir, { addTimeoutMs: WORKTREE_ADD_TIMEOUT_MS, base: gitOut(["rev-parse", "HEAD"], repo) });
     writeFileSync(join(wt.path, "work.txt"), "x\n");
     commitAll(wt.path, "work");
     spawnSync("git", ["merge", "-q", "swarm/impl"], { cwd: repo, windowsHide: true });
@@ -660,7 +660,7 @@ test("prune: removes the worktree and branch, prints freed, leaves the run recor
   try {
     const resultsDir = join(dir, "out");
     mkdirSync(resultsDir, { recursive: true });
-    const wt = prepareIsolation({ id: "impl", originalCwd: repo, cwd: repo }, { worktreeBranchPrefix: "swarm/" }, resultsDir, { addTimeoutMs: WORKTREE_ADD_TIMEOUT_MS });
+    const wt = prepareIsolation({ id: "impl", originalCwd: repo, cwd: repo }, { worktreeBranchPrefix: "swarm/" }, resultsDir, { addTimeoutMs: WORKTREE_ADD_TIMEOUT_MS, base: gitOut(["rev-parse", "HEAD"], repo) });
     writeFileSync(join(wt.path, "work.txt"), "x\n");
     commitAll(wt.path, "work");
     spawnSync("git", ["merge", "-q", "swarm/impl"], { cwd: repo, windowsHide: true });
@@ -710,7 +710,7 @@ test("prune: a real prune rewrites worktreesKept to drop the pruned entry; a sec
     const resultsDir = join(dir, "out");
     mkdirSync(resultsDir, { recursive: true });
     writeFileSync(join(resultsDir, "manifest.json"), JSON.stringify({ resultsDir, cwd: repo, tasks: [] }));
-    const wt = prepareIsolation({ id: "impl", originalCwd: repo, cwd: repo }, { worktreeBranchPrefix: "swarm/" }, resultsDir, { addTimeoutMs: WORKTREE_ADD_TIMEOUT_MS });
+    const wt = prepareIsolation({ id: "impl", originalCwd: repo, cwd: repo }, { worktreeBranchPrefix: "swarm/" }, resultsDir, { addTimeoutMs: WORKTREE_ADD_TIMEOUT_MS, base: gitOut(["rev-parse", "HEAD"], repo) });
     writeFileSync(join(wt.path, "work.txt"), "x\n");
     commitAll(wt.path, "work");
     spawnSync("git", ["merge", "-q", "swarm/impl"], { cwd: repo, windowsHide: true });
@@ -738,7 +738,7 @@ test("prune --dry-run: summary.json is left byte-identical", () => {
   try {
     const resultsDir = join(dir, "out");
     mkdirSync(resultsDir, { recursive: true });
-    const wt = prepareIsolation({ id: "impl", originalCwd: repo, cwd: repo }, { worktreeBranchPrefix: "swarm/" }, resultsDir, { addTimeoutMs: WORKTREE_ADD_TIMEOUT_MS });
+    const wt = prepareIsolation({ id: "impl", originalCwd: repo, cwd: repo }, { worktreeBranchPrefix: "swarm/" }, resultsDir, { addTimeoutMs: WORKTREE_ADD_TIMEOUT_MS, base: gitOut(["rev-parse", "HEAD"], repo) });
     writeFileSync(join(wt.path, "work.txt"), "x\n");
     commitAll(wt.path, "work");
     spawnSync("git", ["merge", "-q", "swarm/impl"], { cwd: repo, windowsHide: true });
@@ -778,7 +778,7 @@ test("prune: refuses a live run (fresh heartbeat, no summary) — exit 1, nothin
   try {
     const resultsDir = join(dir, "out");
     mkdirSync(resultsDir, { recursive: true });
-    const wt = prepareIsolation({ id: "impl", originalCwd: repo, cwd: repo }, { worktreeBranchPrefix: "swarm/" }, resultsDir, { addTimeoutMs: WORKTREE_ADD_TIMEOUT_MS });
+    const wt = prepareIsolation({ id: "impl", originalCwd: repo, cwd: repo }, { worktreeBranchPrefix: "swarm/" }, resultsDir, { addTimeoutMs: WORKTREE_ADD_TIMEOUT_MS, base: gitOut(["rev-parse", "HEAD"], repo) });
     writeFileSync(join(resultsDir, "run.log"), JSON.stringify({ ts: new Date().toISOString(), event: "run-start", tasks: [{ id: "impl", provider: "claude", model: "claude-haiku-4-5-20251001" }] }) + "\n");
     writeFileSync(join(resultsDir, "heartbeat"), `${new Date().toISOString()} 1234\n`);
 
@@ -802,7 +802,7 @@ test("prune --dry-run: a dead-engine-stopped run with no kept worktree still fin
     const resultsDir = join(dir, "out");
     mkdirSync(resultsDir, { recursive: true });
     writeFileSync(join(resultsDir, "manifest.json"), JSON.stringify({ resultsDir, cwd: repo, tasks: [] }));
-    const wt = prepareIsolation({ id: "impl", originalCwd: repo, cwd: repo }, { worktreeBranchPrefix: "swarm/" }, resultsDir, { addTimeoutMs: WORKTREE_ADD_TIMEOUT_MS });
+    const wt = prepareIsolation({ id: "impl", originalCwd: repo, cwd: repo }, { worktreeBranchPrefix: "swarm/" }, resultsDir, { addTimeoutMs: WORKTREE_ADD_TIMEOUT_MS, base: gitOut(["rev-parse", "HEAD"], repo) });
     writeFileSync(join(wt.path, "work.txt"), "x\n");
     commitAll(wt.path, "work");
     spawnSync("git", ["merge", "-q", "swarm/impl"], { cwd: repo, windowsHide: true });
@@ -829,7 +829,7 @@ test("stop: dead engine discovers a real orphaned worktree via manifest cwd, rec
     const resultsDir = join(dir, "out");
     mkdirSync(resultsDir, { recursive: true });
     writeFileSync(join(resultsDir, "manifest.json"), JSON.stringify({ resultsDir, cwd: repo, tasks: [] }));
-    const wt = prepareIsolation({ id: "impl", originalCwd: repo, cwd: repo }, { worktreeBranchPrefix: "swarm/" }, resultsDir, { addTimeoutMs: WORKTREE_ADD_TIMEOUT_MS });
+    const wt = prepareIsolation({ id: "impl", originalCwd: repo, cwd: repo }, { worktreeBranchPrefix: "swarm/" }, resultsDir, { addTimeoutMs: WORKTREE_ADD_TIMEOUT_MS, base: gitOut(["rev-parse", "HEAD"], repo) });
 
     const lines = [
       JSON.stringify({ ts: new Date().toISOString(), event: "run-start", tasks: [{ id: "impl", provider: "claude", model: "claude-haiku-4-5-20251001" }] }),

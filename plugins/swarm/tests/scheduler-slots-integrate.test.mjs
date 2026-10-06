@@ -275,11 +275,12 @@ test("IS4: a seed integrate node's tree, reused by a workspace writer, joins on 
     const p = {
       cwd: repo, resultsDir: join(dir, "run"), concurrency: 1, goal: "",
       tasks: [
-        // branchScope is what manifest.mjs gives a writer inside a git repo —
-        // and what it withholds from an integrate node.
+        // branchScope is what manifest.mjs gives a writer inside a git repo — and,
+        // with the seed below, an integrate node too. One run, one resultsDir, one
+        // scope: the seed and the writer that reuses its tree resolve the SAME ref.
         integrateLeaf("helper", { cwd: repo, originalCwd: repo, worktreeName: "feat", branchScope: "run1" }),
         { id: "seed-x", model: "integrate", prompt: "", allowedTools: "", cwd: repo, originalCwd: repo,
-          timeoutMs: 5000, after: ["helper"], worktreeName: "migrate-x",
+          timeoutMs: 5000, after: ["helper"], worktreeName: "migrate-x", branchScope: "run1",
           integrate: { into: "migrate-x", from: ["helper"] } },
         integrateLeaf("migrate-x", { cwd: repo, originalCwd: repo, after: ["seed-x"],
           worktreeName: "migrate-x", branchScope: "run1" }),
@@ -291,10 +292,10 @@ test("IS4: a seed integrate node's tree, reused by a workspace writer, joins on 
     await runPlan(p, CFG, io);
 
     const res = JSON.parse(readFileSync(join(p.resultsDir, "results", "join.json"), "utf8"));
-    ok(gitInRepo(["branch", "--list", "swarm/migrate-x"], repo) !== "",
-      "precondition: the seed created swarm/migrate-x — the ref the writer reused and committed onto");
+    ok(gitInRepo(["branch", "--list", "swarm/run1/migrate-x"], repo) !== "",
+      "precondition: the seed created swarm/run1/migrate-x — the ref the writer reused and committed onto");
     equal(res.ok, true, `the join must merge the branch its source actually created, got: ${res.output}`);
-    deepEqual(res.outputJson.merged, ["swarm/migrate-x"],
+    deepEqual(res.outputJson.merged, ["swarm/run1/migrate-x"],
       "the writer's commits are on the seed's branch, so that is the ref the join merges");
     ok(existsSync(join(p.resultsDir, "wt-feat", "migrated.txt")),
       "the writer's commit reaches the target tree");
