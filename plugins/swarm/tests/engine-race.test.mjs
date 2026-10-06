@@ -199,6 +199,9 @@ test("ask: a live claim refuses an ask that has no heartbeat to read", async () 
     equal(refused.status, 1, refused.stdout + refused.stderr);
     ok(/already has a live engine/.test(refused.stderr), refused.stderr);
     ok(refused.stderr.includes(`pid ${process.pid}`), `the refusal must name the claim's owner: ${refused.stderr}`);
+    // This refusal is thrown from `askLeaf` and printed by `main`'s catch, which adds the
+    // `swarm: ` prefix — so the message itself must not carry one too.
+    ok(!refused.stderr.includes("swarm: swarm:"), `the operator must read the prefix once: ${refused.stderr}`);
     equal(readFileSync(join(out, "engine.lock"), "utf8").trim().split(" ")[1], String(process.pid),
       "a refused ask must leave the owner's claim alone");
   } finally {

@@ -13,7 +13,7 @@ import { cwdAllowed, defaultGovernanceIo } from "./governance.mjs";
 import { allowedRootsFor, providerConfig } from "./providers.mjs";
 import { defaultProviderRegistry } from "./default-providers.mjs";
 import { runPlan, makeDefaultIo } from "./scheduler.mjs";
-import { claimEngine, releaseEngine, lockRefusal } from "./engine-lock.mjs";
+import { claimEngine, lockRefusal } from "./engine-lock.mjs";
 
 const PROVIDERS = defaultProviderRegistry();
 
@@ -100,10 +100,12 @@ export async function askLeaf({ resultsDir, taskId, question, model, provider, c
       ];
   // An ask drives the same resultsDir a run does, so it takes the same claim: two
   // asks, or an ask against a run still in its pre-heartbeat startup, are otherwise
-  // one engine each. Released on every exit — runPlan's own throws included.
+  // one engine each.
   const claimed = claimEngine(resultsDir, { heartbeatMs: Math.max(50, (cfg.heartbeatSecs ?? 15) * 1000) });
   if (!claimed.ok) throw new Error(lockRefusal(resultsDir, claimed.pid, "asking"));
-  try {
+  // No release here: `runPlan` releases on its own exit path, `finally` included, and it
+  // is the one that knows the run ended. A second release would race a contender that
+  // claimed the dir afterwards and delete that live claim.
   // An ask is a one-off answer, not a monitored run: no roster/live-view
   // frames, only the CLI's own answer + tokens line. Suppressing io.snapshot
   // is what runPlan's paint() checks before rendering anything.
@@ -125,7 +127,4 @@ export async function askLeaf({ resultsDir, taskId, question, model, provider, c
     ...(askEntry.provider && { provider: askEntry.provider }),
     ...(askEntry.runner && { runner: askEntry.runner }),
   };
-  } finally {
-    releaseEngine(resultsDir);
-  }
 }

@@ -194,7 +194,7 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), {
   } catch (e) {
     process.off("SIGINT", ctx.sigintHandler);
     process.off("SIGTERM", ctx.sigtermHandler);
-    releaseEngine(plan.resultsDir);
+    releaseEngine(plan.resultsDir, process.pid);
     throw e;
   }
 
@@ -349,7 +349,7 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), {
     process.off("SIGTERM", ctx.sigtermHandler);
     // The run is over on every one of those exits, stop included — the claim goes
     // with it. A crash never reaches here; the next engine clears that lock itself.
-    releaseEngine(plan.resultsDir);
+    releaseEngine(plan.resultsDir, process.pid);
   }
 
   // Ask mode changes exactly one row of a run the engine already finished: the

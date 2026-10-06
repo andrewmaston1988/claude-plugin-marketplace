@@ -1,12 +1,8 @@
-// `swarm run` and its engine-claim preflight — split out of scripts/swarm.mjs,
-// which now just dispatches to it, the same shape as cmd-status.mjs and
-// cmd-grade.mjs. The preflight lives here with the run: refusing a second engine
-// on a resultsDir and claiming it are one concern, and `ask` imports the
-// preflight from here because it takes the same claim.
-//
-// The argv→ref prelude (`parseArgsFlag`, `resolveManifestRef`, `usageHeadroom`)
-// stays in swarm.mjs, shared with `validate` and `models`, so it is injected at
-// the dispatch site rather than duplicated here.
+// `swarm run` and its engine-claim preflight. The preflight lives with the run: refusing a
+// second engine on a resultsDir and claiming it are one concern, and `ask` imports the
+// preflight from here because it takes the same claim. The argv→ref prelude (`parseArgsFlag`,
+// `resolveManifestRef`, `usageHeadroom`) stays in swarm.mjs, shared with `validate` and
+// `models`, so it is injected at the dispatch site rather than duplicated here.
 import { join } from "node:path";
 import { getConfig, swarmHome, enginePath } from "./config.mjs";
 import { costOfFor } from "./run-cost.mjs";
@@ -31,7 +27,7 @@ export function refuseLiveEngine(dir, cfg, verb) {
   const heartbeatMs = Math.max(50, (cfg.heartbeatSecs ?? 15) * 1000);
   const live = runLiveness(dir, { heartbeatMs });
   if (live.finishedMs == null && live.stoppedMs == null && live.abortedMs == null) {
-    err(lockRefusal(dir, hb.pid, verb));
+    err(`swarm: ${lockRefusal(dir, hb.pid, verb)}`);
     return true;
   }
   return false;
@@ -63,7 +59,7 @@ export async function cmdRun(rest, { parseArgsFlag, resolveManifestRef, usageHea
   // between them.
   const claimed = claimEngine(plan.resultsDir, { heartbeatMs: Math.max(50, (cfg.heartbeatSecs ?? 15) * 1000) });
   if (!claimed.ok) {
-    err(lockRefusal(plan.resultsDir, claimed.pid, "re-running"));
+    err(`swarm: ${lockRefusal(plan.resultsDir, claimed.pid, "re-running")}`);
     return 1;
   }
 
