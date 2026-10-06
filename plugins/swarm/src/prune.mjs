@@ -1,4 +1,5 @@
 import { join, resolve, dirname, sep } from "node:path";
+import { unlandedCount } from "./worktree.mjs";
 
 // Every byte under `path`, walked with the injected `fs` — real `node:fs` in
 // production, a scripted stand-in in tests. Missing/unreadable entries count as
@@ -101,7 +102,7 @@ export function plan(run, git, fs) {
   const seen = new Set();
   for (const wt of run.worktreesKept || []) {
     if (!fs.existsSync(wt.path)) continue; // already gone from disk — not a row to plan or report
-    rows.push({ path: wt.path, branch: wt.branch, bytes: dirSize(fs, wt.path), repo: wt.repo });
+    rows.push(measureRow({ path: wt.path, branch: wt.branch, bytes: dirSize(fs, wt.path), repo: wt.repo }, git, fs));
     seen.add(resolve(wt.path));
   }
 
@@ -109,12 +110,26 @@ export function plan(run, git, fs) {
     if (!fs.existsSync(repo)) continue;
     for (const reg of registeredUnder(git, repo, run.resultsDir)) {
       if (seen.has(reg.path)) continue;
-      rows.push({ path: reg.path, branch: reg.branch, bytes: dirSize(fs, reg.path), repo });
+      rows.push(measureRow({ path: reg.path, branch: reg.branch, bytes: dirSize(fs, reg.path), repo }, git, fs));
       seen.add(reg.path);
     }
   }
 
   return { rows };
+}
+
+function measureRow(row, git, fs) {
+  if (!fs.existsSync(row.repo)) return { ...row, unlanded: Infinity, dirty: Infinity };
+  const unlanded = row.branch ? unlandedCount("HEAD", row.branch, row.repo, git) : 0;
+  const status = git(["status", "--porcelain", "--untracked-files=all"], row.path);
+  const dirty = status.status === 0
+    ? status.stdout.split(/\r?\n/).filter(Boolean).length
+    : Infinity;
+  return { ...row, unlanded, dirty };
+}
+
+export function blockers(rows) {
+  return rows.filter((row) => !Number.isFinite(row.unlanded) || row.unlanded > 0 || !Number.isFinite(row.dirty) || row.dirty > 0);
 }
 
 // Destroy in order: the worktree directory, then the branch it sat on — a row
@@ -140,7 +155,12 @@ function gb(bytes) {
 }
 
 export function formatPrune(rows, { dryRun = false } = {}) {
-  const lines = rows.map((r) => `  ${r.path}  ${gb(r.bytes)} GB  ${r.branch ?? "(detached)"}`);
+  const lines = rows.map((r) => {
+    let line = `  ${r.path}  ${gb(r.bytes)} GB  ${r.branch ?? "(detached)"}`;
+    if (r.unlanded > 0) line += `  ${Number.isFinite(r.unlanded) ? r.unlanded : "unmeasurable"} unlanded`;
+    if (r.dirty > 0) line += `  ${Number.isFinite(r.dirty) ? r.dirty : "unmeasurable"} uncommitted`;
+    return line;
+  });
   const total = rows.reduce((s, r) => s + r.bytes, 0);
   const verb = dryRun ? "would free" : "freed";
   lines.push(`${verb} ${gb(total)} GB across ${rows.length} worktree${rows.length === 1 ? "" : "s"}`);

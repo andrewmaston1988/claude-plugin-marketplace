@@ -1950,6 +1950,29 @@ test("prune: a run that ended normally still has its leftover tree removed — t
   }
 });
 
+test("prune: unlanded commit and dirty tree are preserved until explicit discard", () => {
+  const f = pruneFixture();
+  try {
+    const wt = prepareIsolation({ id: "impl", originalCwd: f.repo, cwd: f.repo }, { worktreeBranchPrefix: "swarm/" }, f.resultsDir, { addTimeoutMs: WORKTREE_ADD_TIMEOUT_MS });
+    writeFileSync(join(wt.path, "a.txt"), "unlanded\n");
+    commitAll(wt.path, "unlanded work");
+    writeFileSync(join(wt.path, "new.txt"), "dirty\n");
+    writeFinishedRun(f.resultsDir, [{ branch: wt.branch, path: wt.path }]);
+    const env = { SWARM_HOME: join(f.dir, "home") };
+    const refused = runCli(["prune", f.resultsDir], { cwd: f.dir, env });
+    equal(refused.status, 1, refused.stdout + refused.stderr);
+    ok(refused.stderr.includes(wt.path) && refused.stderr.includes("--discard-unlanded"), refused.stderr);
+    ok(existsSync(wt.path), "blocked worktree must survive refusal");
+    ok(gitOut(["branch", "--list", wt.branch], f.repo), "blocked branch must survive refusal");
+    const discarded = runCli(["prune", f.resultsDir, "--discard-unlanded"], { cwd: f.dir, env });
+    equal(discarded.status, 0, discarded.stdout + discarded.stderr);
+    ok(!existsSync(wt.path), "explicit discard removes the worktree");
+    ok(!gitOut(["branch", "--list", wt.branch], f.repo), "explicit discard removes the branch");
+  } finally {
+    dropSnapPrune(f);
+  }
+});
+
 test("prune: a killed run's leftover tree (no summary.json) is removed without a branch delete, and no summary is invented", () => {
   const f = pruneFixture();
   try {

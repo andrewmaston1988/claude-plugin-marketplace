@@ -18,7 +18,7 @@ import { citationPaths } from "../src/citations.mjs";
 import { formatClosing, formatKeptWorktrees, readResult, listLeaves, stopPath, appendRunLog, writeSummary, resultPath, writeDigestMd, readHeartbeat } from "../src/results.mjs";
 import { identityOf, identityKey } from "../src/contracts.mjs";
 import { runLiveness, readRun, ALIVE_STATES } from "../src/runlog.mjs";
-import { plan as planPrune, execute as executePrune, formatPrune, registeredUnder, repoOfWorktree, reposOfTrees, makeGit, reposFromManifest } from "../src/prune.mjs";
+import { plan as planPrune, execute as executePrune, formatPrune, blockers as pruneBlockers, registeredUnder, repoOfWorktree, reposOfTrees, makeGit, reposFromManifest } from "../src/prune.mjs";
 import { addTokens, emptyTokens } from "../src/stream.mjs";
 import { dim, out, err } from "../src/ui.mjs";
 import { markValidated, unvalidatedRefusal } from "../src/validated.mjs";
@@ -39,7 +39,7 @@ const USAGE = `usage: swarm.mjs <command>
   status --mine              this session's finished runs still holding kept worktrees, each with its prune command
   wait <resultsDir> [--timeout <secs>]  block until the run settles, then print the final roster (exit 0 clean · 1 leaf not ok · 2 engine died · 3 timed out)
   stop <resultsDir>          cooperative stop: signal a live engine and wait, or record a dead one — never kills a process
-  prune <resultsDir> [--dry-run]   destroy a finished run's kept worktrees + branches; refuses a live run
+  prune <resultsDir> [--dry-run] [--discard-unlanded]   destroy kept worktrees + branches; refuses live, unlanded, or dirty trees
   report <resultsDir>        render the run's digest.md/report.md → digest.html/report.html (self-contained, theme-aware; backfill for old runs)
   ask <resultsDir> <taskId> "<question>" [--model <m>]   resume a finished leaf's session with a follow-up
   quota | usage              provider utilization per limit window (exit 1 when Anthropic is exhausted)
@@ -598,6 +598,17 @@ async function cmdPrune(rest) {
     return 0;
   }
   out(formatPrune(rows, { dryRun }));
+  const blocked = pruneBlockers(rows);
+  if (!dryRun && blocked.length && !rest.includes("--discard-unlanded")) {
+    for (const row of blocked) {
+      const counts = [];
+      if (row.unlanded > 0) counts.push(`${Number.isFinite(row.unlanded) ? row.unlanded : "unmeasurable"} unlanded`);
+      if (row.dirty > 0) counts.push(`${Number.isFinite(row.dirty) ? row.dirty : "unmeasurable"} uncommitted`);
+      err(`  ${row.path} ${row.branch ?? "(detached)"}: ${counts.join(", ")}`);
+    }
+    err("swarm: refusing — land or take this work first, or pass --discard-unlanded to destroy it");
+    return 1;
+  }
   if (!dryRun) {
     executePrune(rows, git, fs);
     // survivors: whatever wasn't just removed and wasn't already gone before we started
