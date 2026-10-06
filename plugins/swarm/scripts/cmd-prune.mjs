@@ -6,7 +6,7 @@ import { join, resolve } from "node:path";
 import { getConfig } from "../src/config.mjs";
 import { runLiveness } from "../src/runlog.mjs";
 import { writeSummary } from "../src/results.mjs";
-import { plan as planPrune, execute as executePrune, formatPrune, blockers as pruneBlockers, repoOfWorktree, reposOfTrees, makeGit, reposFromManifest } from "../src/prune.mjs";
+import { plan as planPrune, execute as executePrune, formatPrune, workCounts, blockers as pruneBlockers, repoOfWorktree, reposOfTrees, makeGit, reposFromManifest } from "../src/prune.mjs";
 import { out, err } from "../src/ui.mjs";
 
 export async function cmdPrune(rest, { usage }) {
@@ -49,18 +49,18 @@ export async function cmdPrune(rest, { usage }) {
     out(`swarm: ${dir} has no kept worktrees — nothing to prune.`);
     return 0;
   }
-  out(formatPrune(rows, { dryRun }));
+  // The guard decides the run BEFORE the report describes it: a refused call must
+  // never print "freed", or the loudest line on screen would claim a destruction
+  // that did not happen.
   const blocked = pruneBlockers(rows);
   if (!dryRun && blocked.length && !rest.includes("--discard-unlanded")) {
     for (const row of blocked) {
-      const counts = [];
-      if (row.unlanded > 0) counts.push(`${Number.isFinite(row.unlanded) ? row.unlanded : "unmeasurable"} unlanded`);
-      if (row.dirty > 0) counts.push(`${Number.isFinite(row.dirty) ? row.dirty : "unmeasurable"} uncommitted`);
-      err(`  ${row.path} ${row.branch ?? "(detached)"}: ${counts.join(", ")}`);
+      err(`  ${row.path} ${row.branch ?? "(detached)"}: ${workCounts(row).join(", ")}`);
     }
     err("swarm: refusing — land or take this work first, or pass --discard-unlanded to destroy it");
     return 1;
   }
+  out(formatPrune(rows, { dryRun }));
   if (!dryRun) {
     executePrune(rows, git, fs);
     // survivors: whatever wasn't just removed and wasn't already gone before we started

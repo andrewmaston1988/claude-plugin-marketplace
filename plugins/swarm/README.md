@@ -373,9 +373,10 @@ worktrees and branches, never its results — refuses a live run and any tree wi
 commits or uncommitted changes, prints every tree first, and supports `--dry-run` for a no-op
 preview. `--discard-unlanded` explicitly destroys blocked work. `swarm status --mine` lists this session's finished runs still
 holding worktrees. The dispatching session takes what it needs from each finished run only after its work has landed (merged) or been taken (pushed or merged into your branch), then
-prunes it with `swarm prune`; it does not ask the operator. A refusal means the work has NOT
-landed: land it or take it before retrying, and never pass `--discard-unlanded` without the
-operator deciding the work can be lost. The per-turn nudge hook
+prunes it with `swarm prune`; it does not ask the operator. A refusal names each blocked row
+and why: unlanded commits on its branch or detached HEAD, uncommitted changes, or a measurement
+git could not make. Land, take or commit that work before retrying, and never pass
+`--discard-unlanded` without the operator deciding the work can be lost. The per-turn nudge hook
 (Claude: `UserPromptSubmit`; Codex: `Stop`) names each finished
 run once, in one line counting this session's worktrees and other sessions'. The setting
 `"swarm": { "pruneNudge": false }` silences it.

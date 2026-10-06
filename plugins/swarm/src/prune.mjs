@@ -110,6 +110,9 @@ export function plan(run, git, fs) {
     if (!fs.existsSync(repo)) continue;
     for (const reg of registeredUnder(git, repo, run.resultsDir)) {
       if (seen.has(reg.path)) continue;
+      // Registered but gone from disk: `git status` against a missing cwd would fail
+      // closed and block the run forever, so it is not a row to measure.
+      if (!fs.existsSync(reg.path)) continue;
       rows.push(measureRow({ path: reg.path, branch: reg.branch, bytes: dirSize(fs, reg.path), repo }, git, fs));
       seen.add(reg.path);
     }
@@ -118,9 +121,23 @@ export function plan(run, git, fs) {
   return { rows };
 }
 
+// Commits a detached tree's HEAD holds that no branch or remote reaches — what
+// `worktree remove` unreferences. A killed `worktree add` leaves HEAD detached at a
+// commit that IS on a branch (count 0, prunes as before); an agent that kept working
+// in that orphaned tree leaves commits behind that are not. `Infinity` when git
+// cannot answer, the same fail-closed contract as `unlandedCount`.
+function detachedUnlanded(git, path) {
+  const r = git(["rev-list", "--count", "HEAD", "--not", "--branches", "--remotes"], path);
+  if (r.status !== 0) return Infinity;
+  const n = Number.parseInt(r.stdout, 10);
+  return Number.isFinite(n) ? n : Infinity;
+}
+
 function measureRow(row, git, fs) {
   if (!fs.existsSync(row.repo)) return { ...row, unlanded: Infinity, dirty: Infinity };
-  const unlanded = row.branch ? unlandedCount("HEAD", row.branch, row.repo, git) : 0;
+  const unlanded = row.branch
+    ? unlandedCount("HEAD", row.branch, row.repo, git)
+    : detachedUnlanded(git, row.path);
   const status = git(["status", "--porcelain", "--untracked-files=all"], row.path);
   const dirty = status.status === 0
     ? status.stdout.split(/\r?\n/).filter(Boolean).length
@@ -154,11 +171,20 @@ function gb(bytes) {
   return (bytes / 1024 ** 3).toFixed(2);
 }
 
+// The one place the work cells are spelled: the table lays them out and the refusal
+// repeats them, so a second copy of these strings in the command layer is how the
+// report and the reason it was refused drift apart.
+export function workCounts(row) {
+  const counts = [];
+  if (row.unlanded > 0) counts.push(`${Number.isFinite(row.unlanded) ? row.unlanded : "unmeasurable"} unlanded`);
+  if (row.dirty > 0) counts.push(`${Number.isFinite(row.dirty) ? row.dirty : "unmeasurable"} uncommitted`);
+  return counts;
+}
+
 export function formatPrune(rows, { dryRun = false } = {}) {
   const lines = rows.map((r) => {
     let line = `  ${r.path}  ${gb(r.bytes)} GB  ${r.branch ?? "(detached)"}`;
-    if (r.unlanded > 0) line += `  ${Number.isFinite(r.unlanded) ? r.unlanded : "unmeasurable"} unlanded`;
-    if (r.dirty > 0) line += `  ${Number.isFinite(r.dirty) ? r.dirty : "unmeasurable"} uncommitted`;
+    for (const cell of workCounts(r)) line += `  ${cell}`;
     return line;
   });
   const total = rows.reduce((s, r) => s + r.bytes, 0);

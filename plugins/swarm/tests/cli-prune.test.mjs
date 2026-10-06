@@ -245,6 +245,7 @@ test("prune: unlanded commit and dirty tree are preserved until explicit discard
     ok(gitOut(["branch", "--list", wt.branch], f.repo), "blocked branch must survive refusal");
     equal(refused.status, 1, refused.stdout + refused.stderr);
     ok(refused.stderr.includes(wt.path) && refused.stderr.includes("--discard-unlanded"), refused.stderr);
+    ok(!/freed/.test(refused.stdout), `a refused prune must not report freed space: ${refused.stdout}`);
     const discarded = runCli(["prune", f.resultsDir, "--discard-unlanded"], { cwd: f.dir, env });
     equal(discarded.status, 0, discarded.stdout + discarded.stderr);
     ok(!existsSync(wt.path), "explicit discard removes the worktree");
@@ -335,8 +336,34 @@ test("prune: a killed run's leftover tree (no summary.json) is removed without a
   }
 });
 
-// RED as written, and it is a src defect rather than a stale fixture — see the note on
-// the sibling row below.
+test("prune: a detached tree holding its own commit is refused, and the commit survives", () => {
+  const f = pruneFixture();
+  try {
+    // A branchless tree is not automatically empty: an agent that kept working in a
+    // tree left detached by a killed `worktree add` commits there, and those commits
+    // are reachable from HEAD only — `worktree remove` would unreference them.
+    addDetachedTree(f);
+    writeFileSync(join(f.tree, "own.txt"), "orphan work\n");
+    commitAll(f.tree, "commit in the detached tree");
+    const head = gitOut(["rev-parse", "HEAD"], f.tree);
+    writeKilledRun(f);
+
+    const env = { SWARM_HOME: join(f.dir, "home") };
+    const refused = runCli(["prune", f.resultsDir], { cwd: f.dir, env });
+    equal(refused.status, 1, refused.stdout + refused.stderr);
+    ok(refused.stderr.includes(f.tree) && refused.stderr.includes("--discard-unlanded"), refused.stderr);
+    ok(!/freed/.test(refused.stdout), `a refused prune must not report freed space: ${refused.stdout}`);
+    ok(existsSync(f.tree), "the detached tree must survive the refusal");
+    equal(gitOut(["rev-parse", "HEAD"], f.tree), head, "the detached tree's own commit must survive");
+
+    const discarded = runCli(["prune", f.resultsDir, "--discard-unlanded"], { cwd: f.dir, env });
+    equal(discarded.status, 0, discarded.stdout + discarded.stderr);
+    ok(!existsSync(f.tree), "an explicit discard still destroys the detached tree");
+  } finally {
+    dropSnapPrune(f);
+  }
+});
+
 test("prune: a second repo's leftover tree is removed too, not just the first repo's", () => {
   const f = pruneFixture();
   const repo2 = initPruneRepo();
@@ -367,11 +394,6 @@ test("prune: a second repo's leftover tree is removed too, not just the first re
   }
 });
 
-// RED as written: `execute()` (src/prune.mjs:80) runs `git worktree remove` with
-// cwd = row.repo, and every row's repo is the single one cmdPrune resolved
-// (scripts/swarm.mjs:616-621 resolved a repo per snapshot event until 46003f5).
-// A tree registered in a second repo therefore survives, silently — prune still
-// prints "freed … across 2 worktrees". Not a fixture problem; left red on purpose.
 test("prune: a killed run with leftover trees in two repos removes both, and invents no summary", () => {
   const f = pruneFixture();
   const repo2 = initPruneRepo();
