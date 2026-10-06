@@ -282,6 +282,8 @@ A leaf that runs a suite, a build, or anything else measured in minutes gets all
 
 > For an offline smoke test, inject fakes at call time, not as definition-time defaults, and run the test with network access unavailable.
 
+**Why the first line, when a hook exists.** `hooks/foreground-guard.mjs` denies an explicit `run_in_background` inside a leaf, but it cannot see the other route: a *foreground* call that exceeds its timeout is auto-backgrounded by the harness, with no `run_in_background` field for any hook to deny. The prompt is the only thing that closes that path — which is why the line names the 600000 ms ceiling rather than just forbidding backgrounding.
+
 **Why the second.** Six leaves died this way on 2026-09-01 and four more on 2026-09-06, each reporting `ok` with a dirty tree and nothing committed. Commit-as-you-go is what made the second batch recoverable rather than lost.
 
 ## Verification loop — multi-run composition
