@@ -162,6 +162,47 @@ test("fallback: quota leaf re-dispatches immediately on its declared fallbackMod
   }
 });
 
+// The machinery fact, not the model's fault: `grade --init` reads this field to
+// pre-fill the infra outcome, so a missing one files a quota death as `failed`.
+test("quota: a quota-killed leaf's result records failureClass quota", async () => {
+  const dir = tmp();
+  try {
+    const io = makeIo(fakeSpawnFactory(() => ({ exit: 1, output: "usage limit reached — resets at 3pm" })));
+    const p = plan(dir, [task("a", { provider: "claude", model: "claude-sonnet-5" })]);
+    await runPlan(p, CFG, io);
+    const res = readResult(p.resultsDir, "a");
+    equal(res.failureClass, "quota");
+    equal(res.quotaResetsAt, "3pm", "the reset time still rides the same record");
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("rate-limited: a leaf past its retry budget records failureClass rate-limited", async () => {
+  const dir = tmp();
+  try {
+    const io = makeIo(fakeSpawnFactory(() => ({ exit: 1, output: "429 Too Many Requests" })));
+    const p = plan(dir, [task("a", { provider: "claude", model: "claude-sonnet-5" })]);
+    await runPlan(p, { ...CFG, retry: { rateLimited: 1, backoffMs: 10 } }, io);
+    equal(readResult(p.resultsDir, "a").failureClass, "rate-limited");
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+// A leaf that recovered on its fallback is not an infra failure — the success
+// rewrites the whole result, so the failed attempt's class must not survive.
+test("fallback: a leaf that recovered on its fallback records no failureClass", async () => {
+  const dir = tmp();
+  try {
+    const spawn = fakeSpawnFactory((call) =>
+      call.args[call.args.indexOf("--model") + 1] === "claude-sonnet-5"
+        ? { exit: 1, output: "Claude AI usage limit reached|1751210400" }
+        : { output: "fallback did it" });
+    const io = makeIo(spawn);
+    const p = plan(dir, [task("judge", { provider: "claude", model: "claude-sonnet-5", fallbackProvider: "claude", fallbackModel: "claude-haiku-4-5-20251001" })]);
+    const r = await runPlan(p, { ...CFG, retry: { backoffMs: 10 } }, io);
+    equal(r.summary.tasks[0].state, "ok");
+    equal(readResult(p.resultsDir, "judge").failureClass, undefined, "a recovered leaf carries no infra class");
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
 test("quota fail-fast: first Claude quota pre-emptively marks pending Claude leaves without fallback", async () => {
   const dir = tmp();
   try {

@@ -1,6 +1,6 @@
 // Read-models over scores.mjs's own aggregate/dedupe output, computed
 // server-side so the page never re-derives a count it could get wrong.
-import { OUTCOMES } from "../aspects.mjs";
+import { OUTCOMES, INFRA_OUTCOMES } from "../aspects.mjs";
 import { supersessionReading, supersessionKey, successorPitch } from "../supersession.mjs";
 import { readyFrom, providersOf, compareIdentity, verdictsIn } from "../cost-view.mjs";
 
@@ -74,6 +74,9 @@ export function coverage(report) {
 // Each deduped leaf (one row, however many aspects its grades cover) counts
 // once — the aggregate report's per-aspect outcomes must never be summed
 // across aspects, or an ungraded leaf multiplies by the aspect count.
+// `infra` is the three machinery outcomes summed: the bar draws one neutral
+// segment for them, so the vocabulary is collapsed here rather than duplicated
+// into perf.js, which loads as a browser script with no module imports.
 export function reliability(liveRows) {
   const byModel = new Map();
   for (const r of liveRows) {
@@ -83,6 +86,7 @@ export function reliability(liveRows) {
       label: r.model,
       providers: [],
       total: 0,
+      infra: 0,
       byOutcome: blankOutcomes(),
     });
     const m = byModel.get(key);
@@ -91,6 +95,7 @@ export function reliability(liveRows) {
     }
     m.providers.sort();
     m.total += 1;
+    if (INFRA_OUTCOMES.includes(r.outcome)) m.infra += 1;
     m.byOutcome[r.outcome] = (m.byOutcome[r.outcome] || 0) + 1;
   }
   return [...byModel.values()].sort((a, b) => b.total - a.total || compareIdentity(a, b));

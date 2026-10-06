@@ -68,6 +68,33 @@ test("reliability: sorted by total descending", () => {
   deepEqual(result.map((r) => r.model), ["m-big", "m-small"]);
 });
 
+test("reliability: the three infra outcomes collapse into one per-model infra count", () => {
+  const rows = [
+    graded({ leaf: "ok", model: "m-a" }),
+    row({ leaf: "q", model: "m-a", outcome: "quota", note: "dry", grades: undefined }),
+    row({ leaf: "r", model: "m-a", outcome: "rate-limited", note: "429", grades: undefined }),
+    row({ leaf: "h", model: "m-a", outcome: "harness", note: "lost path", grades: undefined }),
+  ];
+  const ma = reliability(dedupe(rows)).find((r) => r.model === "m-a");
+  equal(ma.infra, 3, "one tally, not three series");
+  equal(ma.byOutcome.quota, 1, "the raw counts stay available for audit");
+});
+
+// The bar is the model's record, not a grade table: infra rides one neutral
+// segment so a provider outage never reads as a quality signal.
+test("dashboard: reliabilityBars draws infra as one segment, never one per infra outcome", () => {
+  const P = loadPerfViews();
+  const html = P.reliabilityBars(
+    [{ model: "m-a", total: 4, infra: 3, byOutcome: { completed: 1, quota: 2, "rate-limited": 1, harness: 0 } }],
+    H,
+  );
+  const labels = [...html.matchAll(/<span class="chip">.*?<\/i>([^<]*)<\/span>/g)].map((m) => m[1]);
+  equal(labels.filter((l) => l === "infra").length, 1, "the legend names infra exactly once");
+  deepEqual(labels.filter((l) => l === "quota" || l === "harness" || l === "rate-limited"), [], "the infra outcomes are never legend series");
+  equal((html.match(/<span style="flex:/g) || []).length, 2, "one completed segment plus one infra segment");
+  ok(html.includes('style="flex:3;'), "the infra segment carries the summed count, not a single outcome's");
+});
+
 // ── leaders ─────────────────────────────────────────────────────────────────
 
 test("leaders: ordered by weighted score, capped at k, provisional flagged, outcomes-only model excluded", () => {

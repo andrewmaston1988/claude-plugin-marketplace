@@ -97,7 +97,9 @@ test("validateRow: an unknown outcome is rejected, and does not cascade into gra
   ok(!errs.some((e) => e.startsWith("grades")), `cascade: ${errs.join(" | ")}`);
 });
 
-for (const outcome of ["failed", "timeout", "session-died", "not-capable"]) {
+// quota / rate-limited / harness are infra outcomes: the leaf never got to do
+// its job, so it has no output to grade — same rule as a dead session.
+for (const outcome of ["failed", "timeout", "session-died", "not-capable", "quota", "rate-limited", "harness"]) {
   test(`validateRow: grades present on ${outcome} are rejected — no output, no grades`, () => {
     const errs = validateRow(row({ outcome, note: "no output" }));
     ok(errs.some((e) => e.startsWith("grades:")), errs.join(" | "));
@@ -298,6 +300,41 @@ test("aggregate: every aspect gets an entry even with no rows — absence is evi
 
 test("aggregate: an unknown aspect throws, naming the valid set", () => {
   throws(() => aggregate([], { aspect: "godot" }), /unknown aspect/);
+});
+
+// ── infra outcomes ────────────────────────────────────────────────────────────
+
+// A model whose provider ran dry overnight must not read in perf as unreliable.
+const infraRow = (leaf, outcome) => ({ ...row(), leaf, outcome, note: "the provider, not the model", grades: undefined });
+
+test("aggregate: an infra row never lands on an aspect cell — it counts per model instead", () => {
+  const rows = [graded({ leaf: "done" }), infraRow("q1", "quota"), infraRow("q2", "quota")];
+  const report = aggregate(rows, { aspect: "adherence" });
+  const cell = report.aspects[0].cells[0];
+  equal(cell.n, 1, "only the graded leaf is evidence for the aspect");
+  equal(cell.outcomes.quota, 0, "an infra row must not sit in any cell's tally");
+  ok(Object.values(cell.outcomes).every(Number.isFinite), "an infra outcome must not put a NaN count on a cell");
+  deepEqual(report.infra, [{ model: "glm-5.2:cloud", n: 2 }], "the infra count is on the model, not the cell");
+});
+
+test("aggregate: the infra count is per model, never multiplied by the aspect count", () => {
+  const rows = [graded({ leaf: "done" }), infraRow("q1", "quota"), infraRow("r1", "rate-limited"), infraRow("h1", "harness")];
+  deepEqual(aggregate(rows).infra, [{ model: "glm-5.2:cloud", n: 3 }], "eleven aspect cells must not multiply the tally");
+});
+
+test("aggregate: the infra count stays with its provider-qualified model", () => {
+  const rows = [
+    graded({ leaf: "done", provider: "ollama" }),
+    { ...infraRow("q1", "quota"), provider: "ollama" },
+  ];
+  deepEqual(aggregate(rows).infra, [{ provider: "ollama", model: "glm-5.2:cloud", n: 1 }]);
+});
+
+test("overall: a model's infra count rides its ranked row", () => {
+  const rows = [graded({ leaf: "done" }), infraRow("q1", "quota"), infraRow("q2", "quota")];
+  const cell = overall(rows).cells.find((c) => c.model === "glm-5.2:cloud");
+  equal(cell.infra, 2, "overall must carry the tally, or it shows nowhere on that view");
+  equal(cell.n, 1, "the graded row still sets n");
 });
 
 // ── shrinkage ─────────────────────────────────────────────────────────────────

@@ -515,9 +515,16 @@ them (`null` otherwise) — they co-occur freely.
 
 `domain` is one lowercase token naming the leaf's language/ecosystem (`godot`, `rust`,
 `node`, `python`, `docs`) — never the repo or task. `outcome` (`completed | wrong | failed
-| timeout | session-died | not-capable`) is separate from the grades: the first two
-require grades, the rest forbid them — `not-capable` records the model couldn't do the
-thing *on this harness*.
+| timeout | session-died | not-capable | quota | rate-limited | harness`) is separate from
+the grades: the first two require grades, the rest forbid them — `not-capable` records the
+model couldn't do the thing *on this harness*.
+
+The last three are **infra outcomes**: the leaf never got to try. `quota` and
+`rate-limited` are written onto the result by the scheduler when the provider ran dry or
+throttled it (`grade --init` pre-fills them); `harness` is the grader's diagnosis after
+reading the transcript — a lost path, a hook firing in the leaf, a timeout mid-write.
+None of them is evidence about the model, so none lands on an aspect cell: they are
+tallied per model, and `perf` prints that as a single `infra n` tail.
 
 Each row also snapshots mechanical columns (`ok`, `durationMs`, `tokens`, `numTurns`,
 citation counts) and the model's declared capabilities from the model roster — auditable
