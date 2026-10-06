@@ -170,11 +170,48 @@ test("ask: refused while an engine holds the claim, and its own claim is release
   }
 });
 
+// The test above is refused by the heartbeat pre-check in `main`, which master already
+// has — so it passes with `askLeaf`'s claim deleted. This one cannot: the lock says live
+// and there is no heartbeat at all, which is exactly the pre-heartbeat startup window a
+// second engine used to slip into. Only the claim itself refuses this ask.
+test("ask: a live claim refuses an ask that has no heartbeat to read", async () => {
+  const dir = tmp();
+  try {
+    const home = join(dir, "home");
+    const manifest = join(dir, "plan.json");
+    writeFileSync(manifest, JSON.stringify({
+      resultsDir: "out",
+      tasks: [{ id: "t1", prompt: "x", provider: "claude", model: "claude-haiku-4-5-20251001" }],
+    }));
+    const env = { SWARM_HOME: home, SWARM_SHIM_STREAM: "1", SWARM_SHIM_OUTPUT: "x" };
+    const v = runCli(["validate", manifest], { cwd: dir, env });
+    equal(v.status, 0, v.stderr);
+    const r0 = runCli(["run", manifest], { cwd: dir, env });
+    equal(r0.status, 0, r0.stdout + r0.stderr);
+
+    const out = join(dir, "out");
+    // This process's own pid, so it reads alive; no heartbeat, so the pre-check's
+    // liveness read (which bails on a missing heartbeat) cannot be what refuses.
+    rmSync(join(out, "heartbeat"), { force: true });
+    writeFileSync(join(out, "engine.lock"), `${new Date().toISOString()} ${process.pid}\n`);
+
+    const refused = runCli(["ask", out, "t1", "why?"], { cwd: dir, env });
+    equal(refused.status, 1, refused.stdout + refused.stderr);
+    ok(/already has a live engine/.test(refused.stderr), refused.stderr);
+    ok(refused.stderr.includes(`pid ${process.pid}`), `the refusal must name the claim's owner: ${refused.stderr}`);
+    equal(readFileSync(join(out, "engine.lock"), "utf8").trim().split(" ")[1], String(process.pid),
+      "a refused ask must leave the owner's claim alone");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 // `stop` is the operator's way out of a long run. It exits through the scheduler's
 // finally like any other end, so the claim must go with it — a claim that outlives
 // its engine refuses the resume the operator runs next.
 test("stop: a live engine holds its claim, and `swarm stop` releases it", async () => {
   const dir = tmp();
+  let run;
   try {
     const home = join(dir, "home");
     const manifest = join(dir, "plan.json");
@@ -185,7 +222,7 @@ test("stop: a live engine holds its claim, and `swarm stop` releases it", async 
     const env = { SWARM_HOME: home, SWARM_SHIM_STREAM: "1", SWARM_SHIM_OUTPUT: "x", SWARM_SHIM_SLEEP_MS: "30000" };
     const v = runCli(["validate", manifest], { cwd: dir, env });
     equal(v.status, 0, v.stderr);
-    const run = runCliAsync(["run", manifest], { cwd: dir, env });
+    run = runCliAsync(["run", manifest], { cwd: dir, env });
     const out = join(dir, "out");
     const deadline = Date.now() + 60_000;
     while (!existsSync(join(out, "heartbeat")) && Date.now() < deadline) {
@@ -198,9 +235,15 @@ test("stop: a live engine holds its claim, and `swarm stop` releases it", async 
     const stopped = runCli(["stop", out], { cwd: dir, env });
     equal(stopped.status, 0, stopped.stdout + stopped.stderr);
     const r = await run;
+    run = null;
     equal(r.status, 1, r.stdout + r.stderr);
     equal(existsSync(join(out, "engine.lock")), false, "a stopped engine must release its claim");
   } finally {
+    // An assertion above throws while the engine is still running — which is exactly
+    // what happens when the claim regresses, the case this test exists to catch. The
+    // live child holds its temp dir open, so an unwaited rmSync fails EPERM and, being
+    // a throw from `finally`, replaces the assertion that would have explained it.
+    if (run) await run;
     rmSync(dir, { recursive: true, force: true });
   }
 });
