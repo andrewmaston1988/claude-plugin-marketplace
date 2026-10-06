@@ -1,4 +1,5 @@
 import { join, resolve, dirname, sep } from "node:path";
+import { unlandedCount } from "./worktree.mjs";
 
 // Every byte under `path`, walked with the injected `fs` — real `node:fs` in
 // production, a scripted stand-in in tests. Missing/unreadable entries count as
@@ -101,7 +102,7 @@ export function plan(run, git, fs) {
   const seen = new Set();
   for (const wt of run.worktreesKept || []) {
     if (!fs.existsSync(wt.path)) continue; // already gone from disk — not a row to plan or report
-    rows.push({ path: wt.path, branch: wt.branch, bytes: dirSize(fs, wt.path), repo: wt.repo });
+    rows.push(measureRow({ path: wt.path, branch: wt.branch, bytes: dirSize(fs, wt.path), repo: wt.repo }, git, fs));
     seen.add(resolve(wt.path));
   }
 
@@ -109,12 +110,43 @@ export function plan(run, git, fs) {
     if (!fs.existsSync(repo)) continue;
     for (const reg of registeredUnder(git, repo, run.resultsDir)) {
       if (seen.has(reg.path)) continue;
-      rows.push({ path: reg.path, branch: reg.branch, bytes: dirSize(fs, reg.path), repo });
+      // Registered but gone from disk: `git status` against a missing cwd would fail
+      // closed and block the run forever, so it is not a row to measure.
+      if (!fs.existsSync(reg.path)) continue;
+      rows.push(measureRow({ path: reg.path, branch: reg.branch, bytes: dirSize(fs, reg.path), repo }, git, fs));
       seen.add(reg.path);
     }
   }
 
   return { rows };
+}
+
+// Commits a detached tree's HEAD holds that no branch or remote reaches — what
+// `worktree remove` unreferences. A killed `worktree add` leaves HEAD detached at a
+// commit that IS on a branch (count 0, prunes as before); an agent that kept working
+// in that orphaned tree leaves commits behind that are not. `Infinity` when git
+// cannot answer, the same fail-closed contract as `unlandedCount`.
+function detachedUnlanded(git, path) {
+  const r = git(["rev-list", "--count", "HEAD", "--not", "--branches", "--remotes"], path);
+  if (r.status !== 0) return Infinity;
+  const n = Number.parseInt(r.stdout, 10);
+  return Number.isFinite(n) ? n : Infinity;
+}
+
+function measureRow(row, git, fs) {
+  if (!fs.existsSync(row.repo)) return { ...row, unlanded: Infinity, dirty: Infinity };
+  const unlanded = row.branch
+    ? unlandedCount("HEAD", row.branch, row.repo, git)
+    : detachedUnlanded(git, row.path);
+  const status = git(["status", "--porcelain", "--untracked-files=all"], row.path);
+  const dirty = status.status === 0
+    ? status.stdout.split(/\r?\n/).filter(Boolean).length
+    : Infinity;
+  return { ...row, unlanded, dirty };
+}
+
+export function blockers(rows) {
+  return rows.filter((row) => !Number.isFinite(row.unlanded) || row.unlanded > 0 || !Number.isFinite(row.dirty) || row.dirty > 0);
 }
 
 // Destroy in order: the worktree directory, then the branch it sat on — a row
@@ -139,8 +171,22 @@ function gb(bytes) {
   return (bytes / 1024 ** 3).toFixed(2);
 }
 
+// The one place the work cells are spelled: the table lays them out and the refusal
+// repeats them, so a second copy of these strings in the command layer is how the
+// report and the reason it was refused drift apart.
+export function workCounts(row) {
+  const counts = [];
+  if (row.unlanded > 0) counts.push(`${Number.isFinite(row.unlanded) ? row.unlanded : "unmeasurable"} unlanded`);
+  if (row.dirty > 0) counts.push(`${Number.isFinite(row.dirty) ? row.dirty : "unmeasurable"} uncommitted`);
+  return counts;
+}
+
 export function formatPrune(rows, { dryRun = false } = {}) {
-  const lines = rows.map((r) => `  ${r.path}  ${gb(r.bytes)} GB  ${r.branch ?? "(detached)"}`);
+  const lines = rows.map((r) => {
+    let line = `  ${r.path}  ${gb(r.bytes)} GB  ${r.branch ?? "(detached)"}`;
+    for (const cell of workCounts(r)) line += `  ${cell}`;
+    return line;
+  });
   const total = rows.reduce((s, r) => s + r.bytes, 0);
   const verb = dryRun ? "would free" : "freed";
   lines.push(`${verb} ${gb(total)} GB across ${rows.length} worktree${rows.length === 1 ? "" : "s"}`);

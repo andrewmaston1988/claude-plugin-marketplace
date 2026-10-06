@@ -21,8 +21,8 @@ function git(args, cwd, { timeout, env }) {
 // HEAD has moved sideways. Returns Infinity when git cannot answer, so callers
 // FAIL CLOSED: an unresolvable question must block a destructive path, not
 // waive it.
-function unlandedCount(base, branch, repo) {
-  const c = git(["cherry", base, branch], repo, { timeout: 60000 });
+export function unlandedCount(base, branch, repo, gitRunner = git) {
+  const c = gitRunner(["cherry", base, branch], repo, { timeout: 60000 });
   if (c.status !== 0) return Infinity;
   return c.stdout.split(/\r?\n/).filter((l) => l.trim().startsWith("+")).length;
 }

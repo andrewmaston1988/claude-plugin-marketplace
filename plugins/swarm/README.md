@@ -374,12 +374,17 @@ manifest seeding the same `into` no longer collide.
 `worktreesKept` in `summary.json` carries one entry per shared group. When the engine reuses or
 resets one of its own worktrees, a branch with commits not yet landed (by patch, so squash-merges
 count) is never force-reset — it refuses rather than lose the work. `swarm prune <resultsDir>` is
-not that path: it removes each kept tree and its branch with `git branch -D`, whether or not the
-branch landed, so push or merge before pruning. It never destroys results. There is no detach
-option; push a branch to preserve its remote copy. It refuses a live run, prints every tree first,
-`--dry-run` for a no-op preview. `swarm status --mine` lists this session's finished runs still
+not that path: it removes each kept tree and its branch together with `git branch -D`, so push or
+merge before pruning. It never destroys results. There is no detach option; push a branch to
+preserve its remote copy. It refuses a live run, and any tree with unlanded commits or uncommitted
+changes, printing every tree first, `--dry-run` for a no-op preview; `--discard-unlanded`
+explicitly destroys that blocked work, whether or not the branch landed. `swarm status --mine`
+lists this session's finished runs still
 holding worktrees. The dispatching session takes what it needs from each finished run only after its work has landed (merged) or been taken (pushed or merged into your branch), then
-prunes it with `swarm prune`; it does not ask the operator. The per-turn nudge hook
+prunes it with `swarm prune`; it does not ask the operator. A refusal names each blocked row
+and why: unlanded commits on its branch or detached HEAD, uncommitted changes, or a measurement
+git could not make. Land, take or commit that work before retrying, and never pass
+`--discard-unlanded` without the operator deciding the work can be lost. The per-turn nudge hook
 (Claude: `UserPromptSubmit`; Codex: `Stop`) names each finished
 run once, in one line counting this session's worktrees and other sessions'. The setting
 `"swarm": { "pruneNudge": false }` silences it.

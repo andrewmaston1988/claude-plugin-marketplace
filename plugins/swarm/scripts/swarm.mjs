@@ -17,13 +17,14 @@ import { citationPaths } from "../src/citations.mjs";
 import { formatKeptWorktrees, listLeaves, stopPath, appendRunLog, writeSummary, resultPath } from "../src/results.mjs";
 import { identityOf, identityKey } from "../src/contracts.mjs";
 import { runLiveness, readRun, ALIVE_STATES } from "../src/runlog.mjs";
-import { plan as planPrune, execute as executePrune, formatPrune, registeredUnder, repoOfWorktree, reposOfTrees, makeGit, reposFromManifest } from "../src/prune.mjs";
+import { registeredUnder, makeGit, reposFromManifest } from "../src/prune.mjs";
 import { addTokens, emptyTokens } from "../src/stream.mjs";
 import { dim, out, err } from "../src/ui.mjs";
 import { markValidated } from "../src/validated.mjs";
 import { cmdRun, refuseLiveEngine } from "../src/cmd-run.mjs";
 import { cmdServe } from "./cmd-serve.mjs";
 import { cmdStatus } from "./cmd-status.mjs";
+import { cmdPrune } from "./cmd-prune.mjs";
 import { cmdReport } from "./cmd-report.mjs";
 import { cmdCost } from "./cmd-cost.mjs";
 import { cmdGradeInit, cmdGradeFile, cmdGradeWaive } from "./cmd-grade.mjs";
@@ -39,7 +40,7 @@ const USAGE = `usage: swarm.mjs <command>
   status --mine              this session's finished runs still holding kept worktrees, each with its prune command
   wait <resultsDir> [--timeout <secs>]  block until the run settles, then print the final roster (exit 0 clean · 1 leaf not ok · 2 engine died · 3 timed out)
   stop <resultsDir>          cooperative stop: signal a live engine and wait, or record a dead one — never kills a process
-  prune <resultsDir> [--dry-run]   destroy a finished run's kept worktrees + branches; refuses a live run
+  prune <resultsDir> [--dry-run] [--discard-unlanded]   destroy kept worktrees + branches; refuses live, unlanded, or dirty trees
   report <resultsDir>        render the run's digest.md/report.md → digest.html/report.html (self-contained, theme-aware; backfill for old runs)
   ask <resultsDir> <taskId> "<question>" [--model <m>]   resume a finished leaf's session with a follow-up
   quota | usage              provider utilization per limit window (exit 1 when Anthropic is exhausted)
@@ -433,55 +434,6 @@ async function cmdStop(rest) {
   return 1;
 }
 
-async function cmdPrune(rest) {
-  // The dir is the first non-flag arg, so `prune --dry-run <dir>` and
-  // `prune <dir> --dry-run` mean the same thing.
-  const target = rest.find((a) => !a.startsWith("--"));
-  if (!target) { err(USAGE); return 1; }
-  const dir = resolve(target);
-  const dryRun = rest.includes("--dry-run");
-  const fs = await import("node:fs");
-  // runLiveness reads "no run.log, no summary, no heartbeat" as a live run with
-  // nothing written yet — for prune that is a typo'd path, not something to refuse.
-  if (!fs.existsSync(join(dir, "run.log"))) { err(`swarm: no run at ${dir} (no run.log)`); return 1; }
-  const cfg = getConfig();
-  const heartbeatMs = Math.max(50, (cfg.heartbeatSecs ?? 15) * 1000);
-  const live = runLiveness(dir, { heartbeatMs });
-  if (live.finishedMs == null && live.stoppedMs == null && live.abortedMs == null) {
-    err(`swarm: ${dir} live — swarm stop it first`);
-    return 1;
-  }
-
-  const { spawnSync } = await import("node:child_process");
-  // A killed run wrote no summary.json; prune must tolerate that and never invent one.
-  const summaryFile = join(dir, "summary.json");
-  const hadSummary = fs.existsSync(summaryFile);
-  const summary = hadSummary ? JSON.parse(fs.readFileSync(summaryFile, "utf8")) : null;
-  const worktreesKept = Array.isArray(summary?.worktreesKept) ? summary.worktreesKept : [];
-  // Resolve each tree's own repo: one scalar attributed a second repo's tree to the
-  // first and `git worktree remove` then silently failed against the wrong cwd.
-  const keptWithRepo = worktreesKept.map((wt) => ({ ...wt, repo: wt.repo || repoOfWorktree(spawnSync, wt.path) }));
-  const repos = [...new Set([...keptWithRepo.map((wt) => wt.repo), ...reposFromManifest(fs, dir), ...reposOfTrees(fs, dir, spawnSync)].filter(Boolean))];
-  if (!repos.length) {
-    err(`swarm: could not resolve the repo for ${dir} — no kept worktree survives and manifest.json has no cwd.`);
-    return 1;
-  }
-  const git = makeGit(spawnSync);
-
-  const { rows } = planPrune({ live: false, repos, resultsDir: dir, worktreesKept: keptWithRepo }, git, fs);
-  if (!rows.length) {
-    out(`swarm: ${dir} has no kept worktrees — nothing to prune.`);
-    return 0;
-  }
-  out(formatPrune(rows, { dryRun }));
-  if (!dryRun) {
-    executePrune(rows, git, fs);
-    // survivors: whatever wasn't just removed and wasn't already gone before we started
-    if (hadSummary) writeSummary(dir, { ...summary, worktreesKept: worktreesKept.filter((wt) => fs.existsSync(wt.path)) });
-  }
-  return 0;
-}
-
 function getFlag(name, args) {
   const i = args.indexOf(`--${name}`);
   return i < 0 ? undefined : args[i + 1];
@@ -673,7 +625,7 @@ async function main() {
         return await cmdStop(rest);
       }
       case "prune": {
-        return await cmdPrune(rest);
+        return await cmdPrune(rest, { usage: USAGE });
       }
       case "serve":
         return await cmdServe(rest, { readProviderUsage });
