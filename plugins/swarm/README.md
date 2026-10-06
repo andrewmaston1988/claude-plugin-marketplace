@@ -366,12 +366,15 @@ HEAD, on the run-scoped branch `swarm/<run>/<id>`; read-only ⇒ the live repo a
 To start a tree from another task's commits, put an `integrate` node before it: the node creates
 the target tree and merges the named branches in. There is no key for it.
 
-`worktreesKept` in `summary.json` carries one entry per shared group. A branch with
-commits not yet landed (by patch, so squash-merges count) is never deleted or force-reset —
-the engine refuses rather than lose it. `swarm prune <resultsDir>` destroys one run's kept
-worktrees and branches, never its results — refuses a live run and any tree with unlanded
-commits or uncommitted changes, prints every tree first, and supports `--dry-run` for a no-op
-preview. `--discard-unlanded` explicitly destroys blocked work. `swarm status --mine` lists this session's finished runs still
+`worktreesKept` in `summary.json` carries one entry per shared group. When the engine reuses or
+resets one of its own worktrees, a branch with commits not yet landed (by patch, so squash-merges
+count) is never force-reset — it refuses rather than lose the work. `swarm prune <resultsDir>` is
+not that path: it removes each kept tree and its branch together with `git branch -D`, so push or
+merge before pruning. It never destroys results. There is no detach option; push a branch to
+preserve its remote copy. It refuses a live run, and any tree with unlanded commits or uncommitted
+changes, printing every tree first, `--dry-run` for a no-op preview; `--discard-unlanded`
+explicitly destroys that blocked work, whether or not the branch landed. `swarm status --mine`
+lists this session's finished runs still
 holding worktrees. The dispatching session takes what it needs from each finished run only after its work has landed (merged) or been taken (pushed or merged into your branch), then
 prunes it with `swarm prune`; it does not ask the operator. A refusal names each blocked row
 and why: unlanded commits on its branch or detached HEAD, uncommitted changes, or a measurement
@@ -399,9 +402,13 @@ anywhere. Running rows show the leaf's latest tool call; a leaf silent past `qui
 (default 60) shows `⚠ quiet Ns` instead. Failed tasks block their dependents; independent
 branches continue; re-`run` resumes (`ok` work skipped, `rate-limited` retries). A Claude
 runner that exhausts StructuredOutput retries records the leaf as `failed`, with no in-run
-retry and no `fallbackModel` switch. A live engine (heartbeat younger than `heartbeatSecs * 3`)
-makes `run` — even `--force` — refuse rather than double-drive the same leaf; `swarm stop
-<resultsDir>` ends it first.
+retry and no `fallbackModel` switch. A results dir is owned by one engine: `run` and `ask`
+claim it (`engine.lock`) before starting, so a second engine — even `--force` — is refused
+rather than double-driving the same leaf. The claim goes when the engine exits, `stop`
+included; an engine that crashes leaves its claim behind and the next `run` clears it (owner
+pid dead *and* heartbeat stale) with no manual step. `swarm stop <resultsDir>` ends a live
+engine first. A claim whose recorded pid reads alive but is not a swarm engine — a recycled
+pid — is never cleared automatically; delete `<resultsDir>/engine.lock` with no engine running.
 
 `status <resultsDir>` renders the same roster read-only (`--watch` for live repaint). Past
 that same staleness window it relabels every `running`/`retrying` row `interrupted` and
@@ -429,7 +436,9 @@ Transient failures recover in-run; temporal ones fail fast with the recovery nam
 
 - **Rate limits** retry with exponential backoff (`retry.rateLimited`, default 2 attempts,
   `retry.backoffMs` 30s) — the slot frees during the wait. Spawn errors get one quick
-  retry. Timeouts never auto-retry (rescope and resume instead).
+  retry. Timeouts never auto-retry (rescope and resume instead). A leaf settles within 2 s of its
+  process exiting, and within a few seconds of its timeout firing, even if a process it started still holds its output
+  open.
 - **`fallbackModel`** (per task) is the only substitution the engine ever makes — validated
   against `allowedRoots` like any dispatch target. Quota switches to it immediately; rate
   limits switch after retries exhaust. Logged (`↯ fallback → glm-5.2:cloud`).

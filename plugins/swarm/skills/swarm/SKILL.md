@@ -147,7 +147,7 @@ This carves out the *resume*, nothing else. A manifest edited before re-running 
    Then `swarm grade --file <resultsDir>/grades.json`. It resolves each leaf's model and mechanical columns from disk, validates, and appends to `~/.swarm/model-scores.jsonl`. `swarm perf [--aspect X] [--domain D]` reads it back. Routing is currently decided by remembered incidents; this is how it stops being. The per-turn nudge hook re-asks every turn, not once per session, until each run is graded — not worth grading one? `swarm grade --waive <resultsDir> --reason "<why>"` excuses it for good, no store row added.
 7. A failed run is reported with its failures — never presented as complete. **Route by failure kind, per the resume carve-out above** — the offer is conditional, not unconditional. A **plain timeout** skips the offer: re-run it and report what it did, do not ask whether to do it. An **error failure**, or a **second timeout that committed nothing new**, gets the choice via AskUserQuestion: **Resume (Recommended)** (re-`run` skips `ok`; `rate-limited` retries) / **Inspect failures** (open the failed `results/<id>.json|.log`) / **Accept partial** — failure list as the preview. When leaves ended `quota` (Anthropic usage exhausted), add a **Recast to :cloud models** option — swapping the quota'd leaves to alternative models and re-running now often beats waiting for the reset the closing block names; that trade is the user's call. Ending a run outright — never a process kill — is `swarm stop <resultsDir>`: the operator's call, signal-and-wait on a live engine, or a dead-engine record when the heartbeat has gone stale; either way, `run` on that dir resumes per the routing above.
 8. **For a human-facing report, RENDER it — never hand-author one.** Every finished run already has its pages: `digest.html` from `digest.md`, and `report.html` from `report.md` when step 5b wrote one, rendered self-contained and theme-aware with zero model calls. The render is mechanical: standard markdown plus the semantic upgrades the report prompt documents — verdict badges, `path:line` citation spans, the two-track ledger, a confidence tally synthesised by counting the badges. `swarm report <resultsDir>` is the manual re-render — for a run that predates the pages, or one whose closing block said `pages: NOT RENDERED`; it prints the paths and never re-spends. Offer those paths; do not build an Artifact by hand from `summary.json`.
-9. **`prune <resultsDir>`** destroys a run's kept worktrees and their branches, never its results — run `--dry-run` first. `swarm status --mine` lists this session's finished runs still holding worktrees. Take what you need from each finished run only after its work has landed (merged) or been taken (pushed or merged into your branch), then prune it with `swarm prune`; do not ask the operator. If prune refuses, it names the row and why — unlanded commits on its branch or detached HEAD, uncommitted changes, or a measurement git could not make: land, take or commit that work before retrying.
+9. **`prune <resultsDir>`** destroys a run's kept worktrees and their branches together, never its results — there is no detach option; run `--dry-run` first. `swarm status --mine` lists this session's finished runs still holding worktrees. Take what you need from each finished run only after its work has landed (merged) or been taken (pushed or merged into your branch), then prune it with `swarm prune`; do not ask the operator. If prune refuses, it names the row and why — unlanded commits on its branch or detached HEAD, uncommitted changes, or a measurement git could not make: land, take or commit that work before retrying.
    Never reach for `--discard-unlanded` on your own; it destroys unlanded commits and uncommitted changes and requires the operator's decision. The per-turn nudge hook names each finished run once, in one line counting this session's worktrees and other sessions'.
 
 
@@ -219,7 +219,7 @@ The red flags above are about a *healthy* run. The other failure class (2026-07-
     "prompt": "…",
     "provider": "ollama", "model": "glm-5.2:cloud",                  // required; the full model id (claude-opus-5, never "opus")
     "effort": "medium",                        // optional; defaults to the model's declared default or medium; validated when the provider declares levels
-    "allowedTools": "Read,Grep,Glob",          // default: Claude/Ollama get Read,Grep,Glob,Skill plus machine MCP; Codex gets Read,Grep,Glob.
+    "allowedTools": "Read,Grep,Glob",          // allow-list only; see manifest-fields.md for limits. Default: Claude/Ollama get Read,Grep,Glob,Skill plus machine MCP; Codex gets Read,Grep,Glob.
                                                // Explicit lists replace the default (name MCP servers literally, e.g. mcp__scout); returns always adds StructuredOutput.
     "cwd": "C:/code/somerepo",                 // default: the top-level cwd; relative resolves against it
     "workspace": "feat",                       // optional, writers only: the name of a tree SHARED with
@@ -228,7 +228,7 @@ The red flags above are about a *healthy* run. The other failure class (2026-07-
     "branch": "swarm/eco-p3",                  // optional, writers only: a stable branch instead of the
                                                //   derived run-scoped one — which opts out of run scoping
     "fallbackProvider": "ollama", "fallbackModel": "glm-5.2:cloud",          // optional; auto-switch on quota / exhausted rate-limit retries (governance-validated)
-    "outputDir": "…",                          // generation leaves
+    "outputDir": "…",                          // generation leaves; name the resolved absolute path in the prompt because this resolves against dispatch cwd, while the leaf writes from its own cwd
     "timeoutMs": 3600000,
     "settings": {"env": {"CLAUDE_CODE_DISABLE_1M_CONTEXT": "0"}},   // optional; per-leaf override of disable1mContext (beats the config default and the user settings.json env block)
     "leafGuard": false,                        // optional; the only accepted value — opts this task out of its matching projects[].hooks.preToolUse entry (~/.swarm/config.json)
@@ -266,24 +266,28 @@ a second manifest is almost never needed. Invoke it before drafting, alongside
 |---|---|
 | Investigation | Read-only tools (the default), closed question, ≤10-bullet return contract |
 | Review | Prompt demands a JSON verdict; engine stores raw + parsed |
-| Generation | `outputDir`; nothing to declare |
-| Implementation | write tools — results are branches to review; unchanged worktrees are removed, changed ones kept and listed in the summary. Its prompt carries the two required lines below |
+| Generation | `outputDir`; nothing to declare — name the resolved absolute path in the prompt, since it resolves against the dispatch cwd while the leaf writes inside its own worktree |
+| Implementation | write tools — results are branches to review; unchanged worktrees are removed, changed ones kept and listed in the summary. Its prompt carries the three required lines below |
 
 **The write tools decide where a leaf runs, and nothing else does.** A leaf holding `Edit`, `Write` or `Bash` gets a private worktree on HEAD, on a run-scoped branch `swarm/<run>/<id>`; a read-only leaf reads the live repo at the `cwd` it was given. Only a writer needs its `cwd` inside a git repo — a reader reads logs or a data dump outside any repo just as well.
 
 Name a `workspace` only when leaves must SHARE one tree, and a `branch` only when the branch name must be stable. Both are writer-only, both are omitted by the common case, and `swarm validate` names either if it is wrong.
 
-### Two lines every Bash-running leaf's prompt carries, verbatim
+### Three lines every Bash-running leaf's prompt carries, verbatim
 
-A leaf that runs a suite, a build, or anything else measured in minutes gets both, in addition to its task:
+A leaf running long Bash work — a suite, a build, anything else measured in minutes — gets lines 1 and 2; any prompt that asks for an offline test gets line 3 as well. All of them in addition to the leaf's task:
 
 > Never call Bash with `run_in_background`, and never end your turn waiting for a background task. You are a headless session: there is no next turn, the notification never arrives, and your work is lost. For a command that takes minutes, pass `timeout: 600000` on the Bash call and wait for it.
 
 > Write files and commit as you go rather than holding everything to one long final turn.
 
+> For an offline smoke test, inject fakes at call time, not as definition-time defaults, and run the test with network access unavailable.
+
 **Why the first line, when a hook exists.** `hooks/foreground-guard.mjs` denies an explicit `run_in_background` inside a leaf, but it cannot see the other route: a *foreground* call that exceeds its timeout is auto-backgrounded by the harness, with no `run_in_background` field for any hook to deny. The prompt is the only thing that closes that path — which is why the line names the 600000 ms ceiling rather than just forbidding backgrounding.
 
 **Why the second.** Six leaves died this way on 2026-09-01 and four more on 2026-09-06, each reporting `ok` with a dirty tree and nothing committed. Commit-as-you-go is what made the second batch recoverable rather than lost.
+
+**Why the third line.** A fake bound as a definition-time default argument is built before any call site can replace it, so the real dependency still reaches the network — the leaf contract cannot see the default, and the "offline" run passes for the wrong reason. Injecting at call time is what makes the offline property real.
 
 ## Verification loop — multi-run composition
 

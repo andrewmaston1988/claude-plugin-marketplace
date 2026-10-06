@@ -26,6 +26,7 @@ import { createLivePaint } from "./scheduler/live-paint.mjs";
 import { createHeartbeatTick } from "./scheduler/heartbeat-tick.mjs";
 import { createDeterministicSteps } from "./scheduler/deterministic-steps.mjs";
 import { createLaunch } from "./scheduler/launch.mjs";
+import { releaseEngine } from "./engine-lock.mjs";
 import { holdNote } from "./usage.mjs";
 
 export function launcherSession(env = process.env) {
@@ -193,6 +194,7 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), {
   } catch (e) {
     process.off("SIGINT", ctx.sigintHandler);
     process.off("SIGTERM", ctx.sigtermHandler);
+    releaseEngine(plan.resultsDir, process.pid);
     throw e;
   }
 
@@ -345,6 +347,9 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), {
     for (const timer of ctx.retryTimers) clearTimeout(timer);
     process.off("SIGINT", ctx.sigintHandler);
     process.off("SIGTERM", ctx.sigtermHandler);
+    // The run is over on every one of those exits, stop included — the claim goes
+    // with it. A crash never reaches here; the next engine clears that lock itself.
+    releaseEngine(plan.resultsDir, process.pid);
   }
 
   // Ask mode changes exactly one row of a run the engine already finished: the

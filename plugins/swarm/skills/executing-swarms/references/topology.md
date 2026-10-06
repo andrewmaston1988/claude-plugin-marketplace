@@ -18,8 +18,8 @@ task's commits is preceded by an agentless `integrate` node, which creates the t
 merges the named branch into it:
 
 ```json
-{ "id": "seed-impl", "after": ["extract"], "integrate": { "into": "impl", "from": ["extract"] } },
-{ "id": "impl", "after": ["seed-impl", "review"], "workspace": "impl",
+{ "id": "seed-implementation", "after": ["extract"], "integrate": { "into": "implementation", "from": ["extract"] } },
+{ "id": "implementation", "after": ["seed-implementation", "review"], "workspace": "implementation",
   "allowedTools": "Read,Grep,Glob,Edit,Write,Bash",
   "prompt": "The reviewer reported: {{result:review}} …" }
 ```
