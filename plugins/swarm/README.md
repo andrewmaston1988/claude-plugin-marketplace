@@ -393,9 +393,12 @@ dashboard read `run.log`, which carries no bill, so they show it as `≈$… api
 when a rate-card estimate, never a subscription charge. With no `display.money` no `$` appears anywhere. Running rows
 show the leaf's latest tool call; a leaf silent past `quietWarnSecs` (default 60) shows
 `⚠ quiet Ns` instead. Failed tasks block their dependents; independent branches continue;
-re-`run` resumes (`ok` work skipped, `rate-limited` retries). A live engine (heartbeat
-younger than `heartbeatSecs * 3`) makes `run` — even `--force` — refuse rather than
-double-drive the same leaf; `swarm stop <resultsDir>` ends it first.
+re-`run` resumes (`ok` work skipped, `rate-limited` retries). A results dir is owned by one
+engine: `run` and `ask` claim it (`engine.lock`) before starting, so a second engine — even
+`--force` — is refused rather than double-driving the same leaf. The claim goes when the engine
+exits, `stop` included; an engine that crashes leaves its claim behind and the next `run` clears
+it (owner pid dead *and* heartbeat stale) with no manual step. `swarm stop <resultsDir>` ends a
+live engine first.
 
 `status <resultsDir>` renders the same roster read-only (`--watch` for live repaint). Past
 that same staleness window it relabels every `running`/`retrying` row `interrupted` and

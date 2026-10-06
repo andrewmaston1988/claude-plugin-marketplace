@@ -85,3 +85,50 @@ test("ownership: a finished run leaves no claim behind — the next run starts",
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+// `ask` drives the same resultsDir a run does, so it takes the same claim. The
+// lock must be on disk for as long as the engine is, which is why this test waits
+// for the file rather than assuming the order the two processes reach it in.
+test("ask: refused while an engine holds the claim, and its own claim is released on exit", async () => {
+  const dir = tmp();
+  try {
+    const home = join(dir, "home");
+    const manifest = join(dir, "plan.json");
+    writeFileSync(manifest, JSON.stringify({
+      resultsDir: "out",
+      tasks: [{ id: "t1", prompt: "x", provider: "claude", model: "claude-haiku-4-5-20251001" }],
+    }));
+    const env = { SWARM_HOME: home, SWARM_SHIM_STREAM: "1", SWARM_SHIM_OUTPUT: "because X" };
+    const v = runCli(["validate", manifest], { cwd: dir, env });
+    equal(v.status, 0, v.stderr);
+    // An ask resumes a finished leaf, so one real run has to land first.
+    const r0 = runCli(["run", manifest], { cwd: dir, env });
+    equal(r0.status, 0, r0.stdout + r0.stderr);
+    const out = join(dir, "out");
+    equal(existsSync(join(out, "engine.lock")), false, "a finished engine must release its claim");
+
+    // A second engine held open by a slow leaf: its claim is on disk for the whole run.
+    const slow = runCliAsync(["run", manifest, "--force"], { cwd: dir, env: { ...env, SWARM_SHIM_SLEEP_MS: "8000" } });
+    const deadline = Date.now() + 60_000;
+    while (!existsSync(join(out, "engine.lock")) && Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, 25));
+    }
+    ok(existsSync(join(out, "engine.lock")), "a running engine must hold its claim");
+    const owner = Number(readFileSync(join(out, "engine.lock"), "utf8").trim().split(" ")[1]);
+
+    const refused = runCli(["ask", out, "t1", "why?"], { cwd: dir, env });
+    equal(refused.status, 1, refused.stdout + refused.stderr);
+    ok(/already has a live engine/.test(refused.stderr), refused.stderr);
+    ok(refused.stderr.includes(`pid ${owner}`), `refusal must name the owner pid ${owner}: ${refused.stderr}`);
+
+    const r1 = await slow;
+    equal(r1.status, 0, r1.stdout + r1.stderr);
+    equal(existsSync(join(out, "engine.lock")), false, "a finished engine releases its claim");
+
+    const asked = runCli(["ask", out, "t1", "why?"], { cwd: dir, env });
+    equal(asked.status, 0, asked.stdout + asked.stderr);
+    equal(existsSync(join(out, "engine.lock")), false, "an ask releases its own claim on exit");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
