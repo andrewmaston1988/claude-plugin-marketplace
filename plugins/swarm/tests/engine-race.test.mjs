@@ -11,7 +11,7 @@ import { tmp } from "./helpers/cli-fixture.mjs";
 // `swarm run` of the same manifest started inside that window sees no heartbeat,
 // passes the same check, and two engines drive one resultsDir.
 //
-// The corpus the estimate walks sits INSIDE that window (`scripts/swarm.mjs`
+// The corpus the estimate walks sits INSIDE that window (`src/cmd-run.mjs`
 // loadCorpus, after the liveness check), so a fat corpus holds the window open
 // long enough for a second process to land in it. 4000 runs measured 5/5.
 function fatCorpus(home, n) {
