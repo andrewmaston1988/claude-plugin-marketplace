@@ -266,10 +266,10 @@ test("run: 3-task fan-out + digest end-to-end via the claude shim", () => {
     ok(summary.started && summary.finished);
     deepEqual(summary.tasks.map((t) => t.state), ["ok", "ok", "ok", "ok"]);
     deepEqual(summary.blocked, []);
-    // run.log is JSONL: run-start + 2 lines per task — no snapshot event, since
-    // isolation trees are no longer snapshotted into the run's results dir.
+    // run.log is JSONL: run-start + a bases event + 2 lines per task — no snapshot
+    // event, since isolation trees are no longer snapshotted into the run's results dir.
     const logLines = readFileSync(join(resultsDir, "run.log"), "utf8").trim().split("\n");
-    equal(logLines.length, 9);
+    equal(logLines.length, 10);
     // progressive per-leaf logs
     for (const id of ["scan-a", "scan-b", "scan-c", "__digest"]) {
       equal(readFileSync(join(resultsDir, "results", `${id}.log`), "utf8"), "leaf-output-text");

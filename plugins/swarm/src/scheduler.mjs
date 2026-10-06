@@ -116,10 +116,6 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), {
   // A resume reuses the file an earlier engine wrote; --force recaptures.
   ctx.bases = captureBases(tasks, { resultsDir: plan.resultsDir, cwd: plan.cwd }, io, { force });
   ctx.baseFor = (repo) => baseFor(ctx.bases, repo);
-  appendRunLog(plan.resultsDir, {
-    ts: new Date().toISOString(), event: "bases",
-    bases: Object.fromEntries(ctx.bases),
-  });
   // A prior `swarm stop` leaves its marker and no other engine is live here (cmdRun
   // refuses one): clear it before any await, so a stop landing during startup still counts.
   rmSync(stopPath(plan.resultsDir), { force: true });
@@ -227,6 +223,12 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), {
     ...(launcherSession() ? { launcher: launcherSession() } : {}),
     ...(ask && { ask: ask.taskId }),
     tasks: tasks.map((t) => ({ id: t.id, model: t.model, ...ctx.durableIdentity(t) })),
+  });
+  // The bases event follows run-start, never precedes it: readers key on the FIRST
+  // run-start line to derive pending tasks, and its index is part of the contract.
+  appendRunLog(plan.resultsDir, {
+    ts: ctx.started, event: "bases",
+    bases: Object.fromEntries(ctx.bases),
   });
   ctx.runStartMs = io.now();
 
