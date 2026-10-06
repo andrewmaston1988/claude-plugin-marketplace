@@ -12,6 +12,8 @@ import { enginePath } from "./config.mjs";
 //   manifest.json       effective plan at dispatch (P1 — runs record their own intent):
 //                       { goal?, ref?, args?, argsFingerprint?, resultsDir, tasks, digest? }
 //                       (forEach/child expansion is runtime — reconstruct from run.log + per-leaf prompt)
+//   bases.json          { [repoTop]: sha } — the commit every tree of this run is cut from, pinned at
+//                       dispatch and reused by a resume; --force recaptures it (run-bases.mjs)
 //   results/<id>.json   { id, provider?, runner?, model, ok, exit, durationMs, tokens?, costUsd?, numTurns?, prompt?, output, outputJson?, rawOutput?, schemaRetried?, schemaErrors?, citations?, citationRefuted?, coverage?, worktree?, asks?, checkoutToplevel?, key? }
 //                       (rawOutput = the leaf's own output on a schema failure — `output` then holds
 //                        the validator's text; a re-run re-asks from it instead of redoing the work)
@@ -30,6 +32,7 @@ import { enginePath } from "./config.mjs";
 //                       (costUsd only for real-key-billed leaves — these rows ARE the estimate corpus)
 //   run.log             JSONL, tailable mid-run:
 //                         { ts, event: "run-start", tasks: [{ id, provider?, runner?, model }], ask? }   ask = the interrogated task id
+//                         { ts, event: "bases", bases: { [repoTop]: sha } }   the pinned dispatch commits
 //                         { ts, id, state, durationMs?, tokens?, note? }   state changes; a cache-miss { ts, id, event: "cache-miss", priorKey, reason } says resume re-ran a task whose definition changed
 //                         { ts, id, event: "tokens", tokens }       live usage ticks
 //                         { ts, id, event: "session", provider?, runner?, sessionId }   the leaf's session, as soon as its stream names it — resume reads it

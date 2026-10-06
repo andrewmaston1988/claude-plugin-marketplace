@@ -56,6 +56,10 @@ test("a branch checked out in another worktree fails with a guided error naming 
     ok(/checked out in another worktree/.test(error.message), error.message);
     // git reports the holder with forward slashes; the tree path is win32-native.
     ok(error.message.includes(first.path.replaceAll("\\", "/")), `the error must name the tree holding it: ${error.message}`);
+    // `swarm prune` takes the RUN dir; handing it the tree inside fails with
+    // "no run at … (no run.log)".
+    equal(error.message.match(/swarm prune ([^)]+)\)/)?.[1], a.replaceAll("\\", "/"),
+      `the printed prune target must be the run dir, not the worktree: ${error.message}`);
   } finally {
     dropWorktree(repo, join(a, "wt-x"));
     cleanup(a, b, repo);

@@ -1,7 +1,7 @@
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { copyFileSync, existsSync, mkdirSync, rmSync } from "node:fs";
-import { isAbsolute, join, relative, resolve } from "node:path";
+import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 
 export const WORKTREE_ADD_TIMEOUT_MS = 180000;
 
@@ -68,11 +68,8 @@ function isRegisteredWorktree(path, repo) {
 // partial diff survives and the leaf resumes in place, rather than 0s-failing on
 // a re-create. `reset` (the --force redo) scrubs it back to the base first.
 //
-// `base` is REQUIRED: the run's pinned dispatch commit for this repo, from
-// run-bases.mjs. Reading the live HEAD here instead is the defect this parameter
-// exists to remove — a leaf that waited on `after` was cut from whatever the
-// live checkout had moved to by the time it launched. It is required, not
-// defaulted, so no caller can silently keep the old behaviour.
+// `base` is REQUIRED — the run's pinned dispatch commit for this repo (run-bases.mjs),
+// never a live HEAD read; defaulting it is how a caller silently keeps the old behaviour.
 export function prepareIsolation(task, cfg, resultsDir, { reset = false, addTimeoutMs, base } = {}) {
   if (!(Number.isFinite(addTimeoutMs) && addTimeoutMs > 0)) throw new Error("prepareIsolation requires a positive addTimeoutMs");
   if (typeof base !== "string" || !base.trim()) {
@@ -129,9 +126,12 @@ export function prepareIsolation(task, cfg, resultsDir, { reset = false, addTime
     // here, and the raw "already used by worktree" reads as corruption.
     if (/already (used by|checked out at) worktree/i.test(add.stderr)) {
       const holder = add.stderr.match(/worktree at '([^']+)'/)?.[1];
+      // The holder is the TREE; `swarm prune` takes the RUN dir that holds it, and
+      // the tree path fails with "no run at … (no run.log)".
+      const runDir = holder ? dirname(holder) : null;
       throw new Error(
         `branch '${branch}' is checked out in another worktree${holder ? ` (${holder})` : ""} — ` +
-        `finish or prune that run (swarm prune ${holder || "…"}), or name a different branch/workspace`);
+        `finish or prune that run (swarm prune ${runDir || "…"}), or name a different branch/workspace`);
     }
     if (add.timedOut) {
       throw new Error(`git worktree add timed out after ${addTimeoutMs / 1000}s for '${task.id}' — a slow repo hook (post-checkout / reference-transaction) is the usual cause: ${add.stderr}`);

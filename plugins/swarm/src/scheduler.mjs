@@ -115,7 +115,7 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), {
   // standing on commits that landed in the checkout while the run was in flight.
   // A resume reuses the file an earlier engine wrote; --force recaptures.
   ctx.bases = captureBases(tasks, { resultsDir: plan.resultsDir, cwd: plan.cwd }, io, { force });
-  ctx.baseFor = (repo) => baseFor(ctx.bases, repo);
+  ctx.baseFor = (repo) => baseFor(ctx.bases, repo, plan.resultsDir);
   // A prior `swarm stop` leaves its marker and no other engine is live here (cmdRun
   // refuses one): clear it before any await, so a stop landing during startup still counts.
   rmSync(stopPath(plan.resultsDir), { force: true });
