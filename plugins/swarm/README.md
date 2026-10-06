@@ -397,9 +397,13 @@ anywhere. Running rows show the leaf's latest tool call; a leaf silent past `qui
 (default 60) shows `⚠ quiet Ns` instead. Failed tasks block their dependents; independent
 branches continue; re-`run` resumes (`ok` work skipped, `rate-limited` retries). A Claude
 runner that exhausts StructuredOutput retries records the leaf as `failed`, with no in-run
-retry and no `fallbackModel` switch. A live engine (heartbeat younger than `heartbeatSecs * 3`)
-makes `run` — even `--force` — refuse rather than double-drive the same leaf; `swarm stop
-<resultsDir>` ends it first.
+retry and no `fallbackModel` switch. A results dir is owned by one engine: `run` and `ask`
+claim it (`engine.lock`) before starting, so a second engine — even `--force` — is refused
+rather than double-driving the same leaf. The claim goes when the engine exits, `stop`
+included; an engine that crashes leaves its claim behind and the next `run` clears it (owner
+pid dead *and* heartbeat stale) with no manual step. `swarm stop <resultsDir>` ends a live
+engine first. A claim whose recorded pid reads alive but is not a swarm engine — a recycled
+pid — is never cleared automatically; delete `<resultsDir>/engine.lock` with no engine running.
 
 `status <resultsDir>` renders the same roster read-only (`--watch` for live repaint). Past
 that same staleness window it relabels every `running`/`retrying` row `interrupted` and

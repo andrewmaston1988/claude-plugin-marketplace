@@ -12,16 +12,16 @@ import { collapseRoster, visibleModels, probeTopModels } from "../src/discovery.
 import { enabledProviderIds, providerConfig } from "../src/providers.mjs";
 import { costBands, costSettings } from "../src/cost-settings.mjs";
 import { defaultProviderRegistry } from "../src/default-providers.mjs";
-import { runPlan, makeDefaultIo } from "../src/scheduler.mjs";
 import { loadCorpus, estimateRun, formatEstimate, leafCounts, integrateCaps } from "../src/estimate.mjs";
 import { citationPaths } from "../src/citations.mjs";
-import { formatClosing, formatKeptWorktrees, readResult, listLeaves, stopPath, appendRunLog, writeSummary, resultPath, writeDigestMd, readHeartbeat } from "../src/results.mjs";
+import { formatKeptWorktrees, listLeaves, stopPath, appendRunLog, writeSummary, resultPath } from "../src/results.mjs";
 import { identityOf, identityKey } from "../src/contracts.mjs";
 import { runLiveness, readRun, ALIVE_STATES } from "../src/runlog.mjs";
 import { plan as planPrune, execute as executePrune, formatPrune, registeredUnder, repoOfWorktree, reposOfTrees, makeGit, reposFromManifest } from "../src/prune.mjs";
 import { addTokens, emptyTokens } from "../src/stream.mjs";
 import { dim, out, err } from "../src/ui.mjs";
-import { markValidated, unvalidatedRefusal } from "../src/validated.mjs";
+import { markValidated } from "../src/validated.mjs";
+import { cmdRun, refuseLiveEngine } from "../src/cmd-run.mjs";
 import { cmdServe } from "./cmd-serve.mjs";
 import { cmdStatus } from "./cmd-status.mjs";
 import { cmdReport } from "./cmd-report.mjs";
@@ -362,130 +362,6 @@ async function cmdValidate(rest) {
   return markValidated(plan, args);
 }
 
-// A second engine on the same resultsDir resumes each leaf's recorded session
-// alongside the first — two processes driving one Claude session. Only a real
-// heartbeat file makes a dir "live"; a brand-new or never-run dir has none, and
-// runLiveness alone can't tell that apart from a genuinely alive engine.
-function refuseLiveEngine(dir, cfg, verb) {
-  const hb = readHeartbeat(dir);
-  if (!hb) return false;
-  const heartbeatMs = Math.max(50, (cfg.heartbeatSecs ?? 15) * 1000);
-  const live = runLiveness(dir, { heartbeatMs });
-  if (live.finishedMs == null && live.stoppedMs == null && live.abortedMs == null) {
-    err(`swarm: ${dir} already has a live engine (pid ${hb.pid}) — swarm status ${dir} to watch it, swarm stop ${dir} to end it before ${verb}.`);
-    return true;
-  }
-  return false;
-}
-
-async function cmdRun(rest) {
-  const cfg = getConfig();
-  const force = rest.includes("--force");
-  const args = parseArgsFlag(rest);
-  const ref = resolveManifestRef(rest[0]);
-  const fromRegistry = ref.source !== "path";
-  const plan = loadManifest(ref.path, cfg, process.cwd(), { args, fromRegistry, headroom: await usageHeadroom(cfg), cache: modelRoster({ config: cfg, env: process.env, registry: defaultProviderRegistry() }).models, ...(fromRegistry && { ref: rest[0] }) });
-  // Shared by the end-of-run status and the scheduler's single-shot cost warn.
-  const { createNotifier } = await import("../src/notify.mjs");
-  const notify = createNotifier({ notifyCmd: cfg.notifyCmd });
-  if (refuseLiveEngine(plan.resultsDir, cfg, "re-running")) return 1;
-  // Engine-side, so it holds on hosts the hook gates never reach; after
-  // refuseLiveEngine, which owns its own message.
-  const refusal = unvalidatedRefusal(plan, args, rest[0]);
-  if (refusal) {
-    err(refusal);
-    return 1;
-  }
-
-  plan.estimate = estimateRun(plan.tasks, plan.digest, loadCorpus(join(swarmHome(), "runs")));
-
-  // Ground truth, up front: a session that has to reconstruct the run directory
-  // gets it wrong (the default is <stem>-1, and --force reuses it rather than
-  // minting <stem>-2). Print the path and the exact watch command so the string
-  // handed to the operator is copied, never remembered.
-  out(`resultsDir: ${plan.resultsDir}`);
-  out(`watch:      node ${fileURLToPath(import.meta.url)} status ${plan.resultsDir} --watch`);
-
-  const io = makeDefaultIo();
-  io.notify = (status) => { notify(status); };
-  const r = await runPlan(plan, cfg, io, { force });
-
-  // A cache replay IS a success: the results are valid and the resume workflow
-  // depends on it, so the exit code stays 0 and the caching is untouched. What must
-  // change is the WORDING — "finished clean" plus a bare digest path let a session
-  // skim the tail and report a no-op as a completed fresh round. The digest it
-  // points at predates this invocation; say so.
-  const live = r.summary.tasks.filter((t) => t.id !== "__digest");
-  const replayed = live.length > 0 && live.every((t) => t.state === "skipped");
-  if (replayed) {
-    out(`NOTHING RE-EXECUTED — all ${live.length} task(s) replayed from cache in ${plan.resultsDir}.`);
-    out("The digest below is from the PREVIOUS run, not this invocation — nothing about it is new.");
-    out("To re-execute this manifest: --force (same resultsDir; results are overwritten).");
-  }
-
-  // Grading is opt-in (grading.enabled): off, nothing asks and the store is never
-  // read; `grade`/`perf` still work when called. On, the closing block and the
-  // digest footer share one rule — the run still has no store rows.
-  let gradeable;
-  if (cfg.grading?.enabled === true) {
-    const { runGradeable } = await import("../src/grade-nudge.mjs");
-    const { readRows, scoresPath, gradedRunKeys } = await import("../src/scores.mjs");
-    gradeable = runGradeable(plan.resultsDir, { cfg, graded: gradedRunKeys(readRows(scoresPath())) });
-  }
-  // Rewritten from the digest leaf's stored output, never the file on disk, so a
-  // replay carries one footer, never two; a graded replay drops it.
-  if (r.digestPath) {
-    const body = readResult(plan.resultsDir, "__digest")?.output;
-    if (body) writeDigestMd(plan.resultsDir, body, gradeable);
-  }
-
-  out(formatClosing({
-    digestPath: r.digestPath,
-    reportPath: r.reportPath,
-    reportMissing: r.reportMissing,
-    pagesError: r.pagesError,
-    digestFailed: r.digestFailed,
-    summaryPath: r.summaryPath,
-    totalTokens: r.summary.totalTokens,
-    worktreesKept: r.worktreesKept,
-    truncations: r.summary.truncations,
-    refutations: r.summary.refutations,
-    coverageGaps: r.summary.coverageGaps,
-    estimate: plan.estimate,
-    resultsDir: plan.resultsDir,
-    engine: fileURLToPath(import.meta.url),
-    gradeable,
-    memoryParks: r.memoryParks,
-    costText: costOfFor(cfg)(r.summary.tasks),
-  }));
-
-  const bad = r.summary.tasks.filter((t) => !["ok", "skipped"].includes(t.state) && t.id !== "__digest");
-  await notify(
-    bad.length ? `swarm run finished with ${bad.length} failed/blocked`
-      : replayed ? "swarm run finished — cache replay, nothing re-executed"
-        : "swarm run finished clean",
-    { digest: r.digestPath || "", ...(r.reportPath && { report: r.reportPath }), summary: r.summaryPath || "" },
-  );
-  if (bad.length) {
-    out(`FAILED tasks: ${bad.map((t) => `${t.id} [${t.state}]`).join(", ")}`);
-    const quotaBad = bad.filter((t) => t.state === "quota");
-    if (quotaBad.length) {
-      const resets = quotaBad.map((t) => readResult(plan.resultsDir, t.id)?.quotaResetsAt).find(Boolean);
-      // quotaResetsAt is either a real ISO instant (parseQuotaReset's epoch path) or a
-      // human-text fragment like "3pm" — format the former, pass the latter through.
-      const { formatResetTime } = await import("../src/usage.mjs");
-      const shown = resets ? (formatResetTime(resets) ?? resets) : null;
-      out(`quota: ${quotaBad.length} leaf(s) blocked by Anthropic usage limits${shown ? ` — re-run after ${shown}` : ""}`);
-    }
-    out("resume: re-run the same command — ok results are skipped, failed/blocked work re-executes.");
-    return 1;
-  }
-  // A digest failure alone never blocks result availability — the run is done;
-  // the session falls back to summary.json + selective raw reads.
-  if (r.summary.stopped) return 1;
-  return 0;
-}
-
 // Dead engine: no live process to signal, so nothing is killed. The run-stop
 // event + summary are the only record — read straight from disk (readRun),
 // mirroring the shape runPlan itself writes so every reader treats the two
@@ -791,7 +667,7 @@ async function main() {
       }
       case "run": {
         if (!rest[0]) { err(USAGE); return 1; }
-        return await cmdRun(rest);
+        return await cmdRun(rest, { parseArgsFlag, resolveManifestRef, usageHeadroom });
       }
       case "stop": {
         if (!rest[0]) { err(USAGE); return 1; }
@@ -870,6 +746,9 @@ async function main() {
         const [resultsDir, taskId, question] = positional;
         if (!resultsDir || !taskId || !question) { err(USAGE); return 1; }
         const cfg = getConfig();
+        // The heartbeat read, kept alongside the claim `askLeaf` takes: an engine started
+        // before the lock existed — a plugin update mid-run — holds no lock, and only its
+        // heartbeat says it is there. Refused here, so no run dir is touched on the way.
         if (refuseLiveEngine(resultsDir, cfg, "asking")) return 1;
         const { askLeaf } = await import("../src/ask.mjs");
         const { formatTokens } = await import("../src/results.mjs");
