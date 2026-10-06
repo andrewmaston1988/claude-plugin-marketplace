@@ -369,7 +369,7 @@ the target tree and merges the named branches in. There is no key for it.
 `worktreesKept` in `summary.json` carries one entry per shared group. A branch with
 commits not yet landed (by patch, so squash-merges count) is never deleted or force-reset —
 the engine refuses rather than lose it. `swarm prune <resultsDir>` destroys one run's kept
-worktrees and branches, never its results. There is no detach option; push a branch to preserve its remote copy, but pushed-but-unmerged commits still count as unlanded against local HEAD. It refuses a live run, prints every tree first,
+worktrees and branches, never its results. There is no detach option; push a branch to preserve its remote copy. It refuses a live run, prints every tree first,
 `--dry-run` for a no-op preview. `swarm status --mine` lists this session's finished runs still
 holding worktrees. The dispatching session takes what it needs from each finished run only after its work has landed (merged) or been taken (pushed or merged into your branch), then
 prunes it with `swarm prune`; it does not ask the operator. The per-turn nudge hook
