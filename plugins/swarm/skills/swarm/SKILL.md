@@ -265,8 +265,8 @@ a second manifest is almost never needed. Invoke it before drafting, alongside
 |---|---|
 | Investigation | Read-only tools (the default), closed question, ≤10-bullet return contract |
 | Review | Prompt demands a JSON verdict; engine stores raw + parsed |
-| Generation | `outputDir`; nothing to declare |
-| Implementation | write tools — results are branches to review; unchanged worktrees are removed, changed ones kept and listed in the summary. Its prompt carries the two required lines below |
+| Generation | `outputDir`; nothing to declare — name the resolved absolute path in the prompt, since it resolves against the dispatch cwd while the leaf writes inside its own worktree |
+| Implementation | write tools — results are branches to review; unchanged worktrees are removed, changed ones kept and listed in the summary. Its prompt carries the three required lines below |
 
 **The write tools decide where a leaf runs, and nothing else does.** A leaf holding `Edit`, `Write` or `Bash` gets a private worktree on HEAD, on a run-scoped branch `swarm/<run>/<id>`; a read-only leaf reads the live repo at the `cwd` it was given. Only a writer needs its `cwd` inside a git repo — a reader reads logs or a data dump outside any repo just as well.
 
@@ -274,7 +274,7 @@ Name a `workspace` only when leaves must SHARE one tree, and a `branch` only whe
 
 ### Three lines every Bash-running leaf's prompt carries, verbatim
 
-A leaf that runs a suite, a build, or anything else measured in minutes gets all three, in addition to its task:
+A leaf running long Bash work — a suite, a build, anything else measured in minutes — gets lines 1 and 2; any prompt that asks for an offline test gets line 3 as well. All of them in addition to the leaf's task:
 
 > Never call Bash with `run_in_background`, and never end your turn waiting for a background task. You are a headless session: there is no next turn, the notification never arrives, and your work is lost. For a command that takes minutes, pass `timeout: 600000` on the Bash call and wait for it.
 
@@ -285,6 +285,8 @@ A leaf that runs a suite, a build, or anything else measured in minutes gets all
 **Why the first line, when a hook exists.** `hooks/foreground-guard.mjs` denies an explicit `run_in_background` inside a leaf, but it cannot see the other route: a *foreground* call that exceeds its timeout is auto-backgrounded by the harness, with no `run_in_background` field for any hook to deny. The prompt is the only thing that closes that path — which is why the line names the 600000 ms ceiling rather than just forbidding backgrounding.
 
 **Why the second.** Six leaves died this way on 2026-09-01 and four more on 2026-09-06, each reporting `ok` with a dirty tree and nothing committed. Commit-as-you-go is what made the second batch recoverable rather than lost.
+
+**Why the third line.** A fake bound as a definition-time default argument is built before any call site can replace it, so the real dependency still reaches the network — the leaf contract cannot see the default, and the "offline" run passes for the wrong reason. Injecting at call time is what makes the offline property real.
 
 ## Verification loop — multi-run composition
 

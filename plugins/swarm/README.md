@@ -366,10 +366,12 @@ HEAD, on the run-scoped branch `swarm/<run>/<id>`; read-only ⇒ the live repo a
 To start a tree from another task's commits, put an `integrate` node before it: the node creates
 the target tree and merges the named branches in. There is no key for it.
 
-`worktreesKept` in `summary.json` carries one entry per shared group. A branch with
-commits not yet landed (by patch, so squash-merges count) is never deleted or force-reset —
-the engine refuses rather than lose it. `swarm prune <resultsDir>` destroys one run's kept
-worktrees and branches, never its results. There is no detach option; push a branch to preserve its remote copy. It refuses a live run, prints every tree first,
+`worktreesKept` in `summary.json` carries one entry per shared group. When the engine reuses or
+resets one of its own worktrees, a branch with commits not yet landed (by patch, so squash-merges
+count) is never force-reset — it refuses rather than lose the work. `swarm prune <resultsDir>` is
+not that path: it removes each kept tree and its branch with `git branch -D`, whether or not the
+branch landed, so push or merge before pruning. It never destroys results. There is no detach
+option; push a branch to preserve its remote copy. It refuses a live run, prints every tree first,
 `--dry-run` for a no-op preview. `swarm status --mine` lists this session's finished runs still
 holding worktrees. The dispatching session takes what it needs from each finished run only after its work has landed (merged) or been taken (pushed or merged into your branch), then
 prunes it with `swarm prune`; it does not ask the operator. The per-turn nudge hook

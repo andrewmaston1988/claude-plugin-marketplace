@@ -9,7 +9,7 @@ these fields; the decision of *whether* to use them lives in SKILL.md.
 declares this — `allowedTools` already says which a leaf is, and a second field saying the
 same thing is a second field to disagree with.
 
-Defaults vary by runner: Claude and Ollama get `Read,Grep,Glob,Skill` plus the dispatching machine MCP servers; Codex gets `Read,Grep,Glob`. An explicit `allowedTools` list replaces that default. It is only a CLI allow-list: under `bypassPermissions`, unlisted tools can still run, and listed `Bash` can reach any file; `--disallowedTools` filters tool names, not paths. Only a matching `projects[].hooks.preToolUse` guard denies access mechanically.
+Defaults vary by runner: Claude and Ollama get `Read,Grep,Glob,Skill` plus the dispatching machine MCP servers; Codex gets `Read,Grep,Glob`. An explicit `allowedTools` list replaces that default. It is only an allow-list: under `bypassPermissions`, unlisted tools can still run. A deny rule is the other half, and it is path-aware — `Tool(specifier)` form, so `Edit(//secrets/**)` holds in every permission mode — but no path rule can see `Bash`, which reaches any file through a shell command. Swarm passes no deny rules itself, so only a matching `projects[].hooks.preToolUse` guard denies the `Bash` route mechanically.
 
 | The leaf holds | It runs in | Its branch |
 |---|---|---|
