@@ -86,6 +86,43 @@ test("ownership: a finished run leaves no claim behind — the next run starts",
   }
 });
 
+// A crash is the one exit that never reaches `releaseEngine`, so the claim it leaves
+// is the only one the operator has to get past. The lock alone must not refuse: its
+// owner is dead, which is what `engineAlive` is asked. This is the end-to-end half of
+// the unit row — it proves `cmdRun` reaches the claim and proceeds, not just that the
+// claim function would have said yes.
+test("resume: a crashed engine's claim is cleared by the next run, with no manual step", async () => {
+  const dir = tmp();
+  try {
+    const home = join(dir, "home");
+    const manifest = join(dir, "plan.json");
+    writeFileSync(manifest, JSON.stringify({
+      resultsDir: "out",
+      tasks: [{ id: "t1", prompt: "x", provider: "claude", model: "claude-haiku-4-5-20251001" }],
+    }));
+    const env = { SWARM_HOME: home, SWARM_SHIM_STREAM: "1", SWARM_SHIM_OUTPUT: "x" };
+    const v = runCli(["validate", manifest], { cwd: dir, env });
+    equal(v.status, 0, v.stderr);
+    const r1 = runCli(["run", manifest], { cwd: dir, env });
+    equal(r1.status, 0, r1.stdout + r1.stderr);
+
+    const out = join(dir, "out");
+    // Exactly what a crash leaves: the claim on disk, its owner gone, and no heartbeat
+    // ticking. Written by hand because killing a process mid-run would race the cleanup
+    // the crash is meant to skip.
+    writeFileSync(join(out, "engine.lock"), `${new Date().toISOString()} 999999\n`);
+    rmSync(join(out, "heartbeat"), { force: true });
+
+    const r2 = runCli(["run", manifest], { cwd: dir, env });
+    equal(r2.status, 0, `a dead owner's claim must not refuse the resume: ${r2.stdout}${r2.stderr}`);
+    ok(!/already has a live engine/.test(r2.stderr), r2.stderr);
+    equal(existsSync(join(out, "engine.lock")), false, "the takeover must release on exit too");
+    equal(runStarts(out).length, 2);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 // `ask` drives the same resultsDir a run does, so it takes the same claim. The
 // lock must be on disk for as long as the engine is, which is why this test waits
 // for the file rather than assuming the order the two processes reach it in.
