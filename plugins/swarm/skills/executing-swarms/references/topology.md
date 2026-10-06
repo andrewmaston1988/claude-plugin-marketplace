@@ -11,11 +11,13 @@ its `after` names only `write-helper`. Referencing it anyway fails validation; a
 `after` too (`["write-helper", "survey-auth"]`). The extra edge changes no ordering, it declares what the
 prompt reads.
 
-## A tree is ALWAYS based on repo HEAD — `integrate` is what seeds it
+## A tree is ALWAYS based on the run's dispatch commit — `integrate` is what seeds it
 
-There is no key for basing one tree on another's branch. A leaf that must start from another
-task's commits is preceded by an agentless `integrate` node, which creates the target tree and
-merges the named branch into it:
+There is no key for basing one tree on another's branch, and no tree is cut from the repo's
+HEAD as it stands when the leaf launches: the run pins one commit per repo when it starts and
+every tree in it starts there. A leaf that must start from another task's commits is preceded
+by an agentless `integrate` node, which creates the target tree and merges the named branch
+into it:
 
 ```json
 { "id": "seed-impl", "after": ["extract"], "integrate": { "into": "impl", "from": ["extract"] } },

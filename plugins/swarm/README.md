@@ -283,9 +283,10 @@ worst-case leaf count.
 
 ## Widening after a narrow step — `workspace` and `integrate`
 
-Private trees branch from repo HEAD and never see each other's commits, so a fan-out that
-follows a shared step needs a way to start from that step's work and a way to fold results
-back:
+Private trees are cut from the commit the run pinned at dispatch — one `git rev-parse HEAD`
+per repo, before anything launches, so a leaf that had to wait on `after` still starts where
+the run started — and they never see each other's commits. So a fan-out that follows a shared
+step needs a way to start from that step's work and a way to fold results back:
 
 ```json
 { "tasks": [
@@ -348,15 +349,17 @@ source array, or a failed clone, behave exactly as they do for a hand-listed `fr
   digest.html                # the run's own readable pages, rendered by the engine as the
   report.html                # run finishes (report.html in report mode); phone-friendly
   summary.json               # { started, finished, tasks: [...], blocked: [], worktreesKept: [], totalTokens }
+  bases.json                 # { "<repo checkout>": "<commit>" } — the dispatch commit every tree
+                              # in this run was cut from; reused on resume, recaptured by --force
   run.log                    # JSONL — state changes, live token ticks, run-start roster — tailable mid-run
                               # also carries a `session` event ({ id, sessionId }) the moment each
                               # leaf's stream names it, before the leaf settles — a crashed engine
                               # still has every session id on disk for resume to fall back to
 ```
 
-**A leaf's tree follows from its tools.** `Edit`/`Write`/`Bash` ⇒ a private worktree on repo
-HEAD, on the run-scoped branch `swarm/<run>/<id>`; read-only ⇒ the live repo at the leaf's own
-`cwd`. Two optional keys refine it, both writer-only:
+**A leaf's tree follows from its tools.** `Edit`/`Write`/`Bash` ⇒ a private worktree cut from
+the run's pinned dispatch commit, on the run-scoped branch `swarm/<run>/<id>`; read-only ⇒ the
+live repo at the leaf's own `cwd`. Two optional keys refine it, both writer-only:
 
 | Key | Effect |
 |---|---|
@@ -364,7 +367,9 @@ HEAD, on the run-scoped branch `swarm/<run>/<id>`; read-only ⇒ the live repo a
 | `branch` | A stable branch name instead of the derived one — which opts out of run scoping, so a second run of the manifest meets the first's kept tree. |
 
 To start a tree from another task's commits, put an `integrate` node before it: the node creates
-the target tree and merges the named branches in. There is no key for it.
+the target tree and merges the named branches in. There is no key for it. The node owns that
+tree's branch, so its `swarm/<run>/<into>` is run-scoped like a writer's — two runs of one
+manifest seeding the same `into` no longer collide.
 
 `worktreesKept` in `summary.json` carries one entry per shared group. A branch with
 commits not yet landed (by patch, so squash-merges count) is never deleted or force-reset —
