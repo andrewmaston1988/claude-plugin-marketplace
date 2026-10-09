@@ -98,6 +98,12 @@ export async function enforceLeafContract(task, r, taskCwd, resultsDir, cfg, io,
     ts: new Date().toISOString(), event: "coverage", id: task.id,
     status: cov.status, required: cov.required, read: cov.read, missed: cov.missed, retried,
   });
+  // The coverage stamp a result carries, logged once per assessment.
+  const stampCoverage = (out, a, retried) => {
+    if (!a.cov) return out;
+    logCoverage(a.cov, retried);
+    return { ...out, coverage: coverageStamp(a.cov) };
+  };
   // A schema-clean result: annotate every citation in place, re-serialize the
   // annotated output, and attach loud stats. Then stamp coverage. Refutations and
   // coverage shortfalls never fail the leaf — both are recorded, and the caller
@@ -119,11 +125,7 @@ export async function enforceLeafContract(task, r, taskCwd, resultsDir, cfg, io,
     }
     // The stripped, annotated value is what validated, so it is what gets stored.
     if (task.returns && a.parsed !== undefined) out = { ...out, output: JSON.stringify(a.parsed) };
-    if (a.cov) {
-      logCoverage(a.cov, retried);
-      out = { ...out, coverage: coverageStamp(a.cov) };
-    }
-    return out;
+    return stampCoverage(out, a, retried);
   };
   const failSchema = (res, errs, suffix = "") => ({
     ...res, ok: false, output: failText(errs) + suffix, schemaErrors: errs,
@@ -149,6 +151,13 @@ export async function enforceLeafContract(task, r, taskCwd, resultsDir, cfg, io,
   // path that never resolved is the engine's gap, so a leaf that read none of it
   // is short, not idle.
   const idle = (cov) => Boolean(cov) && cov.status === "incomplete" && cov.gaps.length > 0 && cov.creditedLines === 0;
+  // A schema miss that is ALSO an idling leaf fails on both counts: the schema text
+  // stays (that is why the leaf failed), and the coverage stamp rides along so the
+  // run-level gap entry — and the closing block's red line — still get produced.
+  const failSchemaIdle = (res, errs, suffix, a, retried) => {
+    const out = failSchema(res, errs, suffix);
+    return idle(a.cov) ? { ...stampCoverage(out, a, retried), coverageFailed: true } : out;
+  };
 
   let cur = r;
   let a = assess(cur.output);
@@ -171,7 +180,7 @@ export async function enforceLeafContract(task, r, taskCwd, resultsDir, cfg, io,
       if (schemaErrs) return failSchema(cur, schemaErrs, "\n(no session id — re-ask unavailable)");
       return finish(cur, a, turns > 0);
     }
-    if (schemaErrs && schemaAttempt >= CONTRACT_SCHEMA_REASKS) return failSchema(cur, schemaErrs);
+    if (schemaErrs && schemaAttempt >= CONTRACT_SCHEMA_REASKS) return failSchemaIdle(cur, schemaErrs, "", a, turns > 0);
     // Progress is measured in uncovered LINES, not whole items read: a leaf paging
     // 2,000 of 8,000 lines has read 0 items, and would read as stonewalling.
     const covAllowed = covMiss && covAttempt < CONTRACT_COVERAGE_REASKS
@@ -224,7 +233,7 @@ export async function enforceLeafContract(task, r, taskCwd, resultsDir, cfg, io,
     // and its first-pass annotations — a failed correction must not destroy findings
     // the first pass made.
     if (!next.ok) {
-      if (schemaErrs) return failSchema(combined, [`re-ask failed (exit ${next.exit}): ${next.output.slice(0, 200)}`]);
+      if (schemaErrs) return failSchemaIdle(combined, [`re-ask failed (exit ${next.exit}): ${next.output.slice(0, 200)}`], "", a, true);
       // The correction never ran, so the FIRST pass is the verdict — and if that pass
       // read nothing, a re-ask that failed cannot launder it into a completed leaf.
       return idling ? failCoverage(combined, a, true) : finish(combined, a, true);

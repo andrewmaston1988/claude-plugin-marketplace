@@ -357,6 +357,45 @@ test("coverage: a mustRead that does not resolve is a recorded shortfall, not a 
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
+// A schema miss and a zero-engagement leaf are independent verdicts, and BOTH
+// must reach the result: the schema text is why the leaf failed, the coverage
+// stamp is what the run-level gap list (and the closing block's red line) reads.
+test("coverage: a leaf that read nothing fails with coverageFailed even when the schema re-asks are exhausted", async () => {
+  const dir = tmp();
+  try {
+    const F = writeLines(dir, "big.mjs", 2500);
+    // Never reads, never validates: four dispatches (initial + three schema re-asks).
+    const spawn = fakeSpawnFactory((call, i) => ({ output: leafOut([], { sid: `s-${i + 1}`, result: "{}" }) }));
+    const io = makeIo(spawn);
+    const p = plan(dir, [task("a", dir, { mustRead: [F], returns: ANSWER_SCHEMA })]);
+    await runPlan(p, CFG, io);
+    const res = readResult(p.resultsDir, "a");
+    equal(res.ok, false);
+    equal(res.coverageFailed, true);
+    equal(res.coverage.status, "incomplete");
+    equal(res.coverage.required, 1);
+    ok(res.schemaErrors?.length, "the schema error text must survive the coverage verdict");
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("coverage: a leaf that read nothing fails with coverageFailed when the schema re-ask process itself fails", async () => {
+  const dir = tmp();
+  try {
+    const F = writeLines(dir, "big.mjs", 2500);
+    const spawn = fakeSpawnFactory((call, i) => (i === 0
+      ? { output: leafOut([], { sid: "s-1", result: "{}" }) }
+      : { exit: 1, output: "" }));
+    const io = makeIo(spawn);
+    const p = plan(dir, [task("a", dir, { mustRead: [F], returns: ANSWER_SCHEMA })]);
+    await runPlan(p, CFG, io);
+    const res = readResult(p.resultsDir, "a");
+    equal(res.ok, false);
+    equal(res.coverageFailed, true);
+    equal(res.coverage.required, 1);
+    ok(res.schemaErrors?.[0]?.includes("re-ask failed"), JSON.stringify(res.schemaErrors));
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
 // The two PIN rows of the test plan live where they already were: a partial read
 // stays ok (coverage.test.mjs "still incomplete after the re-ask"), and an
 // unparseable transcript stays ok ("unparseable transcript on an ok leaf").
