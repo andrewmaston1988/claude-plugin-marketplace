@@ -8,7 +8,10 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
-import { parseReadCalls, computeCoverage, coverageErrorLines, coverageRetryBlock, codexWindowedRead } from "../src/coverage.mjs";
+import {
+  parseReadCalls, computeCoverage, coverageErrorLines, coverageRetryBlock, codexWindowedRead,
+  codexCoverable, codexReadPlan, splitReadPlan, uncoveredLines,
+} from "../src/coverage.mjs";
 import { ValidationError } from "../src/manifest.mjs";
 import { loadManifest } from "./helpers/repo-io.mjs";
 import { runPlan } from "../src/scheduler.mjs";
@@ -457,5 +460,143 @@ test("integration: a codex leaf that missed its mustRead is re-asked for a shell
     ok(prompt.includes(codexWindowedRead(WANTED, 1, 3)), prompt);
     ok(!prompt.includes("Read tool"), prompt);
     ok(!prompt.includes("Read offset"), prompt);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+// ── 12. the launch-time read plan ─────────────────────────────────────────────
+// What a codex leaf is handed BEFORE it starts: every required range paged under the
+// model-visible cap, split into files one command can show whole. The retry teaching
+// (coverageErrorLines) is the same per-range mapper, capped; this one is not.
+
+test("coverage.mjs: the codex read plan round-trips through the parser — every planned command is credited", () => {
+  const dir = tmp();
+  try {
+    const N = 60_003;                                 // "x\n" × N ≈ 3× the 40,000-byte cap
+    const F = writeLines(dir, "big.mjs", N);
+    const plan = codexReadPlan([{ path: F, ranges: [[1, N]], whole: true }]);
+    ok(plan.length >= 3, `${plan.length} plan lines for a file 3× the cap`);
+    const events = plan.map((line) => {
+      const [a, b] = line.match(/lines (\d+)-(\d+):/).slice(1).map(Number);
+      const cmd = line.slice(line.indexOf(": ") + 2);  // the codexWindowedRead payload
+      ok(/^[@s]/.test(cmd), cmd);
+      return event(pwshRun(cmd), { output: "x\n".repeat(b - a + 1) });
+    });
+    const cov = computeCoverage([F], readsOf(transcript(...events), dir), { cwd: dir, runner: "codex" });
+    equal(cov.status, "complete");
+    equal(cov.read, 1);
+    equal(cov.creditedLines, N, "every line of the file is credited, not just the pages' ends");
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("coverage.mjs: the codex read plan is uncapped where the retry teaching is not", () => {
+  const dir = tmp();
+  try {
+    const F = writeLines(dir, "f.mjs", 60);
+    const ranges = Array.from({ length: 30 }, (_, i) => [i + 1, i + 1]);
+    const plan = codexReadPlan([{ path: F, ranges, whole: false }], { platform: "linux" });
+    equal(plan.length, 30, "one line per required range, however many there are");
+    ok(!plan.some((l) => l.includes("…and")), "the plan carries no truncation marker");
+    ok(plan.at(-1).includes(codexWindowedRead(F, 30, 30, "linux")), plan.at(-1));
+    // the capped sibling over the same 30 ranges: the cap belongs to the retry alone
+    const retry = coverageErrorLines([{ path: F, ranges }], { runner: "codex", platform: "linux" });
+    equal(retry.length, 11);                           // 10 lines + "…and 20 more"
+    ok(retry.at(-1).includes("…and 20 more"), retry.at(-1));
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("coverage.mjs: splitReadPlan sizes parts by what a codex command EMITS, and keeps every line in order", () => {
+  const lines = Array.from({ length: 100 }, (_, i) => `${"y".repeat(996)}${String(i).padStart(3, "0")}`);
+  const parts = splitReadPlan(lines);
+  ok(parts.length >= 3, `${parts.length} parts for ~2.5× the cap`);
+  for (const part of parts) {
+    // PowerShell re-emits each line with CRLF, so the part file's own byte count is not
+    // what the model sees: this is the size that must fit, and +1 per line would not.
+    const emitted = part.reduce((n, l) => n + Buffer.byteLength(l, "utf8") + 2, 0);
+    ok(emitted <= 40_000, `a part emits ${emitted} bytes`);
+  }
+  deepEqual(parts.flat(), lines);
+  deepEqual(splitReadPlan([]), []);
+});
+
+test("coverage.mjs: a codex line past the model-visible cap is uncoverable, never missed — claude keeps it required", () => {
+  const dir = tmp();
+  try {
+    const F = join(dir, "huge.mjs");
+    writeFileSync(F, `a\nb\n${"x".repeat(50_000)}\nd\ne\nf\ng\nh\ni\nj\n`);
+    deepEqual(codexCoverable([{ path: F, ranges: [[1, 10]], whole: false }], { platform: "linux" }), {
+      required: [{ path: F, ranges: [[1, 2], [4, 10]], whole: false }],
+      uncoverable: [{ path: F, ranges: [[3, 3]] }],
+    });
+    const entries = [{ path: F, lines: [[1, 10]] }];
+    const reads = [{ file: F, offset: 1, limit: 2 }, { file: F, offset: 4, limit: 7 }];
+    const cov = computeCoverage(entries, reads, { cwd: dir, runner: "codex" });
+    equal(cov.status, "complete");
+    equal(cov.read, 1, "the item counts read once its other 9 lines are credited");
+    deepEqual(cov.missed, [], "the over-cap line is not a thing the leaf failed to do");
+    deepEqual(cov.uncoverable, [{ path: F, ranges: [[3, 3]] }]);
+    // claude has no such cap, so the same fixture keeps line 3 required and missed
+    const claude = computeCoverage(entries, reads, { cwd: dir });
+    equal(claude.status, "incomplete");
+    deepEqual(claude.uncoverable, []);
+    deepEqual(claude.missed, [`${F}:3-3`]);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("coverage.mjs: an item with no coverable line is dropped from required — never a free read", () => {
+  const dir = tmp();
+  try {
+    const F = join(dir, "huge.mjs");
+    writeFileSync(F, `${"x".repeat(50_000)}\n`);
+    const cov = computeCoverage([{ path: F, lines: [[1, 1]] }], [], { cwd: dir, runner: "codex" });
+    equal(cov.required, 0, "the item is dropped from the requirement");
+    equal(cov.read, 0, "and is never counted read");
+    equal(cov.creditedLines, 0);
+    deepEqual(cov.uncoverable, [{ path: F, ranges: [[1, 1]] }]);
+    deepEqual(cov.missed, []);
+    // nothing the LEAF failed to do, so the loop must not chase it forever
+    equal(cov.status, "complete");
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("coverage.mjs: missedItems counts ITEMS where missed counts ranges — a resolve miss is an item too", () => {
+  const dir = tmp();
+  try {
+    const A = writeLines(dir, "a.mjs", 70);
+    const B = writeLines(dir, "b.mjs", 10);
+    const reads = [{ file: A, offset: 1, limit: 10 }, { file: B, offset: 1, limit: 10 }];
+    const entries = [{ path: A, lines: [[1, 10], [20, 30], [40, 50], [60, 70]] }, { path: B, lines: [[1, 10]] }];
+    const cov = computeCoverage(entries, reads, { cwd: dir });
+    equal(cov.missed.length, 3, cov.missed.join());    // three uncovered RANGES ...
+    equal(cov.missedItems, 1);                         // ... all inside one item
+    const gone = () => { const e = new Error("no"); e.code = "ENOENT"; throw e; };
+    const withMiss = computeCoverage([...entries, "C:/gone.md"], reads, { cwd: dir, readFile: gone });
+    ok(withMiss.missed.some((m) => /unreadable: ENOENT/.test(m)), withMiss.missed.join());
+    equal(withMiss.missedItems, 2, "the three ranges stay one item; the unreadable entry is the second");
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("coverage.mjs: creditedLines separates 'engaged partially' from 'never engaged'", () => {
+  const dir = tmp();
+  try {
+    const F = writeLines(dir, "big.mjs", 2500);
+    const entries = [{ path: F, lines: [[1, 2500]] }];
+    const partial = computeCoverage(entries, [{ file: F, offset: 1, limit: 2000 }], { cwd: dir });
+    equal(partial.read, 0, "an item counts read only when it closes");
+    equal(partial.creditedLines, 2000);
+    equal(computeCoverage(entries, [], { cwd: dir }).creditedLines, 0);
+    equal(computeCoverage(entries, [{ file: F, unverifiable: true }], { cwd: dir }).creditedLines, 0,
+      "an unverifiable read has no window, so it credits nothing");
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("coverage.mjs: uncoveredLines is the re-ask loop's progress metric, over the gaps the stamp carries", () => {
+  equal(uncoveredLines([]), 0);
+  equal(uncoveredLines([{ path: "C:/a.mjs", ranges: [[1, 10], [21, 30]] }]), 20);
+  equal(uncoveredLines([{ path: "a.mjs", ranges: [[1, 1]] }, { path: "b.mjs", ranges: [[5, 9]] }]), 6);
+  const dir = tmp();
+  try {
+    const F = writeLines(dir, "big.mjs", 2500);
+    const cov = computeCoverage([{ path: F, lines: [[1, 2500]] }], [{ file: F, offset: 1, limit: 2000 }], { cwd: dir });
+    equal(uncoveredLines(cov.gaps), 500);
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });

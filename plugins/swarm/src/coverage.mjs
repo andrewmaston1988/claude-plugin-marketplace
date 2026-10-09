@@ -7,6 +7,11 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { parseJsonObjectLine } from "./jsonl.mjs";
+import { CODEX_MODEL_OUTPUT_BYTES, codexCoverable, codexRangeLines } from "./coverage-codex.mjs";
+
+// The page arithmetic a codex leaf's requirement is built on lives in coverage-codex.mjs;
+// re-exported so a caller has one import for coverage, whichever runner it checks.
+export { codexCoverable, codexReadPlan, splitReadPlan, codexWindowedRead } from "./coverage-codex.mjs";
 
 export const READ_DEFAULT_LINES = 2000; // the Read tool's own default page
 // The runners whose transcript this module parses. The one list: manifest validation
@@ -65,11 +70,6 @@ export function parseReadCalls(text, runner, { cwd } = {}) {
 // `exit_code` and `aggregated_output`. The same [{file, offset, limit}] windows
 // come out (plus `unverifiable` entries for an over-cap multi-statement read), so checkCoverage and everything downstream stay shared.
 
-// Codex middle-truncates a command's output before the MODEL sees it, so
-// `aggregated_output` (the event field) is not what the model read: inside this
-// budget it arrived whole, past it only as the first and last halves.
-// rust-v0.156.1: codex-rs/models-manager/models.json sets truncation_policy tokens limit 10000; codex-rs/utils/string/src/truncate.rs uses APPROX_BYTES_PER_TOKEN = 4.
-const CODEX_MODEL_OUTPUT_BYTES = 40_000;
 const CODEX_SHELLS = new Set(["cmd", "powershell", "pwsh", "bash", "sh"]);
 
 function parseCodexReadCalls(text, cwd) {
@@ -243,15 +243,6 @@ function codexReadSpec(pipeline) {
   return path ? { path, a: 1, b: Infinity } : null;
 }
 
-// The ONE windowed read. On win32 the codex sandbox kills every MSYS2 program, so it is
-// PowerShell's; `@( )` stops a one-line file indexing characters instead of lines, and
-// single quotes keep `$` and backticks in a path literal.
-export function codexWindowedRead(path, a, b, platform = process.platform) {
-  return platform === "win32"
-    ? `@(Get-Content -LiteralPath '${path.replace(/'/g, "''")}')[${a - 1}..${b - 1}]`
-    : `sed -n '${a},${b}p' "${path}"`;
-}
-
 // The same shape, recognised. Matched off the whole pipeline rather than its tokens:
 // the path is quoted and may hold spaces. codex re-serialises the command with `\"`,
 // so that is normalised first.
@@ -371,16 +362,21 @@ export function resolveMustRead(entries, { cwd, substitute = (s) => s, readFile 
   return { required, missed, errors };
 }
 
-// { status, required (count), read, missed (strings), gaps ([{path, ranges}]) }.
+// { status, required (count), read, missed (strings), gaps ([{path, ranges}]),
+//   missedItems (count), creditedLines (count) }.
 // Per required path the Read windows for that path are merged into an interval
 // union (adjacent windows join: a window ending at n and one starting at n+1),
 // then each required range must sit inside one merged interval.
+// `read` counts ITEMS that closed completely; `missed` has one line per uncovered
+// RANGE and `missedItems` one per item, so the two do not have to agree. `creditedLines`
+// is the required lines the credited windows cover — the only number that tells a leaf
+// which paged half its inputs from one that never opened them.
 const UNVERIFIABLE_NOTE = ` (unverifiable: output past the ${CODEX_MODEL_OUTPUT_BYTES}-byte codex cap — read one file per command)`;
 
 export function checkCoverage(required, reads) {
   const missed = [];
   const gaps = [];
-  let read = 0;
+  let read = 0, missedItems = 0, creditedLines = 0;
   for (const item of required) {
     const mine = (reads || []).filter((r) => samePath(r.file, item.path));
     // An unverifiable entry has no window: mapped, it is [undefined, NaN], and
@@ -389,7 +385,13 @@ export function checkCoverage(required, reads) {
     const note = mine.some((r) => r.unverifiable) ? UNVERIFIABLE_NOTE : "";
     const merged = mergeIntervals(windows);
     const uncovered = [];
-    for (const [a, b] of item.ranges) uncovered.push(...subtract([a, b], merged));
+    for (const [a, b] of item.ranges) {
+      const hole = subtract([a, b], merged);
+      uncovered.push(...hole);
+      // The lines this range was credited for are what is left once its holes are out;
+      // an unverifiable read has no window, so it credits nothing here either.
+      creditedLines += b - a + 1 - hole.reduce((n, [s, e]) => n + e - s + 1, 0);
+    }
     if (uncovered.length === 0) { read++; continue; }
     // Bare "<path>" ONLY when nothing of the file was read (whole-file entry);
     // otherwise per uncovered range, so the gap is legible and paging-checkable.
@@ -399,20 +401,41 @@ export function checkCoverage(required, reads) {
       for (const [a, b] of uncovered) missed.push(`${item.path}:${a}-${b}${note}`);
     }
     gaps.push({ path: item.path, ranges: uncovered });
+    missedItems++;
   }
-  return { status: missed.length ? "incomplete" : "complete", required: required.length, read, missed, gaps };
+  return {
+    status: missed.length ? "incomplete" : "complete",
+    required: required.length, read, missed, gaps, missedItems, creditedLines,
+  };
+}
+
+// The coverage re-ask loop's progress metric: how many required lines are still uncovered.
+// `read` only moves when an item closes completely, so it cannot tell a leaf that paged
+// 2,000 of 2,500 lines from one that never opened the file.
+export function uncoveredLines(gaps) {
+  let n = 0;
+  for (const { ranges } of gaps || []) for (const [a, b] of ranges || []) n += b - a + 1;
+  return n;
 }
 
 // resolve + check + merge into the final coverage stamp the result carries.
 // reads === null (unsupported runner / unparseable) → every entry missed.
+// A codex leaf is checked against the COVERABLE requirement: an over-cap line is not
+// something it failed to read, and one nothing can show is not a requirement at all.
 export function computeCoverage(entries, reads, opts) {
-  const { required, missed: resolveMissed, errors } = resolveMustRead(entries, opts);
+  const resolved = resolveMustRead(entries, opts);
+  const { required, uncoverable } = opts?.runner === "codex"
+    ? codexCoverable(resolved.required, { platform: opts.platform })
+    : { required: resolved.required, uncoverable: [] };
+  const resolveMissed = resolved.missed;
+  const errors = resolved.errors;
   const total = required.length + resolveMissed.length;
   if (reads === null) {
     const rendered = required.map((r) => r.path).concat(resolveMissed);
     return {
       status: "unparseable", required: total, read: 0, missed: rendered,
       gaps: required.map((r) => ({ path: r.path, ranges: r.ranges })), errors,
+      missedItems: total, creditedLines: 0, uncoverable,
     };
   }
   const cov = checkCoverage(required, reads);
@@ -420,35 +443,8 @@ export function computeCoverage(entries, reads, opts) {
   return {
     status: missed.length ? "incomplete" : "complete",
     required: total, read: cov.read, missed, gaps: cov.gaps, errors,
+    missedItems: cov.missedItems + resolveMissed.length, creditedLines: cov.creditedLines, uncoverable,
   };
-}
-
-// A range must fit the model-visible output budget. On win32 the read is PowerShell's,
-// which emits CRLF, so a range sized in SOURCE bytes can arrive PAST the cap and be
-// truncated to head+tail (page.html 1-416 = 40,000 source bytes, 40,416 emitted) — the
-// budget there counts the extra byte per line the emitted text will carry.
-function codexRanges(path, start, end, platform = process.platform) {
-  const eol = platform === "win32" ? 1 : 0;
-  let sizes;
-  try {
-    sizes = (readFileSync(path, "utf8").match(/[^\n]*\n|[^\n]+$/g) || [])
-      .map((line) => Buffer.byteLength(line, "utf8"));
-  } catch {
-    sizes = [];
-  }
-  const ranges = [];
-  let first = start, bytes = 0;
-  for (let line = start; line <= end; line++) {
-    const size = (sizes[line - 1] ?? 0) + eol;
-    if (bytes && bytes + size > CODEX_MODEL_OUTPUT_BYTES) {
-      ranges.push([first, line - 1]);
-      first = line;
-      bytes = 0;
-    }
-    bytes += size;
-  }
-  if (first <= end) ranges.push([first, end]);
-  return ranges;
 }
 
 // Retry teaching: one "- <path> lines a-b: Read offset a limit n" per uncovered
@@ -459,9 +455,7 @@ export function coverageErrorLines(gaps, { indexErrors = [], runner = "claude", 
   for (const { path, ranges } of gaps) {
     for (const [a, b] of ranges) {
       if (runner === "codex") {
-        for (const [start, end] of codexRanges(path, a, b, platform)) {
-          lines.push(`${path} lines ${start}-${end}: ${codexWindowedRead(path, start, end, platform)}`);
-        }
+        lines.push(...codexRangeLines(path, a, b, platform));
         continue;
       }
       for (let s = a; s <= b; s += READ_DEFAULT_LINES) {
