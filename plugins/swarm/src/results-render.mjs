@@ -296,6 +296,10 @@ export function formatClosing({ digestPath, reportPath, reportMissing, pagesErro
     const tail = missed.length ? `; missed: ${shown}${more}` : "";
     if (cg.coverageFailed) {
       lines.push(`${red("✗")} ${bold(cg.id)}: engaged with none of its ${cg.required} required inputs — coverage failed`);
+    } else if (cg.status === "unparseable") {
+      // The engine could not read the leaf's transcript — say that, never "read 0
+      // of N", which reads as the leaf having ignored its inputs.
+      lines.push(`${yellow("⚠")} ${bold(cg.id)}: transcript could not be parsed — coverage of its ${cg.required} required inputs is unverified, not unmet`);
     } else {
       const missedItems = cg.missedItems ?? missed.length;
       const uncoverableCount = Array.isArray(cg.uncoverable) ? cg.uncoverable.length : (cg.uncoverable || 0);
