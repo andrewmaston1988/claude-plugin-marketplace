@@ -347,7 +347,7 @@ async function cmdValidate(rest) {
       const index = t.mustRead.some((e) => e && typeof e === "object" && e.index !== undefined);
       return `${t.id} (${n} ${n === 1 ? "entry" : "entries"}${index ? ", index" : ""})`;
     };
-    out(`must-read enforced: ${mustRead.map(describe).join(", ")} (transcript checked against mustRead; a shortfall gets one corrective re-ask, then is recorded — never fails the leaf)`);
+    out(`must-read enforced: ${mustRead.map(describe).join(", ")} (transcript checked against mustRead; re-asks continue while the leaf closes lines, a shortfall is recorded, but a leaf that read none of its inputs fails)`);
   }
   // The consent line: worst-case leaves × historical per-model medians.
   out(formatEstimate(estimateRun(plan.tasks, plan.digest, loadCorpus(join(swarmHome(), "runs")))));
