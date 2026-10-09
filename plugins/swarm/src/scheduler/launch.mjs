@@ -212,7 +212,11 @@ export function createLaunch(ctx) {
       // when short — pushed to the run-level list the closing block prints loud.
       if (r.coverage) {
         result.coverage = r.coverage;
-        if (r.coverage.status !== "complete") ctx.coverageGaps.push({ id: task.id, ...r.coverage });
+        // The zero-engagement flag must ride the run-level entry too — the closing
+        // block keys its red line off the entry, not off the result file.
+        if (r.coverage.status !== "complete") {
+          ctx.coverageGaps.push({ id: task.id, ...r.coverage, ...(r.coverageFailed && { coverageFailed: true }) });
+        }
       }
       // A leaf that engaged with nothing it was required to read. Not a shortfall to
       // annotate: it never did the task. What a corrective re-run re-asks from.

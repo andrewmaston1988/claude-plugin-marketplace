@@ -9,6 +9,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { spawnSync } from "node:child_process";
 import { runPlan } from "../src/scheduler.mjs";
+import { formatClosing } from "../src/results-render.mjs";
 import { readResult, writeResult, initResultsDir } from "../src/results.mjs";
 import { taskKey } from "../src/task-key.mjs";
 import { fakeSpawnFactory, makeIo, sentPrompt, usageEnv, codexReading } from "./helpers/fake-io.mjs";
@@ -174,6 +175,24 @@ for (const [name, spawnOf, sid] of [
     } finally { rmSync(dir, { recursive: true, force: true }); }
   });
 }
+
+// The result FILE carrying coverageFailed is not enough: the closing block reads
+// the run-level gap list, so a gap entry that drops the flag renders the leaf as a
+// mere shortfall ("read 0 of 1") — the loudest line in the block, silently lost.
+test("coverage: a zero-engagement leaf reaches the closing block as the red line", async () => {
+  const dir = tmp();
+  try {
+    const F = writeLines(dir, "big.mjs", 2500);
+    const spawn = fakeSpawnFactory((call, i) => ({ output: leafOut([], { sid: `s-${i + 1}`, result: "no idea" }) }));
+    const io = makeIo(spawn);
+    const p = plan(dir, [task("a", dir, { mustRead: [F] })]);
+    const r = await runPlan(p, CFG, io);
+    const gaps = r.summary.coverageGaps;
+    ok(gaps?.length, `no run-level gap entry at all: ${JSON.stringify(gaps)}`);
+    const closing = formatClosing({ summaryPath: "S/summary.json", digestPath: "d", coverageGaps: gaps });
+    ok(closing.includes("engaged with none of its 1 required inputs"), closing);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
 
 test("coverage: a leaf that never read anything settles as failed, not as a rate-limit retry", async () => {
   const dir = tmp();
