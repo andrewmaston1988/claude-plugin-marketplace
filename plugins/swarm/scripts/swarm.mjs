@@ -307,6 +307,7 @@ async function cmdValidate(rest) {
   writeRosterErrors(roster.errors, err);
   const plan = loadManifest(ref.path, cfg, process.cwd(), { args, fromRegistry, headroom: await usageHeadroom(cfg), cache: roster.models, ...(fromRegistry && { ref: rest[0] }) });
   out(`manifest OK: ${plan.tasks.length} task(s)${plan.digest ? " + digest" : ""}`);
+  for (const warning of plan.warnings || []) out(`warning: ${warning}`);
   // The preview IS the approval: with forEach or composition in play, show the
   // worst-case leaf count the caps permit before anything runs.
   const fans = plan.tasks.filter((t) => t.forEach && !t.childPlan);
