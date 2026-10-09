@@ -378,10 +378,22 @@ test("formatClosing renders a loud coverage-gap line, kept-not-failed", () => {
     coverageGaps: [{ id: "rv-arch", status: "incomplete", required: 5, read: 2, missed: ["a.mjs:1-40", "b.mjs:1-90", "c.mjs", "d.mjs"] }],
   });
   ok(out.includes("rv-arch"), out);
-  ok(out.includes("read 2 of 5 required entries"), out);
-  ok(out.includes("incomplete"), out);
+  ok(out.includes("read 2 of 5 required — 4 missed (4 ranges)"), out);
   ok(/a\.mjs:1-40/.test(out) && /\+1 more/.test(out), "first 3 missed + overflow count: " + out);
   ok(!/failed|deleted/i.test(out), "a shortfall never reads as a failed leaf: " + out);
+});
+
+test("formatClosing renders item and range coverage counts and zero-engagement failure", () => {
+  const out = formatClosing({
+    summaryPath: "S/summary.json", digestPath: "d",
+    coverageGaps: [
+      { id: "rv-partial", status: "incomplete", required: 32, read: 1, missedItems: 31, missed: Array(47).fill("a.mjs:1-2"), uncoverable: ["big.mjs:4"] },
+      { id: "rv-empty", status: "incomplete", required: 3, read: 0, missedItems: 3, missed: [], coverageFailed: true },
+    ],
+  });
+  ok(out.includes("read 1 of 32 required — 31 missed (47 ranges)"), out);
+  ok(out.includes("uncoverable 1"), out);
+  ok(out.includes("engaged with none of its 3 required inputs"), out);
 });
 
 // mechanicalOf is a projection a grade row copies — coverage must ride along so

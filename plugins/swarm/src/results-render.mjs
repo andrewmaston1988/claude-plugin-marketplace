@@ -294,7 +294,14 @@ export function formatClosing({ digestPath, reportPath, reportMissing, pagesErro
     const shown = missed.slice(0, 3).join(", ");
     const more = missed.length > 3 ? `, +${missed.length - 3} more` : "";
     const tail = missed.length ? `; missed: ${shown}${more}` : "";
-    lines.push(`${yellow("⚠")} ${bold(cg.id)}: read ${cg.read} of ${cg.required} required entries — coverage ${cg.status}${tail}`);
+    if (cg.coverageFailed) {
+      lines.push(`${red("✗")} ${bold(cg.id)}: engaged with none of its ${cg.required} required inputs — coverage failed`);
+    } else {
+      const missedItems = cg.missedItems ?? missed.length;
+      const uncoverableCount = Array.isArray(cg.uncoverable) ? cg.uncoverable.length : (cg.uncoverable || 0);
+      const uncoverable = uncoverableCount ? `, uncoverable ${uncoverableCount}` : "";
+      lines.push(`${yellow("⚠")} ${bold(cg.id)}: read ${cg.read} of ${cg.required} required — ${missedItems} missed (${missed.length} ranges)${uncoverable}${tail}`);
+    }
   }
   if (digestPath) lines.push(`${bold("digest:")} ${green(digestPath)}`);
   else if (digestFailed) lines.push(`${bold("digest:")} ${red("FAILED")} — read summary + per-task results instead`);
