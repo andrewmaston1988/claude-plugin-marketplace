@@ -3,7 +3,7 @@
 // through the same buildDispatch/toSpawnable path the scheduler spawns with.
 
 import { buildDispatch, toSpawnable, windowsCommandLineLength } from "./dispatch.mjs";
-import { withLeafNotices } from "./leaf-notices.mjs";
+import { withLeafNotices, READS_PART_CEILING } from "./leaf-notices.mjs";
 import { TEMPLATE_RE } from "./coverage.mjs";
 import { ITEM_TEMPLATE_RE_G } from "./manifest-relations.mjs";
 import { isSentinelModel } from "./manifest-task-policy.mjs";
@@ -30,6 +30,14 @@ export function measurablePrompt(prompt, cfg) {
     .replace(ITEM_TEMPLATE_RE_G, () => "x".repeat(FOREACH_ITEM_MAX));
 }
 
+// A codex leaf with mustRead is dispatched with a list of read-plan part files in its
+// prompt, and the launch caps that list at READS_PART_CEILING. Validate cannot resolve
+// mustRead — the leaf's cwd is a worktree that does not exist yet — so it measures the
+// ceiling, with each path at RESULT_PATH_MEASURE_LEN. Over-measuring a leaf that turns
+// out to need fewer parts costs nothing; under-measuring one costs a failed spawn.
+const readFileCeiling = () =>
+  Array.from({ length: READS_PART_CEILING }, () => "x".repeat(RESULT_PATH_MEASURE_LEN));
+
 // win32 only: the command line the scheduler would spawn for each leaf, the
 // engine's own notice included — measured through buildDispatch + toSpawnable in
 // CreateProcess quoting, so what validates is what spawns.
@@ -48,7 +56,11 @@ export function checkCommandLineLengths(tasks, cfg, io, errors, label) {
     let dispatch;
     try {
       dispatch = buildDispatch(t, author, cfg);
-      const sent = withLeafNotices(author, t, cfg, dispatch.runner);
+      // Only a codex leaf with mustRead is ever handed a read-plan list, so only that
+      // leaf carries the extra line — measuring every codex leaf at the ceiling would
+      // refuse a manifest whose prompt has room for the notice it actually gets.
+      const reads = dispatch.runner === "codex" && t.mustRead?.length ? readFileCeiling() : undefined;
+      const sent = withLeafNotices(author, t, cfg, dispatch.runner, reads);
       dispatch = sent === author ? dispatch : buildDispatch(t, sent, cfg);
     } catch {
       // Provider identity, enabled-state, governance, and task-policy errors
