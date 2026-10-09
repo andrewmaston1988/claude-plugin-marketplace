@@ -337,6 +337,26 @@ test("launch: a codex leaf's stamp carries the uncoverable lines nothing can sho
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
+// An unresolvable mustRead is the ENGINE's gap, not the leaf's: the leaf cannot
+// read a path that does not exist, so it must not be failed for reading none of
+// it. The shortfall is still recorded (D9) — warned, kept, leaf ok.
+test("coverage: a mustRead that does not resolve is a recorded shortfall, not a zero-engagement failure", async () => {
+  const dir = tmp();
+  try {
+    const missing = join(dir, "never-written.mjs");
+    const spawn = fakeSpawnFactory(() => ({ output: leafOut([], { sid: "s-1", result: "kept" }) }));
+    const io = makeIo(spawn);
+    const p = plan(dir, [task("a", dir, { mustRead: [missing] })]);
+    await runPlan(p, CFG, io);
+    const res = readResult(p.resultsDir, "a");
+    equal(res.ok, true, JSON.stringify(res.coverage));
+    equal(res.coverageFailed, undefined);
+    equal(res.coverage.status, "incomplete");
+    equal(res.coverage.missed.length, 1);
+    ok(res.coverage.missed[0].includes("unreadable"), res.coverage.missed[0]);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
 // The two PIN rows of the test plan live where they already were: a partial read
 // stays ok (coverage.test.mjs "still incomplete after the re-ask"), and an
 // unparseable transcript stays ok ("unparseable transcript on an ok leaf").

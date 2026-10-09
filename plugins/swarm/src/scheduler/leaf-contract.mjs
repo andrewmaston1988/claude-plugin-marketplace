@@ -144,8 +144,11 @@ export async function enforceLeafContract(task, r, taskCwd, resultsDir, cfg, io,
     output: coverageRetryBlock(a.cov.gaps, { indexErrors: a.cov.errors, runner }),
     rawOutput: res.output,
   });
-  // What an idling leaf looks like, whatever else the checker found.
-  const idle = (cov) => Boolean(cov) && cov.status === "incomplete" && cov.required > 0 && cov.creditedLines === 0;
+  // What an idling leaf looks like, whatever else the checker found. Judged over
+  // `gaps` alone: those are the requirements the leaf COULD have read. A mustRead
+  // path that never resolved is the engine's gap, so a leaf that read none of it
+  // is short, not idle.
+  const idle = (cov) => Boolean(cov) && cov.status === "incomplete" && cov.gaps.length > 0 && cov.creditedLines === 0;
 
   let cur = r;
   let a = assess(cur.output);
