@@ -1,6 +1,6 @@
 // One leaf, from seat to settle: ask mode, isolation, the resume/corrective
 // decision, the dispatch, worktree collection, retry/fallback and the cost warn.
-import { mkdirSync, createWriteStream, appendFileSync, writeFileSync, renameSync } from "node:fs";
+import { mkdirSync, createWriteStream, appendFileSync, writeFileSync, renameSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { storedTurnCount } from "../contracts.mjs";
 import { withLeafNotices, READS_PART_CEILING } from "../leaf-notices.mjs";
@@ -24,24 +24,27 @@ import { tryParseJson, enforceLeafContract } from "./leaf-contract.mjs";
 // simply not in it. So the plan is written to part files, each sized to arrive whole,
 // and the leaf is told to run one command per call from the start. Paths resolve against
 // the cwd the leaf actually RUNS in (its worktree), which is the only cwd its shell has.
-function writeReadPlan(task, taskCwd, resultsDir, cfg, runner) {
-  if (runner !== "codex" || !task.mustRead?.length) return [];
+function writeReadPlan(task, taskCwd, resultsDir, cfg, runner, writeFile = writeFileSync) {
+  if (runner !== "codex" || !task.mustRead?.length) return { files: [], omitted: 0 };
   const { required } = resolveMustRead(task.mustRead, {
     cwd: taskCwd,
     substitute: (s) => substituteTemplates(s, resultsDir, cfg.resultInlineCap ?? 4000).prompt,
   });
-  // Over-cap lines are dropped before the plan is built: a command that cannot be shown
-  // whole is not something to tell a leaf to run.
-  const parts = splitReadPlan(codexReadPlan(codexCoverable(required).required))
-    .slice(0, READS_PART_CEILING);
-  return parts.map((lines, i) => {
+  const parts = splitReadPlan(codexReadPlan(codexCoverable(required).required));
+  const omitted = Math.max(0, parts.length - READS_PART_CEILING);
+  const files = parts.slice(0, READS_PART_CEILING).map((lines, i) => {
     const path = join(resultsDir, "results", `${task.id}.reads-${i + 1}.txt`);
     const tmp = `${path}.tmp`;
-    // tmp + rename: a reader that finds the part finds it whole.
-    writeFileSync(tmp, lines.join("\n") + "\n");
-    renameSync(tmp, path);
+    try {
+      writeFile(tmp, lines.join("\n") + "\n");
+      renameSync(tmp, path);
+    } catch (e) {
+      try { rmSync(tmp, { force: true }); } catch { /* best effort */ }
+      throw e;
+    }
     return path;
   });
+  return { files, omitted };
 }
 
 export function createLaunch(ctx) {
@@ -132,8 +135,16 @@ export function createLaunch(ctx) {
       const promptTruncations = sub ? sub.truncations : [];
       if (sub) ctx.notePromptTruncations(task, promptTruncations);
       const runner = ctx.durableIdentity(task).runner;
-      const readFiles = writeReadPlan(task, taskCwd, plan.resultsDir, cfg, runner);
-      const prompt = withLeafNotices(sub ? sub.prompt : task.prompt, task, cfg, runner, readFiles);
+      let readPlan;
+      try {
+        readPlan = writeReadPlan(task, taskCwd, plan.resultsDir, cfg, runner, io.writeReadPlanFile);
+      } catch (e) {
+        const result = { id: task.id, model: task.model, ...ctx.durableIdentity(task), ok: false, exit: null, durationMs: 0, output: `read plan setup failed: ${e.message}` };
+        writeResult(plan.resultsDir, task.id, result);
+        ctx.record(task, "failed", 0);
+        return task.id;
+      }
+      const prompt = withLeafNotices(sub ? sub.prompt : task.prompt, task, cfg, runner, readPlan.files, readPlan.omitted);
       // A leaf that failed only its schema, or only its coverage, is resumed on its
       // CORRECTION, not its prompt: re-sending the original makes it redo an
       // investigation it already finished. Keyed on the task definition — an edited
@@ -226,12 +237,9 @@ export function createLaunch(ctx) {
       if (task.checkoutToplevel) result.checkoutToplevel = task.checkoutToplevel;
       result.allowedTools = task.allowedTools;
 
-      // returns-validation and coverage failures are semantic — never classify them by
-      // transcript grep (a stray "429" in the raw stream would read as transient, and a
-      // retry would re-send a leaf that already answered). A valve-killed leaf produced
-      // no text classifyFailure could match, so memoryStopped is checked ahead of the
-      // whole ladder, even against a stray r.ok race. The `!r.ok` guard covers the valve
-      // racing an already-exited leaf, so clear it unconditionally.
+      // Semantic contract failures bypass transcript classification; a stray 429 cannot retry them.
+      // A memory stop is checked first because the valve may kill without a classifiable message.
+      // The !r.ok guard handles a racing stop after the leaf exits.
       const isMemoryStop = ctx.memoryStopped.has(task.id) && !r.ok;
       ctx.memoryStopped.delete(task.id);
       const st = isMemoryStop ? "memory"

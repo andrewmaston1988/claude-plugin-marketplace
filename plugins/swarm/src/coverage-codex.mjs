@@ -8,7 +8,7 @@ import { readFileSync } from "node:fs";
 // Codex middle-truncates a command's output before the MODEL sees it, so
 // `aggregated_output` (the event field) is not what the model read: inside this
 // budget it arrived whole, past it only as the first and last halves.
-// rust-v0.156.1: codex-rs/models-manager/models.json sets truncation_policy tokens limit 10000; codex-rs/utils/string/src/truncate.rs uses APPROX_BYTES_PER_TOKEN = 4.
+// Approximately 4 bytes per token keeps the 10,000-token output budget under the 40,000-byte cap.
 export const CODEX_MODEL_OUTPUT_BYTES = 40_000;
 
 // The ONE windowed read. On win32 the codex sandbox kills every MSYS2 program, so it is
@@ -17,7 +17,7 @@ export const CODEX_MODEL_OUTPUT_BYTES = 40_000;
 export function codexWindowedRead(path, a, b, platform = process.platform) {
   return platform === "win32"
     ? `@(Get-Content -LiteralPath '${path.replace(/'/g, "''")}')[${a - 1}..${b - 1}]`
-    : `sed -n '${a},${b}p' "${path}"`;
+    : `sed -n '${a},${b}p' '${path.replace(/'/g, String.fromCharCode(39, 92, 39, 39))}'`;
 }
 
 // Per-line EMITTED bytes — the line's own bytes plus the EOL the reader puts back on it.
@@ -35,8 +35,7 @@ function codexLineSizes(path, platform) {
 }
 
 // A required range, split into pages that each fit the model-visible budget.
-function codexRanges(path, start, end, platform = process.platform) {
-  const sizes = codexLineSizes(path, platform);
+function codexRanges(path, start, end, platform = process.platform, sizes = codexLineSizes(path, platform)) {
   const eol = platform === "win32" ? 1 : 0;
   const ranges = [];
   let first = start, bytes = 0;
@@ -56,8 +55,8 @@ function codexRanges(path, start, end, platform = process.platform) {
 // One line per page of one required range: the path, its line span, and the exact command
 // that reads it. The ONE mapper — the launch-time read plan and the retry teaching may not
 // drift apart.
-export function codexRangeLines(path, a, b, platform = process.platform) {
-  return codexRanges(path, a, b, platform)
+export function codexRangeLines(path, a, b, platform = process.platform, sizes = codexLineSizes(path, platform)) {
+  return codexRanges(path, a, b, platform, sizes)
     .map(([start, end]) => `${path} lines ${start}-${end}: ${codexWindowedRead(path, start, end, platform)}`);
 }
 
@@ -98,8 +97,11 @@ export function codexCoverable(required, { platform = process.platform } = {}) {
 // job (coverageErrorLines); a leaf handed its list up front gets all of it.
 export function codexReadPlan(required, { platform = process.platform } = {}) {
   const lines = [];
+  const sizesByPath = new Map();
   for (const { path, ranges } of required || []) {
-    for (const [a, b] of ranges) lines.push(...codexRangeLines(path, a, b, platform));
+    if (!sizesByPath.has(path)) sizesByPath.set(path, codexLineSizes(path, platform));
+    const sizes = sizesByPath.get(path);
+    for (const [a, b] of ranges) lines.push(...codexRangeLines(path, a, b, platform, sizes));
   }
   return lines;
 }
