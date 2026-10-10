@@ -1,9 +1,10 @@
 // One leaf, from seat to settle: ask mode, isolation, the resume/corrective
 // decision, the dispatch, worktree collection, retry/fallback and the cost warn.
-import { mkdirSync, createWriteStream, appendFileSync } from "node:fs";
+import { mkdirSync, createWriteStream, appendFileSync, writeFileSync, renameSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { storedTurnCount } from "../contracts.mjs";
-import { withLeafNotices } from "../leaf-notices.mjs";
+import { withLeafNotices, READS_PART_CEILING } from "../leaf-notices.mjs";
+import { resolveMustRead, codexCoverable, codexReadPlan, splitReadPlan } from "../coverage.mjs";
 import { isClaudeModel } from "../models.mjs";
 import { scratchPath as digestScratchPath } from "../digest.mjs";
 import { readResult, writeResult, appendRunLog, writeDigestMd, formatTokens } from "../results.mjs";
@@ -17,6 +18,34 @@ import { isAgentless } from "../manifest.mjs";
 import * as defaultWorktree from "../worktree.mjs";
 import { runTask, classifyFailure, substituteTemplates } from "./run-task.mjs";
 import { tryParseJson, enforceLeafContract } from "./leaf-contract.mjs";
+
+// A codex leaf's first command is usually a batch, and past the model-visible cap codex
+// shows the model only its first and last halves — the files it was told to read are
+// simply not in it. So the plan is written to part files, each sized to arrive whole,
+// and the leaf is told to run one command per call from the start. Paths resolve against
+// the cwd the leaf actually RUNS in (its worktree), which is the only cwd its shell has.
+function writeReadPlan(task, taskCwd, resultsDir, cfg, runner, writeFile = writeFileSync) {
+  if (runner !== "codex" || !task.mustRead?.length) return { files: [], omitted: 0 };
+  const { required } = resolveMustRead(task.mustRead, {
+    cwd: taskCwd,
+    substitute: (s) => substituteTemplates(s, resultsDir, cfg.resultInlineCap ?? 4000).prompt,
+  });
+  const parts = splitReadPlan(codexReadPlan(codexCoverable(required).required));
+  const omitted = Math.max(0, parts.length - READS_PART_CEILING);
+  const files = parts.slice(0, READS_PART_CEILING).map((lines, i) => {
+    const path = join(resultsDir, "results", `${task.id}.reads-${i + 1}.txt`);
+    const tmp = `${path}.tmp`;
+    try {
+      writeFile(tmp, lines.join("\n") + "\n");
+      renameSync(tmp, path);
+    } catch (e) {
+      try { rmSync(tmp, { force: true }); } catch { /* best effort */ }
+      throw e;
+    }
+    return path;
+  });
+  return { files, omitted };
+}
 
 export function createLaunch(ctx) {
   const { cfg, io, plan, tasks } = ctx;
@@ -105,12 +134,23 @@ export function createLaunch(ctx) {
       const sub = task.promptFinal ? null : substituteTemplates(task.prompt, plan.resultsDir, cfg.resultInlineCap ?? 4000);
       const promptTruncations = sub ? sub.truncations : [];
       if (sub) ctx.notePromptTruncations(task, promptTruncations);
-      const prompt = withLeafNotices(sub ? sub.prompt : task.prompt, task, cfg, ctx.durableIdentity(task).runner);
-      // A leaf that failed only its schema is resumed on its CORRECTION, not its
-      // prompt: re-sending the original makes it redo an investigation it already
-      // finished. Keyed on the task definition — an edited manifest is new spend —
-      // and on rawOutput, absent from rows written before it was kept.
-      const corrective = Boolean(prior?.schemaErrors?.length && prior.rawOutput != null
+      const runner = ctx.durableIdentity(task).runner;
+      let readPlan;
+      try {
+        readPlan = writeReadPlan(task, taskCwd, plan.resultsDir, cfg, runner, io.writeReadPlanFile);
+      } catch (e) {
+        const result = { id: task.id, model: task.model, ...ctx.durableIdentity(task), ok: false, exit: null, durationMs: 0, output: `read plan setup failed: ${e.message}` };
+        writeResult(plan.resultsDir, task.id, result);
+        ctx.record(task, "failed", 0);
+        return task.id;
+      }
+      const prompt = withLeafNotices(sub ? sub.prompt : task.prompt, task, cfg, runner, readPlan.files, readPlan.omitted);
+      // A leaf that failed only its schema, or only its coverage, is resumed on its
+      // CORRECTION, not its prompt: re-sending the original makes it redo an
+      // investigation it already finished. Keyed on the task definition — an edited
+      // manifest is new spend — and on rawOutput, absent from rows written before it
+      // was kept.
+      const corrective = Boolean((prior?.schemaErrors?.length || prior?.coverageFailed) && prior.rawOutput != null
         && prior.key === taskKey(task) && resumeId);
       let r;
       if (corrective) {
@@ -183,23 +223,28 @@ export function createLaunch(ctx) {
       // when short — pushed to the run-level list the closing block prints loud.
       if (r.coverage) {
         result.coverage = r.coverage;
-        if (r.coverage.status !== "complete") ctx.coverageGaps.push({ id: task.id, ...r.coverage });
+        // The zero-engagement flag must ride the run-level entry too — the closing
+        // block keys its red line off the entry, not off the result file.
+        if (r.coverage.status !== "complete") {
+          ctx.coverageGaps.push({ id: task.id, ...r.coverage, ...(r.coverageFailed && { coverageFailed: true }) });
+        }
       }
+      // A leaf that engaged with nothing it was required to read. Not a shortfall to
+      // annotate: it never did the task. What a corrective re-run re-asks from.
+      if (r.coverageFailed) result.coverageFailed = true;
       result.cwd = taskCwd;
       result.originalCwd = task.originalCwd;
       if (task.checkoutToplevel) result.checkoutToplevel = task.checkoutToplevel;
       result.allowedTools = task.allowedTools;
 
-      // returns-validation failures are semantic — never classify them by transcript
-      // grep (a stray "429" in the raw stream would read as transient). A valve-killed
-      // leaf produced no text classifyFailure could match, so memoryStopped is checked
-      // ahead of the whole ladder, even against a stray r.ok race. The `!r.ok` guard
-      // covers the valve racing an already-exited leaf, so clear it unconditionally.
+      // Semantic contract failures bypass transcript classification; a stray 429 cannot retry them.
+      // A memory stop is checked first because the valve may kill without a classifiable message.
+      // The !r.ok guard handles a racing stop after the leaf exits.
       const isMemoryStop = ctx.memoryStopped.has(task.id) && !r.ok;
       ctx.memoryStopped.delete(task.id);
       const st = isMemoryStop ? "memory"
         : r.ok ? "ok"
-        : r.schemaErrors || r.errorCode === "schema_error" ? "failed"
+        : r.schemaErrors || r.coverageFailed || r.errorCode === "schema_error" ? "failed"
         : classifyFailure({ timedOut: r.timedOut, output: r.raw, stopped: ctx.stopRequested }, cfg.quotaPatterns);
       if (isMemoryStop) {
         // runTask's generic mid-stream message tells a reader not to kill or

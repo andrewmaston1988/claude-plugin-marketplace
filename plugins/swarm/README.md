@@ -190,7 +190,7 @@ dominates:
 | Predictive cost consent — estimate at approval, one projection warn, actual-vs-estimate close | ✅ | ❌ reactive only |
 | Weak-model authorability — fill-in-the-blanks JSON; validation errors teach | ✅ | ⚠️ JS bar |
 | Mechanical citation verification — `{file, line, quote}` returns string-matched against real files before any verifier spawns | ✅ zero tokens | ❌ |
-| Transcript-proven read coverage — a leaf proves from its own transcript it read the files/ranges it declared (the `Read` tool, or a codex leaf's own shell dump), one corrective re-ask then recorded; a codex multi-file dump past the 40,000-byte output cap is labelled `unverifiable`, never credited | ✅ `mustRead`, zero tokens | ❌ |
+| Transcript-proven read coverage — a leaf proves from its own transcript it read the files/ranges it declared (the `Read` tool, or a codex leaf's own shell dump); codex leaves get capped read-plan part files up front, and coverage re-asks continue while each turn closes lines (first always granted, cap 4). A leaf that engages with none of its inputs fails; partial reads stay ok. A codex multi-file dump past the 40,000-byte output cap is labelled `unverifiable`, never credited | ✅ `mustRead`, zero tokens | ❌ |
 
 Rule of thumb: bounded fan-out — sweeps, judge panels, generation, mechanical
 implementation, discover-then-map — is swarm's shape, especially with alternative models
@@ -564,7 +564,7 @@ in words, never a number — absence is not zero. When the manifest seats no lau
 below 20 graded rows, one `gap seat available:` line names the strongest candidate — seat it
 on one bounded leaf; a grade at n<20 is not a verdict.
 
-**Context fit.** `swarm validate` refuses a seat whose `mustRead` reads (bytes/4, plus the prompt) exceed 50% of the seated model's declared `contextLength` — the other half is left for tool framing, output and a schema re-ask. It checks `fallbackModel` seats against their own windows, and counts only the ranges a `{path, lines}` entry names. A `:cloud` seat runs through the claude CLI, so its window is the CLI default (200k) unless the task sets `"contextWindow": "1m"`. A model whose roster row declares no `contextLength` (today every Claude and Codex row) is not checked. When some reads cannot be sized — a `{{resultPath:…}}` entry, or a worktree leaf whose tree is cut at dispatch — the estimate prints as a `≥` floor; a task with nothing sizeable at all is not checked.
+**Context fit.** `swarm validate` refuses a seat whose `mustRead` reads (bytes/4, plus the prompt) exceed 50% of the seated model's declared `contextLength` — the other half is left for tool framing, output and a schema re-ask. It checks `fallbackModel` seats against their own windows, and counts only the ranges a `{path, lines}` entry names. A `:cloud` seat runs through the claude CLI, so its window is the CLI default (200k) unless the task sets `"contextWindow": "1m"`. A model whose roster row declares no `contextLength` is not checked; when its mustRead estimate is at least 100k tokens, `validate` warns with the seat and estimate, but never refuses it. When some reads cannot be sized — a `{{resultPath:…}}` entry, or a worktree leaf whose tree is cut at dispatch — the estimate prints as a `≥` floor; a task with nothing sizeable at all is not checked.
 
 **`swarm perf --overall`** (grading on, a models cache present) opens with a `needs grades`
 block: every launchable model below 20 graded rows, read from the whole store so `--model` /

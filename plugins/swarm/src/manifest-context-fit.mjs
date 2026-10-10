@@ -9,6 +9,7 @@ import { identityOf, CONTEXT_WINDOW_1M, CLAUDE_CLI_DEFAULT_WINDOW } from "./cont
 export const BYTES_PER_TOKEN = 4;
 // The other half is left for tool-call framing, the leaf's own output and a schema re-ask.
 export const CONTEXT_FIT_SHARE = 0.5;
+export const CONTEXT_WARN_TOKENS = 100000;
 
 // { ctx, catalog } — the window the leaf actually gets. A claude-runner seat (a :cloud
 // model) keeps the CLI's default window unless the task opts into 1m.
@@ -63,19 +64,24 @@ function sizeReads(t) {
   return { bytes, partial };
 }
 
-export function validateContextFit(tasks, { cache, errors, label }) {
+export function validateContextFit(tasks, { cache, errors, warnings, label }) {
   for (const t of tasks) {
     if (!Array.isArray(t.mustRead) || !t.provider) continue;
     const seats = [
       { provider: t.provider, model: t.model, name: label(t) },
       ...(t.fallbackModel && t.fallbackProvider ? [{ provider: t.fallbackProvider, model: t.fallbackModel, name: `${label(t)} fallback` }] : []),
-    ].map((s) => ({ ...s, ...windowOf(cache, s.provider, s.model, t.contextWindow) })).filter((s) => s.ctx);
-    if (!seats.length) continue;
+    ].map((s) => ({ ...s, ...windowOf(cache, s.provider, s.model, t.contextWindow) }));
     const { bytes: readBytes, partial } = sizeReads(t);
     if (readBytes === 0) continue;
     const bytes = readBytes + Buffer.byteLength(String(t.prompt ?? ""));
     const tokens = bytes / BYTES_PER_TOKEN;
     for (const s of seats) {
+      if (!s.ctx) {
+        if (tokens >= CONTEXT_WARN_TOKENS) {
+          warnings.push(`${s.name}: seats '${s.model}' with no declared context window, but its mustRead is ${partial ? "≥" : "~"}${formatTokens(Math.round(tokens))} tokens — check context fit before dispatch.`);
+        }
+        continue;
+      }
       const budget = s.ctx * CONTEXT_FIT_SHARE;
       if (tokens <= budget) continue;
       errors.push(

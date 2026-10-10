@@ -9,7 +9,7 @@ import { tmpdir } from "node:os";
 import { spawnSync } from "node:child_process";
 import { runPlan } from "../src/scheduler.mjs";
 import { readResult } from "../src/results.mjs";
-import { withLeafNotices, withoutLeafNotices, leafNotices } from "../src/leaf-notices.mjs";
+import { withLeafNotices, withoutLeafNotices, leafNotices, READS_PART_CEILING } from "../src/leaf-notices.mjs";
 import { fakeSpawnFactory, makeIo, sentPrompt, usageEnv, codexReading } from "./helpers/fake-io.mjs";
 
 // The notices verbatim: these literals are the spec, so a wording change is a
@@ -171,6 +171,60 @@ test("a codex block written on either platform strips, and is never told twice",
     const told = `author text\n\n${FINAL}\n${codexLine("read-only", platform)}`;
     equal(withoutLeafNotices(told), "author text", `${platform}: stripped`);
     equal(withLeafNotices(told, { allowedTools: "Read,Grep,Glob" }, {}, "codex"), told, `${platform}: not told twice`);
+  }
+});
+
+// ── the read-plan files ───────────────────────────────────────────────────────
+// A codex leaf batches its first command past the model-visible cap and never sees
+// the files it was told to read. The engine writes the plan to part files and names
+// them in the notice, so the leaf runs one command per call from the start.
+// The head is the spec — a wording change is a deliberate edit here.
+const READS_HEAD =
+  "Your required reads are listed in the files below — run every command in them, one command per call, before you answer:";
+const readsBlock = (files) => `${READS_HEAD}\n${files.map((f) => `  - ${f}`).join("\n")}`;
+
+test("a codex leaf handed read-plan files is told to run every command in them", () => {
+  const files = ["C:/run/results/a.reads-1.txt", "C:/run/results/a.reads-2.txt"];
+  equal(
+    withLeafNotices("author text", { allowedTools: "Read,Grep,Glob" }, {}, "codex", files),
+    `author text\n\n${FINAL}\n${codexLine("read-only")}\n${readsBlock(files)}`,
+  );
+});
+
+test("a leaf with no read-plan files gets the notice it always got", () => {
+  const told = withLeafNotices("author text", { allowedTools: "Read,Grep,Glob" }, {}, "codex", []);
+  equal(told, `author text\n\n${FINAL}\n${codexLine("read-only")}`);
+  equal(withLeafNotices("author text", { allowedTools: "Read,Grep,Glob" }, {}, "codex"), told);
+});
+
+test("a claude leaf is never handed a read-plan list — its reads are Read calls", () => {
+  equal(withLeafNotices("author text", {}, {}, "claude", ["C:/run/a.reads-1.txt"]), `author text\n\n${FINAL}`);
+});
+
+test("the notice names at most 12 parts, and says so when the plan is longer", () => {
+  // The dispatch budget measures a 12-part list; a launch that could send 13 would
+  // send a notice longer than the one that was measured.
+  const files = Array.from({ length: 13 }, (_, i) => `C:/run/results/a.reads-${i + 1}.txt`);
+  const told = withLeafNotices("author text", { allowedTools: "Read,Grep,Glob" }, {}, "codex", files);
+  const tail = told.slice(told.indexOf(READS_HEAD));
+  equal(occurrences(tail, "  - C:/run/results/a.reads-"), 12);
+  ok(tail.startsWith(readsBlock(files.slice(0, 12))), tail);
+  ok(tail.includes("additional read-plan parts are omitted from this notice"), tail);
+});
+
+test("a read-plan notice reports parts omitted past the ceiling", () => {
+  const files = Array.from({ length: READS_PART_CEILING }, (_, i) => `C:/run/part-${i + 1}.txt`);
+  const told = withLeafNotices("author text", { allowedTools: "Read,Grep,Glob" }, {}, "codex", files, 2);
+  ok(told.includes("additional read-plan parts are omitted"), told);
+  ok(told.includes(files.at(-1)), "all listed parts remain named");
+});
+
+test("a codex block carrying read-plan files strips whole, and is never told twice", () => {
+  const files = ["C:/run/results/a.reads-1.txt", "C:/run/results/a.reads-2.txt"];
+  for (const platform of ["win32", "linux"]) {
+    const told = `author text\n\n${FINAL}\n${codexLine("read-only", platform)}\n${readsBlock(files)}`;
+    equal(withoutLeafNotices(told), "author text", `${platform}: stripped`);
+    equal(withLeafNotices(told, { allowedTools: "Read,Grep,Glob" }, {}, "codex", files), told, `${platform}: not told twice`);
   }
 });
 

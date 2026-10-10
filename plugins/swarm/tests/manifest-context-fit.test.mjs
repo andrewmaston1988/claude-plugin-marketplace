@@ -188,3 +188,45 @@ test("context-fit: a sub-2000-token budget still prints a number", () => {
   equal(errs.length, 1);
   ok(errs[0].includes("budget (1.5k)"), errs[0]);
 });
+
+test("context-fit: unknown codex window warns at 100000 tokens without blocking", () => {
+  const dir = tmp();
+  writeFileSync(join(dir, "big.txt"), "a".repeat(399999));
+  const manifest = writeManifest(dir, { tasks: [{ id: "codex-seat", prompt: "p", provider: "codex", model: "gpt-6-luna", mustRead: ["big.txt"] }] });
+  const cfg = { ...CFG, providers: { claude: { enabled: true, allowedRoots: [dir] }, codex: { enabled: true, allowedRoots: [dir] } } };
+  const plan = loadManifest(manifest, cfg, dir, { cache: [{ provider: "codex", model: "gpt-6-luna" }], headroom: HEADROOM });
+  equal(plan.warnings?.length, 1);
+  ok(plan.warnings[0].includes("task 'codex-seat'"), plan.warnings[0]);
+  ok(plan.warnings[0].includes("gpt-6-luna"), plan.warnings[0]);
+  ok(plan.warnings[0].includes("100k tokens"), plan.warnings[0]);
+});
+
+test("context-fit: unknown window below 100000 tokens stays quiet", () => {
+  const dir = tmp();
+  writeFileSync(join(dir, "small.txt"), "a".repeat(359999));
+  const manifest = writeManifest(dir, { tasks: [{ id: "x", prompt: "p", provider: "codex", model: "gpt-6-luna", mustRead: ["small.txt"] }] });
+  const cfg = { ...CFG, providers: { claude: { enabled: true, allowedRoots: [dir] }, codex: { enabled: true, allowedRoots: [dir] } } };
+  const plan = loadManifest(manifest, cfg, dir, { cache: [{ provider: "codex", model: "gpt-6-luna" }], headroom: HEADROOM });
+  deepEqual(plan.warnings, undefined);
+});
+
+test("context-fit: declared window uses the existing gate without a warning", () => {
+  const dir = tmp();
+  writeFileSync(join(dir, "big.txt"), "a".repeat(400000));
+  const manifest = writeManifest(dir, { tasks: [{ id: "x", prompt: "p", provider: "codex", model: "gpt-6-luna", mustRead: ["big.txt"] }] });
+  const cfg = { ...CFG, providers: { claude: { enabled: true, allowedRoots: [dir] }, codex: { enabled: true, allowedRoots: [dir] } } };
+  const plan = loadManifest(manifest, cfg, dir, { cache: [{ provider: "codex", model: "gpt-6-luna", contextLength: 1048576 }], headroom: HEADROOM });
+  deepEqual(plan.warnings, undefined);
+  equal(fit(dir, { tasks: [seat("mid:cloud", { mustRead: ["big.txt"] })] }).length, 1);
+});
+
+test("context-fit: child unknown-window warning reaches the parent", () => {
+  const dir = tmp();
+  writeFileSync(join(dir, "big.txt"), "a".repeat(399999));
+  writeFileSync(join(dir, "child.json"), JSON.stringify({ tasks: [{ id: "x", prompt: "p", provider: "codex", model: "gpt-6-luna", mustRead: ["big.txt"] }] }));
+  const manifest = writeManifest(dir, { tasks: [{ id: "audit", manifest: "child.json" }] });
+  const cfg = { ...CFG, providers: { claude: { enabled: true, allowedRoots: [dir] }, codex: { enabled: true, allowedRoots: [dir] } } };
+  const plan = loadManifest(manifest, cfg, dir, { cache: [{ provider: "codex", model: "gpt-6-luna" }], headroom: HEADROOM });
+  equal(plan.warnings?.length, 1);
+  ok(plan.warnings[0].includes("task 'audit' -> child 'x'"), plan.warnings[0]);
+});

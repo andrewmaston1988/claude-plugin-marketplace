@@ -114,7 +114,7 @@ export function readManifestJson(path) {
 // into the run by the scheduler. The child inherits the parent run's cwd and
 // resultsDir; it may not steer the run itself.
 
-function loadChild(node, parentPath, cwd, cfg, resultsDir, errors, { args, usedArgs, fromRegistry, cache = [], io, probedGuards, providerRegistry = PROVIDERS } = {}) {
+function loadChild(node, parentPath, cwd, cfg, resultsDir, errors, warnings, { args, usedArgs, fromRegistry, cache = [], io, probedGuards, providerRegistry = PROVIDERS } = {}) {
   const nodeLabel = `task '${node.id}'`;
   // A registry-resolved parent references its children relative to itself — a
   // saved manifest must work from any cwd. Plain-path parents keep cwd
@@ -157,7 +157,7 @@ function loadChild(node, parentPath, cwd, cfg, resultsDir, errors, { args, usedA
   });
   checkCommandLineLengths(tasks, cfg, io, errors, label);
   validateMustReadRunners(tasks, cfg, io, errors, label, providerRegistry);
-  validateContextFit(tasks, { cache, errors, label });
+  validateContextFit(tasks, { cache, errors, warnings, label });
   // `path` is the file that was actually read — the gate keys on its bytes, and
   // only loadChild knows where resolution landed.
   return { tasks, path: childPath };
@@ -265,7 +265,7 @@ export function loadManifest(path, cfg, cwd = process.cwd(), { args, fromRegistr
   const manifestFiles = [manifestPath];
   for (const t of raw.tasks) {
     if (t && typeof t === "object" && typeof t.manifest === "string" && t.manifest) {
-      const child = loadChild(t, manifestPath, cwd, cfg, resultsDir, errors, { args, usedArgs, fromRegistry, cache, io: resolvedIo, probedGuards, providerRegistry });
+      const child = loadChild(t, manifestPath, cwd, cfg, resultsDir, errors, warnings, { args, usedArgs, fromRegistry, cache, io: resolvedIo, probedGuards, providerRegistry });
       if (child) {
         childPlans.set(t.id, { tasks: child.tasks });
         manifestFiles.push(child.path);
@@ -287,7 +287,7 @@ export function loadManifest(path, cfg, cwd = process.cwd(), { args, fromRegistr
   });
   checkCommandLineLengths(tasks, cfg, resolvedIo, errors, label);
   validateMustReadRunners(tasks, cfg, resolvedIo, errors, label, providerRegistry);
-  validateContextFit(tasks, { cache, errors, label });
+  validateContextFit(tasks, { cache, errors, warnings, label });
 
   let digest;
   // Set when the digest's own governance check already refused its cwd — the
