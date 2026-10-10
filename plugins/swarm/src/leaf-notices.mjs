@@ -23,27 +23,27 @@ const codexToolLine = (sandbox, platform = process.platform) =>
 const READS_LINE_HEAD =
   "Your required reads are listed in the files below — run every command in them, one command per call, before you answer:";
 const READS_TRUNCATED =
-  "  - …more reads than this notice can list — the retry instructions name any that remain.";
+  "  - …additional read-plan parts are omitted from this notice.";
 // The ceiling the dispatch budget measures against. A notice longer than the measured
 // worst case is a command line validate never vouched for, so a launch may not exceed it.
 export const READS_PART_CEILING = 12;
 
-function readsLines(readFiles) {
+function readsLines(readFiles, omittedReadParts = 0) {
   if (!readFiles?.length) return "";
   const named = readFiles.slice(0, READS_PART_CEILING);
   const block = [READS_LINE_HEAD, ...named.map((p) => `  - ${p}`)];
-  if (readFiles.length > named.length) block.push(READS_TRUNCATED);
+  if (omittedReadParts > 0 || readFiles.length > named.length) block.push(READS_TRUNCATED);
   return block.join("\n");
 }
 
 /** The engine's notice block for one leaf: the output contract every runner
  *  gets, the codex tool/sandbox line, and — for a codex leaf handed one — the
  *  part files holding its read plan. */
-export function leafNotices({ runner, sandbox, platform = process.platform, readFiles } = {}) {
+export function leafNotices({ runner, sandbox, platform = process.platform, readFiles, omittedReadParts } = {}) {
   if (runner !== "codex") return FINAL_MESSAGE;
   // The reads line is not the sandbox line's business: an unusable sandbox loses the
   // advisory prose, never the list of files the leaf must run.
-  return [FINAL_MESSAGE, sandbox && codexToolLine(sandbox, platform), readsLines(readFiles)]
+  return [FINAL_MESSAGE, sandbox && codexToolLine(sandbox, platform), readsLines(readFiles, omittedReadParts)]
     .filter(Boolean).join("\n");
 }
 
@@ -74,10 +74,10 @@ function blockAt(text) {
 
 /** Append the notice to a leaf's prompt. Idempotent — a prompt that already
  *  ends with the block is returned unchanged, so no leaf is ever told twice. */
-export function withLeafNotices(prompt, task, cfg, runner, readFiles) {
+export function withLeafNotices(prompt, task, cfg, runner, readFiles, omittedReadParts = 0) {
   const text = String(prompt ?? "");
   if (blockAt(text) !== -1) return text;
-  return text + SEPARATOR + leafNotices({ runner, sandbox: sandboxFor(task, cfg, runner), readFiles });
+  return text + SEPARATOR + leafNotices({ runner, sandbox: sandboxFor(task, cfg, runner), readFiles, omittedReadParts });
 }
 
 /** The author's prompt, with the engine's block removed. */

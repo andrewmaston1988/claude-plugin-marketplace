@@ -18,7 +18,7 @@ import { enginePath } from "./config.mjs";
 //                       (rawOutput = the leaf's own output on a schema failure — `output` then holds
 //                        the validator's text; a re-run re-asks from it instead of redoing the work)
 //                       (coverage = { status: "complete"|"incomplete"|"unparseable", required, read, missed[] }
-//                        when the task declared mustRead — a shortfall is recorded, never fails the leaf)
+//                        when the task declared mustRead — zero credited reads fails; partial reads remain warnings)
 //                       (asks = [{question, answer, ok, provider?, runner?, model, tokens?, sessionId?}] — `swarm ask` follow-ups;
 //                        the leaf's own ok/output never change because a later ask failed)
 //   results/<id>.ask.log  plain-text Q/A transcript, appended on every ask against this leaf

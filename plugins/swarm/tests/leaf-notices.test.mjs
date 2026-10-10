@@ -9,7 +9,7 @@ import { tmpdir } from "node:os";
 import { spawnSync } from "node:child_process";
 import { runPlan } from "../src/scheduler.mjs";
 import { readResult } from "../src/results.mjs";
-import { withLeafNotices, withoutLeafNotices, leafNotices } from "../src/leaf-notices.mjs";
+import { withLeafNotices, withoutLeafNotices, leafNotices, READS_PART_CEILING } from "../src/leaf-notices.mjs";
 import { fakeSpawnFactory, makeIo, sentPrompt, usageEnv, codexReading } from "./helpers/fake-io.mjs";
 
 // The notices verbatim: these literals are the spec, so a wording change is a
@@ -209,7 +209,14 @@ test("the notice names at most 12 parts, and says so when the plan is longer", (
   const tail = told.slice(told.indexOf(READS_HEAD));
   equal(occurrences(tail, "  - C:/run/results/a.reads-"), 12);
   ok(tail.startsWith(readsBlock(files.slice(0, 12))), tail);
-  ok(tail.includes("more reads than this notice can list"), tail);
+  ok(tail.includes("additional read-plan parts are omitted from this notice"), tail);
+});
+
+test("a read-plan notice reports parts omitted past the ceiling", () => {
+  const files = Array.from({ length: READS_PART_CEILING }, (_, i) => `C:/run/part-${i + 1}.txt`);
+  const told = withLeafNotices("author text", { allowedTools: "Read,Grep,Glob" }, {}, "codex", files, 2);
+  ok(told.includes("additional read-plan parts are omitted"), told);
+  ok(told.includes(files.at(-1)), "all listed parts remain named");
 });
 
 test("a codex block carrying read-plan files strips whole, and is never told twice", () => {

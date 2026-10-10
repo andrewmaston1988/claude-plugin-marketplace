@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import { loadManifest } from "./helpers/repo-io.mjs";
 import { buildDispatch, windowsCommandLineLength } from "../src/dispatch.mjs";
 import { withLeafNotices } from "../src/leaf-notices.mjs";
+import { readFileCeiling, RESULT_PATH_MEASURE_LEN } from "../src/manifest-dispatch-budget.mjs";
 
 function tmp() {
   return mkdtempSync(join(tmpdir(), "swarm-cmdline-"));
@@ -141,9 +142,10 @@ test("win32 command-line check: a codex leaf with mustRead is measured with its 
       cwd: dir, originalCwd: dir, mustRead: ["a.mjs"],
     };
     // The ceiling the launch caps itself at, as paths: RESULT_PATH_MEASURE_LEN each.
-    const atCeiling = Array.from({ length: 12 }, () => "x".repeat(260));
+    const atCeiling = readFileCeiling();
+    ok(atCeiling.every((p) => p.length === RESULT_PATH_MEASURE_LEN));
     const len = (n, reads) => windowsCommandLineLength(
-      buildDispatch({ ...task, prompt: "x".repeat(n) }, withLeafNotices("x".repeat(n), task, cfg, "codex", reads), cfg).argv,
+      buildDispatch({ ...task, prompt: "x".repeat(n) }, withLeafNotices("x".repeat(n), task, cfg, "codex", reads, reads?.length ? 1 : 0), cfg).argv,
     );
     // One probe gives the line's cost, a second how much of it an all-x prompt accounts
     // for; 100 characters of headroom below the cap then lands the two cases either side.
