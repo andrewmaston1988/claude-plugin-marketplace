@@ -55,3 +55,15 @@ test("log line filter drops a trailing partial thinking_tokens event on end", ()
   filter.end();
   deepEqual(writeAll(written), Buffer.alloc(0));
 });
+test("log line filter writes a 4 MiB line fed in 1 KiB chunks intact as one line", () => {
+  const written = [];
+  const filter = createLogLineFilter((chunk) => written.push(Buffer.from(chunk)));
+  const line = Buffer.alloc(4 * 1024 * 1024, 0x61);
+  for (let offset = 0; offset < line.length; offset += 1024) {
+    filter.push(line.subarray(offset, offset + 1024));
+  }
+  filter.push(Buffer.from("\n"));
+  filter.end();
+  equal(written.length, 1);
+  deepEqual(written[0], Buffer.concat([line, Buffer.from("\n")]));
+});
