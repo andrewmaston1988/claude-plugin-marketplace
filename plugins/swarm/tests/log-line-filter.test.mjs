@@ -22,7 +22,7 @@ test("log line filter preserves non-thinking lines split across chunks byte-for-
   const filter = createLogLineFilter((chunk) => written.push(Buffer.from(chunk)));
   filter.push(Buffer.from('{"type":"assistant","message":{"text":"first'));
   filter.push(Buffer.from(' line"}}\n{"type":"result"'));
-  filter.push(Buffer.from('\n'));
+  filter.push(Buffer.from('}\n'));
   filter.end();
   deepEqual(writeAll(written), Buffer.from('{"type":"assistant","message":{"text":"first line"}}\n{"type":"result"}\n'));
 });
