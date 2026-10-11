@@ -18,6 +18,7 @@ import { isAgentless } from "../manifest.mjs";
 import * as defaultWorktree from "../worktree.mjs";
 import { runTask, classifyFailure, substituteTemplates } from "./run-task.mjs";
 import { tryParseJson, enforceLeafContract } from "./leaf-contract.mjs";
+import { enforceCommitted, UNCOMMITTED_WORK } from "./commit-gate.mjs";
 
 // A codex leaf's first command is usually a batch, and past the model-visible cap codex
 // shows the model only its first and last halves — the files it was told to read are
@@ -149,8 +150,10 @@ export function createLaunch(ctx) {
       // CORRECTION, not its prompt: re-sending the original makes it redo an
       // investigation it already finished. Keyed on the task definition — an edited
       // manifest is new spend — and on rawOutput, absent from rows written before it
-      // was kept.
-      const corrective = Boolean((prior?.schemaErrors?.length || prior?.coverageFailed) && prior.rawOutput != null
+      // was kept. An UNCOMMITTED_WORK failure rides the same path: its answer is done, the
+      // tree is dirty, and the commit gate below asks the resumed session to commit.
+      const corrective = Boolean((prior?.schemaErrors?.length || prior?.coverageFailed
+        || prior?.errorCode === UNCOMMITTED_WORK) && prior.rawOutput != null
         && prior.key === taskKey(task) && resumeId);
       let r;
       if (corrective) {
@@ -175,6 +178,21 @@ export function createLaunch(ctx) {
         if ((task.returns || task.mustRead) && r.ok) {
           r = await enforceLeafContract(task, r, taskCwd, plan.resultsDir, cfg, io, ctx.streamHooks(task), ctx.runtime, runTask);
         }
+      }
+
+      // The tree group's final link is measured here, before the result is built: a writer
+      // that ends with edits outside git history is failed, not recorded ok.
+      let collected = null;
+      if (wt && ctx.groupFinal.get(wtName) === task.id) {
+        const groupTaskIds = ctx.groupMembers.get(wtName);
+        const gate = await enforceCommitted(task, r, () => ctx.worktree.collect(task, cfg, wt, {
+          isChainFollower: (groupTaskIds?.length ?? 1) > 1,
+          isIntegrateSource: ctx.isIntegrateSourceId(task.id),
+        }), groupTaskIds, {
+          taskCwd, resultsDir: plan.resultsDir, cfg, io, hooks: ctx.streamHooks(task), runtime: ctx.runtime, runTask,
+        });
+        r = gate.r;
+        collected = gate.collected;
       }
 
       // Claude leaves record the REAL model id (from the init event) with the
@@ -232,6 +250,10 @@ export function createLaunch(ctx) {
       // A leaf that engaged with nothing it was required to read. Not a shortfall to
       // annotate: it never did the task. What a corrective re-run re-asks from.
       if (r.coverageFailed) result.coverageFailed = true;
+      if (r.errorCode === UNCOMMITTED_WORK) {
+        result.errorCode = UNCOMMITTED_WORK;
+        result.uncommitted = r.uncommitted;
+      }
       result.cwd = taskCwd;
       result.originalCwd = task.originalCwd;
       if (task.checkoutToplevel) result.checkoutToplevel = task.checkoutToplevel;
@@ -244,7 +266,7 @@ export function createLaunch(ctx) {
       ctx.memoryStopped.delete(task.id);
       const st = isMemoryStop ? "memory"
         : r.ok ? "ok"
-        : r.schemaErrors || r.coverageFailed || r.errorCode === "schema_error" ? "failed"
+        : r.schemaErrors || r.coverageFailed || r.errorCode === "schema_error" || r.errorCode === UNCOMMITTED_WORK ? "failed"
         : classifyFailure({ timedOut: r.timedOut, output: r.raw, stopped: ctx.stopRequested }, cfg.quotaPatterns);
       if (isMemoryStop) {
         // runTask's generic mid-stream message tells a reader not to kill or
@@ -272,16 +294,12 @@ export function createLaunch(ctx) {
       const parsed = tryParseJson(r.output);
       if (parsed !== undefined) result.outputJson = parsed;
 
-      if (wt && ctx.groupFinal.get(wtName) === task.id) {
-        const isChainFollower = (ctx.groupMembers.get(wtName)?.length ?? 1) > 1;
-        const collected = ctx.worktree.collect(task, cfg, wt, {
-          isChainFollower,
-          isIntegrateSource: ctx.isIntegrateSourceId(task.id),
-        });
+      if (collected) {
         result.worktree = collected;
         if (collected.kept) ctx.worktreesKept.push({
           name: wt.name ?? wtName, branch: collected.branch,
           path: collected.path, diffstat: collected.diffstat,
+          uncommitted: collected.uncommitted,
           taskIds: ctx.groupMembers.get(wtName),
         });
       } else if (wt) {

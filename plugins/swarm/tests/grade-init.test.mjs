@@ -131,3 +131,12 @@ test("grade --init writes pre-filled rows and still refuses to be appended unfil
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("noteFor states an UNCOMMITTED_WORK failure from the engine's measurement", () => {
+  const note = noteFor({
+    ok: false, errorCode: "UNCOMMITTED_WORK", uncommitted: { files: 2, commitsAhead: 1 },
+    output: "UNCOMMITTED_WORK: 2 files left uncommitted", rawOutput: "TL;DR: finished everything",
+  });
+  ok(note.includes("2 uncommitted files") && note.includes("1 commit ahead"), note);
+  ok(!note.includes("finished everything"), "the leaf's own claim is not the note");
+});

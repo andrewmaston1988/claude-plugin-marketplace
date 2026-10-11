@@ -11,11 +11,11 @@ test("collect counts every path in an untracked directory and commits ahead", ()
   const results = mkdtempSync(join(tmpdir(), "swarm-wt-uncommitted-"));
   try {
     const wt = prepareIsolation({ id: "impl", originalCwd: repo }, CFG, results, ADD(repo));
+    writeFileSync(join(wt.path, "committed.txt"), "commit\n");
+    commitAll(wt.path, "leaf commit");
     mkdirSync(join(wt.path, "new-dir", "nested"), { recursive: true });
     writeFileSync(join(wt.path, "new-dir", "nested", "a.txt"), "a\n");
     writeFileSync(join(wt.path, "new-dir", "b.txt"), "b\n");
-    writeFileSync(join(wt.path, "committed.txt"), "commit\n");
-    commitAll(wt.path, "leaf commit");
 
     const result = collect({ id: "impl" }, CFG, wt);
     equal(result.kept, true);

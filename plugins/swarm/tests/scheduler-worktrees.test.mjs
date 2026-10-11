@@ -415,7 +415,8 @@ test("rerun resumes an UNCOMMITTED_WORK leaf on the commit correction in its kep
       },
       collect: (t, cfg, wt) => {
         collectCalls.push(t.id);
-        const uncommitted = collectCalls.length < 3 ? { files: 1, commitsAhead: 0 } : { files: 0, commitsAhead: 1 };
+        // collects 1-2 are the first run (measure, re-measure); 3 is the re-run's opening measure
+        const uncommitted = collectCalls.length < 4 ? { files: 1, commitsAhead: 0 } : { files: 0, commitsAhead: 1 };
         return { kept: true, branch: wt.branch, path: wt.path, diffstat: "1 file changed", uncommitted };
       },
     },

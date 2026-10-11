@@ -248,6 +248,11 @@ export function formatKeptWorktrees(worktreesKept, { resultsDir, engine } = {}) 
     // the session merging it knows whose work is on there.
     const chain = wt.taskIds?.length > 1 ? ` ${dim(`(${wt.taskIds.join(" → ")})`)}` : "";
     lines.push(`  ${bold(wt.name)}: ${magenta(wt.branch)} at ${wt.path}${chain}`);
+    // A writer's tree with edits outside git history: loud, with the counts a merge needs.
+    const u = wt.uncommitted;
+    if (u?.files > 0) {
+      lines.push(`    ${red("✗")} ${u.files} uncommitted file${u.files === 1 ? "" : "s"}, ${u.commitsAhead} commit${u.commitsAhead === 1 ? "" : "s"} ahead — a merge takes the commits only`);
+    }
   }
   if (resultsDir && engine) {
     lines.push(dim(`prune when done: node ${engine} prune ${resultsDir}`));
