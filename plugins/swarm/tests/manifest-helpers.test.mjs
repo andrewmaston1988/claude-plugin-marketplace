@@ -19,9 +19,9 @@ test("isUnderRoot: boundary-aware, separator-tolerant", () => {
 // io.repoToplevel stub: pretends `cwd` sits inside a repo whose root is `top`,
 // or returns null (git failed) so guardFor falls back to basename(cwd).
 function ioWithToplevel(top) {
-  return { repoToplevel: () => top };
+  return { repoToplevel: () => top, repoLookup: () => top ? { repo: top } : { none: "not-a-repo" } };
 }
-const ioNoGit = { repoToplevel: () => null };
+const ioNoGit = { repoToplevel: () => null, repoLookup: () => ({ none: "not-a-repo" }) };
 
 test("guardFor: no projects -> undefined; matching repo name -> its command; unknown name -> undefined; Windows case-insensitive", () => {
   const repo = join(tmpdir(), "myrepo");

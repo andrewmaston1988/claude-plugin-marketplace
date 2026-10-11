@@ -168,7 +168,7 @@ test("governance: the run-level gate refuses before any guard hook is spawned", 
     const p = writeManifest(repo, { tasks: [claudeTask()] });
     const errs = errorsOf(() => loadManifest(p, cfg, repo, {
       io: {
-        repoToplevel: () => repo,
+        repoToplevel: () => repo, repoLookup: () => ({ repo }),
         spawnSync: (cmd) => { spawned.push(cmd); return { status: 0, stderr: "" }; },
         stdout: () => {},
       },
@@ -485,7 +485,7 @@ test("governance: a legacy config with only per-provider keys dispatches unchang
 // own manifest cwd stays an allowed repo in every case.
 const govIo = (home, repoOfTree) => ({
   home,
-  repoToplevel: (p) => (isUnderRoot(p, home) ? repoOfTree : p),
+  repoToplevel: (p) => (isUnderRoot(p, home) ? repoOfTree : p), repoLookup: (p) => ({ repo: isUnderRoot(p, home) ? repoOfTree : p }),
 });
 
 // G1 — the literal path is still the first test: a cwd already under a root must not
@@ -500,7 +500,7 @@ test("governance G1: a cwd already under a root passes without probing git for i
     const cfg = { ...CFG, providers: { ollama: { enabled: true, allowedRoots: [repo] } } };
     const p = writeManifest(repo, { tasks: [ollamaTask({ cwd: inside })] });
     const plan = loadManifest(p, cfg, repo, {
-      io: { home: join(repo, "no-such-home"), repoToplevel: (x) => { probed.push(x); return repo; } },
+      io: { home: join(repo, "no-such-home"), repoToplevel: (x) => { probed.push(x); return repo; }, repoLookup: () => ({ repo }) },
     });
     equal(plan.tasks[0].cwd, inside);
     ok(!probed.includes(inside), `governance probed git for an in-root cwd: ${probed.join("|")}`);

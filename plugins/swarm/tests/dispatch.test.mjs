@@ -1,10 +1,11 @@
 import { test } from "node:test";
 import { equal, deepEqual, ok, throws, match } from "node:assert/strict";
-import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
+import { mkdtempSync, writeFileSync, rmSync, mkdirSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { buildDispatch, toSpawnable, resolveExecutable, windowsCommandLineLength } from "../src/dispatch.mjs";
 import { loadManifest } from "./helpers/repo-io.mjs";
+import * as leafGuard from "../src/manifest-leaf-guard.mjs";
 
 const CFG = {
   provider: {
@@ -489,10 +490,37 @@ test("dispatch: a swarm worktree of an allowed repo dispatches; one of a strange
     const cfg = { allowedRoots: [root], providers: { claude: { enabled: true } } };
     const wt = join(home, "runs", "repo", "run1", "wt-a");
     const base = task({ cwd: wt, originalCwd: wt });
-    const gov = (repo) => ({ _governanceIo: { home, repoToplevel: () => repo } });
+    const gov = (repo) => ({ _governanceIo: { home, repoToplevel: () => repo, repoLookup: () => repo ? { repo } : { none: "not-a-repo" } } });
     equal(buildDispatch(base, "p", cfg, gov(root)).argv[0], "claude");
     throws(() => buildDispatch(base, "p", cfg, gov(resolve(root, "..", "swarm-stranger-repo"))), /governance/i);
     throws(() => buildDispatch(base, "p", cfg, gov(null)), /governance/i);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("dispatch: a real repo lookup spawn failure carries a retryable git error code", () => {
+  const root = mkdtempSync(join(tmpdir(), "swarm-dispatch-root-"));
+  const home = mkdtempSync(join(tmpdir(), "swarm-dispatch-home-"));
+  const cwd = join(home, "runs", "kept-worktree");
+  mkdirSync(cwd, { recursive: true });
+  try {
+    let calls = 0;
+    const spawn = () => { calls++; return { error: Object.assign(new Error("spawn EAGAIN"), { code: "EAGAIN" }) }; };
+    const cfg = { allowedRoots: [root], providers: { claude: { enabled: true } } };
+    const gov = {
+      _governanceIo: {
+        home,
+        repoToplevel: (path) => path === root ? root : leafGuard.realRepoToplevel(path),
+        repoLookup: (path) => leafGuard.repoLookup(path, spawn),
+      },
+    };
+    throws(
+      () => buildDispatch(task({ cwd, originalCwd: cwd }), "p", cfg, gov),
+      (error) => error.code === "GOVERNANCE_LOOKUP_FAILED" && /git/i.test(error.message),
+    );
+    equal(calls, 1, "the real repo lookup receives the injected spawn");
   } finally {
     rmSync(root, { recursive: true, force: true });
     rmSync(home, { recursive: true, force: true });

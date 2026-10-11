@@ -1,6 +1,6 @@
 import { allowedRootsFor } from "./providers.mjs";
 import { isUnderRoot } from "./roots.mjs";
-import { realRepoToplevel } from "./manifest-leaf-guard.mjs";
+import { realRepoToplevel, repoLookup } from "./manifest-leaf-guard.mjs";
 import { swarmHome } from "./config.mjs";
 // From the leaf, not manifest.mjs: importing it from the loader made governance
 // and the loader mutually dependent, and the loader's split pulled
@@ -18,17 +18,27 @@ function unconfigured(provider, rootLabel) {
 }
 // The one root test for all three gates (manifest, dispatch, ask). A swarm-made worktree
 // sits outside every root: judge it by the repo it was cut from, so each provider's roots
-// still bind. repoToplevel spawns git, so ask only inside the home.
+// still bind.
 export function cwdAllowed(cwd, roots, io) {
   const inRoots = (p) => roots.some((root) => isUnderRoot(p, root));
-  if (inRoots(cwd)) return true;
-  if (!isUnderRoot(cwd, io.home)) return false;
-  const repo = io.repoToplevel(cwd);
-  return Boolean(repo) && inRoots(repo);
+  if (inRoots(cwd)) return { reason: "allowed" };
+  if (!isUnderRoot(cwd, io.home)) return { reason: "outside-roots" };
+  const lookup = io.repoLookup(cwd);
+  if (lookup.failed) return { reason: "lookup-failed", error: lookup.failed };
+  return lookup.repo && inRoots(lookup.repo)
+    ? { reason: "allowed" }
+    : { reason: "outside-roots" };
 }
 
-export const defaultGovernanceIo = () => ({ home: swarmHome(), repoToplevel: realRepoToplevel });
+export const defaultGovernanceIo = () => ({ home: swarmHome(), repoToplevel: realRepoToplevel, repoLookup });
 
+function waitForLookupRetry() {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 1000);
+}
+
+function lookupError(label, provider, model, cwd, error) {
+  return label + ": git repo lookup failed for provider '" + provider + "' model '" + model + "' at cwd '" + cwd + "' — " + error;
+}
 // Every provider, Claude included — operator, 2026-09-21: allowedRoots is the single
 // statement of where swarm may run anything. The old `claude` early return made the roots
 // list a non-Anthropic policy, which left the Claude leaves that do the writing ungated.
@@ -41,14 +51,21 @@ export function checkGovernance(provider, model, effCwd, l, cfg, errors, io) {
     errors.push(`${l}: ${unconfigured(provider, deniedBy)}`);
     return;
   }
-  if (!cwdAllowed(effCwd, roots, io)) {
-    errors.push(
-      `${l}: provider '${provider}' model '${model}' and its cwd '${effCwd}' is not under any ` +
-      `${deniedBy} entry — ${provider === "claude"
-        ? `swarm runs nothing outside its configured roots`
-        : `blocked by data governance policy (only Anthropic is covered by the data agreement)`}. ` +
-      `Configure ${deniedBy} in ~/.swarm/config.json to permit this provider there.`
-    );
+  let result = cwdAllowed(effCwd, roots, io);
+  if (result.reason === "lookup-failed") {
+    waitForLookupRetry();
+    result = cwdAllowed(effCwd, roots, io);
+  }
+  if (result.reason === "lookup-failed") {
+    errors.push(lookupError(l, provider, model, effCwd, result.error));
+  } else if (result.reason === "outside-roots") {
+    const denial = l + ": provider '" + provider + "' model '" + model + "' and its cwd '" + effCwd +
+      "' is not under any " + deniedBy + " entry — " +
+      (provider === "claude"
+        ? "swarm runs nothing outside its configured roots"
+        : "blocked by data governance policy (only Anthropic is covered by the data agreement)") +
+      ". Configure " + deniedBy + " in ~/.swarm/config.json to permit this provider there.";
+    errors.push(denial);
   }
 }
 

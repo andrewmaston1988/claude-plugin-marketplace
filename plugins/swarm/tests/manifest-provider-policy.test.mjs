@@ -102,7 +102,7 @@ test("provider policy: Codex takes settings.env, refuses any other settings key,
       projects: [{ name: basename(dir), hooks: { preToolUse: "guard-cmd" } }],
     };
     const stub = {
-      io: { repoToplevel: () => dir, spawnSync: () => ({ status: 0, stderr: "" }), stdout: () => {}, platform: process.platform },
+      io: { repoToplevel: () => dir, repoLookup: () => ({ repo: dir }), spawnSync: () => ({ status: 0, stderr: "" }), stdout: () => {}, platform: process.platform },
     };
     // `env` is the one key with a Codex route — it reaches the spawn env, not a settings file.
     const envOnly = writeManifest(dir, {
@@ -125,7 +125,7 @@ test("provider policy: Codex takes settings.env, refuses any other settings key,
     }, "plain.json");
     const lines = [];
     const plan = loadManifest(plain, cfg, dir, {
-      io: { repoToplevel: () => dir, spawnSync: () => ({ status: 0, stderr: "" }), stdout: (l) => lines.push(l), platform: process.platform },
+      io: { repoToplevel: () => dir, repoLookup: () => ({ repo: dir }), spawnSync: () => ({ status: 0, stderr: "" }), stdout: (l) => lines.push(l), platform: process.platform },
     });
     equal(plan.tasks[0].provider, "codex");
     // A Codex leaf runs the guard only once swarm's hooks are trusted; the armed line says so.

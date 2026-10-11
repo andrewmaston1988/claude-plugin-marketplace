@@ -16,7 +16,7 @@ import { CFG, writeManifest, tmp, errorsOf, claudeTask, writerTask } from "./hel
 // A stub io skips the real spawnSync/git — the probe/print/match machinery is
 // under test, not any actual guard command or repo.
 function stubIo(over = {}) {
-  return { spawnSync: () => ({ status: 0, stderr: "" }), stdout: () => {}, ...over };
+  return { spawnSync: () => ({ status: 0, stderr: "" }), stdout: () => {}, repoLookup: () => ({ none: "not-a-repo" }), ...over };
 }
 
 test("normalizeTasks: a task under a projects entry matching its repo name carries leafGuard; false opts out; any other value errors", () => {
@@ -50,7 +50,7 @@ test("normalizeTasks: the repo name is resolved via io.repoToplevel (git seam), 
     // match that reported repo's basename, not dir's own basename.
     const cfg = { ...CFG, provider: { allowedRoots: [dir, join(dir, "..", "reported-repo")] }, projects: [{ name: "reported-repo", hooks: { preToolUse: "guard-cmd" } }] };
     const p = writeManifest(dir, { tasks: [claudeTask({ cwd: "." })] });
-    const plan = loadManifest(p, cfg, dir, { io: stubIo({ repoToplevel: () => join(dir, "..", "reported-repo") }) });
+    const plan = loadManifest(p, cfg, dir, { io: stubIo({ repoToplevel: () => join(dir, "..", "reported-repo"), repoLookup: () => ({ repo: join(dir, "..", "reported-repo") }) }) });
     deepEqual(plan.tasks[0].leafGuard, { name: "reported-repo", command: "guard-cmd" });
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });

@@ -51,9 +51,18 @@ export async function askLeaf({ resultsDir, taskId, question, model, provider, c
   {
     const govCwd = prior.originalCwd || cwd;
     const { roots, deniedBy } = allowedRootsFor(cfg, identity.provider);
-    if (!cwdAllowed(govCwd, roots || [], _governanceIo)) {
+    let result = cwdAllowed(govCwd, roots || [], _governanceIo);
+    if (result.reason === "lookup-failed") {
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 1000);
+      result = cwdAllowed(govCwd, roots || [], _governanceIo);
+    }
+    if (result.reason === "lookup-failed") {
+      throw new Error("governance: git repo lookup failed for cwd '" + govCwd + "' — " + result.error);
+    }
+    if (result.reason === "outside-roots") {
       throw new Error(
-        `governance: provider '${identity.provider}' model '${askModel}' and '${govCwd}' is not under any ${deniedBy} entry`
+        "governance: provider '" + identity.provider + "' model '" + askModel +
+        "' and '" + govCwd + "' is not under any " + deniedBy + " entry"
       );
     }
   }

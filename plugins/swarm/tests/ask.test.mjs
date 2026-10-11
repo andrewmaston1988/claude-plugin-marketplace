@@ -11,6 +11,7 @@ import {
 } from "../src/results.mjs";
 import { readRun } from "../src/runlog.mjs";
 import { fakeSpawnFactory, makeIo, promptOf, STREAM } from "./helpers/fake-io.mjs";
+import * as leafGuard from "../src/manifest-leaf-guard.mjs";
 
 const CFG = {
   provider: { mode: "env", url: "http://127.0.0.1:1", authToken: "ollama", allowedRoots: [] },
@@ -398,7 +399,7 @@ test("askLeaf: a leaf approved in a swarm worktree of an allowed repo can be ask
     const spawn = fakeSpawnFactory(() => ({ output: STREAM }));
     const r = await askLeaf({ resultsDir: dir, taskId: "leaf", question: "?", cfg, io: makeIo(spawn) });
     equal(r.answer, "the follow-up answer");
-    const stranger = { home, repoToplevel: () => null };
+    const stranger = { home, repoToplevel: () => null, repoLookup: () => ({ none: "not-a-repo" }) };
     await rejects(() => askLeaf({ resultsDir: dir, taskId: "leaf", question: "?", cfg, io: makeIo(spawn), _governanceIo: stranger }), /governance/i);
   } finally {
     if (prevHome === undefined) delete process.env.SWARM_HOME; else process.env.SWARM_HOME = prevHome;
@@ -436,6 +437,27 @@ test("askLeaf: run.log, readRun and summary.json all read the leaf's cumulative 
     equal(rows.leaf, 7, "run.log / readRun: prior 5 + ask 2");
     equal(rows.other, 7, "an untouched leaf keeps its turns across the ask's run-start");
     equal(readSummary(dir).tasks.find((t) => t.id === "leaf").numTurns, 7, "summary.json: not double-counted");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("askLeaf: a failed real repo lookup retries once and reports git failure", async () => {
+  const dir = setup({ originalCwd: tmpdir() });
+  try {
+    let calls = 0;
+    const spawnLookup = () => { calls++; return { error: Object.assign(new Error("spawn EAGAIN"), { code: "EAGAIN" }) }; };
+    const governanceIo = {
+      home: tmpdir(),
+      repoToplevel: leafGuard.realRepoToplevel,
+      repoLookup: (cwd) => leafGuard.repoLookup(cwd, spawnLookup),
+    };
+    const cfg = { ...CFG, providers: { claude: { enabled: true, allowedRoots: [join(tmpdir(), "swarm-ask-unrelated-root")] } } };
+    await rejects(
+      () => askLeaf({ resultsDir: dir, taskId: "leaf", question: "?", cfg, io: makeIo(fakeSpawnFactory()), _governanceIo: governanceIo }),
+      (error) => /git.*lookup.*fail|lookup.*git.*fail/i.test(error.message),
+    );
+    equal(calls, 2, "ask retries the failed repo lookup exactly once");
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
