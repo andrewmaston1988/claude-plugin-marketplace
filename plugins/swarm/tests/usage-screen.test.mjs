@@ -31,7 +31,7 @@ test("the hero names the provider with the MOST left this session, as percent le
   assert.match(html, /class="uhero[^"]*"[\s\S]*?<b>97%<\/b>/, "3% used is 97% left");
 });
 
-test("Week reads anthropic's weekly_* buckets, the most-consumed one winning", () => {
+test("Week reads the most-consumed unscoped weekly bucket", () => {
   const html = loadPerfViews().usageScreen(READABLE, H, "week");
   assert.match(html, /MOST LEFT THIS WEEK[\s\S]*?OLLAMA/);
   assert.match(html, /<b>72%<\/b>/, "ollama's plain weekly reads");
@@ -39,6 +39,21 @@ test("Week reads anthropic's weekly_* buckets, the most-consumed one winning", (
 });
 
 // Operator, 2026-09-24: alphabetical — the hero already carries the ranking.
+test("Week reads weekly_all instead of a more-consumed Fable weekly bucket", () => {
+  const data = { usages: [usage("anthropic", [
+    lim("weekly_all", 38), lim("weekly_scoped", 67, { scope: "Fable" }),
+  ])], errors: {} };
+  const html = loadPerfViews().usageScreen(data, H, "week");
+  assert.match(html, /class="nm">(?:<svg[\s\S]*?<\/svg>)?anthropic<\/span><span class="val ok">62%/, "38% used account-wide is 62% left");
+});
+
+test("an exhausted account ignores a spent scoped weekly bucket", () => {
+  const data = { usages: [usage("anthropic", [
+    lim("session", 100), lim("weekly_all", 38), lim("weekly_scoped", 100, { scope: "Fable" }),
+  ], { state: "exhausted" })], errors: {} };
+  const html = loadPerfViews().usageScreen(data, H, "week");
+  assert.match(html, /class="nm">(?:<svg[\s\S]*?<\/svg>)?anthropic<\/span><span class="val ok">62%/, "Fable exhaustion does not zero the account-wide week");
+});
 test("one card per provider in alphabetical order, each with its percent left and a bar", () => {
   const html = loadPerfViews().usageScreen(LIVE, H, "session");
   assert.equal(pcards(html).length, 3);
