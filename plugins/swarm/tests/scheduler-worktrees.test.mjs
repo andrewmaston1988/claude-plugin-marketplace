@@ -348,3 +348,137 @@ test("non-Claude leaf keeps its manifest model; no modelAlias", async () => {
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("dirty writer gets one commit re-ask and stays ok when collection becomes clean", async () => {
+  const dir = tmp();
+  const collects = [];
+  const spawn = fakeSpawnFactory((call, i) => ({ output: streamOut(i ? "committed" : "initial", "sess-commit") }));
+  const io = makeIo(spawn, {
+    worktree: {
+      prepareIsolation: (t, cfg, resultsDir) => ({ path: join(resultsDir, "wt-impl"), branch: "swarm/impl", name: "impl", head: "h", repo: resultsDir, reused: false }),
+      collect: (t, cfg, wt) => {
+        const uncommitted = collects.length++ === 0 ? { files: 2, commitsAhead: 0 } : { files: 0, commitsAhead: 1 };
+        return { kept: true, branch: wt.branch, path: wt.path, diffstat: "2 files changed", uncommitted };
+      },
+    },
+  });
+  try {
+    const p = plan(dir, [task("impl", { worktreeName: "impl", allowedTools: "Read,Edit,Bash" })]);
+    const r = await runPlan(p, CFG, io);
+    equal(r.summary.tasks[0].state, "ok");
+    equal(spawn.calls.length, 2, "one original turn plus exactly one commit re-ask");
+    ok(sentPrompt(spawn.calls[1]).includes("2 files are uncommitted in your tree"), sentPrompt(spawn.calls[1]));
+    equal(readResult(p.resultsDir, "impl").uncommitted, undefined, "a clean recovery has no failure field");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("writer still dirty after its commit re-ask fails with UNCOMMITTED_WORK and keeps raw output", async () => {
+  const dir = tmp();
+  const collectCalls = [];
+  const spawn = fakeSpawnFactory((call, i) => ({ output: streamOut(i ? "still editing" : "original answer", "sess-dirty") }));
+  const io = makeIo(spawn, {
+    worktree: {
+      prepareIsolation: (t, cfg, resultsDir) => ({ path: join(resultsDir, "wt-impl"), branch: "swarm/impl", name: "impl", head: "h", repo: resultsDir, reused: false }),
+      collect: (t, cfg, wt) => {
+        collectCalls.push(t.id);
+        return { kept: true, branch: wt.branch, path: wt.path, diffstat: "2 files changed", uncommitted: { files: 2, commitsAhead: 1 } };
+      },
+    },
+  });
+  try {
+    const p = plan(dir, [task("impl", { worktreeName: "impl", allowedTools: "Read,Edit,Bash" })]);
+    const r = await runPlan(p, CFG, io);
+    equal(r.summary.tasks[0].state, "failed");
+    const result = readResult(p.resultsDir, "impl");
+    equal(result.errorCode, "UNCOMMITTED_WORK");
+    deepEqual(result.uncommitted, { files: 2, commitsAhead: 1 });
+    equal(result.rawOutput, "original answer");
+    equal(spawn.calls.length, 2);
+    equal(collectCalls.length, 2);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("rerun resumes an UNCOMMITTED_WORK leaf on the commit correction in its kept tree", async () => {
+  const dir = tmp();
+  const resets = [];
+  const collectCalls = [];
+  const spawn = fakeSpawnFactory((call, i) => ({ output: streamOut(i ? "corrected" : "first answer", "sess-resume") }));
+  const io = makeIo(spawn, {
+    worktree: {
+      prepareIsolation: (t, cfg, resultsDir, opts) => {
+        resets.push(opts.reset);
+        return { path: join(resultsDir, "wt-impl"), branch: "swarm/impl", name: "impl", head: "h", repo: resultsDir, reused: collectCalls.length > 0 };
+      },
+      collect: (t, cfg, wt) => {
+        collectCalls.push(t.id);
+        const uncommitted = collectCalls.length < 3 ? { files: 1, commitsAhead: 0 } : { files: 0, commitsAhead: 1 };
+        return { kept: true, branch: wt.branch, path: wt.path, diffstat: "1 file changed", uncommitted };
+      },
+    },
+  });
+  try {
+    const p = plan(dir, [task("impl", { worktreeName: "impl", allowedTools: "Read,Edit,Bash" })]);
+    const first = await runPlan(p, CFG, io);
+    equal(first.summary.tasks[0].state, "failed");
+    const second = await runPlan(p, CFG, io);
+    equal(second.summary.tasks[0].state, "ok");
+    equal(resets.at(-1), false, "resume must preserve the failed leaf's tree");
+    equal(spawn.calls.length, 3);
+    ok(sentPrompt(spawn.calls[2]).includes("uncommitted in your tree"), sentPrompt(spawn.calls[2]));
+    ok((spawn.calls[2].args || spawn.calls[2].argv).includes("sess-resume"), "re-run resumes the recorded leaf session");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("only the final chain link is checked and its correction names every group task", async () => {
+  const dir = tmp();
+  const collected = [];
+  const spawn = fakeSpawnFactory((call, i) => ({ output: streamOut(`answer ${i}`, "sess-chain") }));
+  const io = makeIo(spawn, {
+    worktree: {
+      prepareIsolation: (t, cfg, resultsDir) => ({ path: join(resultsDir, "wt-feat"), branch: "swarm/feat", name: "feat", head: "h", repo: resultsDir, reused: t.id !== "first" }),
+      collect: (t, cfg, wt) => {
+        collected.push(t.id);
+        return { kept: true, branch: wt.branch, path: wt.path, diffstat: "1 file changed", uncommitted: collected.length === 1 ? { files: 1, commitsAhead: 0 } : { files: 0, commitsAhead: 1 } };
+      },
+    },
+  });
+  try {
+    const p = plan(dir, [
+      task("first", { worktreeName: "feat", allowedTools: "Read,Edit,Bash" }),
+      task("last", { after: ["first"], worktreeName: "feat", allowedTools: "Read,Edit,Bash" }),
+    ]);
+    const r = await runPlan(p, CFG, io);
+    deepEqual(collected, ["last", "last"], "only the final link is collected, including its re-measurement");
+    equal(spawn.calls.length, 3, "the chain's final writer alone gets one correction");
+    const correction = sentPrompt(spawn.calls[2]);
+    ok(correction.includes("first") && correction.includes("last"), correction);
+    equal(r.summary.tasks.find((row) => row.id === "first").state, "ok");
+    equal(r.summary.tasks.find((row) => row.id === "last").state, "ok");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("clean committed tree remains ok without a top-level uncommitted failure field", async () => {
+  const dir = tmp();
+  try {
+    const io = makeIo(fakeSpawnFactory(() => ({ output: streamOut("clean result", "sess-clean") })), {
+      worktree: {
+        prepareIsolation: (t, cfg, resultsDir) => ({ path: join(resultsDir, "wt-clean"), branch: "swarm/clean", name: "clean", head: "h", repo: resultsDir, reused: false }),
+        collect: (t, cfg, wt) => ({ kept: true, branch: wt.branch, path: wt.path, diffstat: "1 file changed", uncommitted: { files: 0, commitsAhead: 1 } }),
+      },
+    });
+    const p = plan(dir, [task("clean", { worktreeName: "clean", allowedTools: "Read,Edit,Bash" })]);
+    const r = await runPlan(p, CFG, io);
+    equal(r.summary.tasks[0].state, "ok");
+    equal(readResult(p.resultsDir, "clean").uncommitted, undefined);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

@@ -66,3 +66,11 @@ test("formatClosing prints the prune hint once worktrees are kept and resultsDir
   const nothingKept = formatClosing({ summaryPath: "S/summary.json", resultsDir: "R", engine: "E/swarm.mjs" });
   ok(!nothingKept.includes("prune when done"), nothingKept);
 });
+
+test("formatClosing prints uncommitted file and commit counts for kept worktrees", () => {
+  const out = formatClosing({ worktreesKept: [
+    { name: "impl", branch: "swarm/impl", path: "R/wt-impl", uncommitted: { files: 3, commitsAhead: 2 } },
+  ] });
+  ok(/3.*uncommitted/i.test(out), out);
+  ok(/2.*commit.*ahead/i.test(out), out);
+});

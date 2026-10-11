@@ -61,7 +61,7 @@ export function fakeWorktree(collectCalls) {
     },
     collect: (t, cfg, wt) => {
       collectCalls.push({ taskId: t.id, name: wt.name });
-      return { kept: true, branch: wt.branch, path: wt.path, diffstat: "1 file changed" };
+      return { kept: true, branch: wt.branch, path: wt.path, diffstat: "1 file changed", uncommitted: { files: 0, commitsAhead: 0 } };
     },
   };
 }
