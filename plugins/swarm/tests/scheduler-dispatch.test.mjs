@@ -514,7 +514,6 @@ test("governance lookup failure retries with bounded backoff, then keeps the git
     const providerRegistry = new Proxy(base, {
       get(target, key) {
         if (key === "resolve") return (...args) => {
-          resolves++;
           const identity = target.resolve(...args);
           if (new Error().stack.includes("dispatch.mjs")) {
             lookupFailures++;
