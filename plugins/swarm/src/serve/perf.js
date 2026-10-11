@@ -331,8 +331,14 @@
       const span = spanMins(l.window);
       return span != null && (span >= 1440) === week;
     };
+    // A bucket carrying a scope (a single model's limit) constrains that model only; it stands
+    // in only when the provider reported no account-wide bucket. Codex scopes every bucket.
+    const accountLimits = (limits) => {
+      const unscoped = limits.filter((l) => !l.scope);
+      return unscoped.length ? unscoped : limits;
+    };
     // Several buckets of one window: the most-consumed is the one that stops work.
-    const limitOf = (u) => (u.limits || []).filter(fits).sort((a, b) => b.percent - a.percent)[0] || null;
+    const limitOf = (u) => accountLimits(u.limits || []).filter(fits).sort((a, b) => b.percent - a.percent)[0] || null;
     // How long a limit's own window runs, in minutes — the reach a spent one has, so
     // `reading` can zero its own tab and any shorter one. The named kinds come first
     // (each provider's own vocabulary), else codex's window string; null is unplaceable.
@@ -365,7 +371,7 @@
       // already says it ran out.
       const tabSpan = week ? 1440 : 0;
       const spent = p.usage?.state === "exhausted"
-        ? (p.usage.limits || []).filter((l) => l.percent >= 100 && (spanOf(l) ?? Infinity) >= tabSpan)
+        ? accountLimits(p.usage.limits || []).filter((l) => l.percent >= 100 && (spanOf(l) ?? Infinity) >= tabSpan)
         : [];
       if (spent.length) {
         const back = spent.filter((l) => l.resetsAt).map((l) => l.resetsAt).sort().pop();
