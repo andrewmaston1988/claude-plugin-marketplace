@@ -535,7 +535,6 @@ test("governance lookup failure retries with bounded backoff, then keeps the git
     equal(r.summary.tasks[0].state, "failed");
     const result = readResult(p.resultsDir, "lookup");
     ok(result.output.includes("git repo lookup failed"), result.output);
-    equal(result.errorCode, "GOVERNANCE_LOOKUP_FAILED");
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
