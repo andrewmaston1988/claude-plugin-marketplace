@@ -16,7 +16,7 @@ test("run home: a non-repo dispatch is refused with the cd <repo> instruction", 
   const dir = tmp();
   try {
     const p = writeManifest(dir, { tasks: [claudeTask()] });
-    const errs = errorsOf(() => loadManifest(p, CFG, dir, { io: { repoToplevel: () => null } }));
+    const errs = errorsOf(() => loadManifest(p, CFG, dir, { io: { repoToplevel: () => null, repoLookup: () => ({ none: "not-a-repo" }) } }));
     ok(errs.some((e) => e.includes("is not inside a git repository") && e.includes('swarm run "')), errs.join("\n"));
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
@@ -25,7 +25,7 @@ test("run home: a non-repo dispatch is refused for a registry manifest too", () 
   const dir = tmp();
   try {
     const p = writeManifest(dir, { tasks: [claudeTask()] });
-    const errs = errorsOf(() => loadManifest(p, CFG, dir, { fromRegistry: true, io: { repoToplevel: () => null } }));
+    const errs = errorsOf(() => loadManifest(p, CFG, dir, { fromRegistry: true, io: { repoToplevel: () => null, repoLookup: () => ({ none: "not-a-repo" }) } }));
     ok(errs.some((e) => e.includes("is not inside a git repository")), errs.join("\n"));
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
@@ -49,7 +49,7 @@ test("run home: a subdirectory dispatch is filed under the repo toplevel's key",
       const sub = join(dir, "sub");
       mkdirSync(sub);
       const p = writeManifest(dir, { tasks: [claudeTask()] }, "m.json");
-      const plan = loadManifest(p, CFG_PROJ, sub, { io: { repoToplevel: () => "C:/proj/repo" } });
+      const plan = loadManifest(p, CFG_PROJ, sub, { io: { repoToplevel: () => "C:/proj/repo", repoLookup: () => ({ repo: "C:/proj/repo" }) } });
       equal(plan.resultsDir, join(dir, "home", "runs", "C--proj-repo", "m-1"));
     });
   } finally { rmSync(dir, { recursive: true, force: true }); }
@@ -63,7 +63,7 @@ test("run home: dispatches from the toplevel and a subdirectory resume the same 
       mkdirSync(sub);
       mkdirSync(join(dir, "home", "runs", "C--proj-repo", "m-1"), { recursive: true });
       const p = writeManifest(dir, { tasks: [claudeTask()] }, "m.json");
-      const io = { repoToplevel: () => "C:/proj/repo" };
+      const io = { repoToplevel: () => "C:/proj/repo", repoLookup: () => ({ repo: "C:/proj/repo" }) };
       const want = join(dir, "home", "runs", "C--proj-repo", "m-1");
       equal(loadManifest(p, CFG_PROJ, dir, { io }).resultsDir, want);
       equal(loadManifest(p, CFG_PROJ, sub, { io }).resultsDir, want);
@@ -83,9 +83,9 @@ test("run home: allowedRoots bounds the repo for a Claude-only manifest too", ()
       const cfg = { ...CFG, providers: { claude: { enabled: true, allowedRoots: [root] } } };
       const p = writeManifest(dir, { tasks: [claudeTask({ cwd: inside })] });
       const outside = join(dir, "elsewhere");
-      const errs = errorsOf(() => loadManifest(p, cfg, inside, { io: { repoToplevel: () => outside } }));
+      const errs = errorsOf(() => loadManifest(p, cfg, inside, { io: { repoToplevel: () => outside, repoLookup: () => ({ repo: outside }) } }));
       ok(errs.some((e) => e.includes(`this run's repo '${outside}'`) && e.includes("providers.claude.allowedRoots") && e.includes(root)), errs.join("\n"));
-      loadManifest(p, cfg, inside, { io: { repoToplevel: () => inside } });
+      loadManifest(p, cfg, inside, { io: { repoToplevel: () => inside, repoLookup: () => ({ repo: inside }) } });
     });
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
@@ -98,7 +98,7 @@ test("run home: absent or empty allowedRoots leaves the run gate inert", () => {
   try {
     withHome(dir, () => {
       const p = writeManifest(dir, { tasks: [claudeTask()] });
-      const io = { repoToplevel: () => join(dir, "anywhere") };
+      const io = { repoToplevel: () => join(dir, "anywhere"), repoLookup: () => ({ repo: join(dir, "anywhere") }) };
       const configs = [{ claude: { enabled: true } }, { claude: { enabled: true, allowedRoots: [] } }];
       for (const providers of configs) {
         const errs = errorsOf(() => loadManifest(p, { ...CFG, providers }, dir, { io }));
