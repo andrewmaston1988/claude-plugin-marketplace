@@ -142,11 +142,23 @@ function validateDispatchPolicy(task, identity, adapter, cfg, governanceIo) {
   // Every provider is gated here, Claude included — the same rule ask.mjs and
   // governance.mjs apply. Gating Claude is defence in depth (normalization's
   // checkGovernance refuses it first), but the layers must not disagree on exemptions.
-  if (rootGate && (!cwd || !Array.isArray(roots) || !cwdAllowed(cwd, roots, governanceIo))) {
-    throw new Error(
-      `governance: provider '${identity.provider}' model '${identity.model}' cannot dispatch from '${cwd}' — ` +
-      `cwd is not under any ${deniedBy} entry`
-    );
+  if (rootGate) {
+    const result = cwd && Array.isArray(roots)
+      ? cwdAllowed(cwd, roots, governanceIo)
+      : { reason: "outside-roots" };
+    if (result.reason === "lookup-failed") {
+      const error = new Error(
+        "governance: git repo lookup failed for cwd '" + cwd + "' — " + result.error
+      );
+      error.code = "GOVERNANCE_LOOKUP_FAILED";
+      throw error;
+    }
+    if (result.reason === "outside-roots") {
+      throw new Error(
+        "governance: provider '" + identity.provider + "' model '" + identity.model + "' cannot dispatch from '" + cwd + "' — " +
+        "cwd is not under any " + deniedBy + " entry"
+      );
+    }
   }
 }
 

@@ -3,6 +3,7 @@
 // seam the loader and normalizer share.
 
 import { spawnSync as nodeSpawnSync } from "node:child_process";
+import { existsSync } from "node:fs";
 import { basename } from "node:path";
 import { checkoutToplevel } from "./worktree.mjs";
 import { swarmHome } from "./config.mjs";
@@ -12,27 +13,34 @@ function namesEqual(a, b) {
   return process.platform === "win32" ? a.toLowerCase() === b.toLowerCase() : a === b;
 }
 
-// The MAIN worktree of the repo containing `cwd`, or null when git fails (not a
-// repo, git missing) or the repo is bare — the real implementation behind
-// io.repoToplevel.
-//
-// Files the RUN, so NOT `--show-toplevel`: a linked worktree answers that with ITSELF and
-// nested run homes inside each other. A writer's tree depth is `checkoutToplevel`'s job.
-// `worktree list` names the main worktree first by definition, and survives
-// --separate-git-dir where stripping `.git` off --git-common-dir would not.
-export function realRepoToplevel(cwd) {
-  const result = nodeSpawnSync("git", ["worktree", "list", "--porcelain"], { cwd, encoding: "utf8" });
-  if (result.status !== 0 || !result.stdout) return null;
+// The MAIN worktree of the repo containing cwd, an explicit non-repo answer, or a
+// failed lookup. A spawn failure must stay distinct from git's "not a repository" answer.
+export function repoLookup(cwd, spawn) {
+  if (!existsSync(cwd)) return { none: "missing-cwd" };
+  const run = spawn || nodeSpawnSync;
+  const result = run("git", ["worktree", "list", "--porcelain"], { cwd, encoding: "utf8" });
+  const stderr = (result.stderr || "").toString().trim();
+  if (result.error) return { failed: result.error.message || String(result.error) };
+  if (result.signal) return { failed: "git was terminated by " + result.signal };
+  if (result.status === null || result.status === undefined) return { failed: "git returned no exit status" };
+  if (result.status !== 0) {
+    if (result.status === 128 && /not a git repository/i.test(stderr)) return { none: "not-a-repo" };
+    return { failed: "git exited with status " + result.status + (stderr ? ": " + stderr : "") };
+  }
+  if (!result.stdout) return { failed: "git returned empty worktree output" };
   // Blocks are blank-line separated; only the first one describes the main worktree.
   const block = result.stdout.trim().split(/\r?\n/);
   const end = block.indexOf("");
   const main = end === -1 ? block : block.slice(0, end);
-  // A bare repo has no checkout to file a run under; --show-toplevel failed here too.
-  if (main.includes("bare")) return null;
+  if (main.includes("bare")) return { none: "bare" };
   const match = /^worktree (.+)$/.exec(main[0] || "");
-  return match ? match[1].trim() : null;
+  return match ? { repo: match[1].trim() } : { failed: "git returned no main worktree path" };
 }
 
+// Existing callers need only the repo path and retain their null-on-no-repo contract.
+export function realRepoToplevel(cwd, spawn) {
+  return repoLookup(cwd, spawn).repo || null;
+}
 // The leaf guard governing a task's cwd, or undefined if none applies. The
 // task matches the project whose name equals the basename of its repo root
 // (via the injectable io.repoToplevel seam so tests need no real git),
@@ -55,6 +63,7 @@ export function defaultManifestIo() {
     spawnSync: (command, opts) => nodeSpawnSync(command, { shell: true, encoding: "utf8", ...opts }),
     stdout: (line) => console.log(line),
     repoToplevel: realRepoToplevel,
+    repoLookup,
     checkoutToplevel,
     // The machine's own MCP servers, for the leaf toolset normalize fills in.
     mcpTools,

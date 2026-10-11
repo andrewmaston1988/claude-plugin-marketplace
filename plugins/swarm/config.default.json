@@ -40,7 +40,8 @@
   "retry": {
     "rateLimited": 2,
     "backoffMs": 30000,
-    "spawnError": 1
+    "spawnError": 1,
+    "lookupFailed": 3
   },
   "quotaPreflight": true,
   "quotaWarnPct": 80,

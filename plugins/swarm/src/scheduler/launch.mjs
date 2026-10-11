@@ -306,6 +306,14 @@ export function createLaunch(ctx) {
         const n = ctx.attempts.get(task.id) || 0;
         // transient failures retry in-run with backoff; spawn errors (exit
         // null, not killed) get one immediate-ish retry for environment flakes
+        if (r.errorCode === "GOVERNANCE_LOOKUP_FAILED" && n < (retry.lookupFailed ?? 3)) {
+          const budget = retry.lookupFailed ?? 3;
+          ctx.attempts.set(task.id, n + 1);
+          const delay = (retry.backoffMs ?? 30000) * Math.pow(3, n);
+          ctx.scheduleRetry(task, delay,
+            "↻ retry " + (n + 1) + "/" + budget + " after git lookup failure in " + Math.round(delay / 1000) + "s");
+          return task.id;
+        }
         if (st === "rate-limited" && n < (retry.rateLimited ?? 2)) {
           ctx.attempts.set(task.id, n + 1);
           const delay = (retry.backoffMs ?? 30000) * Math.pow(3, n);
