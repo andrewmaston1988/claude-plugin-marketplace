@@ -8,6 +8,7 @@ import { toSpawnable, buildDispatch } from "../dispatch.mjs";
 import { strictSchema } from "../native-schema.mjs";
 import { resultPath, readResult } from "../results.mjs";
 import { createRunnerParser, emptyTokens } from "../stream.mjs";
+import { createLogLineFilter } from "../log-line-filter.mjs";
 import { createSnapshotWriter, liveViewLines } from "../ui.mjs";
 import { TEMPLATE_RE } from "../coverage.mjs";
 import { matchQuota, DEFAULT_QUOTA_PATTERNS } from "../quota.mjs";
@@ -233,7 +234,8 @@ export function runTask(task, prompt, cfg, io, leafLog, { onTokens, onActivity, 
     // Progressive capture: stream to results/<id>.log as data arrives so a
     // user can tail an individual leaf mid-run (with stream-json, the tail
     // shows tool-call events live).
-    child.stdout?.on("data", (d) => { raw += d; leafLog?.write(d); parser.feed(String(d)); });
+    const logFilter = createLogLineFilter((chunk) => leafLog?.write(chunk));
+    child.stdout?.on("data", (d) => { raw += d; logFilter.push(d); parser.feed(String(d)); });
     child.stderr?.on("data", (d) => { raw += d; leafLog?.write(d); });
     const armDrain = () => {
       if (drain || settled) return;
@@ -241,6 +243,7 @@ export function runTask(task, prompt, cfg, io, leafLog, { onTokens, onActivity, 
         // The engine is about to cut streams the leaf's descendants still hold
         // open. Say so in the leaf's own log, or the truncated tail reads as a
         // leaf that stopped talking.
+        logFilter.end();
         leafLog?.write(`[swarm] exit drain fired after ${io.now() - started} ms (exit ${exitCode}); output streams closed by the engine\n`);
         child.stdout?.destroy?.();
         child.stderr?.destroy?.();
@@ -271,6 +274,7 @@ export function runTask(task, prompt, cfg, io, leafLog, { onTokens, onActivity, 
     const settle = (exit, errMsg, errorCode) => {
       if (settled) return;
       settled = true;
+      logFilter.end();
       clearTimeout(timer);
       clearTimeout(drain);
       parser.end();
