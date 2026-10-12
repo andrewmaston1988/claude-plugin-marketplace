@@ -4,7 +4,9 @@
 
 import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { resolve, join, relative, isAbsolute, sep } from "node:path";
+import { resolve, join, dirname, relative, isAbsolute, sep } from "node:path";
+import { treeDirFor, treeRootFor, listTreeRecords, legacyTreeDirs, runOfTree } from "./worktree.mjs";
+import { isUnderRoot } from "./roots.mjs";
 
 // Default leaf toolset is read-only; write capability must be asked for.
 export const DEFAULT_TOOLS = "Read,Grep,Glob";
@@ -55,38 +57,58 @@ export function resolveWorktreeName(t) {
 }
 
 // ── the leaf write guard's roots ──────────────────────────────────────────────
-// The tree the scheduler will create for this writer. The formula is
-// worktree.mjs's prepareIsolation (`resolve(join(resultsDir, "wt-" + name))`) —
-// keep the two in step, or the guard denies every write into the very tree it
-// was injected to protect.
-const TREE_PREFIX = "wt-";
+// Both halves go through worktree.mjs's resolver. A tree path derived HERE is how
+// the guard came to name a directory the scheduler never creates, and to deny every
+// write into the very tree it was injected to protect.
 
-function worktreePathFor(worktreeName, resultsDir) {
-  return resolve(join(resultsDir, `${TREE_PREFIX}${worktreeName}`));
-}
+// Two paths are the same path when each is under the other — roots.mjs's own
+// normalisation (separators, win32 case, trailing separator), not string equality.
+const samePath = (a, b) => isUnderRoot(a, b) && isUnderRoot(b, a);
 
-// worktreePathFor's inverse, for a task rebuilt from a RECORDED run rather than
-// from the manifest: `swarm ask` carries a finished leaf's cwd, not its tree name.
-// The name is not always the id — deterministic-steps renames each forEach clone
-// to `<id>-<i>`, so a clone's `fix[0]` runs in `wt-fix-0`. Undefined when the cwd
-// is outside every tree (a reader in the live repo, the digest in engine scratch).
-export function worktreeNameFromCwd(cwd, resultsDir) {
+// The resolver's inverse, for a task rebuilt from a RECORDED run rather than from
+// the manifest: `swarm ask` carries a finished leaf's cwd, not its tree name. The
+// name is not always the id — deterministic-steps renames each forEach clone to
+// `<id>-<i>`, so a clone's `fix[0]` runs in the tree named `fix-0`. Undefined when
+// the cwd is outside every tree (a reader in the live repo, the digest in engine
+// scratch).
+export function worktreeNameFromCwd(cwd, resultsDir, cfg) {
   if (typeof cwd !== "string" || !cwd) return undefined;
-  const rel = relative(resolve(resultsDir), resolve(cwd));
+  const p = resolve(cwd);
+  const run = resolve(resultsDir);
+  // The run's own record first: a legacy tree, a reconfigured `treeRoot` and a tree
+  // moved by hand all still name their tree here, and none of them is the formula.
+  const recorded = listTreeRecords(run).find((r) => typeof r.path === "string" && samePath(r.path, p));
+  if (recorded) return recorded.name;
+  const rel = relative(run, p);
   // `..`, and an absolute rel on win32 (a cross-drive relative), both mean "not inside".
-  if (!rel || rel.startsWith("..") || isAbsolute(rel)) return undefined;
-  const [first] = rel.split(sep);
-  return first.startsWith(TREE_PREFIX) && first.length > TREE_PREFIX.length
-    ? first.slice(TREE_PREFIX.length)
+  if (rel && !rel.startsWith("..") && !isAbsolute(rel)) {
+    // A pre-upgrade run has no records: its tree IS the run dir's child, <run>/wt-<name>.
+    // The prefix rule stays where it belongs — legacyTreeDirs strips it, so a nested
+    // cwd (the leaf's declared depth) resolves through its first segment either way.
+    const [first] = rel.split(sep);
+    const legacy = legacyTreeDirs(run).find((t) => samePath(join(run, first), t.path));
+    return legacy ? legacy.name : undefined;
+  }
+  // The formula, for a tree whose record is gone: <treeRoot>/<project>/<run>/<name>.
+  // Read from the same three leading segments runOfTree inverts, and checked against
+  // THIS run — a sibling run's tree is not this leaf's.
+  const root = treeRootFor(cfg);
+  if (!isUnderRoot(p, root)) return undefined;
+  const parts = relative(root, p).split(sep);
+  if (parts.length < 3) return undefined;
+  // runOfTree inverts the SAME two-level tail from the runs root this run dir sits in.
+  const runsRoot = dirname(dirname(run));
+  return samePath(runOfTree(join(root, ...parts.slice(0, 3)), cfg, { runsRoot }), run)
+    ? parts[2]
     : undefined;
 }
 
 // A writer's allowed roots: its own tree, plus `outputDir` when set — that one
 // resolves against the dispatch cwd, i.e. into the live checkout, so it is a
 // second root rather than a directory inside the first.
-export function leafWriteGuardRoots({ worktreeName, resultsDir, outputDir }) {
+export function leafWriteGuardRoots({ worktreeName, resultsDir, outputDir, cfg }) {
   return [
-    ...(typeof worktreeName === "string" && worktreeName ? [worktreePathFor(worktreeName, resultsDir)] : []),
+    ...(typeof worktreeName === "string" && worktreeName ? [treeDirFor(resultsDir, worktreeName, cfg)] : []),
     ...(outputDir ? [outputDir] : []),
   ];
 }

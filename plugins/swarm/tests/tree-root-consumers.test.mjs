@@ -82,6 +82,9 @@ test("worktreeNameFromCwd: the record outranks the formula — a clone's id is n
 test("worktreeNameFromCwd: a legacy <run>/wt-<name> tree still names its tree", () => {
   const results = runDir("run-name-legacy");
   try {
+    // A real pre-upgrade run: the tree is a directory IN the run dir, and the run has
+    // no records — the resolver's legacy scan is the only thing that can name it.
+    mkdirSync(join(results, "wt-impl"), { recursive: true });
     equal(worktreeNameFromCwd(join(results, "wt-impl"), results, CFG), "impl",
       "a pre-upgrade run has no records, and its tree is the only thing that says which one it is");
     equal(worktreeNameFromCwd(join(results, "wt-impl", "sub"), results, CFG), "impl",
