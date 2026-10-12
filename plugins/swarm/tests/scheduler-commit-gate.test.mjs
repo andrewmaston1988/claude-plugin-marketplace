@@ -8,10 +8,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { runPlan } from "../src/scheduler.mjs";
 import { readResult } from "../src/results.mjs";
+import { treeDirFor } from "../src/worktree.mjs";
 import { CFG, tmp, task, plan, fakeSpawnFactory, makeIo, sentPrompt, streamOut, usageEnv, codexReading } from "./helpers/scheduler-fixtures.mjs";
 
 const worktreeWith = (uncommitted, collects = []) => ({
-  prepareIsolation: (t, cfg, resultsDir) => ({ path: join(resultsDir, "wt-impl"), branch: "swarm/impl", name: "impl", head: "h", repo: resultsDir, reused: false }),
+  prepareIsolation: (t, cfg, resultsDir) => ({ path: treeDirFor(resultsDir, "impl", cfg), branch: "swarm/impl", name: "impl", head: "h", repo: resultsDir, reused: false }),
   collect: (t, cfg, wt) => {
     collects.push(t.id);
     return { kept: true, branch: wt.branch, path: wt.path, diffstat: "1 file changed", uncommitted };

@@ -5,7 +5,7 @@ import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { spawnSync } from "node:child_process";
 import {
-  prepareIsolation, collect, integrate, branchNameFor,
+  prepareIsolation, collect, integrate, branchNameFor, treeDirFor,
   runScopeKey, treeCwd,
 } from "../src/worktree.mjs";
 import { runPlan } from "../src/scheduler.mjs";
@@ -21,7 +21,7 @@ test("prepareIsolation creates a worktree on the prefixed branch at repo HEAD", 
     const task = { id: "impl", originalCwd: repo, cwd: repo };
     const wt = prepareIsolation(task, CFG, resultsDir, ADD(repo));
     equal(wt.branch, "swarm/impl");
-    equal(wt.path, join(resultsDir, "wt-impl"));
+    equal(wt.path, treeDirFor(resultsDir, "impl", CFG));
     ok(existsSync(join(wt.path, "a.txt")));
     equal(git(["branch", "--show-current"], wt.path), "swarm/impl");
     equal(git(["rev-parse", "HEAD"], wt.path), git(["rev-parse", "HEAD"], repo));
@@ -56,7 +56,7 @@ test("prepareIsolation re-enters a kept worktree in place — a resend keeps the
     equal(again.reused, true, "must signal it re-entered an existing worktree");
     ok(existsSync(join(again.path, "partial.txt")), "partial diff must survive the resend");
   } finally {
-    spawnSync("git", ["worktree", "remove", "--force", join(resultsDir, "wt-impl")], { cwd: repo, windowsHide: true });
+    spawnSync("git", ["worktree", "remove", "--force", treeDirFor(resultsDir, "impl", CFG)], { cwd: repo, windowsHide: true });
     cleanup(resultsDir, repo);
   }
 });
@@ -76,7 +76,7 @@ test("prepareIsolation with { reset } scrubs a kept worktree clean — the --for
     ok(!existsSync(join(forced.path, "partial.txt")), "untracked partial work is cleaned");
     equal(git(["status", "--porcelain"], forced.path), "", "tree is clean after reset");
   } finally {
-    spawnSync("git", ["worktree", "remove", "--force", join(resultsDir, "wt-impl")], { cwd: repo, windowsHide: true });
+    spawnSync("git", ["worktree", "remove", "--force", treeDirFor(resultsDir, "impl", CFG)], { cwd: repo, windowsHide: true });
     cleanup(resultsDir, repo);
   }
 });
@@ -89,7 +89,7 @@ test("prepareIsolation on a fresh path still creates and reports reused:false", 
     equal(wt.reused, false);
     ok(existsSync(join(wt.path, "a.txt")));
   } finally {
-    spawnSync("git", ["worktree", "remove", "--force", join(resultsDir, "wt-fresh")], { cwd: repo, windowsHide: true });
+    spawnSync("git", ["worktree", "remove", "--force", treeDirFor(resultsDir, "fresh", CFG)], { cwd: repo, windowsHide: true });
     cleanup(resultsDir, repo);
   }
 });
@@ -104,7 +104,7 @@ test("two tasks sharing a worktree name land in one tree on one branch", () => {
     const wt1 = prepareIsolation(p1, CFG, resultsDir, ADD(repo));
     equal(wt1.branch, "swarm/feat", "branch comes from the name, not the task id");
     equal(wt1.name, "feat");
-    ok(wt1.path.endsWith("wt-feat"), `expected wt-feat, got ${wt1.path}`);
+    ok(wt1.path.endsWith("feat"), `expected tree named feat, got ${wt1.path}`);
 
     writeFileSync(join(wt1.path, "phase1.txt"), "phase 1 work\n");
     commitAll(wt1.path, "phase 1");
@@ -115,7 +115,7 @@ test("two tasks sharing a worktree name land in one tree on one branch", () => {
     ok(wt2.reused, "second task reuses rather than creates");
     ok(existsSync(join(wt2.path, "phase1.txt")), "p2 must see p1's committed work");
   } finally {
-    dropWorktree(repo, join(resultsDir, "wt-feat"));
+    dropWorktree(repo, treeDirFor(resultsDir, "feat", CFG));
     cleanup(resultsDir, repo);
   }
 });
@@ -142,7 +142,7 @@ test("a follower's head is the tree's HEAD, so its diffstat spans only its own w
     equal(c.kept, true, "a follower's branch carries its predecessors' commits — never destroy it");
     ok(existsSync(join(wt1.path, "phase1.txt")), "p1's committed work must survive the collect");
   } finally {
-    dropWorktree(repo, join(resultsDir, "wt-feat"));
+    dropWorktree(repo, treeDirFor(resultsDir, "feat", CFG));
     cleanup(resultsDir, repo);
   }
 });
@@ -161,7 +161,7 @@ test("--force on a follower resets to repo HEAD, not the tree's", () => {
     equal(forced.head, git(["rev-parse", "HEAD"], repo), "a reset restarts the group from repo HEAD");
     ok(!existsSync(join(forced.path, "phase1.txt")), "reset scrubs the whole group's work");
   } finally {
-    dropWorktree(repo, join(resultsDir, "wt-feat"));
+    dropWorktree(repo, treeDirFor(resultsDir, "feat", CFG));
     cleanup(resultsDir, repo);
   }
 });
@@ -173,9 +173,9 @@ test("a task with no worktreeName keeps its per-task tree (regression)", () => {
     const wt = prepareIsolation({ id: "impl", originalCwd: repo, cwd: repo }, CFG, resultsDir, ADD(repo));
     equal(wt.branch, "swarm/impl");
     equal(wt.name, "impl");
-    ok(wt.path.endsWith("wt-impl"));
+    ok(wt.path.endsWith("impl"));
   } finally {
-    dropWorktree(repo, join(resultsDir, "wt-impl"));
+    dropWorktree(repo, treeDirFor(resultsDir, "impl", CFG));
     cleanup(resultsDir, repo);
   }
 });
@@ -199,7 +199,7 @@ test("collect never destroys a reused tree — a failed follower would take the 
     ok(existsSync(join(wt2.path, "phase1.txt")), "p1's committed work must still be there");
     ok(git(["branch", "--list", "swarm/feat"], repo) !== "", "the branch must not be deleted");
   } finally {
-    dropWorktree(repo, join(resultsDir, "wt-feat"));
+    dropWorktree(repo, treeDirFor(resultsDir, "feat", CFG));
     cleanup(resultsDir, repo);
   }
 });
@@ -263,7 +263,7 @@ test("collect keeps a changed worktree with porcelain + diffstat (uncommitted)",
     ok(c.diffstat.includes("a.txt"), c.diffstat);
   } finally {
     // remove worktree before repo so git doesn't hold locks
-    spawnSync("git", ["worktree", "remove", "--force", join(resultsDir, "wt-edit")], { cwd: repo, windowsHide: true });
+    spawnSync("git", ["worktree", "remove", "--force", treeDirFor(resultsDir, "edit", CFG)], { cwd: repo, windowsHide: true });
     cleanup(resultsDir, repo);
   }
 });
@@ -281,7 +281,7 @@ test("collect keeps a worktree whose changes were committed", () => {
     equal(c.kept, true);
     ok(c.diffstat.includes("b.txt"), c.diffstat);
   } finally {
-    spawnSync("git", ["worktree", "remove", "--force", join(resultsDir, "wt-commit")], { cwd: repo, windowsHide: true });
+    spawnSync("git", ["worktree", "remove", "--force", treeDirFor(resultsDir, "commit", CFG)], { cwd: repo, windowsHide: true });
     cleanup(resultsDir, repo);
   }
 });
@@ -334,7 +334,7 @@ test("collect keeps a changed integrate-source exactly as before — isIntegrate
     ok(git(["branch", "--list", "swarm/changed-src"], repo).includes("swarm/changed-src"));
     ok(c.diffstat.includes("new.txt"), c.diffstat);
   } finally {
-    spawnSync("git", ["worktree", "remove", "--force", join(resultsDir, "wt-changed-src")], { cwd: repo, windowsHide: true });
+    spawnSync("git", ["worktree", "remove", "--force", treeDirFor(resultsDir, "changed-src", CFG)], { cwd: repo, windowsHide: true });
     cleanup(resultsDir, repo);
   }
 });
@@ -370,8 +370,8 @@ test("isChainFollower and carriesWork guards still keep worktree and branch, una
     equal(cCarries.kept, true, "carriesWork protects commits not landed on repo HEAD");
     ok(git(["branch", "--list", "swarm/carry"], repo).includes("swarm/carry"));
   } finally {
-    dropWorktree(repo, join(resultsDir, "wt-feat"));
-    dropWorktree(repo, join(resultsDir, "wt-carry"));
+    dropWorktree(repo, treeDirFor(resultsDir, "feat", CFG));
+    dropWorktree(repo, treeDirFor(resultsDir, "carry", CFG));
     cleanup(resultsDir, repo);
   }
 });
@@ -412,7 +412,7 @@ test("scheduler resume: a failed isolated leaf re-enters its kept worktree AND r
     const log = readFileSync(join(p.resultsDir, "run.log"), "utf8");
     ok(/"event":"worktree-resume"/.test(log), "the worktree re-entry is logged loudly");
   } finally {
-    spawnSync("git", ["worktree", "remove", "--force", join(dir, "run", "wt-impl")], { cwd: repo, windowsHide: true });
+    spawnSync("git", ["worktree", "remove", "--force", treeDirFor(join(dir, "run"), "impl", CFG)], { cwd: repo, windowsHide: true });
     cleanup(dir, repo);
   }
 });
@@ -439,7 +439,7 @@ test("scheduler integration: a writer runs IN its worktree; summary lists kept b
       }],
     };
     const r = await runPlan(p, CFG, io);
-    equal(spawn.calls[0].opts.cwd, join(p.resultsDir, "wt-impl"));
+    equal(spawn.calls[0].opts.cwd, treeDirFor(p.resultsDir, "impl", CFG));
     equal(r.summary.tasks[0].state, "ok");
     equal(r.worktreesKept.length, 1);
     equal(r.worktreesKept[0].branch, "swarm/impl");
@@ -451,7 +451,7 @@ test("scheduler integration: a writer runs IN its worktree; summary lists kept b
     equal(res.worktree.kept, true);
     ok(res.worktree.diffstat.includes("made-by-leaf.txt"), "the committed work is in the kept tree's diffstat");
   } finally {
-    spawnSync("git", ["worktree", "remove", "--force", join(dir, "run", "wt-impl")], { cwd: repo, windowsHide: true });
+    spawnSync("git", ["worktree", "remove", "--force", treeDirFor(join(dir, "run"), "impl", CFG)], { cwd: repo, windowsHide: true });
     cleanup(dir, repo);
   }
 });
@@ -538,7 +538,7 @@ test("an explicit branch names the branch independently of the tree", () => {
       { id: "p3", originalCwd: repo, worktreeName: "p3", branchName: "swarm/eco-p3branch" },
       CFG, results, ADD(repo));
     equal(wt.branch, "swarm/eco-p3branch", "explicit branch wins over the derived name");
-    ok(wt.path.endsWith("wt-p3"), "the tree is still keyed by the worktree name");
+    ok(wt.path.endsWith("p3"), "the tree is still keyed by the worktree name");
     ok(git(["branch", "--list", "swarm/eco-p3branch"], repo).includes("swarm/eco-p3branch"));
   } finally { cleanup(repo, results); }
 });
@@ -646,13 +646,13 @@ test("scheduler integration: an integrate node merges sibling branches into the 
   try {
     const spawn = fakeSpawnFactory((call) => {
       const cwd = call.opts.cwd;
-      if (cwd.endsWith("wt-feat")) {
+      if (cwd.endsWith("feat")) {
         writeFileSync(join(cwd, "helper.txt"), "helper\n");
         commitAll(cwd, "helper");
-      } else if (cwd.endsWith("wt-mx")) {
+      } else if (cwd.endsWith("mx")) {
         writeFileSync(join(cwd, "mx.txt"), "x work\n");
         commitAll(cwd, "mx");
-      } else if (cwd.endsWith("wt-my")) {
+      } else if (cwd.endsWith("my")) {
         writeFileSync(join(cwd, "my.txt"), "y work\n");
         commitAll(cwd, "my");
       }
@@ -688,7 +688,7 @@ test("scheduler integration: an integrate node merges sibling branches into the 
     equal(res.ok, true, "the node completes ok");
     deepEqual(res.outputJson.merged, ["swarm/mx", "swarm/my"], "task ids resolved to branch names");
     deepEqual(res.outputJson.conflicts, [], "disjoint files merged cleanly");
-    const tree = join(p.resultsDir, "wt-feat");
+    const tree = treeDirFor(p.resultsDir, "feat", CFG);
     ok(existsSync(join(tree, "mx.txt")) && existsSync(join(tree, "my.txt")),
       "both siblings' work landed in the target tree");
   } finally { cleanup(repo, dir); }
@@ -701,7 +701,7 @@ test("groupFinal is the task nothing else in the group depends on, even across o
     const spawn = fakeSpawnFactory((call) => {
       const cwd = call.opts.cwd;
       // The feat tree is entered twice: first by helper, later by cleanup.
-      const tag = !cwd.endsWith("wt-feat") ? "mx"
+      const tag = !cwd.endsWith("feat") ? "mx"
         : existsSync(join(cwd, "helper.txt")) ? "cleanup" : "helper";
       writeFileSync(join(cwd, `${tag}.txt`), "work\n");
       commitAll(cwd, tag);

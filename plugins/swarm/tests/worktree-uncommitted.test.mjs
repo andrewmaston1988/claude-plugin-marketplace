@@ -3,7 +3,7 @@ import { deepEqual, equal, ok } from "node:assert/strict";
 import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
-import { collect, prepareIsolation } from "../src/worktree.mjs";
+import { collect, prepareIsolation, treeDirFor } from "../src/worktree.mjs";
 import { git, initRepo, cleanup, commitAll, dropWorktree, CFG, ADD } from "./helpers/worktree-fixtures.mjs";
 
 test("collect counts every path in an untracked directory and commits ahead", () => {
@@ -22,7 +22,7 @@ test("collect counts every path in an untracked directory and commits ahead", ()
     deepEqual(result.uncommitted, { files: 2, commitsAhead: 1 });
     ok(git(["status", "--porcelain", "--untracked-files=all"], wt.path).includes("new-dir/nested/a.txt"));
   } finally {
-    dropWorktree(repo, join(results, "wt-impl"));
+    dropWorktree(repo, treeDirFor(results, "impl", CFG));
     cleanup(results, repo);
   }
 });
@@ -39,7 +39,7 @@ test("collect reports zero uncommitted files for a clean committed tree", () => 
     equal(result.kept, true);
     deepEqual(result.uncommitted, { files: 0, commitsAhead: 1 });
   } finally {
-    dropWorktree(repo, join(results, "wt-impl"));
+    dropWorktree(repo, treeDirFor(results, "impl", CFG));
     cleanup(results, repo);
   }
 });
@@ -58,7 +58,7 @@ test("collect reports an unmeasured tree, not zero files, when git status cannot
     equal(result.uncommitted.files, null, "an unanswerable status must not read as a clean tree");
     equal(result.uncommitted.commitsAhead, 1);
   } finally {
-    dropWorktree(repo, join(results, "wt-impl"));
+    dropWorktree(repo, treeDirFor(results, "impl", CFG));
     cleanup(results, repo);
   }
 });

@@ -5,6 +5,7 @@ import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { commitAll, gitOut, tmp } from "./cli-fixture.mjs";
+import { treeDirFor } from "../../src/worktree.mjs";
 
 // A real tiny repo + a real worktree, used to exercise prune end-to-end.
 export function initPruneRepo() {
@@ -41,7 +42,7 @@ export function pruneFixture() {
   mkdirSync(resultsDir, { recursive: true });
   const sha = gitOut(["rev-parse", "HEAD"], repo);
   writeFileSync(join(resultsDir, "manifest.json"), JSON.stringify({ resultsDir, cwd: repo, tasks: [] }));
-  return { repo, dir, resultsDir, sha, tree: join(resultsDir, "wt-impl") };
+  return { repo, dir, resultsDir, sha, tree: treeDirFor(resultsDir, "impl", { treeRoot: join(dir, "home", "worktrees") }) };
 }
 
 // A detached tree is what a killed `worktree add` leaves: no branch, so prune's

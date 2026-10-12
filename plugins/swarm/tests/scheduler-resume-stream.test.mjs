@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import { spawn as nodeSpawn, spawnSync } from "node:child_process";
 import { oracleSnapKey } from "./helpers/snap-key.mjs";
 import { runPlan, runTask, classifyFailure } from "../src/scheduler.mjs";
+import { treeDirFor } from "../src/worktree.mjs";
 import { writeResult, readResult, initResultsDir, writeDigestMd, readHeartbeat, stopPath } from "../src/results.mjs";
 import { DIGEST_ID } from "../src/digest.mjs";
 import { CFG, tmp, task, plan, fakeSpawnFactory, makeIo, promptOf, SHIM, streamOut, initGitRepo, commitAllInRepo } from "./helpers/scheduler-fixtures.mjs";
@@ -267,7 +268,7 @@ test("a private-mode leaf spawns at the same depth inside its worktree; an expli
     ], { resultsDir: join(dir, "run"), concurrency: 1 });
     await runPlan(p, CFG, makeIo(spawn2));
     equal(cwds.length, 1);
-    equal(cwds[0], join(dir, "run", "wt-gen", "sub"));
+    equal(cwds[0], join(treeDirFor(join(dir, "run"), "gen", CFG), "sub"));
 
     const cwds2 = [];
     const spawn3 = fakeSpawnFactory((call) => { cwds2.push(call.opts.cwd); return {}; });
@@ -275,7 +276,7 @@ test("a private-mode leaf spawns at the same depth inside its worktree; an expli
       task("expl", { cwd: sub, originalCwd: sub, allowedTools: "Bash", worktreeName: "expl" }),
     ], { resultsDir: join(dir, "run2"), concurrency: 1 });
     await runPlan(p2, CFG, makeIo(spawn3));
-    equal(cwds2[0], join(dir, "run2", "wt-expl"));
+    equal(cwds2[0], treeDirFor(join(dir, "run2"), "expl", CFG));
   } finally {
     rmSync(dir, { recursive: true, force: true });
     rmSync(repo, { recursive: true, force: true });

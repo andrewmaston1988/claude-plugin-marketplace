@@ -40,7 +40,7 @@ test("a top-level cwd is every task's default cwd, and a writer's tree is cut fr
     equal(plan.tasks.find((t) => t.id === "read").cwd, resolve(root, "b"), "a task's own relative cwd resolves against the top-level cwd");
     const heads = [];
     await runPlan(plan, CFG, makeIo(fakeSpawnFactory((call) => {
-      if (call.opts.cwd.includes("wt-impl")) heads.push(git(["rev-parse", "HEAD"], call.opts.cwd));
+      if (call.opts.cwd.endsWith("impl")) heads.push(git(["rev-parse", "HEAD"], call.opts.cwd));
       return {};
     })));
     equal(heads[0], bHead, "the writer's tree is cut from the top-level cwd's repo");

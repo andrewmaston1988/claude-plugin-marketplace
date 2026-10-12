@@ -9,7 +9,7 @@ import { runCli, runCliAsync, runValidated, CLI } from "./helpers/cli.mjs";
 import { gateConfig, gateHome, gitOut, tmp } from "./helpers/cli-fixture.mjs";
 import { initPruneRepo, pruneFixture, addDetachedTree, dropSnapPrune } from "./helpers/prune-fixture.mjs";
 import { decide as hookDecide } from "../hooks/ultraswarm.mjs";
-import { prepareIsolation, WORKTREE_ADD_TIMEOUT_MS } from "../src/worktree.mjs";
+import { prepareIsolation, treeDirFor, WORKTREE_ADD_TIMEOUT_MS } from "../src/worktree.mjs";
 import { readRosterEnvelope, writeRosterEntry } from "../src/roster.mjs";
 import { withoutLeafNotices } from "../src/leaf-notices.mjs";
 
@@ -611,7 +611,7 @@ test("stop: dead engine discovers a real orphaned worktree via manifest cwd, rec
     const resultsDir = join(dir, "out");
     mkdirSync(resultsDir, { recursive: true });
     writeFileSync(join(resultsDir, "manifest.json"), JSON.stringify({ resultsDir, cwd: repo, tasks: [] }));
-    const wt = prepareIsolation({ id: "impl", originalCwd: repo, cwd: repo }, { worktreeBranchPrefix: "swarm/" }, resultsDir, { addTimeoutMs: WORKTREE_ADD_TIMEOUT_MS, base: gitOut(["rev-parse", "HEAD"], repo) });
+    const wt = prepareIsolation({ id: "impl", originalCwd: repo, cwd: repo }, { worktreeBranchPrefix: "swarm/", treeRoot: join(home, "worktrees") }, resultsDir, { addTimeoutMs: WORKTREE_ADD_TIMEOUT_MS, base: gitOut(["rev-parse", "HEAD"], repo) });
 
     const lines = [
       JSON.stringify({ ts: new Date().toISOString(), event: "run-start", tasks: [{ id: "impl", provider: "claude", model: "claude-haiku-4-5-20251001" }] }),
@@ -631,7 +631,7 @@ test("stop: dead engine discovers a real orphaned worktree via manifest cwd, rec
     equal(summary.worktreesKept[0].path, wt.path);
     equal(summary.worktreesKept[0].branch, "swarm/impl");
   } finally {
-    spawnSync("git", ["worktree", "remove", "--force", join(dir, "out", "wt-impl")], { cwd: repo, windowsHide: true });
+    spawnSync("git", ["worktree", "remove", "--force", treeDirFor(resultsDir, "impl", { treeRoot: join(home, "worktrees") })], { cwd: repo, windowsHide: true });
     rmSync(dir, { recursive: true, force: true });
     rmSync(repo, { recursive: true, force: true });
   }

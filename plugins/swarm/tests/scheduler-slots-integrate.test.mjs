@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { EventEmitter } from "node:events";
 import { runPlan, runTask, substituteTemplates, substituteItems, classifyFailure, pickNewestRunning } from "../src/scheduler.mjs";
+import { treeDirFor } from "../src/worktree.mjs";
 import { loadManifest } from "../src/manifest.mjs";
 import { DIGEST_ID } from "../src/digest.mjs";
 import { CFG, tmp, task, plan, fakeSpawnFactory, makeIo, promptOf, gitInRepo, initGitRepo, commitAllInRepo, buildStrandPlan, integrateLeaf } from "./helpers/scheduler-fixtures.mjs";
@@ -146,10 +147,10 @@ test("IS1: integrate over a committed leaf and a no-change leaf completes", asyn
   try {
     const spawn = fakeSpawnFactory((call) => {
       const cwd = call.opts.cwd;
-      if (cwd.endsWith("wt-feat")) {
+      if (cwd.endsWith("feat")) {
         writeFileSync(join(cwd, "base.txt"), "base\n");
         commitAllInRepo(cwd, "base");
-      } else if (cwd.endsWith("wt-committer")) {
+      } else if (cwd.endsWith("committer")) {
         writeFileSync(join(cwd, "committer.txt"), "committer work\n");
         commitAllInRepo(cwd, "committer work");
       }
@@ -173,7 +174,7 @@ test("IS1: integrate over a committed leaf and a no-change leaf completes", asyn
     const res = JSON.parse(readFileSync(join(p.resultsDir, "results", "join.json"), "utf8"));
     equal(res.ok, true, "the integrate completes despite one source changing nothing");
     deepEqual(res.outputJson.merged, ["swarm/committer", "swarm/nochange"]);
-    ok(existsSync(join(p.resultsDir, "wt-feat", "committer.txt")),
+    ok(existsSync(join(treeDirFor(p.resultsDir, "feat", CFG), "committer.txt")),
       "the committing leaf's change lands in the target tree");
   } finally {
     rmSync(dir, { recursive: true, force: true });
@@ -187,10 +188,10 @@ test("IS2: a no-change leaf that no integrate names is still swept", async () =>
   try {
     const spawn = fakeSpawnFactory((call) => {
       const cwd = call.opts.cwd;
-      if (cwd.endsWith("wt-feat")) {
+      if (cwd.endsWith("feat")) {
         writeFileSync(join(cwd, "base.txt"), "base\n");
         commitAllInRepo(cwd, "base");
-      } else if (cwd.endsWith("wt-committer")) {
+      } else if (cwd.endsWith("committer")) {
         writeFileSync(join(cwd, "committer.txt"), "committer work\n");
         commitAllInRepo(cwd, "committer work");
       }
@@ -225,7 +226,7 @@ test("IS3: integrate's missing-ref throw still fires for a ref absent for a reas
   try {
     const spawn = fakeSpawnFactory((call) => {
       const cwd = call.opts.cwd;
-      if (cwd.endsWith("wt-feat")) {
+      if (cwd.endsWith("feat")) {
         writeFileSync(join(cwd, "base.txt"), "base\n");
         commitAllInRepo(cwd, "base");
       }
@@ -264,10 +265,10 @@ test("IS4: a seed integrate node's tree, reused by a workspace writer, joins on 
   try {
     const spawn = fakeSpawnFactory((call) => {
       const cwd = call.opts.cwd;
-      if (cwd.endsWith("wt-feat")) {
+      if (cwd.endsWith("feat")) {
         writeFileSync(join(cwd, "base.txt"), "base\n");
         commitAllInRepo(cwd, "base");
-      } else if (cwd.endsWith("wt-migrate-x")) {
+      } else if (cwd.endsWith("migrate-x")) {
         writeFileSync(join(cwd, "migrated.txt"), "migrated\n");
         commitAllInRepo(cwd, "migrate");
       }
@@ -299,7 +300,7 @@ test("IS4: a seed integrate node's tree, reused by a workspace writer, joins on 
     equal(res.ok, true, `the join must merge the branch its source actually created, got: ${res.output}`);
     deepEqual(res.outputJson.merged, ["swarm/run1/migrate-x"],
       "the writer's commits are on the seed's branch, so that is the ref the join merges");
-    ok(existsSync(join(p.resultsDir, "wt-feat", "migrated.txt")),
+    ok(existsSync(join(treeDirFor(p.resultsDir, "feat", CFG), "migrated.txt")),
       "the writer's commit reaches the target tree");
   } finally {
     rmSync(dir, { recursive: true, force: true });

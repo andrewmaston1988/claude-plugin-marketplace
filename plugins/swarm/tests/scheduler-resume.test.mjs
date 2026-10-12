@@ -10,7 +10,7 @@ import { tmpdir } from "node:os";
 import { spawnSync } from "node:child_process";
 import { runPlan } from "../src/scheduler.mjs";
 import { writeResult, readResult, initResultsDir, appendRunLog } from "../src/results.mjs";
-import { prepareIsolation, WORKTREE_ADD_TIMEOUT_MS } from "../src/worktree.mjs";
+import { prepareIsolation, treeDirFor, WORKTREE_ADD_TIMEOUT_MS } from "../src/worktree.mjs";
 import { createCodexStreamParser } from "../src/stream.mjs";
 import { fakeSpawnFactory, makeIo, usageEnv, codexReading } from "./helpers/fake-io.mjs";
 
@@ -93,8 +93,8 @@ function initRepo() {
   return repo;
 }
 
-function cleanRepo(repo, dir, wtName) {
-  if (wtName) spawnSync("git", ["worktree", "remove", "--force", join(dir, "run", wtName)], { cwd: repo, windowsHide: true });
+function cleanRepo(repo, dir, treeName) {
+  if (treeName) spawnSync("git", ["worktree", "remove", "--force", treeDirFor(join(dir, "run"), treeName, CFG)], { cwd: repo, windowsHide: true });
   rmSync(repo, { recursive: true, force: true });
   rmSync(dir, { recursive: true, force: true });
 }
@@ -131,7 +131,7 @@ test("R1: a leaf reseated onto another provider dispatches with no resume", asyn
     equal(line.session, "fresh", "the log line must not call this a resume");
     equal(line.declined, "provider-changed", JSON.stringify(line));
   } finally {
-    cleanRepo(repo, dir, "wt-wt");
+    cleanRepo(repo, dir, "wt");
   }
 });
 
@@ -166,7 +166,7 @@ test("R2: a session whose attempt completed no turn is not resumed — same prov
       `a session with no completed turn must not be resumed: ${argvOf(spawn.calls[0])}`);
     equal(worktreeResume(p.resultsDir, "prose").declined, "no-turns");
   } finally {
-    cleanRepo(repo, dir, "wt-wt");
+    cleanRepo(repo, dir, "wt");
   }
 });
 
@@ -192,7 +192,7 @@ test("R3: a same-provider leaf that completed turns before dying still resumes",
     equal(line.session, "resumed");
     equal(line.declined, undefined, "a resumed leaf declined nothing");
   } finally {
-    cleanRepo(repo, dir, "wt-wt");
+    cleanRepo(repo, dir, "wt");
   }
 });
 
@@ -215,7 +215,7 @@ test("R4: a leaf with no recorded session starts cold and claims no decline", as
     equal(line.declined, undefined, JSON.stringify(line));
     ok(!runLog(p.resultsDir).some((e) => e.declined), "no entry claims a decline");
   } finally {
-    cleanRepo(repo, dir, "wt-wt");
+    cleanRepo(repo, dir, "wt");
   }
 });
 
@@ -257,7 +257,7 @@ test("R6: --force still resets the tree and clears every session", async () => {
     equal(worktreeResume(p.resultsDir, "impl").reset, true, "--force resets the tree");
     equal(existsSync(resolve(join(wt.path, "partial.txt"))), false, "the kept partial work is scrubbed");
   } finally {
-    cleanRepo(repo, dir, "wt-wt");
+    cleanRepo(repo, dir, "wt");
   }
 });
 
@@ -358,7 +358,7 @@ test("Z-codex: a codex leaf that failed at zero turns dispatches with no resume"
       `a codex session with no completed turn must not be resumed: ${argvOf(spawn.calls[0])}`);
     equal(worktreeResume(p.resultsDir, "prose").declined, "no-turns");
   } finally {
-    cleanRepo(repo, dir, "wt-wt");
+    cleanRepo(repo, dir, "wt");
   }
 });
 
@@ -384,7 +384,7 @@ test("U1: an absent turn count behaves as today — the session is still resumed
       `an unknown turn count must not read as zero: ${argvOf(spawn.calls[0])}`);
     equal(worktreeResume(p.resultsDir, "impl").declined, undefined, "an unknown count declines nothing");
   } finally {
-    cleanRepo(repo, dir, "wt-wt");
+    cleanRepo(repo, dir, "wt");
   }
 });
 
@@ -410,7 +410,7 @@ test("U2: a turn count in the field wins over a zero in the output text", async 
     equal(resumeOf(spawn.calls[0]), OLLAMA_SID,
       `the field decides, not the output text: ${argvOf(spawn.calls[0])}`);
   } finally {
-    cleanRepo(repo, dir, "wt-wt");
+    cleanRepo(repo, dir, "wt");
   }
 });
 

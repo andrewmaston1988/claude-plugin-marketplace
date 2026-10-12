@@ -5,6 +5,7 @@ import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { EventEmitter } from "node:events";
 import { runPlan, runTask, substituteTemplates, substituteItems, classifyFailure, pickNewestRunning } from "../src/scheduler.mjs";
+import { treeDirFor } from "../src/worktree.mjs";
 import { DIGEST_ID } from "../src/digest.mjs";
 import { CFG, tmp, fakeSpawnFactory, makeIo, promptOf, initGitRepo, commitAllInRepo, integrateLeaf, forEachFixLeaf, fixCloneTasks } from "./helpers/scheduler-fixtures.mjs";
 // ── F3-F7: integrate.from over a forEach parent ──────────────────────────────
@@ -19,12 +20,12 @@ test("F3: integrate.from over a forEach parent merges exactly the clones that ex
   try {
     const spawn = fakeSpawnFactory((call) => {
       const cwd = call.opts.cwd;
-      if (cwd.endsWith("wt-feat")) {
+      if (cwd.endsWith("feat")) {
         writeFileSync(join(cwd, "base.txt"), "base\n");
         commitAllInRepo(cwd, "base");
         return { output: "done" };
       }
-      const m = /wt-fix-(\d+)$/.exec(cwd);
+      const m = /fix-(\d+)$/.exec(cwd);
       if (m) {
         writeFileSync(join(cwd, `fix${m[1]}.txt`), `fix ${m[1]}\n`);
         commitAllInRepo(cwd, `fix ${m[1]}`);
@@ -48,8 +49,8 @@ test("F3: integrate.from over a forEach parent merges exactly the clones that ex
     const res = JSON.parse(readFileSync(join(p.resultsDir, "results", "join.json"), "utf8"));
     equal(res.ok, true, res.output);
     deepEqual(res.outputJson.merged, ["swarm/fix-0", "swarm/fix-1"]);
-    ok(existsSync(join(p.resultsDir, "wt-feat", "fix0.txt")));
-    ok(existsSync(join(p.resultsDir, "wt-feat", "fix1.txt")));
+    ok(existsSync(join(treeDirFor(p.resultsDir, "feat", CFG), "fix0.txt")));
+    ok(existsSync(join(treeDirFor(p.resultsDir, "feat", CFG), "fix1.txt")));
     // This plan is hand-built: its tasks carry no normalisation fields, so the run
     // must find each task's repo from the task's OWN cwd. A capture keyed off a
     // normalisation field would pin nothing here, and every launch would have no
@@ -69,13 +70,13 @@ test("F4: integrate waits for every clone, and a no-change clone's branch surviv
   try {
     const spawn = fakeSpawnFactory((call) => {
       const cwd = call.opts.cwd;
-      if (cwd.endsWith("wt-feat")) {
+      if (cwd.endsWith("feat")) {
         writeFileSync(join(cwd, "base.txt"), "base\n");
         commitAllInRepo(cwd, "base");
         return { output: "done" };
       }
       // fix-0 commits; fix-1 legitimately changes nothing.
-      if (cwd.endsWith("wt-fix-0")) {
+      if (cwd.endsWith("fix-0")) {
         writeFileSync(join(cwd, "fix0.txt"), "fix 0\n");
         commitAllInRepo(cwd, "fix 0");
       }
@@ -98,7 +99,7 @@ test("F4: integrate waits for every clone, and a no-change clone's branch surviv
     equal(res.ok, true, res.output);
     deepEqual(res.outputJson.merged, ["swarm/fix-0", "swarm/fix-1"],
       "the no-change clone's branch must still be named — the merge needs the ref, not its contents");
-    ok(existsSync(join(p.resultsDir, "wt-feat", "fix0.txt")));
+    ok(existsSync(join(treeDirFor(p.resultsDir, "feat", CFG), "fix0.txt")));
   } finally {
     rmSync(dir, { recursive: true, force: true });
     rmSync(repo, { recursive: true, force: true });
@@ -111,12 +112,12 @@ test("F5: two clones editing the same line — conflict markers, conflicts list,
   try {
     const spawn = fakeSpawnFactory((call) => {
       const cwd = call.opts.cwd;
-      if (cwd.endsWith("wt-feat")) {
+      if (cwd.endsWith("feat")) {
         writeFileSync(join(cwd, "shared.txt"), "base\n");
         commitAllInRepo(cwd, "base");
         return { output: "done" };
       }
-      const m = /wt-fix-(\d+)$/.exec(cwd);
+      const m = /fix-(\d+)$/.exec(cwd);
       if (m) {
         writeFileSync(join(cwd, "shared.txt"), `clone ${m[1]} wins\n`);
         commitAllInRepo(cwd, `clone ${m[1]}`);
@@ -140,7 +141,7 @@ test("F5: two clones editing the same line — conflict markers, conflicts list,
     const res = JSON.parse(readFileSync(join(p.resultsDir, "results", "join.json"), "utf8"));
     equal(res.ok, true, "a content conflict is not a node failure — same as an ordinary integrate");
     deepEqual(res.outputJson.conflicts, ["shared.txt"]);
-    const merged = readFileSync(join(p.resultsDir, "wt-feat", "shared.txt"), "utf8");
+    const merged = readFileSync(join(treeDirFor(p.resultsDir, "feat", CFG), "shared.txt"), "utf8");
     ok(merged.includes("<<<<<<<"), "conflict markers are left in the tree for the next leaf to resolve");
   } finally {
     rmSync(dir, { recursive: true, force: true });
@@ -155,7 +156,7 @@ test("F6: an empty forEach source merges nothing, completes ok, dependents run",
     const spawn = fakeSpawnFactory((call) => {
       const cwd = call.opts.cwd;
       const pr = promptOf(call);
-      if (cwd.endsWith("wt-feat")) {
+      if (cwd.endsWith("feat")) {
         writeFileSync(join(cwd, "base.txt"), "base\n");
         commitAllInRepo(cwd, "base");
         return { output: "done" };
@@ -194,13 +195,13 @@ test("F7: a failed clone blocks integrate exactly as a failed hand-listed source
   try {
     const spawn = fakeSpawnFactory((call) => {
       const cwd = call.opts.cwd;
-      if (cwd.endsWith("wt-feat")) {
+      if (cwd.endsWith("feat")) {
         writeFileSync(join(cwd, "base.txt"), "base\n");
         commitAllInRepo(cwd, "base");
         return { output: "done" };
       }
-      if (cwd.endsWith("wt-fix-1")) return { exit: 1, output: "boom" };
-      const m = /wt-fix-(\d+)$/.exec(cwd);
+      if (cwd.endsWith("fix-1")) return { exit: 1, output: "boom" };
+      const m = /fix-(\d+)$/.exec(cwd);
       if (m) {
         writeFileSync(join(cwd, `fix${m[1]}.txt`), `fix ${m[1]}\n`);
         commitAllInRepo(cwd, `fix ${m[1]}`);
@@ -242,13 +243,13 @@ test("F9: a real forEach template with a worktree name actually expands and fold
     const spawn = fakeSpawnFactory((call) => {
       const cwd = call.opts.cwd;
       const pr = promptOf(call);
-      if (cwd.endsWith("wt-feat")) {
+      if (cwd.endsWith("feat")) {
         writeFileSync(join(cwd, "base.txt"), "base\n");
         commitAllInRepo(cwd, "base");
         return { output: "done" };
       }
       if (pr === "do src") return { output: '{"files":["a","b","c"]}' };
-      const m = /wt-fix-(\d+)$/.exec(cwd);
+      const m = /fix-(\d+)$/.exec(cwd);
       if (m) {
         writeFileSync(join(cwd, `fix${m[1]}.txt`), `fix ${m[1]}\n`);
         commitAllInRepo(cwd, `fix ${m[1]}`);
@@ -273,9 +274,9 @@ test("F9: a real forEach template with a worktree name actually expands and fold
     const res = JSON.parse(readFileSync(join(p.resultsDir, "results", "join.json"), "utf8"));
     equal(res.ok, true, res.output);
     equal(res.outputJson.merged.length, 3, "a real 3-item forEach must expand to 3 clones and fold every one back");
-    ok(existsSync(join(p.resultsDir, "wt-feat", "fix0.txt")));
-    ok(existsSync(join(p.resultsDir, "wt-feat", "fix1.txt")));
-    ok(existsSync(join(p.resultsDir, "wt-feat", "fix2.txt")));
+    ok(existsSync(join(treeDirFor(p.resultsDir, "feat", CFG), "fix0.txt")));
+    ok(existsSync(join(treeDirFor(p.resultsDir, "feat", CFG), "fix1.txt")));
+    ok(existsSync(join(treeDirFor(p.resultsDir, "feat", CFG), "fix2.txt")));
   } finally {
     rmSync(dir, { recursive: true, force: true });
     rmSync(repo, { recursive: true, force: true });

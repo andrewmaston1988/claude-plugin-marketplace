@@ -9,6 +9,7 @@ import { mkdtempSync, rmSync, writeFileSync, mkdirSync, existsSync } from "node:
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { runCli } from "./helpers/cli.mjs";
+import { treeDirFor } from "../src/worktree.mjs";
 
 const git = (args, cwd) => spawnSync("git", args, { cwd, encoding: "utf8", windowsHide: true });
 
@@ -25,7 +26,7 @@ test("prune finds a run's leaf trees when the manifest's cwd worktree is gone", 
     git(["worktree", "add", "-q", "--detach", base], repo);
     const resultsDir = join(root, "run-1");
     mkdirSync(resultsDir);
-    const leaf = join(resultsDir, "wt-impl");
+    const leaf = treeDirFor(resultsDir, "impl", { treeRoot: join(root, "home", "worktrees") });
     git(["worktree", "add", "-q", "-b", "swarm/x/impl", leaf], repo);
     writeFileSync(join(resultsDir, "manifest.json"), JSON.stringify({ cwd: base, tasks: [{ id: "impl" }] }));
     writeFileSync(join(resultsDir, "run.log"), JSON.stringify({ ts: new Date().toISOString(), event: "run-start" }) + "\n");

@@ -53,7 +53,7 @@ test("serve with the dashboard disabled spawns the tray and never binds the port
   const port = await freePort();
   const { home, trayLog } = serveHome(dir, { enabled: false, port, tray: true });
   try {
-    const r = runCli(["serve"], { cwd: dir, env: { SWARM_HOME: home, SWARM_SERVE_TEST_TRAY: trayLog } });
+    const r = runCli(["serve"], { cwd: dir, env: { NODE_TEST_CONTEXT: "child-v8", SWARM_HOME: home, SWARM_SERVE_TEST_TRAY: trayLog } });
     equal(r.status, 0, r.stderr);
     ok(r.stdout.includes("disabled"), `the operator is told why the dashboard is not up:\n${r.stdout}`);
     // BOTH halves. "the port is free" alone passes the broken behaviour unchanged —

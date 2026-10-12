@@ -7,6 +7,7 @@ import { equal, deepEqual, ok, match } from "node:assert/strict";
 import { rmSync } from "node:fs";
 import { join } from "node:path";
 import { runTask } from "../src/scheduler.mjs";
+import { treeDirFor } from "../src/worktree.mjs";
 import { buildDigestTask, scratchPath } from "../src/digest.mjs";
 import { buildCodexInvocation, defaultCodexProviderAdapter } from "../src/codex.mjs";
 import { CFG, tmp, task, fakeSpawnFactory, makeIo } from "./helpers/scheduler-fixtures.mjs";
@@ -61,10 +62,10 @@ test("Codex writer: runTask sets SWARM_WRITE_GUARD_ROOTS to its tree and outputD
       provider: "codex", model: "gpt-5-codex", allowedTools: "Read,Write",
       cwd: dir, originalCwd: dir, worktreeName: "w", outputDir: join(dir, "artefacts"),
     }), cfg, resultsDir);
-    deepEqual(rootsOf(writer.call), [join(resultsDir, "wt-w"), join(dir, "artefacts")]);
+    deepEqual(rootsOf(writer.call), [treeDirFor(resultsDir, "w", CFG), join(dir, "artefacts")]);
     // The same list is what the adapter grants as --add-dir: one root list, two translations.
     const granted = writer.call.args.reduce((acc, v, i) => (v === "--add-dir" ? [...acc, writer.call.args[i + 1]] : acc), []);
-    ok(granted.includes(join(resultsDir, "wt-w")), writer.call.args.join(" "));
+    ok(granted.includes(treeDirFor(resultsDir, "w", CFG)), writer.call.args.join(" "));
 
     const reader = await capture(task("r", {
       provider: "codex", model: "gpt-5-codex", allowedTools: "Read,Grep,Glob",
@@ -81,9 +82,9 @@ test("a writer that already carries its own tree root gets no duplicate", async 
     const { call } = await capture(task("w", {
       provider: "codex", model: "gpt-5-codex", allowedTools: "Read,Write",
       cwd: dir, originalCwd: dir, worktreeName: "w",
-      writeRoots: [{ path: join(resultsDir, "wt-w"), kind: "directory" }],
+      writeRoots: [{ path: treeDirFor(resultsDir, "w", CFG), kind: "directory" }],
     }), codexCfg(dir), resultsDir);
-    deepEqual(rootsOf(call), [join(resultsDir, "wt-w")], "the same root twice would double every --add-dir and every guard argv");
+    deepEqual(rootsOf(call), [treeDirFor(resultsDir, "w", CFG)], "the same root twice would double every --add-dir and every guard argv");
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
@@ -102,7 +103,7 @@ test("SWARM_WRITE_GUARD_ROOTS: a parent's value never leaks into a leaf, writer 
       provider: "codex", model: "gpt-5-codex", allowedTools: "Read,Write",
       cwd: dir, originalCwd: dir, worktreeName: "w",
     }), cfg, resultsDir, { SWARM_WRITE_GUARD_ROOTS: leak });
-    deepEqual(rootsOf(writer.call), [join(resultsDir, "wt-w")], "the engine's own roots win over the inherited value");
+    deepEqual(rootsOf(writer.call), [treeDirFor(resultsDir, "w", CFG)], "the engine's own roots win over the inherited value");
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
@@ -117,12 +118,12 @@ test("forEach clone: roots name the clone's OWN tree — Codex env and Claude --
     });
 
     const codexCall = await capture(clone({ provider: "codex", model: "gpt-5-codex" }), codexCfg(dir), resultsDir);
-    deepEqual(rootsOf(codexCall.call), [join(resultsDir, "wt-fix-0")]);
+    deepEqual(rootsOf(codexCall.call), [treeDirFor(resultsDir, "fix-0", CFG)]);
 
     const claudeCall = await capture(clone({ provider: "claude", model: "claude-haiku-4-5-20251001" }), CFG, resultsDir);
     const command = guardCommandOf(claudeCall.call);
-    ok(command.includes(`"${join(resultsDir, "wt-fix-0")}"`), command);
-    ok(!command.includes(`"${join(resultsDir, "wt-fix")}"`), `the parent's name was used: ${command}`);
+    ok(command.includes(`"${treeDirFor(resultsDir, "fix-0", CFG)}"`), command);
+    ok(!command.includes(`"${treeDirFor(resultsDir, "fix", CFG)}"`), `the parent's name was used: ${command}`);
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
@@ -139,7 +140,7 @@ test("Claude writer: runTask still merges the guard into --settings, rooted at i
     const entry = claudeSettingsOf(call).hooks.PreToolUse[0];
     equal(entry.matcher, "Write|Edit|NotebookEdit");
     match(entry.hooks[0].command, /leaf-write-guard\.mjs/);
-    ok(entry.hooks[0].command.includes(`"${join(resultsDir, "wt-w")}"`), entry.hooks[0].command);
+    ok(entry.hooks[0].command.includes(`"${treeDirFor(resultsDir, "w", CFG)}"`), entry.hooks[0].command);
     equal(call.opts.env.SWARM_WRITE_GUARD_ROOTS, "", "the Codex env route stays inert on a Claude leaf");
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
@@ -166,7 +167,7 @@ test("fallback: a Claude writer that falls back to Codex dispatches with env roo
       cwd: dir, originalCwd: dir, worktreeName: "fb", settings: { env: { OTHER: "x" } },
     }), codexCfg(dir), resultsDir);
     ok(!/dispatch error/.test(r.output), r.output);
-    deepEqual(rootsOf(call), [join(resultsDir, "wt-fb")]);
+    deepEqual(rootsOf(call), [treeDirFor(resultsDir, "fb", CFG)]);
     equal(call.opts.env.OTHER, "x", "the task's own env reaches the Codex leaf");
     ok(!call.args.includes("--settings"), call.args.join(" "));
   } finally { rmSync(dir, { recursive: true, force: true }); }
@@ -182,7 +183,7 @@ test("fallback: a Codex writer that falls back to Claude gets the --settings gua
     }), CFG, resultsDir);
     ok(!/dispatch error/.test(r.output), r.output);
     const settings = claudeSettingsOf(call);
-    ok(settings.hooks.PreToolUse[0].hooks[0].command.includes(`"${join(resultsDir, "wt-fb")}"`), settings.hooks.PreToolUse[0].hooks[0].command);
+    ok(settings.hooks.PreToolUse[0].hooks[0].command.includes(`"${treeDirFor(resultsDir, "fb", CFG)}"`), settings.hooks.PreToolUse[0].hooks[0].command);
     equal(settings.env.OTHER, "x", "the task's own env survives the merge");
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
@@ -222,9 +223,9 @@ test("buildCodexInvocation env: cfg.env overlaid by task settings.env, plus the 
     equal(merged.env.SWARM_WRITE_GUARD_ROOTS, "", "no write targets, no roots — and the var is still cleared");
 
     const guarded = buildCodexInvocation({
-      ...base, allowedTools: "Read,Write", writeRoots: [{ path: join(dir, "wt-w"), kind: "directory" }],
+      ...base, allowedTools: "Read,Write", writeRoots: [{ path: treeDirFor(dir, "w", CFG), kind: "directory" }],
     }, "go", { config: cfg });
-    deepEqual(JSON.parse(guarded.env.SWARM_WRITE_GUARD_ROOTS), [join(dir, "wt-w")]);
+    deepEqual(JSON.parse(guarded.env.SWARM_WRITE_GUARD_ROOTS), [treeDirFor(dir, "w", CFG)]);
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 

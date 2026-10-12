@@ -7,6 +7,7 @@ import { tmpdir } from "node:os";
 import { spawnSync } from "node:child_process";
 import { loadManifest } from "../src/manifest.mjs";
 import { runPlan } from "../src/scheduler.mjs";
+import { treeDirFor } from "../src/worktree.mjs";
 import { readResult } from "../src/results.mjs";
 import { CFG, writeManifest } from "./helpers/manifest-fixtures.mjs";
 import { fakeSpawnFactory, makeIo } from "./helpers/fake-io.mjs";
@@ -50,7 +51,7 @@ test("a writer whose cwd is inside a linked worktree gets a tree of that worktre
 
     equal(/outside its repo/.test(readResult(plan.resultsDir, "impl")?.output ?? ""), false, "the leaf must not fail at worktree setup");
     equal(cwds.length, 1, "the leaf never spawned: its tree was refused");
-    equal(resolve(cwds[0]), join(resolve(plan.resultsDir, "wt-impl"), "sub"), "the leaf sits at its declared depth inside the tree");
+    equal(resolve(cwds[0]), join(treeDirFor(plan.resultsDir, "impl", CFG), "sub"), "the leaf sits at its declared depth inside the tree");
     equal(heads[0], linkedHead, "the tree is cut from the linked worktree, not main");
   } finally {
     spawnSync("git", ["worktree", "prune"], { cwd: main, windowsHide: true });

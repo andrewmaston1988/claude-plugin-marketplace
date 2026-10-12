@@ -8,7 +8,7 @@ import { equal, ok, deepEqual } from "node:assert/strict";
 import { mkdtempSync, mkdirSync, writeFileSync, existsSync, readFileSync, readdirSync } from "node:fs";
 import { join, resolve, basename, dirname } from "node:path";
 import { tmpdir } from "node:os";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import {
   prepareIsolation, collect, treeDirFor, runOfTree, treeRootFor,
   readTreeRecord, listTreeRecords, legacyTreeDirs, WORKTREE_ADD_TIMEOUT_MS,
@@ -169,6 +169,44 @@ test("a branch held by another run's tree names that RUN dir, not the tree under
   }
 });
 
+test("two concurrent writer leaves in one run each leave their own record", async () => {
+  const repo = initRepo();
+  const results = runDir("run-concurrent");
+  const root = treesDir();
+  const base = ADD(repo).base;
+  const worktreeModule = new URL("../src/worktree.mjs", import.meta.url).href;
+  const childSource = `
+    const [moduleUrl, repo, results, root, name, base] = process.argv.slice(1);
+    const { prepareIsolation, WORKTREE_ADD_TIMEOUT_MS } = await import(moduleUrl);
+    const cfg = { worktreeBranchPrefix: "swarm/", treeRoot: root };
+    prepareIsolation({ id: name, originalCwd: repo, cwd: repo }, cfg, results,
+      { addTimeoutMs: WORKTREE_ADD_TIMEOUT_MS, base });
+  `;
+  const paths = ["alpha", "beta"].map((name) => treeDirFor(results, name, cfgWith(root)));
+  const runChild = (name) => new Promise((resolvePromise, rejectPromise) => {
+    const child = spawn(process.execPath, ["--input-type=module", "-e", childSource,
+      worktreeModule, repo, results, root, name, base], { windowsHide: true });
+    let stderr = "";
+    child.stderr.setEncoding("utf8");
+    child.stderr.on("data", (chunk) => { stderr += chunk; });
+    child.once("error", rejectPromise);
+    child.once("close", (code) => code === 0 ? resolvePromise() :
+      rejectPromise(new Error(`writer ${name} exited ${code}: ${stderr}`)));
+  });
+  try {
+    await Promise.all([runChild("alpha"), runChild("beta")]);
+    deepEqual(readdirSync(join(results, "trees")).sort(), ["alpha.json", "beta.json"],
+      "concurrent writers must not overwrite or lose one another's records");
+    for (const name of ["alpha", "beta"]) {
+      equal(readTreeRecord(results, name)?.state, "ready");
+      ok(existsSync(join(treeDirFor(results, name, cfgWith(root)), "a.txt")),
+        `${name} has its own checked out tree`);
+    }
+  } finally {
+    for (const path of paths) dropWorktree(repo, path);
+    cleanup(root, results, repo);
+  }
+});
 test("two writer leaves in one run each get their own record file", () => {
   const repo = initRepo();
   const results = runDir("run-two");
