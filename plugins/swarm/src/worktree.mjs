@@ -66,8 +66,9 @@ function isRegisteredWorktree(path, repo) {
 // ---- Where a run's trees live: one scratch root, one resolver, one record.
 // A run dir holds RESULTS; its trees are scratch — rebuildable, large, safe to delete
 // alone — so they live at <treeRoot>/<encoded-project>/<run>/<name>, the same
-// encoded-project/run naming as the runs root. Nothing may derive a tree path a second
-// way: the five other derivations disagreed the moment either end moved.
+// encoded-project/run naming as the runs root. Every other site that used to derive a
+// tree path itself — the write guard, prune, ask, the CLI — must call the resolver
+// below instead, or the two ends disagree the moment either one moves.
 
 // The scratch root: `treeRoot` when set, else <swarmHome>/worktrees. Both the
 // resolver and the consumers that only need the root (governance, discovery) call
