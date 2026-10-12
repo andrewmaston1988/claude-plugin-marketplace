@@ -74,3 +74,10 @@ test("formatClosing prints uncommitted file and commit counts for kept worktrees
   ok(/3.*uncommitted/i.test(out), out);
   ok(/2.*commit.*ahead/i.test(out), out);
 });
+
+test("formatClosing flags a kept worktree whose tree could not be measured", () => {
+  const out = formatClosing({ worktreesKept: [
+    { name: "impl", branch: "swarm/impl", path: "R/wt-impl", uncommitted: { files: null, commitsAhead: 1 } },
+  ] });
+  ok(/could not be measured/i.test(out) && !out.includes("null"), out);
+});

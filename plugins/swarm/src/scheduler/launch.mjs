@@ -18,7 +18,7 @@ import { isAgentless } from "../manifest.mjs";
 import * as defaultWorktree from "../worktree.mjs";
 import { runTask, classifyFailure, substituteTemplates } from "./run-task.mjs";
 import { tryParseJson, enforceLeafContract } from "./leaf-contract.mjs";
-import { enforceCommitted, UNCOMMITTED_WORK } from "./commit-gate.mjs";
+import { enforceCommitted, uncommittedNote, UNCOMMITTED_WORK } from "./commit-gate.mjs";
 
 // A codex leaf's first command is usually a batch, and past the model-visible cap codex
 // shows the model only its first and last halves — the files it was told to read are
@@ -410,7 +410,7 @@ export function createLaunch(ctx) {
         else ctx.digestFailed = true;
       }
 
-      ctx.record(task, st, r.durationMs, r.tokens);
+      ctx.record(task, st, r.durationMs, r.tokens, r.errorCode === UNCOMMITTED_WORK ? uncommittedNote(r.uncommitted) : undefined);
 
       // Projection warn: this leaf is terminal (retry/fallback paths returned
       // above). Track spend, project over the worst-case remainder, warn once.

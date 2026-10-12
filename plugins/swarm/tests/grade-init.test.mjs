@@ -140,3 +140,11 @@ test("noteFor states an UNCOMMITTED_WORK failure from the engine's measurement",
   ok(note.includes("2 uncommitted files") && note.includes("1 commit ahead"), note);
   ok(!note.includes("finished everything"), "the leaf's own claim is not the note");
 });
+
+test("noteFor says an UNCOMMITTED_WORK tree could not be measured when git could not answer", () => {
+  const note = noteFor({
+    ok: false, errorCode: "UNCOMMITTED_WORK", uncommitted: { files: null, commitsAhead: 0 },
+    output: "UNCOMMITTED_WORK: the tree could not be measured",
+  });
+  ok(note.includes("could not be measured") && !note.includes("null"), note);
+});

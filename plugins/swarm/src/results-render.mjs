@@ -250,8 +250,9 @@ export function formatKeptWorktrees(worktreesKept, { resultsDir, engine } = {}) 
     lines.push(`  ${bold(wt.name)}: ${magenta(wt.branch)} at ${wt.path}${chain}`);
     // A writer's tree with edits outside git history: loud, with the counts a merge needs.
     const u = wt.uncommitted;
-    if (u?.files > 0) {
-      lines.push(`    ${red("✗")} ${u.files} uncommitted file${u.files === 1 ? "" : "s"}, ${u.commitsAhead} commit${u.commitsAhead === 1 ? "" : "s"} ahead — a merge takes the commits only`);
+    if (u?.files === null || u?.files > 0) {
+      const left = u.files === null ? "tree could not be measured" : `${u.files} uncommitted file${u.files === 1 ? "" : "s"}`;
+      lines.push(`    ${red("✗")} ${left}, ${u.commitsAhead} commit${u.commitsAhead === 1 ? "" : "s"} ahead — a merge takes the commits only`);
     }
   }
   if (resultsDir && engine) {
