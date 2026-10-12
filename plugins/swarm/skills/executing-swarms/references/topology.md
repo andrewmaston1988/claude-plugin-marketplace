@@ -99,11 +99,11 @@ markers with the node `ok`. Everything else follows from that:
 
 ## Worktree names do not carry across manifests
 
-The tree lives under the run's `resultsDir`, so a later manifest naming the same worktree gets a
-*new* tree — and its branch `swarm/<name>` already exists, which fails. To put a tree on a
-specific branch, name it: `"workspace": "p3", "branch": "swarm/eco-p3"`. The
-engine refuses to reset a branch carrying commits HEAD does not have, so a previous run's phases
-cannot be silently discarded.
+The tree is run-scoped — `<treeRoot>/<project>/<run>/<name>`, the layout the swarm README spells
+out — so a later manifest naming the same worktree gets a *new* tree, and its branch
+`swarm/<name>` already exists, which fails. To put a tree on a specific branch, name it:
+`"workspace": "p3", "branch": "swarm/eco-p3"`. The engine refuses to reset a branch carrying
+commits HEAD does not have, so a previous run's phases cannot be silently discarded.
 
 ## How a verifier link works
 
