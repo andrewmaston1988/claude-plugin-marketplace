@@ -187,6 +187,7 @@ export function createCodexAppServerClient({
       closeWith(error);
       throw error;
     }
+    child.stdin?.on?.("error", (error) => closeWith(error));
     child.stdout?.on?.("data", handleStdout);
     child.stderr?.on?.("data", handleStderr);
     child.on?.("error", (error) => closeWith(error));
