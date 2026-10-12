@@ -4,10 +4,12 @@
 // run — and the per-run list lives in `swarm status --mine`, a command's output the
 // terminal collapses.
 import { readdirSync, readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { keptWorktreesOnDisk } from "./results.mjs";
 import { enginePath, runsKeyFor } from "./config.mjs";
 import { lastRunStart } from "./grade-nudge.mjs";
+import { runLiveness } from "./runlog.mjs";
+import { heldTrees, treeCfg } from "./prune.mjs";
 
 const CLI = enginePath();
 
@@ -24,6 +26,25 @@ function alreadyNudged(dir, sessionId) {
   try { return readFileSync(pruneMarkerPath(dir), "utf8") === sessionId; } catch { return false; }
 }
 
+// The trees a FINISHED run still holds, by path: summary.json's own kept list unioned with
+// discovery, so a tree the run never got round to recording is counted too. Gated on the run
+// being terminal — the same gate keptWorktreesOnDisk applies — because a live run's trees are
+// not this session's to prune, and naming them would point at a command that refuses.
+function heldTreePaths(dir, cfg, heartbeatMs) {
+  const live = runLiveness(dir, { heartbeatMs });
+  if (live.finishedMs == null && live.stoppedMs == null) return [];
+  // The summary's own list stays a LIST — it is what the run reported, duplicates and
+  // all — and discovery only adds paths it did not already name.
+  const paths = keptWorktreesOnDisk(dir, { heartbeatMs }).map((wt) => resolve(wt.path));
+  const seen = new Set(paths);
+  for (const t of heldTrees(dir, { cfg })) {
+    if (seen.has(t.path)) continue;
+    seen.add(t.path);
+    paths.push(t.path);
+  }
+  return paths;
+}
+
 // One repo's runs — the hook's toplevel and `status --mine`'s must agree, so this is
 // not grade-nudge's all-encodings walk. A run belongs to the session stamped on its
 // LATEST run-start (`launcher`), the same rule grade-nudge reads.
@@ -32,15 +53,18 @@ function alreadyNudged(dir, sessionId) {
 // `skipNudged` is the hook's path alone: it drops the runs whose marker already names
 // this session, so the line is said once. The listing must NOT skip them, or it would
 // hide the very run the line points at.
-export function projectRunsHoldingWorktrees({ home, toplevel, sessionId, skipNudged = false, heartbeatMs = 15_000 } = {}) {
+export function projectRunsHoldingWorktrees({ home, toplevel, sessionId, skipNudged = false, heartbeatMs = 15_000, cfg } = {}) {
   const out = { mine: [], others: 0 };
   if (!toplevel) return out;
+  // Resolved ONCE for the whole scan: the hook walks every run of the repo, and a per-run
+  // loadConfig would read the config file hundreds of times per turn.
+  const config = treeCfg(cfg);
   const root = join(home, "runs", runsKeyFor(toplevel));
   let names = [];
   try { names = readdirSync(root); } catch { return out; }
   for (const name of names) {
     const dir = join(root, name);
-    const kept = keptWorktreesOnDisk(dir, { heartbeatMs }).length;
+    const kept = heldTreePaths(dir, config, heartbeatMs).length;
     if (!kept) continue;
     if (skipNudged && sessionId && alreadyNudged(dir, sessionId)) continue;
     let text;

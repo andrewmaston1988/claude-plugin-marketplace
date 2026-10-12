@@ -17,7 +17,7 @@ import { citationPaths } from "../src/citations.mjs";
 import { formatKeptWorktrees, listLeaves, stopPath, appendRunLog, writeSummary, resultPath } from "../src/results.mjs";
 import { identityOf, identityKey } from "../src/contracts.mjs";
 import { runLiveness, readRun, ALIVE_STATES } from "../src/runlog.mjs";
-import { registeredUnder, makeGit, reposFromManifest } from "../src/prune.mjs";
+import { registeredForRun, makeGit, reposFromManifest } from "../src/prune.mjs";
 import { addTokens, emptyTokens } from "../src/stream.mjs";
 import { dim, out, err } from "../src/ui.mjs";
 import { markValidated } from "../src/validated.mjs";
@@ -388,7 +388,7 @@ async function recordDeadEngineStop(dir) {
   const git = makeGit(spawnSync);
   const worktreesKept = reposFromManifest(fs, dir)
     .filter((repo) => fs.existsSync(repo))
-    .flatMap((repo) => registeredUnder(git, repo, dir).filter((r) => r.branch)
+    .flatMap((repo) => registeredForRun(git, repo, dir).filter((r) => r.branch)
       .map((r) => ({ name: basename(r.path), branch: r.branch, path: r.path })));
 
   const summary = {
