@@ -64,13 +64,10 @@ function isRegisteredWorktree(path, repo) {
 }
 
 // ---- Where a run's trees live: one scratch root, one resolver, one record.
-//
-// A run dir holds RESULTS. Its leaf trees are scratch — rebuildable, large, and
-// safe to delete on their own — so they live under a separate root:
-//   <treeRoot>/<encoded-project>/<run>/<name>
-// Same encoded-project/run naming as the runs root, so a tree path still says
-// which run owns it. Nothing may derive a tree path a second way: the five other
-// derivations that used to exist disagreed the moment either end moved.
+// A run dir holds RESULTS; its trees are scratch — rebuildable, large, safe to delete
+// alone — so they live at <treeRoot>/<encoded-project>/<run>/<name>, the same
+// encoded-project/run naming as the runs root. Nothing may derive a tree path a second
+// way: the five other derivations disagreed the moment either end moved.
 
 // The scratch root: `treeRoot` when set, else <swarmHome>/worktrees. Both the
 // resolver and the consumers that only need the root (governance, discovery) call
@@ -86,17 +83,11 @@ function runTail(resultsDir) {
   return [basename(dirname(dir)), basename(dir)];
 }
 
-// The ONE place a tree path is built, resolving in order — each step exists for a
-// case the next one gets wrong:
-//   (a) the run's own record for `name`, which is authoritative and is the only
-//       thing that survives a legacy tree, a reconfigured `treeRoot`, or a tree an
-//       operator relocated;
-//   (b) a legacy <run>/wt-<name> git still has registered — resuming a pre-upgrade
-//       run after the upgrade would otherwise compute the new path, and
-//       `worktree add -b` would fail with "branch already used by worktree" while
-//       the write-guard root pointed at a tree that does not exist;
-//   (c) the formula.
-// `repo` is needed for (b), which only git can answer; without it (b) is skipped.
+// The ONE place a tree path is built: the run's own record for `name` first (the only
+// thing that survives a legacy tree, a reconfigured `treeRoot`, or a tree moved by
+// hand), then a legacy <run>/wt-<name> git still has registered — resuming a pre-upgrade
+// run would otherwise compute the new path and `worktree add -b` would fail "branch
+// already used by worktree" while the guard root pointed at nothing — then the formula.
 export function treeDirFor(resultsDir, name, cfg, { repo, env = process.env } = {}) {
   const recorded = readTreeRecord(resultsDir, name);
   if (recorded?.path) return resolve(recorded.path);
@@ -105,15 +96,11 @@ export function treeDirFor(resultsDir, name, cfg, { repo, env = process.env } = 
   return resolve(join(treeRootFor(cfg, { env }), ...runTail(resultsDir), String(name)));
 }
 
-// treeDirFor's inverse, for every site that recovers a run from a tree path. A tree
-// under `treeRoot` is <project>/<run>/<name>, so its run dir is
-// <runsRoot>/<project>/<run>; anything else is a legacy tree sitting IN its run dir,
-// so the tree's own parent is the answer.
-//
-// `runsRoot` defaults to <swarmHome>/runs, which is the only root the formula ever
-// writes into. Pass `runsRootFor(resultsDir)` when the caller holds a run dir of its
-// OWN in that root — the run whose tree is holding a branch is a sibling of it, and
-// taking the root from the caller makes the inverse exact whatever the root is.
+// treeDirFor's inverse: a tree under `treeRoot` is <project>/<run>/<name>, so its run dir
+// is <runsRoot>/<project>/<run>; anything else is a legacy tree IN its run dir, so the
+// tree's own parent is the answer. `runsRoot` defaults to <swarmHome>/runs — pass
+// `runsRootFor(resultsDir)` when the caller holds a run dir of its OWN in that root, and
+// the inverse is then exact whatever the root is.
 export function runOfTree(path, cfg, { env = process.env, runsRoot } = {}) {
   const p = resolve(path);
   const root = treeRootFor(cfg, { env });
