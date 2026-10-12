@@ -172,7 +172,7 @@ export function buildDispatch(task, prompt, cfg = {}, options = {}) {
     config: cfg,
   });
   const adapter = providerRegistry.get(identity.provider);
-  validateDispatchPolicy(task, identity, adapter, cfg, options._governanceIo ?? defaultGovernanceIo());
+  validateDispatchPolicy(task, identity, adapter, cfg, options._governanceIo ?? defaultGovernanceIo(cfg));
   const provider = { ...identity, runnerId: adapter.runnerId };
   const runner = runnerRegistry.resolve(provider);
   if (typeof runner.buildInvocation !== "function") {

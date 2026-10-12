@@ -1,5 +1,8 @@
-import { join, resolve, dirname, sep } from "node:path";
-import { unlandedCount } from "./worktree.mjs";
+import { join, resolve, dirname } from "node:path";
+import { existsSync, readdirSync } from "node:fs";
+import { unlandedCount, treeDirFor, runOfTree, listTreeRecords, legacyTreeDirs, treeRecordPath, treeRootFor } from "./worktree.mjs";
+import { isUnderRoot, normalizeForCompare } from "./roots.mjs";
+import { getConfig } from "./config.mjs";
 
 // Every byte under `path`, walked with the injected `fs` — real `node:fs` in
 // production, a scripted stand-in in tests. Missing/unreadable entries count as
@@ -39,10 +42,20 @@ export function repoOfWorktree(spawnSync, worktreePath) {
 
 // Every tree still sitting in the run dir, asked for its repo — the summary may
 // have recorded none, and the manifest's cwd may be a worktree long since removed.
-export function reposOfTrees(fs, dir, spawnSync) {
-  return fs.readdirSync(dir, { withFileTypes: true })
-    .filter((e) => e.isDirectory() && fs.existsSync(join(dir, e.name, ".git")))
-    .map((e) => repoOfWorktree(spawnSync, join(dir, e.name)));
+export function reposOfTrees(fs, dir, spawnSync, { cfg } = {}) {
+  const out = [];
+  // Both places a run's trees can be: its scratch dir under `treeRoot` (where the resolver
+  // creates them) and the run dir itself (the pre-upgrade <run>/wt-* layout).
+  for (const root of [resolve(dir), runScratchDir(dir, treeCfg(cfg))]) {
+    let entries = [];
+    try { entries = fs.readdirSync(root, { withFileTypes: true }); } catch { continue; }
+    for (const e of entries) {
+      if (!e.isDirectory()) continue;
+      const p = join(root, e.name);
+      if (fs.existsSync(join(p, ".git"))) out.push(repoOfWorktree(spawnSync, p));
+    }
+  }
+  return out;
 }
 
 // A git runner behind an injected spawnSync — the closure production code and
@@ -67,14 +80,60 @@ export function reposFromManifest(fs, dir) {
   }
 }
 
-// `git worktree list --porcelain` parsed with the injected git, mirroring
-// worktree.mjs's prepareIsolation-side registry read — duplicated rather than
-// imported because that one is bound to the real spawnSync git and this seam
-// must stay scriptable.
-export function registeredUnder(git, repo, resultsDir) {
+// The config the tree root is read from. A caller that already holds one passes it; the
+// CLI's prune path does not, and a hardcoded default here would go blind the moment an
+// operator points `treeRoot` at another drive. A malformed config degrades to the default
+// rather than failing a read-only listing.
+export function treeCfg(cfg) {
+  if (cfg) return cfg;
+  try { return getConfig(); } catch { return null; }
+}
+
+// The dir a run's trees live in — <treeRoot>/<encoded-project>/<run>. Asked of the
+// resolver rather than spelled again: `\0` is a name no filesystem accepts and no record
+// can carry, so treeDirFor takes its formula branch and the one path rule stays in
+// worktree.mjs.
+const NO_TREE_NAME = "\u0000";
+export function runScratchDir(resultsDir, cfg) {
+  return resolve(dirname(treeDirFor(resultsDir, NO_TREE_NAME, cfg)));
+}
+
+// Every tree a run still holds on disk: the ones its own per-tree records name, whatever
+// sits in its scratch dir that no record names (a killed `worktree add`, a lost record),
+// and the pre-upgrade <run>/wt-* trees the run dir still carries. prune and the nudge both
+// ask this one function — a second copy of the union is how the nudge ends up naming a run
+// whose prune listing is empty, or the reverse.
+export function heldTrees(resultsDir, { cfg } = {}) {
+  const dir = resolve(resultsDir);
+  const byPath = new Map();
+  const add = (path, name, extra = {}) => {
+    if (!path) return;
+    const p = resolve(path);
+    if (!byPath.has(p)) byPath.set(p, { name: name ?? null, path: p, branch: null, repo: null, ...extra });
+  };
+  for (const rec of listTreeRecords(dir)) add(rec.path, rec.name, { branch: rec.branch ?? null, repo: rec.repo ?? null });
+  // The scratch dir holds nothing but trees, so no name filter applies there.
+  for (const p of subdirs(runScratchDir(dir, treeCfg(cfg)))) add(p, null);
+  for (const t of legacyTreeDirs(dir)) add(t.path, t.name);
+  // A record or a stray dir naming a tree that is already gone is not a tree to report.
+  return [...byPath.values()].filter((t) => existsSync(t.path));
+}
+
+function subdirs(dir) {
+  let entries = [];
+  try { entries = readdirSync(dir, { withFileTypes: true }); } catch { return []; }
+  return entries.filter((e) => e.isDirectory()).map((e) => join(dir, e.name));
+}
+
+// The trees git still has registered for THIS run. Ownership is the resolver's own inverse,
+// not a prefix test: a tree lives under <treeRoot>/<project>/<run> now, so "starts with
+// resultsDir" stopped matching the moment creation moved — and would meanwhile sweep a
+// sibling run's tree into this run's prune.
+export function registeredForRun(git, repo, resultsDir, { cfg } = {}) {
   const r = git(["worktree", "list", "--porcelain"], repo);
   if (r.status !== 0) return [];
-  const prefix = resolve(resultsDir) + sep;
+  const dir = resolve(resultsDir);
+  const runsRoot = dirname(dirname(dir));
   const rows = [];
   let cur = null;
   for (const line of r.stdout.split("\n")) {
@@ -86,7 +145,21 @@ export function registeredUnder(git, repo, resultsDir) {
     }
   }
   if (cur) rows.push(cur);
-  return rows.filter((r) => (r.path + sep).startsWith(prefix) || r.path.startsWith(prefix));
+  const key = (p) => normalizeForCompare(p);
+  const want = key(dir);
+  const root = treeCfg(cfg);
+  return rows.filter((row) => key(runOfTree(row.path, root, { runsRoot })) === want);
+}
+
+// A tree found by scanning carries no repo or branch of its own: ask the tree. Null when
+// git cannot answer, which is how a stray directory is told apart from a real worktree — a
+// row prune cannot resolve is not one it may destroy.
+function treeFacts(git, path) {
+  const common = git(["rev-parse", "--git-common-dir"], path);
+  if (common.status !== 0 || !common.stdout) return null;
+  const head = git(["rev-parse", "--abbrev-ref", "HEAD"], path);
+  const branch = head.status === 0 && head.stdout && head.stdout !== "HEAD" ? head.stdout : null;
+  return { repo: dirname(resolve(path, common.stdout)), branch };
 }
 
 // `run`: { live, repos: [string], resultsDir, worktreesKept: [{ branch, path, repo }] }.
@@ -95,26 +168,48 @@ export function registeredUnder(git, repo, resultsDir) {
 // which attributed every tree to whichever repo resolved first.
 // `live` short-circuits before any git/fs call — a live run is never inspected,
 // only refused, so the cost of asking must be zero.
-export function plan(run, git, fs) {
+export function plan(run, git, fs, { cfg } = {}) {
   if (run.live) return { live: true };
 
   const rows = [];
   const seen = new Set();
+  // The path is kept AS GIVEN — the injected `fs` keys on it, and a summary's own
+  // spelling is what the report prints. Only the dedupe key is normalised, so the three
+  // sources agree about a path however each of them spelled it.
+  const addRow = (path, branch, repo) => {
+    const key = normalizeForCompare(path);
+    if (seen.has(key)) return;
+    seen.add(key);
+    rows.push(measureRow({ path, branch, bytes: dirSize(fs, path), repo }, git, fs));
+  };
+
+  // summary.json's own list: how the run reported what it left, and the only source that
+  // carries a shared chain's taskIds. It is not authoritative for what EXISTS — a killed
+  // run wrote no summary, a summary entry can name a path already moved — so the two
+  // scans below add to it rather than replacing it.
   for (const wt of run.worktreesKept || []) {
     if (!fs.existsSync(wt.path)) continue; // already gone from disk — not a row to plan or report
-    rows.push(measureRow({ path: wt.path, branch: wt.branch, bytes: dirSize(fs, wt.path), repo: wt.repo }, git, fs));
-    seen.add(resolve(wt.path));
+    addRow(wt.path, wt.branch, wt.repo);
+  }
+
+  // Everything else on disk that belongs to the run, wherever the resolver put it.
+  if (run.resultsDir) {
+    for (const t of heldTrees(run.resultsDir, { cfg })) {
+      if (seen.has(t.path) || !fs.existsSync(t.path)) continue;
+      const facts = t.repo && t.branch ? t : treeFacts(git, t.path);
+      if (!facts?.repo) continue; // not a worktree git can speak for — never a row to destroy
+      addRow(t.path, t.branch ?? facts.branch ?? null, facts.repo);
+    }
   }
 
   for (const repo of run.repos || []) {
     if (!fs.existsSync(repo)) continue;
-    for (const reg of registeredUnder(git, repo, run.resultsDir)) {
+    for (const reg of registeredForRun(git, repo, run.resultsDir, { cfg })) {
       if (seen.has(reg.path)) continue;
       // Registered but gone from disk: `git status` against a missing cwd would fail
       // closed and block the run forever, so it is not a row to measure.
       if (!fs.existsSync(reg.path)) continue;
-      rows.push(measureRow({ path: reg.path, branch: reg.branch, bytes: dirSize(fs, reg.path), repo }, git, fs));
-      seen.add(reg.path);
+      addRow(reg.path, reg.branch, repo);
     }
   }
 
@@ -151,19 +246,39 @@ export function blockers(rows) {
 
 // Destroy in order: the worktree directory, then the branch it sat on — a row
 // whose repo is gone skips git entirely and is just removed from disk.
-export function execute(rows, git, fs) {
+export function execute(rows, git, fs, { resultsDir, cfg } = {}) {
+  const records = resultsDir ? listTreeRecords(resultsDir) : [];
   for (const row of rows) {
     if (!fs.existsSync(row.repo)) {
       fs.rmSync(row.path, { recursive: true, force: true });
-      continue;
-    }
-    // A detached tree has no branch, and may be left locked by a killed `worktree add`.
-    if (row.branch) {
-      git(["worktree", "remove", "--force", row.path], row.repo);
-      git(["branch", "-D", row.branch], row.repo);
     } else {
-      git(["worktree", "remove", "-f", "-f", row.path], row.repo);
+      // A detached tree has no branch, and may be left locked by a killed `worktree add`.
+      if (row.branch) {
+        git(["worktree", "remove", "--force", row.path], row.repo);
+        git(["branch", "-D", row.branch], row.repo);
+      } else {
+        git(["worktree", "remove", "-f", "-f", row.path], row.repo);
+      }
     }
+    if (resultsDir && !fs.existsSync(row.path)) {
+      for (const record of records) {
+        if (normalizeForCompare(record.path) === normalizeForCompare(row.path)) {
+          fs.rmSync(treeRecordPath(resultsDir, record.name), { force: true });
+        }
+      }
+    }
+  }
+  if (resultsDir) removeEmptyTreeParents(resultsDir, cfg, fs);
+}
+
+function removeEmptyTreeParents(resultsDir, cfg, fs) {
+  const root = resolve(treeRootFor(cfg));
+  const runDir = runScratchDir(resultsDir, cfg);
+  if (runDir === root || !isUnderRoot(runDir, root)) return;
+  try { fs.rmdirSync(runDir); } catch { return; }
+  const projectDir = dirname(runDir);
+  if (projectDir !== root && isUnderRoot(projectDir, root)) {
+    try { fs.rmdirSync(projectDir); } catch { /* non-empty parents belong to their remaining trees */ }
   }
 }
 

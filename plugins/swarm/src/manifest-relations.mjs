@@ -101,13 +101,13 @@ export function validateWorktreeGroups(rawTasks, errors, label) {
         `        "workspace": "${name}", "branch": "${named.branch}"`);
     }
 
-    // A shared name equal to another task's id resolves to the same wt-<name> path.
+    // A shared name equal to another task's id resolves to the same tree directory.
     if (!shared.length) continue;
     const clash = members.find((t) => t.id === name && !isSharedTree(t));
     if (clash) {
       errors.push(
         `shared worktree "${name}" collides with task '${clash.id}', which has its own private ` +
-        `worktree of the same name — both resolve to wt-${name}. Rename one.`);
+        `worktree of the same name — the two share one tree directory. Rename one.`);
     }
   }
 

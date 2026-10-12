@@ -2,6 +2,7 @@ import { allowedRootsFor } from "./providers.mjs";
 import { isUnderRoot } from "./roots.mjs";
 import { realRepoToplevel, repoLookup } from "./manifest-leaf-guard.mjs";
 import { swarmHome } from "./config.mjs";
+import { treeRootFor } from "./worktree.mjs";
 // From the leaf, not manifest.mjs: importing it from the loader made governance
 // and the loader mutually dependent, and the loader's split pulled
 // manifest-normalize.mjs into that cycle too.
@@ -18,11 +19,13 @@ function unconfigured(provider, rootLabel) {
 }
 // The one root test for all three gates (manifest, dispatch, ask). A swarm-made worktree
 // sits outside every root: judge it by the repo it was cut from, so each provider's roots
-// still bind.
+// still bind. That covers the tree wherever it lives — a `treeRoot` outside the swarm home
+// is still swarm's own tree, so the repo test still applies there rather than a bare refusal.
 export function cwdAllowed(cwd, roots, io) {
   const inRoots = (p) => roots.some((root) => isUnderRoot(p, root));
   if (inRoots(cwd)) return { reason: "allowed" };
-  if (!isUnderRoot(cwd, io.home)) return { reason: "outside-roots" };
+  const mine = isUnderRoot(cwd, io.home) || (io.treeRoot && isUnderRoot(cwd, io.treeRoot));
+  if (!mine) return { reason: "outside-roots" };
   const lookup = io.repoLookup(cwd);
   if (lookup.failed) return { reason: "lookup-failed", error: lookup.failed };
   return lookup.repo && inRoots(lookup.repo)
@@ -30,7 +33,13 @@ export function cwdAllowed(cwd, roots, io) {
     : { reason: "outside-roots" };
 }
 
-export const defaultGovernanceIo = () => ({ home: swarmHome(), repoToplevel: realRepoToplevel, repoLookup });
+// `treeRoot` rides with the home: both are places swarm itself put a directory, so the
+// repo-judgement path above has to recognise a tree under either. Omitted, the gate
+// refuses every cwd in a tree the operator moved outside the home — which is the whole
+// point of allowing `treeRoot` to point elsewhere.
+export const defaultGovernanceIo = (cfg, { env = process.env } = {}) => ({
+  home: swarmHome(env), treeRoot: treeRootFor(cfg, { env }), repoToplevel: realRepoToplevel, repoLookup,
+});
 
 function waitForLookupRetry() {
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 1000);

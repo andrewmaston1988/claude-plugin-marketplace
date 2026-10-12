@@ -5,6 +5,7 @@ import { basename, join } from "node:path";
 import { loadManifest } from "./helpers/repo-io.mjs";
 import { CFG, writeManifest, tmp, errorsOf, claudeTask } from "./helpers/manifest-fixtures.mjs";
 import { isUnderRoot } from "../src/roots.mjs";
+import { treeDirFor } from "../src/worktree.mjs";
 
 // ── governance gate ───────────────────────────────────────────────────────────
 
@@ -476,15 +477,14 @@ test("governance: a legacy config with only per-provider keys dispatches unchang
 });
 
 // ── G: a swarm-made worktree is judged by the repo it was cut from ────────────
-// A leaf worktree lives under ~/.swarm/runs/<repo>/<run>/wt-*, outside every allowedRoots
-// entry, so the literal-cwd test refused swarm's own trees for every provider. These cases
-// stub io.repoToplevel and io.home, so no real git runs.
+// Out-of-root swarm trees bind to their source repo; the injected io avoids git.
 
 // The governance io seam: the swarm home the gate may widen inside, and the repo every
 // tree under it resolves to. A path outside home answers itself, which is how the run's
 // own manifest cwd stays an allowed repo in every case.
 const govIo = (home, repoOfTree) => ({
   home,
+  treeRoot: join(home, "worktrees"),
   repoToplevel: (p) => (isUnderRoot(p, home) ? repoOfTree : p), repoLookup: (p) => ({ repo: isUnderRoot(p, home) ? repoOfTree : p }),
 });
 
@@ -514,7 +514,7 @@ test("governance G1: a cwd already under a root passes without probing git for i
 test("governance G2: a swarm worktree of an allowed repo passes", () => {
   const repo = tmp();
   const home = tmp();
-  const wt = join(home, "runs", "repo", "run1", "wt-a");
+  const wt = treeDirFor(join(home, "runs", "repo", "run1"), "a", { treeRoot: join(home, "worktrees") });
   mkdirSync(wt, { recursive: true });
   try {
     const cfg = { ...CFG, providers: { ollama: { enabled: true, allowedRoots: [repo] } } };
@@ -532,7 +532,7 @@ test("governance G3: a swarm worktree whose repo is outside the roots is refused
   const repo = tmp();
   const stranger = tmp();
   const home = tmp();
-  const wt = join(home, "runs", "stranger", "run1", "wt-a");
+  const wt = treeDirFor(join(home, "runs", "stranger", "run1"), "a", { treeRoot: join(home, "worktrees") });
   mkdirSync(wt, { recursive: true });
   try {
     const cfg = { ...CFG, providers: { ollama: { enabled: true, allowedRoots: [repo] } } };
@@ -552,7 +552,7 @@ test("governance G4: per-provider roots still bind inside the swarm home", () =>
   const rootA = tmp();
   const rootB = tmp();
   const home = tmp();
-  const wt = join(home, "runs", "b", "run1", "wt-a");
+  const wt = treeDirFor(join(home, "runs", "b", "run1"), "a", { treeRoot: join(home, "worktrees") });
   mkdirSync(wt, { recursive: true });
   try {
     const cfg = {
@@ -598,7 +598,7 @@ test("governance G5: a worktree outside the swarm home is not widened", () => {
 test("governance G6: a swarm tree with no resolvable repo is refused", () => {
   const repo = tmp();
   const home = tmp();
-  const wt = join(home, "runs", "gone", "run1", "wt-a");
+  const wt = treeDirFor(join(home, "runs", "gone", "run1"), "a", { treeRoot: join(home, "worktrees") });
   mkdirSync(wt, { recursive: true });
   try {
     const cfg = { ...CFG, providers: { ollama: { enabled: true, allowedRoots: [repo] } } };

@@ -3,7 +3,7 @@ import { equal, ok } from "node:assert/strict";
 import { mkdtempSync, writeFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { prepareIsolation, WORKTREE_ADD_TIMEOUT_MS } from "../src/worktree.mjs";
+import { prepareIsolation, treeDirFor, WORKTREE_ADD_TIMEOUT_MS } from "../src/worktree.mjs";
 import { git, initRepo, cleanup, commitAll, dropWorktree, CFG, ADD } from "./helpers/worktree-fixtures.mjs";
 
 // ---- the dispatch-commit base: one per repo, fixed when the run starts ----
@@ -61,7 +61,7 @@ test("a branch checked out in another worktree fails with a guided error naming 
     equal(error.message.match(/swarm prune ([^)]+)\)/)?.[1], a.replaceAll("\\", "/"),
       `the printed prune target must be the run dir, not the worktree: ${error.message}`);
   } finally {
-    dropWorktree(repo, join(a, "wt-x"));
+    dropWorktree(repo, treeDirFor(a, "x", CFG));
     cleanup(a, b, repo);
   }
 });

@@ -8,7 +8,7 @@ import { tmpdir } from "node:os";
 import { spawnSync } from "node:child_process";
 import { BASES_FILE, baseFor, captureBases } from "../src/run-bases.mjs";
 import { runPlan } from "../src/scheduler.mjs";
-import { checkoutToplevel, prepareIsolation, WORKTREE_ADD_TIMEOUT_MS } from "../src/worktree.mjs";
+import { checkoutToplevel, prepareIsolation, treeDirFor, WORKTREE_ADD_TIMEOUT_MS } from "../src/worktree.mjs";
 import {
   CFG, commitAllInRepo, fakeSpawnFactory, gitInRepo, initGitRepo, integrateLeaf,
   makeIo, plan, tmp,
@@ -120,7 +120,7 @@ test("a leaf launched after the live checkout moved is still cut from the dispat
   let midRun = null;
   try {
     const spawn = fakeSpawnFactory((call) => {
-      if (call.opts.cwd.endsWith("wt-first") && !midRun) {
+      if (call.opts.cwd.endsWith("first") && !midRun) {
         // A merge lands on the live checkout while the run is in flight.
         writeFileSync(join(repo, "merged.txt"), "landed mid-run\n");
         commitAllInRepo(repo, "mid-run merge");
@@ -139,10 +139,10 @@ test("a leaf launched after the live checkout moved is still cut from the dispat
     await runPlan(p, CFG, io);
 
     ok(midRun && midRun !== dispatch, "precondition: the live checkout moved during the run");
-    const secondTree = join(p.resultsDir, "wt-second");
+    const secondTree = treeDirFor(p.resultsDir, "second", CFG);
     equal(gitInRepo(["rev-parse", "HEAD~1"], secondTree), dispatch,
       "the second leaf's tree must sit on the dispatch commit, not the checkout's later HEAD");
-    equal(gitInRepo(["rev-parse", "HEAD~1"], join(p.resultsDir, "wt-first")),
+    equal(gitInRepo(["rev-parse", "HEAD~1"], treeDirFor(p.resultsDir, "first", CFG)),
       gitInRepo(["rev-parse", "HEAD~1"], secondTree),
       "siblings launched either side of the mid-run commit share ONE base");
     equal(spawnSync("git", ["merge-base", "--is-ancestor", midRun, "HEAD"],

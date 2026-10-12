@@ -36,8 +36,9 @@ compatibility and does not change the public manifest identity.
 other model providers, so non-Claude dispatch is **deny-by-default** — a task whose
 effective `cwd` isn't under a listed root fails validation. With no list configured, nothing
 dispatches until `swarm setup` writes one; list only roots cleared to leave for your provider.
-Swarm's own leaf worktrees live under `~/.swarm/runs/`, outside every root — a task there is
-judged by the repo its tree was cut from, so each provider's roots still bind.
+Swarm's own leaf worktrees live under `treeRoot` (`~/.swarm/worktrees` by default), outside every
+root — a task there is judged by the repo its tree was cut from, so each provider's roots still
+bind.
 
 Every other key (`providers.<name>.*`, `concurrency`, `timeoutMs`,
 `worktreeBranchPrefix`, `modelDenylist`, `providers.ollama.cloud.ollama.*`, `notifyCmd`,
@@ -341,7 +342,8 @@ source array, or a failed clone, behave exactly as they do for a hand-listed `fr
 ## Results layout
 
 ```
-<resultsDir>/                # default ~/.swarm/runs/<encoded-repo-toplevel>/<stem>-<n>/ — outside the repo
+<resultsDir>/                # RESULTS ONLY — default ~/.swarm/runs/<encoded-repo-toplevel>/<stem>-<n>/,
+                             # outside the repo; a run's leaf trees live under `treeRoot` instead
   manifest.json              # the effective plan at dispatch (args substituted) — runs record their own intent
   results/<id>.json          # { id, model, ok, exit, durationMs, tokens?, costUsd?, numTurns?, sessionId?, prompt?, cwd, allowedTools, output, outputJson?, citations?, worktree? }
   results/<id>.log           # the leaf's stream minus per-token thinking_tokens progress events — tail one leaf's tool calls live
@@ -355,7 +357,17 @@ source array, or a failed clone, behave exactly as they do for a hand-listed `fr
                               # also carries a `session` event ({ id, sessionId }) the moment each
                               # leaf's stream names it, before the leaf settles — a crashed engine
                               # still has every session id on disk for resume to fall back to
+  trees/<name>.json          # { name, path, branch, repo, state } — the run's own record of where it
+                              # put that tree; written before `worktree add` ("creating"), rewritten
+                              # after ("ready")
 ```
+
+**Trees are scratch and live outside the run dir.** A writer's tree goes to
+`<treeRoot>/<encoded-repo-toplevel>/<run>/<name>` — `treeRoot` from config, default
+`~/.swarm/worktrees` — so a run dir holds results and these records alone, and deleting the
+scratch root can never lose history. `trees/<name>.json` is what resolves that tree: the
+resolver reads the record first, then a legacy `<run>/wt-<name>` git still has registered, then
+that formula. Pre-upgrade runs keep their trees in the run dir until pruned.
 
 **A leaf's tree follows from its tools.** `Edit`/`Write`/`Bash` ⇒ a private worktree cut from
 the run's pinned dispatch commit, on the run-scoped branch `swarm/<run>/<id>`; read-only ⇒ the

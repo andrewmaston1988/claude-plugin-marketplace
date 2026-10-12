@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { buildDispatch, toSpawnable, resolveExecutable, windowsCommandLineLength } from "../src/dispatch.mjs";
 import { loadManifest } from "./helpers/repo-io.mjs";
 import * as leafGuard from "../src/manifest-leaf-guard.mjs";
-
+import { treeDirFor } from "../src/worktree.mjs";
 const CFG = {
   provider: {
     mode: "env",
@@ -488,9 +488,9 @@ test("dispatch: a swarm worktree of an allowed repo dispatches; one of a strange
   const home = mkdtempSync(join(tmpdir(), "swarm-dispatch-home-"));
   try {
     const cfg = { allowedRoots: [root], providers: { claude: { enabled: true } } };
-    const wt = join(home, "runs", "repo", "run1", "wt-a");
+    const wt = treeDirFor(join(home, "runs", "repo", "run1"), "a", { treeRoot: join(home, "worktrees") });
     const base = task({ cwd: wt, originalCwd: wt });
-    const gov = (repo) => ({ _governanceIo: { home, repoToplevel: () => repo, repoLookup: () => repo ? { repo } : { none: "not-a-repo" } } });
+    const gov = (repo) => ({ _governanceIo: { home, treeRoot: join(home, "worktrees"), repoToplevel: () => repo, repoLookup: () => repo ? { repo } : { none: "not-a-repo" } } });
     equal(buildDispatch(base, "p", cfg, gov(root)).argv[0], "claude");
     throws(() => buildDispatch(base, "p", cfg, gov(resolve(root, "..", "swarm-stranger-repo"))), /governance/i);
     throws(() => buildDispatch(base, "p", cfg, gov(null)), /governance/i);

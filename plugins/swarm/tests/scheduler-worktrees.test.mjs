@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import { spawn as nodeSpawn, spawnSync } from "node:child_process";
 import { oracleSnapKey } from "./helpers/snap-key.mjs";
 import { runPlan, runTask } from "../src/scheduler.mjs";
+import { treeDirFor } from "../src/worktree.mjs";
 import { readResult } from "../src/results.mjs";
 import { CFG, tmp, task, plan, computeTask, childPlanOf, fakeSpawnFactory, makeIo, promptOf, sentPrompt, usageEnv, codexReading, SHIM, streamOut, gitInRepo, initGitRepo, commitAllInRepo, fakeWorktree, buildStrandPlan, integrateLeaf, forEachFixLeaf, fixCloneTasks } from "./helpers/scheduler-fixtures.mjs";
 test("collect runs once, after the last task in a shared worktree group", async () => {
@@ -227,7 +228,7 @@ test("a destroyed (unchanged) tree is absent from worktreesKept", async () => {
     const io = makeIo(fakeSpawnFactory(() => ({ ok: true, output: "done" })), {
       worktree: {
         prepareIsolation: (t, cfg, resultsDir) => ({
-          path: join(resultsDir, `wt-${t.worktreeName}`), branch: `swarm/${t.worktreeName}`,
+          path: treeDirFor(resultsDir, t.worktreeName, CFG), branch: `swarm/${t.worktreeName}`,
           name: t.worktreeName, head: "h", repo: resultsDir, reused: false,
         }),
         // 'b' changed nothing, so its tree and branch were deleted
@@ -256,7 +257,7 @@ test("--force resets only the first link of a shared worktree group", async () =
       worktree: {
         prepareIsolation: (t, cfg, resultsDir, opts) => {
           resets.push({ id: t.id, reset: opts.reset });
-          return { path: join(resultsDir, "wt-feat"), branch: "swarm/feat", name: "feat", head: "h", repo: resultsDir, reused: false };
+          return { path: treeDirFor(resultsDir, "feat", CFG), branch: "swarm/feat", name: "feat", head: "h", repo: resultsDir, reused: false };
         },
         collect: (t, cfg, wt) => ({ kept: true, branch: wt.branch, path: wt.path, diffstat: "d" }),
       },
@@ -355,7 +356,7 @@ test("dirty writer gets one commit re-ask and stays ok when collection becomes c
   const spawn = fakeSpawnFactory((call, i) => ({ output: streamOut(i ? "committed" : "initial", "sess-commit") }));
   const io = makeIo(spawn, {
     worktree: {
-      prepareIsolation: (t, cfg, resultsDir) => ({ path: join(resultsDir, "wt-impl"), branch: "swarm/impl", name: "impl", head: "h", repo: resultsDir, reused: false }),
+      prepareIsolation: (t, cfg, resultsDir) => ({ path: treeDirFor(resultsDir, "impl", CFG), branch: "swarm/impl", name: "impl", head: "h", repo: resultsDir, reused: false }),
       collect: (t, cfg, wt) => {
         const uncommitted = collects.length++ === 0 ? { files: 2, commitsAhead: 0 } : { files: 0, commitsAhead: 1 };
         return { kept: true, branch: wt.branch, path: wt.path, diffstat: "2 files changed", uncommitted };
@@ -380,7 +381,7 @@ test("writer still dirty after its commit re-ask fails with UNCOMMITTED_WORK and
   const spawn = fakeSpawnFactory((call, i) => ({ output: streamOut(i ? "still editing" : "original answer", "sess-dirty") }));
   const io = makeIo(spawn, {
     worktree: {
-      prepareIsolation: (t, cfg, resultsDir) => ({ path: join(resultsDir, "wt-impl"), branch: "swarm/impl", name: "impl", head: "h", repo: resultsDir, reused: false }),
+      prepareIsolation: (t, cfg, resultsDir) => ({ path: treeDirFor(resultsDir, "impl", CFG), branch: "swarm/impl", name: "impl", head: "h", repo: resultsDir, reused: false }),
       collect: (t, cfg, wt) => {
         collectCalls.push(t.id);
         return { kept: true, branch: wt.branch, path: wt.path, diffstat: "2 files changed", uncommitted: { files: 2, commitsAhead: 1 } };
@@ -411,7 +412,7 @@ test("rerun resumes an UNCOMMITTED_WORK leaf on the commit correction in its kep
     worktree: {
       prepareIsolation: (t, cfg, resultsDir, opts) => {
         resets.push(opts.reset);
-        return { path: join(resultsDir, "wt-impl"), branch: "swarm/impl", name: "impl", head: "h", repo: resultsDir, reused: collectCalls.length > 0 };
+        return { path: treeDirFor(resultsDir, "impl", CFG), branch: "swarm/impl", name: "impl", head: "h", repo: resultsDir, reused: collectCalls.length > 0 };
       },
       collect: (t, cfg, wt) => {
         collectCalls.push(t.id);
@@ -442,7 +443,7 @@ test("only the final chain link is checked and its correction names every group 
   const spawn = fakeSpawnFactory((call, i) => ({ output: streamOut(`answer ${i}`, "sess-chain") }));
   const io = makeIo(spawn, {
     worktree: {
-      prepareIsolation: (t, cfg, resultsDir) => ({ path: join(resultsDir, "wt-feat"), branch: "swarm/feat", name: "feat", head: "h", repo: resultsDir, reused: t.id !== "first" }),
+      prepareIsolation: (t, cfg, resultsDir) => ({ path: treeDirFor(resultsDir, "feat", CFG), branch: "swarm/feat", name: "feat", head: "h", repo: resultsDir, reused: t.id !== "first" }),
       collect: (t, cfg, wt) => {
         collected.push(t.id);
         return { kept: true, branch: wt.branch, path: wt.path, diffstat: "1 file changed", uncommitted: collected.length === 1 ? { files: 1, commitsAhead: 0 } : { files: 0, commitsAhead: 1 } };
@@ -471,7 +472,7 @@ test("clean committed tree remains ok without a top-level uncommitted failure fi
   try {
     const io = makeIo(fakeSpawnFactory(() => ({ output: streamOut("clean result", "sess-clean") })), {
       worktree: {
-        prepareIsolation: (t, cfg, resultsDir) => ({ path: join(resultsDir, "wt-clean"), branch: "swarm/clean", name: "clean", head: "h", repo: resultsDir, reused: false }),
+        prepareIsolation: (t, cfg, resultsDir) => ({ path: treeDirFor(resultsDir, "clean", CFG), branch: "swarm/clean", name: "clean", head: "h", repo: resultsDir, reused: false }),
         collect: (t, cfg, wt) => ({ kept: true, branch: wt.branch, path: wt.path, diffstat: "1 file changed", uncommitted: { files: 0, commitsAhead: 1 } }),
       },
     });

@@ -8,6 +8,7 @@ import { join, basename } from "node:path";
 import { spawnSync } from "node:child_process";
 import { hasWriteTools } from "../src/manifest.mjs";
 import { runTask } from "../src/scheduler.mjs";
+import { treeDirFor } from "../src/worktree.mjs";
 import { fakeSpawnFactory, makeIo } from "./helpers/fake-io.mjs";
 import { loadManifest } from "./helpers/repo-io.mjs";
 import { CFG, writeManifest, tmp, errorsOf, claudeTask, writerTask } from "./helpers/manifest-fixtures.mjs";
@@ -154,13 +155,17 @@ test("write guard: attached to a write-capable leaf, rooted at its own worktree"
   const dir = tmp();
   try {
     const p = writeManifest(dir, { resultsDir: "out", tasks: [writerTask()] });
-    const { task, guard } = await spawnedWriter(p, CFG, dir);
+    const { plan, task, guard } = await spawnedWriter(p, CFG, dir);
     equal(task.settings, undefined, "normalize writes nothing: roots are computed at spawn");
     equal(guard.matcher, "Write|Edit|NotebookEdit");
     const command = guard.hooks[0].command;
     match(command, /leaf-write-guard\.mjs/);
-    // The root is the worktree the scheduler will create for this task.
-    match(command, /wt-a/);
+    // The root is the worktree the scheduler will create for this task — the one
+    // treeDirFor names, which is where prepareIsolation puts it.
+    const tree = treeDirFor(plan.resultsDir, "a", CFG);
+    ok(command.includes(tree), `the guard is not rooted at the leaf's tree: ${command}`);
+    ok(!command.includes(join(plan.resultsDir, "wt-a")),
+      `the guard is rooted at a path no tree is created at: ${command}`);
     equal(guard.hooks[0].type, "command");
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
@@ -194,8 +199,8 @@ test("write guard: outputDir is a second allowed root — it resolves into the l
   const dir = tmp();
   try {
     const p = writeManifest(dir, { resultsDir: "out", tasks: [writerTask({ outputDir: "artefacts" })] });
-    const { guard } = await spawnedWriter(p, CFG, dir);
-    match(guard.hooks[0].command, /wt-a/);
+    const { plan, guard } = await spawnedWriter(p, CFG, dir);
+    ok(guard.hooks[0].command.includes(treeDirFor(plan.resultsDir, "a", CFG)));
     match(guard.hooks[0].command, /artefacts/);
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
@@ -231,7 +236,7 @@ test("write guard: the emitted command actually denies when a shell runs it", as
       equal(r.status, 0, `the emitted command must run — ${r.stderr}`);
       return r.stdout.trim();
     };
-    const root = join(plan.resultsDir, "wt-a");
+    const root = treeDirFor(plan.resultsDir, "a", CFG);
     equal(run(join(root, "inside.txt")), "", "a write inside the leaf's own tree is allowed");
     const out = JSON.parse(run(join(dir, "escape.txt")));
     equal(out.hookSpecificOutput.permissionDecision, "deny", "a write outside it is denied");

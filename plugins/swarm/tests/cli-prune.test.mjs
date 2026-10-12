@@ -8,8 +8,11 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { runCli } from "./helpers/cli.mjs";
 import { commitAll, gitOut, tmp } from "./helpers/cli-fixture.mjs";
-import { prepareIsolation, WORKTREE_ADD_TIMEOUT_MS } from "../src/worktree.mjs";
+import { prepareIsolation, treeDirFor, WORKTREE_ADD_TIMEOUT_MS } from "../src/worktree.mjs";
 import { initPruneRepo, writeFinishedRun, pruneFixture, addDetachedTree, writeKilledRun, dropSnapPrune } from "./helpers/prune-fixture.mjs";
+
+const cliCfg = (dir) => ({ worktreeBranchPrefix: "swarm/", treeRoot: join(dir, "home", "worktrees") });
+const cliTree = (dir, resultsDir, name) => treeDirFor(resultsDir, name, cliCfg(dir));
 
 test("prune --dry-run: a finished run with a kept worktree prints the table and removes nothing", () => {
   const repo = initPruneRepo();
@@ -17,7 +20,7 @@ test("prune --dry-run: a finished run with a kept worktree prints the table and 
   try {
     const resultsDir = join(dir, "out");
     mkdirSync(resultsDir, { recursive: true });
-    const wt = prepareIsolation({ id: "impl", originalCwd: repo, cwd: repo }, { worktreeBranchPrefix: "swarm/" }, resultsDir, { addTimeoutMs: WORKTREE_ADD_TIMEOUT_MS, base: gitOut(["rev-parse", "HEAD"], repo) });
+    const wt = prepareIsolation({ id: "impl", originalCwd: repo, cwd: repo }, cliCfg(dir), resultsDir, { addTimeoutMs: WORKTREE_ADD_TIMEOUT_MS, base: gitOut(["rev-parse", "HEAD"], repo) });
     writeFileSync(join(wt.path, "work.txt"), "x\n");
     commitAll(wt.path, "work");
     spawnSync("git", ["merge", "-q", "swarm/impl"], { cwd: repo, windowsHide: true });
@@ -33,7 +36,7 @@ test("prune --dry-run: a finished run with a kept worktree prints the table and 
     ok(existsSync(wt.path), "dry-run must not remove the worktree");
     ok(gitOut(["branch", "--list", "swarm/impl"], repo), "dry-run must not remove the branch");
   } finally {
-    spawnSync("git", ["worktree", "remove", "--force", join(dir, "out", "wt-impl")], { cwd: repo, windowsHide: true });
+    spawnSync("git", ["worktree", "remove", "--force", cliTree(dir, join(dir, "out"), "impl")], { cwd: repo, windowsHide: true });
     rmSync(dir, { recursive: true, force: true });
     rmSync(repo, { recursive: true, force: true });
   }
@@ -45,7 +48,7 @@ test("prune: removes the worktree and branch, prints freed, leaves the run recor
   try {
     const resultsDir = join(dir, "out");
     mkdirSync(resultsDir, { recursive: true });
-    const wt = prepareIsolation({ id: "impl", originalCwd: repo, cwd: repo }, { worktreeBranchPrefix: "swarm/" }, resultsDir, { addTimeoutMs: WORKTREE_ADD_TIMEOUT_MS, base: gitOut(["rev-parse", "HEAD"], repo) });
+    const wt = prepareIsolation({ id: "impl", originalCwd: repo, cwd: repo }, cliCfg(dir), resultsDir, { addTimeoutMs: WORKTREE_ADD_TIMEOUT_MS, base: gitOut(["rev-parse", "HEAD"], repo) });
     writeFileSync(join(wt.path, "work.txt"), "x\n");
     commitAll(wt.path, "work");
     spawnSync("git", ["merge", "-q", "swarm/impl"], { cwd: repo, windowsHide: true });
@@ -77,7 +80,7 @@ test("prune --dry-run: a kept worktree whose path is already gone from disk is n
     const resultsDir = join(dir, "out");
     mkdirSync(resultsDir, { recursive: true });
     writeFileSync(join(resultsDir, "manifest.json"), JSON.stringify({ resultsDir, cwd: repo, tasks: [] }));
-    writeFinishedRun(resultsDir, [{ name: "impl", branch: "swarm/impl", path: join(resultsDir, "wt-gone") }]);
+    writeFinishedRun(resultsDir, [{ name: "impl", branch: "swarm/impl", path: cliTree(dir, resultsDir, "gone") }]);
 
     const r = runCli(["prune", resultsDir, "--dry-run"], { cwd: dir, env: { SWARM_HOME: join(dir, "home") } });
     equal(r.status, 0, r.stdout + r.stderr);
@@ -95,7 +98,7 @@ test("prune: a real prune rewrites worktreesKept to drop the pruned entry; a sec
     const resultsDir = join(dir, "out");
     mkdirSync(resultsDir, { recursive: true });
     writeFileSync(join(resultsDir, "manifest.json"), JSON.stringify({ resultsDir, cwd: repo, tasks: [] }));
-    const wt = prepareIsolation({ id: "impl", originalCwd: repo, cwd: repo }, { worktreeBranchPrefix: "swarm/" }, resultsDir, { addTimeoutMs: WORKTREE_ADD_TIMEOUT_MS, base: gitOut(["rev-parse", "HEAD"], repo) });
+    const wt = prepareIsolation({ id: "impl", originalCwd: repo, cwd: repo }, cliCfg(dir), resultsDir, { addTimeoutMs: WORKTREE_ADD_TIMEOUT_MS, base: gitOut(["rev-parse", "HEAD"], repo) });
     writeFileSync(join(wt.path, "work.txt"), "x\n");
     commitAll(wt.path, "work");
     spawnSync("git", ["merge", "-q", "swarm/impl"], { cwd: repo, windowsHide: true });
@@ -123,7 +126,7 @@ test("prune --dry-run: summary.json is left byte-identical", () => {
   try {
     const resultsDir = join(dir, "out");
     mkdirSync(resultsDir, { recursive: true });
-    const wt = prepareIsolation({ id: "impl", originalCwd: repo, cwd: repo }, { worktreeBranchPrefix: "swarm/" }, resultsDir, { addTimeoutMs: WORKTREE_ADD_TIMEOUT_MS, base: gitOut(["rev-parse", "HEAD"], repo) });
+    const wt = prepareIsolation({ id: "impl", originalCwd: repo, cwd: repo }, cliCfg(dir), resultsDir, { addTimeoutMs: WORKTREE_ADD_TIMEOUT_MS, base: gitOut(["rev-parse", "HEAD"], repo) });
     writeFileSync(join(wt.path, "work.txt"), "x\n");
     commitAll(wt.path, "work");
     spawnSync("git", ["merge", "-q", "swarm/impl"], { cwd: repo, windowsHide: true });
@@ -135,7 +138,7 @@ test("prune --dry-run: summary.json is left byte-identical", () => {
     equal(r.status, 0, r.stdout + r.stderr);
     equal(readFileSync(join(resultsDir, "summary.json"), "utf8"), before, "dry-run must never write summary.json");
   } finally {
-    spawnSync("git", ["worktree", "remove", "--force", join(dir, "out", "wt-impl")], { cwd: repo, windowsHide: true });
+    spawnSync("git", ["worktree", "remove", "--force", cliTree(dir, join(dir, "out"), "impl")], { cwd: repo, windowsHide: true });
     rmSync(dir, { recursive: true, force: true });
     rmSync(repo, { recursive: true, force: true });
   }
@@ -163,7 +166,7 @@ test("prune: refuses a live run (fresh heartbeat, no summary) — exit 1, nothin
   try {
     const resultsDir = join(dir, "out");
     mkdirSync(resultsDir, { recursive: true });
-    const wt = prepareIsolation({ id: "impl", originalCwd: repo, cwd: repo }, { worktreeBranchPrefix: "swarm/" }, resultsDir, { addTimeoutMs: WORKTREE_ADD_TIMEOUT_MS, base: gitOut(["rev-parse", "HEAD"], repo) });
+    const wt = prepareIsolation({ id: "impl", originalCwd: repo, cwd: repo }, cliCfg(dir), resultsDir, { addTimeoutMs: WORKTREE_ADD_TIMEOUT_MS, base: gitOut(["rev-parse", "HEAD"], repo) });
     writeFileSync(join(resultsDir, "run.log"), JSON.stringify({ ts: new Date().toISOString(), event: "run-start", tasks: [{ id: "impl", provider: "claude", model: "claude-haiku-4-5-20251001" }] }) + "\n");
     writeFileSync(join(resultsDir, "heartbeat"), `${new Date().toISOString()} 1234\n`);
 
@@ -174,7 +177,7 @@ test("prune: refuses a live run (fresh heartbeat, no summary) — exit 1, nothin
     ok(existsSync(wt.path), "a live run's worktree must not be touched");
     ok(gitOut(["branch", "--list", "swarm/impl"], repo), "a live run's branch must not be touched");
   } finally {
-    spawnSync("git", ["worktree", "remove", "--force", join(dir, "out", "wt-impl")], { cwd: repo, windowsHide: true });
+    spawnSync("git", ["worktree", "remove", "--force", cliTree(dir, join(dir, "out"), "impl")], { cwd: repo, windowsHide: true });
     rmSync(dir, { recursive: true, force: true });
     rmSync(repo, { recursive: true, force: true });
   }
@@ -187,7 +190,7 @@ test("prune --dry-run: a dead-engine-stopped run with no kept worktree still fin
     const resultsDir = join(dir, "out");
     mkdirSync(resultsDir, { recursive: true });
     writeFileSync(join(resultsDir, "manifest.json"), JSON.stringify({ resultsDir, cwd: repo, tasks: [] }));
-    const wt = prepareIsolation({ id: "impl", originalCwd: repo, cwd: repo }, { worktreeBranchPrefix: "swarm/" }, resultsDir, { addTimeoutMs: WORKTREE_ADD_TIMEOUT_MS, base: gitOut(["rev-parse", "HEAD"], repo) });
+    const wt = prepareIsolation({ id: "impl", originalCwd: repo, cwd: repo }, cliCfg(dir), resultsDir, { addTimeoutMs: WORKTREE_ADD_TIMEOUT_MS, base: gitOut(["rev-parse", "HEAD"], repo) });
     writeFileSync(join(wt.path, "work.txt"), "x\n");
     commitAll(wt.path, "work");
     spawnSync("git", ["merge", "-q", "swarm/impl"], { cwd: repo, windowsHide: true });
@@ -200,7 +203,7 @@ test("prune --dry-run: a dead-engine-stopped run with no kept worktree still fin
     ok(r.stdout.includes("swarm/impl"), r.stdout);
     ok(existsSync(wt.path), "dry-run must not remove the worktree");
   } finally {
-    spawnSync("git", ["worktree", "remove", "--force", join(dir, "out", "wt-impl")], { cwd: repo, windowsHide: true });
+    spawnSync("git", ["worktree", "remove", "--force", cliTree(dir, join(dir, "out"), "impl")], { cwd: repo, windowsHide: true });
     rmSync(dir, { recursive: true, force: true });
     rmSync(repo, { recursive: true, force: true });
   }
@@ -225,7 +228,7 @@ test("prune: a run that ended normally still has its leftover tree removed — t
     const r = runCli(["prune", f.resultsDir], { cwd: f.dir, env });
     equal(r.status, 0, r.stdout + r.stderr);
     ok(!existsSync(f.tree), "tree removed");
-    ok(!gitOut(["worktree", "list", "--porcelain"], f.repo).includes("wt-impl"), "tree deregistered");
+    ok(!gitOut(["worktree", "list", "--porcelain"], f.repo).includes("impl"), "tree deregistered");
   } finally {
     dropSnapPrune(f);
   }
@@ -234,7 +237,7 @@ test("prune: a run that ended normally still has its leftover tree removed — t
 test("prune: unlanded commit and dirty tree are preserved until explicit discard", () => {
   const f = pruneFixture();
   try {
-    const wt = prepareIsolation({ id: "impl", originalCwd: f.repo, cwd: f.repo }, { worktreeBranchPrefix: "swarm/" }, f.resultsDir, { addTimeoutMs: WORKTREE_ADD_TIMEOUT_MS, base: gitOut(["rev-parse", "HEAD"], f.repo) });
+    const wt = prepareIsolation({ id: "impl", originalCwd: f.repo, cwd: f.repo }, cliCfg(f.dir), f.resultsDir, { addTimeoutMs: WORKTREE_ADD_TIMEOUT_MS, base: gitOut(["rev-parse", "HEAD"], f.repo) });
     writeFileSync(join(wt.path, "a.txt"), "unlanded\n");
     commitAll(wt.path, "unlanded work");
     writeFileSync(join(wt.path, "new.txt"), "dirty\n");
@@ -258,7 +261,7 @@ test("prune: unlanded commit and dirty tree are preserved until explicit discard
 test("prune: a squash-landed branch measures landed and is pruned", () => {
   const f = pruneFixture();
   try {
-    const wt = prepareIsolation({ id: "impl", originalCwd: f.repo, cwd: f.repo }, { worktreeBranchPrefix: "swarm/" }, f.resultsDir, { addTimeoutMs: WORKTREE_ADD_TIMEOUT_MS, base: gitOut(["rev-parse", "HEAD"], f.repo) });
+    const wt = prepareIsolation({ id: "impl", originalCwd: f.repo, cwd: f.repo }, cliCfg(f.dir), f.resultsDir, { addTimeoutMs: WORKTREE_ADD_TIMEOUT_MS, base: gitOut(["rev-parse", "HEAD"], f.repo) });
     writeFileSync(join(wt.path, "a.txt"), "landed\n");
     commitAll(wt.path, "landed work");
     // Squash-land: the branch's patch is on master but its commit sha is not, so a
@@ -279,7 +282,7 @@ test("prune: a squash-landed branch measures landed and is pruned", () => {
 test("prune: an unlanded-only row on a clean tree is refused, and the worktree and branch both survive", () => {
   const f = pruneFixture();
   try {
-    const wt = prepareIsolation({ id: "impl", originalCwd: f.repo, cwd: f.repo }, { worktreeBranchPrefix: "swarm/" }, f.resultsDir, { addTimeoutMs: WORKTREE_ADD_TIMEOUT_MS, base: gitOut(["rev-parse", "HEAD"], f.repo) });
+    const wt = prepareIsolation({ id: "impl", originalCwd: f.repo, cwd: f.repo }, cliCfg(f.dir), f.resultsDir, { addTimeoutMs: WORKTREE_ADD_TIMEOUT_MS, base: gitOut(["rev-parse", "HEAD"], f.repo) });
     writeFileSync(join(wt.path, "a.txt"), "unlanded\n");
     commitAll(wt.path, "unlanded work"); // committed — the tree itself is clean
     writeFinishedRun(f.resultsDir, [{ branch: wt.branch, path: wt.path }]);
@@ -302,7 +305,7 @@ test("prune: an unlanded-only row on a clean tree is refused, and the worktree a
 test("prune: a dirty-only row on a landed branch is refused, and the uncommitted file survives", () => {
   const f = pruneFixture();
   try {
-    const wt = prepareIsolation({ id: "impl", originalCwd: f.repo, cwd: f.repo }, { worktreeBranchPrefix: "swarm/" }, f.resultsDir, { addTimeoutMs: WORKTREE_ADD_TIMEOUT_MS, base: gitOut(["rev-parse", "HEAD"], f.repo) });
+    const wt = prepareIsolation({ id: "impl", originalCwd: f.repo, cwd: f.repo }, cliCfg(f.dir), f.resultsDir, { addTimeoutMs: WORKTREE_ADD_TIMEOUT_MS, base: gitOut(["rev-parse", "HEAD"], f.repo) });
     writeFileSync(join(wt.path, "a.txt"), "landed\n");
     commitAll(wt.path, "landed work");
     spawnSync("git", ["merge", "-q", wt.branch], { cwd: f.repo, windowsHide: true });
@@ -369,7 +372,7 @@ test("prune: a second repo's leftover tree is removed too, not just the first re
   const repo2 = initPruneRepo();
   try {
     const sha2 = gitOut(["rev-parse", "HEAD"], repo2);
-    const tree2 = join(f.resultsDir, "wt-two");
+    const tree2 = cliTree(f.dir, f.resultsDir, "two");
     addDetachedTree(f);
     addDetachedTree(f, repo2, tree2, sha2);
     writeKilledRun(f);
@@ -387,7 +390,7 @@ test("prune: a second repo's leftover tree is removed too, not just the first re
     equal(r.status, 0, r.stdout + r.stderr);
     ok(!existsSync(f.tree), "first tree removed");
     ok(!existsSync(tree2), "second repo's tree removed");
-    ok(!gitOut(["worktree", "list", "--porcelain"], repo2).includes("wt-two"), "second repo deregistered");
+    ok(!gitOut(["worktree", "list", "--porcelain"], repo2).includes("two"), "second repo deregistered");
   } finally {
     dropSnapPrune(f);
     rmSync(repo2, { recursive: true, force: true });
@@ -399,7 +402,7 @@ test("prune: a killed run with leftover trees in two repos removes both, and inv
   const repo2 = initPruneRepo();
   try {
     const sha2 = gitOut(["rev-parse", "HEAD"], repo2);
-    const tree2 = join(f.resultsDir, "wt-two");
+    const tree2 = cliTree(f.dir, f.resultsDir, "two");
     addDetachedTree(f);
     addDetachedTree(f, repo2, tree2, sha2);
     // A killed run wrote no summary, so the manifest task cwds are the only record
@@ -412,7 +415,7 @@ test("prune: a killed run with leftover trees in two repos removes both, and inv
     equal(r.status, 0, r.stdout + r.stderr);
     ok(!existsSync(f.tree), "first tree removed");
     ok(!existsSync(tree2), "second tree removed");
-    for (const [repo, name] of [[f.repo, "wt-impl"], [repo2, "wt-two"]]) {
+    for (const [repo, name] of [[f.repo, "impl"], [repo2, "two"]]) {
       ok(!gitOut(["worktree", "list", "--porcelain"], repo).includes(name), `${name} still registered`);
     }
     ok(!existsSync(join(f.resultsDir, "summary.json")), "prune must not write a summary.json the run never had");

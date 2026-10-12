@@ -17,7 +17,7 @@ import { claimEngine, lockRefusal } from "./engine-lock.mjs";
 
 const PROVIDERS = defaultProviderRegistry();
 
-export async function askLeaf({ resultsDir, taskId, question, model, provider, cfg, io = makeDefaultIo(), providerRegistry = PROVIDERS, runnerRegistry, _governanceIo = defaultGovernanceIo(), _mcpTools = mcpTools }) {
+export async function askLeaf({ resultsDir, taskId, question, model, provider, cfg, io = makeDefaultIo(), providerRegistry = PROVIDERS, runnerRegistry, _governanceIo = defaultGovernanceIo(cfg), _mcpTools = mcpTools }) {
   const prior = readResult(resultsDir, taskId);
   if (!prior) throw new Error(`no result for '${taskId}' under ${resultsDir}`);
   if (!prior.sessionId) {
@@ -77,7 +77,7 @@ export async function askLeaf({ resultsDir, taskId, question, model, provider, c
   // snapshot records `workspace` but no tree name, and a clone's id (`fix[0]`) is
   // not its tree (`fix-0`). Rebuilding the ask task without it pointed the write
   // guard at `wt-fix[0]`, a tree that never existed, denying every write.
-  const treeName = worktreeNameFromCwd(prior.cwd, resultsDir);
+  const treeName = worktreeNameFromCwd(prior.cwd, resultsDir, cfg);
   // A forEach clone (`fix[0]`) or manifest child (`node~child`) never appears in
   // manifest.tasks — it joined the roster mid-run via an expand event. Its own
   // result carries every field a manifest task would have declared, so build the

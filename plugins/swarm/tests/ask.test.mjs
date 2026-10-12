@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { askLeaf } from "../src/ask.mjs";
 import { DIGEST_ID, scratchPath } from "../src/digest.mjs";
+import { treeDirFor } from "../src/worktree.mjs";
 import {
   initResultsDir, writeResult, readResult, writeManifestSnapshot, appendRunLog, writeSummary, readSummary,
 } from "../src/results.mjs";
@@ -274,7 +275,7 @@ test("askLeaf: a forEach clone's ask is guarded by its REAL tree, not its id —
       },
     };
 
-    const codexTree = join(dir, "wt-fix-0");
+    const codexTree = treeDirFor(dir, "fix-0", {});
     mkdirSync(codexTree, { recursive: true });
     writeResult(dir, "fix[0]", {
       id: "fix[0]", provider: "codex", model: "gpt-5-codex", ok: true, exit: 0, durationMs: 5,
@@ -286,7 +287,7 @@ test("askLeaf: a forEach clone's ask is guarded by its REAL tree, not its id —
     deepEqual(JSON.parse(spawn.calls[0].opts.env.SWARM_WRITE_GUARD_ROOTS), [codexTree]);
     ok(!spawn.calls[0].opts.env.SWARM_WRITE_GUARD_ROOTS.includes("fix[0]"), spawn.calls[0].opts.env.SWARM_WRITE_GUARD_ROOTS);
 
-    const claudeTree = join(dir, "wt-fix-1");
+    const claudeTree = treeDirFor(dir, "fix-1", {});
     mkdirSync(claudeTree, { recursive: true });
     writeResult(dir, "fix[1]", {
       id: "fix[1]", provider: "claude", model: "claude-haiku-4-5-20251001", ok: true, exit: 0, durationMs: 5,
@@ -387,11 +388,12 @@ test("askLeaf: a top-level list that does not cover originalCwd refuses — Clau
 test("askLeaf: a leaf approved in a swarm worktree of an allowed repo can be asked; a stranger repo's cannot", async () => {
   const root = mkdtempSync(join(tmpdir(), "swarm-ask-repo-"));
   const home = mkdtempSync(join(tmpdir(), "swarm-ask-home-"));
-  const wt = join(home, "runs", "repo", "run1", "wt-a");
   const git = (...a) => execFileSync("git", ["-C", root, ...a], { stdio: "ignore" });
   git("init", "-q"); git("-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "--allow-empty", "-m", "init");
+  const dir = setup();
+  const wt = treeDirFor(dir, "a", { treeRoot: join(home, "worktrees") });
   git("worktree", "add", "-q", "--detach", wt);
-  const dir = setup({ cwd: wt, originalCwd: wt });
+  writeResult(dir, "leaf", { ...readResult(dir, "leaf"), cwd: wt, originalCwd: wt });
   const prevHome = process.env.SWARM_HOME;
   process.env.SWARM_HOME = home;
   try {

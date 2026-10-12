@@ -2,6 +2,7 @@ import { mkdtempSync, writeFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { fakeSpawnFactory, makeIo, promptOf, sentPrompt, usageEnv, codexReading } from "./fake-io.mjs";
+import { treeDirFor } from "../../src/worktree.mjs";
 
 export { fakeSpawnFactory, makeIo, promptOf, sentPrompt, usageEnv, codexReading };
 export const SHIM = fileURLToPath(new URL("../shims/claude-shim.mjs", import.meta.url));
@@ -55,7 +56,7 @@ export function fakeWorktree(collectCalls) {
     prepareIsolation: (t, cfg, resultsDir) => {
       const name = t.worktreeName || t.id;
       return {
-        path: join(resultsDir, `wt-${name}`), branch: `swarm/${name}`, name,
+        path: treeDirFor(resultsDir, name, cfg), branch: `swarm/${name}`, name,
         head: "abc123", repo: resultsDir, reused: collectCalls.length > 0,
       };
     },

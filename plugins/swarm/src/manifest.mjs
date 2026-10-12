@@ -177,7 +177,7 @@ function loadChild(node, parentPath, cwd, cfg, resultsDir, errors, warnings, { a
 export function loadManifest(path, cfg, cwd = process.cwd(), { args, fromRegistry = false, ref, cache = [], io, headroom = usageFromCache(cfg), providerRegistry = PROVIDERS, runnerRegistry } = {}) {
   const errors = [];
   const warnings = [];
-  const resolvedIo = { ...defaultManifestIo(), ...io };
+  const resolvedIo = { ...defaultManifestIo(cfg), ...io };
   const probedGuards = new Set();
   if (args !== undefined && (args === null || typeof args !== "object" || Array.isArray(args))) {
     throw new ValidationError([`args must be a JSON object — e.g. {"base":"master"} (got ${JSON.stringify(args)})`]);

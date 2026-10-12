@@ -25,7 +25,7 @@ function tmpHome() {
 function runServeCrash(home, trigger) {
   return new Promise((resolve, reject) => {
     const child = spawn(process.execPath, [SWARM_MJS, "serve"], {
-      env: { ...process.env, SWARM_HOME: home, SWARM_SERVE_TEST_CRASH: trigger },
+      env: { ...process.env, NODE_TEST_CONTEXT: "child-v8", SWARM_HOME: home, SWARM_SERVE_TEST_CRASH: trigger },
       windowsHide: true,
     });
     let stderr = "";

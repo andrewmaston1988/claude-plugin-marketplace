@@ -124,12 +124,13 @@ function writeStrictSchema(resultsDir, id, returns) {
 // wrong provider for a quota fallback (which flips `provider` in place), and would miss
 // the generated digest entirely. One typed list; each runner translates it (Claude:
 // the PreToolUse guard in `--settings`; Codex: SWARM_WRITE_GUARD_ROOTS).
-function withWriteGuardRoots(task, resultsDir) {
+function withWriteGuardRoots(task, resultsDir, cfg) {
   if (!resultsDir || task.isDigest || !hasWriteTools(task.allowedTools)) return task;
   const roots = leafWriteGuardRoots({
     worktreeName: resolveWorktreeName(task),
     resultsDir,
     outputDir: task.outputDir,
+    cfg,
   });
   if (!roots.length) return task;
   const existing = Array.isArray(task.writeRoots) ? task.writeRoots : [];
@@ -150,7 +151,7 @@ export function runTask(task, prompt, cfg, io, leafLog, { onTokens, onActivity, 
       : undefined;
     let dispatch;
     try {
-      dispatch = buildDispatch(withWriteGuardRoots(task, runtime.resultsDir), prompt, cfg, {
+      dispatch = buildDispatch(withWriteGuardRoots(task, runtime.resultsDir, cfg), prompt, cfg, {
         providerRegistry: runtime.providerRegistry,
         runnerRegistry: runtime.runnerRegistry,
         cache: runtime.cache,
