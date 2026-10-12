@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
 import { oracleSnapKey } from "./helpers/snap-key.mjs";
 import { runPlan, runTask } from "../src/scheduler.mjs";
+import { treeDirFor } from "../src/worktree.mjs";
 import { writeResult, readResult, initResultsDir } from "../src/results.mjs";
 import { CFG, tmp, task, plan, computeTask, childPlanOf, fakeSpawnFactory, makeIo, promptOf, sentPrompt, usageEnv, codexReading, SHIM, streamOut, gitInRepo, initGitRepo, commitAllInRepo, fakeWorktree, buildStrandPlan, integrateLeaf, forEachFixLeaf, fixCloneTasks } from "./helpers/scheduler-fixtures.mjs";
 test("spawn env marks the child as a swarm leaf, whatever the model or provider mode", async () => {
@@ -150,7 +151,7 @@ test("a writer under <repo>/sub spawns at <tree>/sub, not at the tree root", asy
       worktreeName: "a", checkoutToplevel: repo,
     })], { resultsDir: join(dir, "run"), concurrency: 1 });
     await runPlan(p, CFG, makeIo(spawn));
-    equal(resolve(seen.cwd), join(p.resultsDir, "wt-a", "sub"));
+    equal(resolve(seen.cwd), join(treeDirFor(p.resultsDir, "a", CFG), "sub"));
     equal(seen.x, true, "the leaf sees its own subdirectory's content");
   } finally {
     rmSync(dir, { recursive: true, force: true });
@@ -177,7 +178,7 @@ test("a writer whose declared cwd is gitignored still spawns: the tree gets the 
       worktreeName: "a", checkoutToplevel: repo,
     })], { resultsDir: join(dir, "run"), concurrency: 1 });
     await runPlan(p, CFG, makeIo(spawn));
-    equal(resolve(seen.cwd), join(p.resultsDir, "wt-a", ".cache"));
+    equal(resolve(seen.cwd), join(treeDirFor(p.resultsDir, "a", CFG), ".cache"));
     equal(seen.there, true, "the mapper creates the directory the snapshot never carried");
   } finally {
     rmSync(dir, { recursive: true, force: true });

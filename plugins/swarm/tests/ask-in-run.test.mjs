@@ -5,6 +5,8 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { spawnSync } from "node:child_process";
 import { runPlan } from "../src/scheduler.mjs";
+import { treeDirFor } from "../src/worktree.mjs";
+import { worktreeNameFromCwd } from "../src/manifest-task-policy.mjs";
 import {
   writeResult, readResult, heartbeatPath,
 } from "../src/results.mjs";
@@ -177,7 +179,7 @@ test("Q6: ask in a kept worktree reuses it without calling prepareIsolation", as
   writeFileSync(join(repo, "a.txt"), "hello\n");
   spawnSync("git", ["add", "."], { cwd: repo, windowsHide: true });
   spawnSync("git", ["-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false", "commit", "-q", "-m", "init"], { cwd: repo, windowsHide: true });
-  const wtPath = join(dir, "run", "wt-impl");
+  let wtPath;
   try {
     const p = {
       cwd: repo, resultsDir: join(dir, "run"), concurrency: 2, goal: "",
@@ -191,8 +193,13 @@ test("Q6: ask in a kept worktree reuses it without calling prepareIsolation", as
       writeFileSync(join(call.opts.cwd, "made-by-leaf.txt"), "output\n"); // uncommitted -> tree kept
       return { output: streamInit("s-impl", "done") };
     });
+    wtPath = treeDirFor(p.resultsDir, "impl", SCHED_CFG);
     const first = await runPlan(p, SCHED_CFG, makeIo(spawn));
     equal(first.worktreesKept.length, 1);
+    // The ask rebuilds the task from the leaf's cwd alone. A tree outside the run
+    // dir names its tree only through the run's record.
+    equal(worktreeNameFromCwd(readResult(p.resultsDir, "impl").cwd, p.resultsDir, SCHED_CFG), "impl",
+      "without the name the ask's write guard names a tree that never existed");
     writeFileSync(join(wtPath, "sentinel.txt"), "still here\n");
 
     let prepareCalls = 0;
@@ -222,7 +229,7 @@ test("Q8: ask preserves the prior summary and status for every other task, inclu
   writeFileSync(join(repo, "a.txt"), "hello\n");
   spawnSync("git", ["add", "."], { cwd: repo, windowsHide: true });
   spawnSync("git", ["-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false", "commit", "-q", "-m", "init"], { cwd: repo, windowsHide: true });
-  const wtPath = join(dir, "run", "wt-wt");
+  let wtPath;
   try {
     const p = {
       cwd: repo, resultsDir: join(dir, "run"), concurrency: 4, goal: "",
@@ -238,6 +245,7 @@ test("Q8: ask preserves the prior summary and status for every other task, inclu
       if (id === "wt") writeFileSync(join(call.opts.cwd, "made-by-leaf.txt"), "output\n"); // uncommitted -> tree kept
       return { output: streamInit(`s-${id}`, `output for ${id}`) };
     });
+    wtPath = treeDirFor(p.resultsDir, "wt", SCHED_CFG);
     await runPlan(p, SCHED_CFG, makeIo(spawn));
 
     const beforeSummary = JSON.parse(readFileSync(join(p.resultsDir, "summary.json"), "utf8"));
