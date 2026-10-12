@@ -1,7 +1,7 @@
 import { join, resolve, dirname } from "node:path";
 import { existsSync, readdirSync } from "node:fs";
-import { unlandedCount, treeDirFor, runOfTree, listTreeRecords, legacyTreeDirs } from "./worktree.mjs";
-import { normalizeForCompare } from "./roots.mjs";
+import { unlandedCount, treeDirFor, runOfTree, listTreeRecords, legacyTreeDirs, treeRecordPath, treeRootFor } from "./worktree.mjs";
+import { isUnderRoot, normalizeForCompare } from "./roots.mjs";
 import { getConfig } from "./config.mjs";
 
 // Every byte under `path`, walked with the injected `fs` — real `node:fs` in
@@ -246,19 +246,39 @@ export function blockers(rows) {
 
 // Destroy in order: the worktree directory, then the branch it sat on — a row
 // whose repo is gone skips git entirely and is just removed from disk.
-export function execute(rows, git, fs) {
+export function execute(rows, git, fs, { resultsDir, cfg } = {}) {
+  const records = resultsDir ? listTreeRecords(resultsDir) : [];
   for (const row of rows) {
     if (!fs.existsSync(row.repo)) {
       fs.rmSync(row.path, { recursive: true, force: true });
-      continue;
-    }
-    // A detached tree has no branch, and may be left locked by a killed `worktree add`.
-    if (row.branch) {
-      git(["worktree", "remove", "--force", row.path], row.repo);
-      git(["branch", "-D", row.branch], row.repo);
     } else {
-      git(["worktree", "remove", "-f", "-f", row.path], row.repo);
+      // A detached tree has no branch, and may be left locked by a killed `worktree add`.
+      if (row.branch) {
+        git(["worktree", "remove", "--force", row.path], row.repo);
+        git(["branch", "-D", row.branch], row.repo);
+      } else {
+        git(["worktree", "remove", "-f", "-f", row.path], row.repo);
+      }
     }
+    if (resultsDir && !fs.existsSync(row.path)) {
+      for (const record of records) {
+        if (normalizeForCompare(record.path) === normalizeForCompare(row.path)) {
+          fs.rmSync(treeRecordPath(resultsDir, record.name), { force: true });
+        }
+      }
+    }
+  }
+  if (resultsDir) removeEmptyTreeParents(resultsDir, cfg, fs);
+}
+
+function removeEmptyTreeParents(resultsDir, cfg, fs) {
+  const root = resolve(treeRootFor(cfg));
+  const runDir = runScratchDir(resultsDir, cfg);
+  if (runDir === root || !isUnderRoot(runDir, root)) return;
+  try { fs.rmdirSync(runDir); } catch { return; }
+  const projectDir = dirname(runDir);
+  if (projectDir !== root && isUnderRoot(projectDir, root)) {
+    try { fs.rmdirSync(projectDir); } catch { /* non-empty parents belong to their remaining trees */ }
   }
 }
 

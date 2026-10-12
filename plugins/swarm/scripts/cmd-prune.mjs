@@ -62,7 +62,7 @@ export async function cmdPrune(rest, { usage }) {
   }
   out(formatPrune(rows, { dryRun }));
   if (!dryRun) {
-    executePrune(rows, git, fs);
+    executePrune(rows, git, fs, { resultsDir: dir, cfg });
     // survivors: whatever wasn't just removed and wasn't already gone before we started
     if (hadSummary) writeSummary(dir, { ...summary, worktreesKept: worktreesKept.filter((wt) => fs.existsSync(wt.path)) });
   }

@@ -173,6 +173,7 @@ test("prune (CLI) removes a recorded tree's record and empty treeRoot parents", 
   const treeRoot = join(swarmHome(), "tree-root-prune-recorded");
   const projectDir = join(treeRoot, runsKeyFor("C--code-lifecycle"));
   const runTreeDir = join(projectDir, name);
+  const outsideCanary = join(swarmHome(), "tree-root-prune-outside-canary");
   const configPath = join(swarmHome(), "config.json");
   const previousConfig = existsSync(configPath) ? readFileSync(configPath) : null;
   let wt;
@@ -180,6 +181,7 @@ test("prune (CLI) removes a recorded tree's record and empty treeRoot parents", 
     mkdirSync(dir, { recursive: true });
     mkdirSync(swarmHome(), { recursive: true });
     writeFileSync(configPath, JSON.stringify({ treeRoot }));
+    writeFileSync(outsideCanary, "keep");
     const cfg = { ...CFG, treeRoot };
     wt = prepareIsolation({ id: "impl", originalCwd: repo, cwd: repo }, cfg, dir, ADD(repo));
     finishRun(dir, { kept: [] });
@@ -187,16 +189,18 @@ test("prune (CLI) removes a recorded tree's record and empty treeRoot parents", 
 
     const record = join(dir, "trees", "impl.json");
     ok(existsSync(record), "prepareIsolation wrote the tree record");
-    const r = runCli(["prune", dir], { cwd: repo });
+    const r = runCli(["prune", dir], { cwd: repo, env: { SWARM_HOME: swarmHome() } });
     equal(r.status, 0, r.stdout + r.stderr);
     ok(r.stdout.includes(wt.path), `prune must name the tree it removed: ${r.stdout}`);
     deepEqual([
       existsSync(record) ? "tree record" : null,
       existsSync(runTreeDir) ? "per-run treeRoot directory" : null,
       existsSync(projectDir) ? "empty project directory" : null,
+      existsSync(outsideCanary) ? null : "outside treeRoot canary",
     ].filter(Boolean), [], "prune must remove the record and empty treeRoot parents");
   } finally {
     if (wt) dropWorktree(repo, wt.path);
+    rmSync(outsideCanary, { force: true });
     if (previousConfig) writeFileSync(configPath, previousConfig);
     else rmSync(configPath, { force: true });
     cleanup(dir, repo);
