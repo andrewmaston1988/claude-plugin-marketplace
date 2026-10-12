@@ -155,11 +155,25 @@ function validateProviderConfig(cfg) {
   }
 }
 
+// treeRoot moves every leaf tree out of the run dir. null is the documented
+// "default" (<swarmHome>/worktrees) — the shipped file is shared by every machine,
+// so it cannot carry a real path. A relative value is refused for the same reason
+// allowedRoots are: it would resolve against whatever cwd launched swarm, and one
+// config would put trees somewhere different per invocation.
+function validateTreeRoot(cfg) {
+  const v = cfg.treeRoot;
+  if (v === null || v === undefined) return;
+  if (typeof v !== "string" || !v || (!isAbsolute(v) && !WINDOWS_DRIVE.test(v))) {
+    throw new Error(`treeRoot must be null (the default, <swarmHome>/worktrees) or an absolute path — e.g. "C:/swarm-trees" or "/mnt/d/swarm-trees" instead of '${v}'`);
+  }
+}
+
 // Every check a config must pass, in one place: loadConfig runs it on the merged
 // view, initConfig on the object it is about to write. The valve/minFreeMemMb
 // ordering below is the one an extraction keeps dropping.
 function validateConfig(cfg, configPath) {
   validateProviderConfig(cfg);
+  validateTreeRoot(cfg);
   validateModelDenylist(cfg.modelDenylist, configPath);
   if (typeof cfg.disable1mContext !== "boolean") {
     throw new Error('disable1mContext must be true or false — e.g. "disable1mContext": false in ~/.swarm/config.json gives every Claude leaf the 1M window');

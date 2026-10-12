@@ -54,6 +54,7 @@
   ],
   "modelDenylist": [],
   "resultInlineCap": 4000,
+  "treeRoot": null,
   "worktreeBranchPrefix": "swarm/",
   "notifyCmd": null,
   "dashboard": {

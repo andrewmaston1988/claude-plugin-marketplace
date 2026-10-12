@@ -72,8 +72,9 @@ test("prepareIsolation records the tree — 'ready' after the add, with name/pat
   const repo = initRepo();
   const results = runDir("run-record");
   const root = treesDir();
+  let wt;
   try {
-    const wt = prepareIsolation({ id: "impl", originalCwd: repo, cwd: repo }, cfgWith(root), results, ADD(repo));
+    wt = prepareIsolation({ id: "impl", originalCwd: repo, cwd: repo }, cfgWith(root), results, ADD(repo));
     const rec = readTreeRecord(results, "impl");
     ok(rec, "the run must record where it put the tree");
     equal(rec.state, "ready");
@@ -112,7 +113,8 @@ test("the resolver reuses a legacy <run>/wt-<name> tree that is still registered
   const legacy = join(results, "wt-impl");
   try {
     mkdirSync(results, { recursive: true });
-    equal(git(["worktree", "add", legacy, "-b", "swarm/impl"], repo), "", "legacy tree registered");
+    git(["worktree", "add", legacy, "-b", "swarm/impl"], repo);
+    ok(existsSync(join(legacy, "a.txt")), "legacy tree registered");
     writeFileSync(join(legacy, "partial.txt"), "kept work\n");
 
     const wt = prepareIsolation({ id: "impl", originalCwd: repo, cwd: repo }, cfgWith(root), results, ADD(repo));
@@ -133,7 +135,8 @@ test("the record outranks the legacy scan and the formula — a moved tree is st
   try {
     mkdirSync(results, { recursive: true });
     mkdirSync(dirname(moved), { recursive: true });
-    equal(git(["worktree", "add", moved, "-b", "swarm/impl"], repo), "", "tree registered off the formula");
+    git(["worktree", "add", moved, "-b", "swarm/impl"], repo);
+    ok(existsSync(join(moved, "a.txt")), "tree registered off the formula");
     mkdirSync(join(results, "trees"), { recursive: true });
     writeFileSync(recordPath(results, "impl"),
       JSON.stringify({ name: "impl", path: moved, branch: "swarm/impl", repo, state: "ready" }));
@@ -143,6 +146,26 @@ test("the record outranks the legacy scan and the formula — a moved tree is st
   } finally {
     dropWorktree(repo, moved);
     cleanup(root, results, repo);
+  }
+});
+
+test("a branch held by another run's tree names that RUN dir, not the tree under treeRoot", () => {
+  const repo = initRepo();
+  const runA = runDir("run-holder-a");
+  const runB = runDir("run-holder-b");
+  const root = treesDir();
+  let first;
+  try {
+    first = prepareIsolation({ id: "x", originalCwd: repo, cwd: repo }, cfgWith(root), runA, ADD(repo));
+    let error = null;
+    try { prepareIsolation({ id: "x", originalCwd: repo, cwd: repo }, cfgWith(root), runB, ADD(repo)); }
+    catch (e) { error = e; }
+    ok(error, "a branch already checked out elsewhere must throw");
+    equal(error.message.match(/swarm prune ([^)]+)\)/)?.[1], resolve(runA).replaceAll("\\", "/"),
+      "the tree is no longer the run dir's child — dirname() would hand prune a path with no run.log");
+  } finally {
+    if (first) dropWorktree(repo, first.path);
+    cleanup(root, runA, runB, repo);
   }
 });
 
@@ -188,7 +211,7 @@ test("legacyTreeDirs finds the wt-* trees a pre-upgrade run left in its run dir"
     mkdirSync(join(results, "results"), { recursive: true });
     deepEqual(legacyTreeDirs(results).map((t) => t.name).sort(), ["feat", "other"]);
     deepEqual(legacyTreeDirs(results).map((t) => resolve(t.path)).sort(),
-      [join(results, "wt-feat"), join(results, "wt-other")].map(resolve).sort());
+      [join(results, "wt-feat"), join(results, "wt-other")].map((p) => resolve(p)).sort());
   } finally { cleanup(results); }
 });
 
@@ -214,18 +237,20 @@ test("collect drops the record of a swept tree, and keeps the record of a kept o
   }
 });
 
-test("a record naming a tree that is gone does not stop the tree being re-created", () => {
+test("a record naming a tree that is gone is still honoured, and the tree is re-created there", () => {
   const repo = initRepo();
   const results = runDir("run-stale");
   const root = treesDir();
+  const stale = join(root, "C--code-repo", "run-stale", "relocated", "impl");
   try {
     mkdirSync(join(results, "trees"), { recursive: true });
     writeFileSync(recordPath(results, "impl"),
-      JSON.stringify({ name: "impl", path: join(root, "C--code-repo", "run-stale", "impl"), branch: "swarm/nope", repo, state: "ready" }));
+      JSON.stringify({ name: "impl", path: stale, branch: "swarm/impl", repo, state: "ready" }));
     const wt = prepareIsolation({ id: "impl", originalCwd: repo, cwd: repo }, cfgWith(root), results, ADD(repo));
-    ok(existsSync(wt.path), "a record pointing at a pruned tree still yields a working tree");
+    equal(wt.path, resolve(stale), "the record wins even when nothing is on disk yet — recomputing would strand the tree");
+    ok(existsSync(join(wt.path, "a.txt")), "the tree is re-created where the record says");
   } finally {
-    dropWorktree(repo, resolve(join(root, "C--code-repo", "run-stale", "impl")));
+    dropWorktree(repo, stale);
     cleanup(root, results, repo);
   }
 });

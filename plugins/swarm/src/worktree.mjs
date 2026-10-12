@@ -1,7 +1,9 @@
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { copyFileSync, existsSync, mkdirSync, rmSync } from "node:fs";
-import { dirname, isAbsolute, join, relative, resolve } from "node:path";
+import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { swarmHome } from "./config.mjs";
+import { isUnderRoot } from "./roots.mjs";
 
 export const WORKTREE_ADD_TIMEOUT_MS = 180000;
 
@@ -61,8 +63,148 @@ function isRegisteredWorktree(path, repo) {
     l.startsWith("worktree ") && key(l.slice("worktree ".length).trim()) === want);
 }
 
+// ---- Where a run's trees live: one scratch root, one resolver, one record.
+//
+// A run dir holds RESULTS. Its leaf trees are scratch — rebuildable, large, and
+// safe to delete on their own — so they live under a separate root:
+//   <treeRoot>/<encoded-project>/<run>/<name>
+// Same encoded-project/run naming as the runs root, so a tree path still says
+// which run owns it. Nothing may derive a tree path a second way: the five other
+// derivations that used to exist disagreed the moment either end moved.
+
+// The scratch root: `treeRoot` when set, else <swarmHome>/worktrees. Both the
+// resolver and the consumers that only need the root (governance, discovery) call
+// this rather than recomputing it.
+export function treeRootFor(cfg, { env = process.env } = {}) {
+  return resolve(cfg?.treeRoot || join(swarmHome(env), "worktrees"));
+}
+
+// The <encoded-project>/<run> tail a tree path is built from, read off the END of
+// resultsDir so the formula holds whatever the runs root is.
+function runTail(resultsDir) {
+  const dir = resolve(resultsDir);
+  return [basename(dirname(dir)), basename(dir)];
+}
+
+// The ONE place a tree path is built, resolving in order — each step exists for a
+// case the next one gets wrong:
+//   (a) the run's own record for `name`, which is authoritative and is the only
+//       thing that survives a legacy tree, a reconfigured `treeRoot`, or a tree an
+//       operator relocated;
+//   (b) a legacy <run>/wt-<name> git still has registered — resuming a pre-upgrade
+//       run after the upgrade would otherwise compute the new path, and
+//       `worktree add -b` would fail with "branch already used by worktree" while
+//       the write-guard root pointed at a tree that does not exist;
+//   (c) the formula.
+// `repo` is needed for (b), which only git can answer; without it (b) is skipped.
+export function treeDirFor(resultsDir, name, cfg, { repo, env = process.env } = {}) {
+  const recorded = readTreeRecord(resultsDir, name);
+  if (recorded?.path) return resolve(recorded.path);
+  const legacy = legacyTreeDirFor(resultsDir, name);
+  if (repo && isRegisteredWorktree(legacy, repo)) return legacy;
+  return resolve(join(treeRootFor(cfg, { env }), ...runTail(resultsDir), String(name)));
+}
+
+// treeDirFor's inverse, for every site that recovers a run from a tree path. A tree
+// under `treeRoot` is <project>/<run>/<name>, so its run dir is
+// <runsRoot>/<project>/<run>; anything else is a legacy tree sitting IN its run dir,
+// so the tree's own parent is the answer.
+//
+// `runsRoot` defaults to <swarmHome>/runs, which is the only root the formula ever
+// writes into. Pass `runsRootFor(resultsDir)` when the caller holds a run dir of its
+// OWN in that root — the run whose tree is holding a branch is a sibling of it, and
+// taking the root from the caller makes the inverse exact whatever the root is.
+export function runOfTree(path, cfg, { env = process.env, runsRoot } = {}) {
+  const p = resolve(path);
+  const root = treeRootFor(cfg, { env });
+  if (isUnderRoot(p, root)) {
+    const rel = relative(root, p);
+    const parts = !isAbsolute(rel) && !rel.startsWith("..") ? rel.split(sep) : [];
+    if (parts.length >= 3) {
+      return resolve(join(runsRoot ? resolve(runsRoot) : join(swarmHome(env), "runs"), parts[0], parts[1]));
+    }
+  }
+  return resolve(dirname(p));
+}
+
+// The runs root `resultsDir` sits in — the one whose two-level tail IS resultsDir.
+// The same assumption runTail() makes, read from the other side, so a caller that
+// knows one run dir in the root can hand the root to runOfTree and get its siblings
+// back exactly.
+function runsRootFor(resultsDir) {
+  const dir = resolve(resultsDir);
+  return dirname(dirname(dir));
+}
+
+// A run's own record of where it put one tree: <run>/trees/<name>.json. ONE FILE
+// PER TREE, never a shared index — an index is a read-modify-write race between the
+// writer leaves of one engine, and a single `.tmp` collides when they land together.
+export function treeRecordPath(resultsDir, name) {
+  return join(resolve(resultsDir), "trees", `${String(name)}.json`);
+}
+
+// The record for `name`, or null when there is none (or it is unreadable — a
+// half-written file is a tree about to be recorded, not a reason to fail).
+export function readTreeRecord(resultsDir, name) {
+  try {
+    const rec = JSON.parse(readFileSync(treeRecordPath(resultsDir, name), "utf8"));
+    return rec !== null && typeof rec === "object" && !Array.isArray(rec) ? rec : null;
+  } catch { return null; }
+}
+
+// Every tree this run recorded. Discovery unions this with the `treeRoot` scan and
+// the legacy scan; a malformed record is skipped rather than thrown, so one bad
+// file cannot take the whole discovery down.
+export function listTreeRecords(resultsDir) {
+  let names;
+  try { names = readdirSync(join(resolve(resultsDir), "trees")); } catch { return []; }
+  const out = [];
+  for (const n of names) {
+    // `.json.tmp` is a write in flight; anything else in here is not a record.
+    if (!n.endsWith(".json")) continue;
+    const rec = readTreeRecord(resultsDir, n.slice(0, -".json".length));
+    if (rec) out.push(rec);
+  }
+  return out;
+}
+
+const LEGACY_TREE_PREFIX = "wt-";
+
+// The single-name legacy location. Private: callers that want a legacy tree ask the
+// resolver, which knows whether git still has it registered.
+function legacyTreeDirFor(resultsDir, name) {
+  return resolve(join(resultsDir, `${LEGACY_TREE_PREFIX}${name}`));
+}
+
+// The pre-upgrade trees a run left in its own dir: <run>/wt-<name>. Discovery needs
+// all of them, not just the ones a name resolves to.
+export function legacyTreeDirs(resultsDir) {
+  const dir = resolve(resultsDir);
+  let entries;
+  try { entries = readdirSync(dir, { withFileTypes: true }); } catch { return []; }
+  return entries
+    .filter((e) => e.isDirectory() && e.name.startsWith(LEGACY_TREE_PREFIX) && e.name.length > LEGACY_TREE_PREFIX.length)
+    .map((e) => ({ name: e.name.slice(LEGACY_TREE_PREFIX.length), path: join(dir, e.name) }));
+}
+
+// Atomic (`.tmp` + rename) so no reader ever sees a half-written record. The
+// `.tmp` is per-tree, which is what makes two concurrent leaves safe.
+function writeTreeRecord(resultsDir, record) {
+  const path = treeRecordPath(resultsDir, record.name);
+  mkdirSync(dirname(path), { recursive: true });
+  writeFileSync(path + ".tmp", JSON.stringify(record, null, 2) + "\n");
+  renameSync(path + ".tmp", path);
+  return path;
+}
+
+// Drop a tree's record with the tree. A record left saying "ready" for a swept
+// path is a tree that discovery would try to remove a second time.
+function removeTreeRecord(resultsDir, name) {
+  try { rmSync(treeRecordPath(resultsDir, name), { force: true }); } catch { /* best effort */ }
+}
+
 // Create — or re-enter — an isolated worktree for an implementation leaf:
-//   git worktree add <resultsDir>/wt-<name> -b <prefix><name> --no-track <base>
+//   git worktree add <treeDirFor(…)> -b <prefix><name> --no-track <base>
 // The branch prefix comes from config — never hardcoded. On resend the leaf's
 // worktree may already exist (kept on timeout for salvage): re-enter it so the
 // partial diff survives and the leaf resumes in place, rather than 0s-failing on
@@ -80,7 +222,7 @@ export function prepareIsolation(task, cfg, resultsDir, { reset = false, addTime
   // own id names a private tree.
   const name = task.worktreeName || task.id;
   const branch = branchNameFor(task, cfg);
-  const path = resolve(join(resultsDir, `wt-${name}`));
+  const path = treeDirFor(resultsDir, name, cfg, { repo });
 
   if (isRegisteredWorktree(path, repo)) {
     // A --force redo scrubs the kept partial work; a plain resend preserves it.
@@ -96,11 +238,21 @@ export function prepareIsolation(task, cfg, resultsDir, { reset = false, addTime
     // that node's ref instead.
     const on = git(["rev-parse", "--abbrev-ref", "HEAD"], path, { timeout: 60000 });
     const reused = on.status === 0 && on.stdout && on.stdout !== "HEAD" ? on.stdout : branch;
+    // Re-entering a tree the run has no record of (one kept by an earlier run, or a
+    // legacy <run>/wt-<name>) is how the run ADOPTS it: from here on the record is
+    // what resolves this name, whatever `treeRoot` is set to next.
+    writeTreeRecord(resultsDir, { name, path, branch: reused, repo, state: "ready" });
     return {
-      path, branch: reused, name, repo, reused: true,
+      path, branch: reused, name, repo, resultsDir, reused: true,
       head: (!reset && treeHead.status === 0) ? treeHead.stdout : base,
     };
   }
+
+  // Write-ahead, BEFORE the add: a crash between the two then leaves a record prune
+  // can resolve, never a tree on disk that no one knows about. `state: "creating"`
+  // means the add may or may not have finished — consumers must tolerate a path
+  // that is not there.
+  writeTreeRecord(resultsDir, { name, path, branch, repo, state: "creating" });
 
   let add = git(["worktree", "add", path, "-b", branch, "--no-track", base], repo, { timeout: addTimeoutMs });
   if (add.status !== 0 && /already exists/i.test(add.stderr)) {
@@ -127,8 +279,11 @@ export function prepareIsolation(task, cfg, resultsDir, { reset = false, addTime
     if (/already (used by|checked out at) worktree/i.test(add.stderr)) {
       const holder = add.stderr.match(/worktree at '([^']+)'/)?.[1];
       // The holder is the TREE; `swarm prune` takes the RUN dir that holds it, and
-      // the tree path fails with "no run at … (no run.log)".
-      const runDir = holder ? dirname(holder) : null;
+      // the tree path fails with "no run at … (no run.log)". A tree under `treeRoot`
+      // is no longer the run dir's child, so the run dir has to be resolved — and
+      // the holder belongs to a sibling of OUR run, which is where the root comes
+      // from. Printed the way git printed the holder: one path style in one message.
+      const runDir = holder ? runOfTree(holder, cfg, { runsRoot: runsRootFor(resultsDir) }).replaceAll("\\", "/") : null;
       throw new Error(
         `branch '${branch}' is checked out in another worktree${holder ? ` (${holder})` : ""} — ` +
         `finish or prune that run (swarm prune ${runDir || "…"}), or name a different branch/workspace`);
@@ -139,7 +294,10 @@ export function prepareIsolation(task, cfg, resultsDir, { reset = false, addTime
     throw new Error(`git worktree add failed for '${task.id}': ${add.stderr}`);
   }
 
-  return { path, branch, name, head: base, repo, reused: false };
+  writeTreeRecord(resultsDir, { name, path, branch, repo, state: "ready" });
+  // `resultsDir` rides along so collect() can drop the record with the tree without
+  // deriving the run dir back out of a path that now lives somewhere else entirely.
+  return { path, branch, name, head: base, repo, resultsDir, reused: false };
 }
 
 // The live HEAD of `repo`'s checkout — the commit a run PINS at dispatch
@@ -177,6 +335,9 @@ export function collect(task, cfg, wt, { isChainFollower = false, isIntegrateSou
   if (!changed && !(wt.reused && isChainFollower) && !carriesWork) {
     git(["worktree", "remove", "--force", wt.path], wt.repo, { timeout: 60000 });
     if (!isIntegrateSource) git(["branch", "-D", wt.branch], wt.repo, { timeout: 60000 });
+    // The record goes with the tree: a record still saying "ready" would name a path
+    // that discovery would then try to remove all over again.
+    if (wt.resultsDir) removeTreeRecord(wt.resultsDir, wt.name);
     return { kept: false, branchKept: isIntegrateSource, branch: wt.branch, path: wt.path };
   }
 
