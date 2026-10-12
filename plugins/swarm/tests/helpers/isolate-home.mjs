@@ -18,6 +18,8 @@ if (!process.env.SWARM_HOME || process.env.SWARM_TEST_HOME !== "1") {
   process.env.SWARM_TEST_HOME = "1";
   process.env.SWARM_CREDENTIALS = join(dir, "claude-credentials.json");
   process.env.PATH = `${binDir}${delimiter}${process.env.PATH || ""}`;
+  // Keep tests off the live Codex meter with a PATH-first stub. Bare win32 spawn
+  // resolves only .exe/.com, so node.exe treats app-server as a script and exits 1.
   if (process.platform === "win32") {
     const stub = join(binDir, "codex.exe");
     try { linkSync(process.execPath, stub); } catch { copyFileSync(process.execPath, stub); }
