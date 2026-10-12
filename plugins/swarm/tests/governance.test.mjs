@@ -477,8 +477,7 @@ test("governance: a legacy config with only per-provider keys dispatches unchang
 });
 
 // ── G: a swarm-made worktree is judged by the repo it was cut from ────────────
-// A leaf worktree lives under `treeRoot`, outside every allowedRoots entry, and the
-// literal-cwd test refused swarm's own trees. These cases stub io, so no real git runs.
+// Out-of-root swarm trees bind to their source repo; the injected io avoids git.
 
 // The governance io seam: the swarm home the gate may widen inside, and the repo every
 // tree under it resolves to. A path outside home answers itself, which is how the run's

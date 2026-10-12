@@ -7,7 +7,6 @@ import { buildDispatch, toSpawnable, resolveExecutable, windowsCommandLineLength
 import { loadManifest } from "./helpers/repo-io.mjs";
 import * as leafGuard from "../src/manifest-leaf-guard.mjs";
 import { treeDirFor } from "../src/worktree.mjs";
-
 const CFG = {
   provider: {
     mode: "env",

@@ -369,7 +369,7 @@ async function cmdValidate(rest) {
 // event + summary are the only record — read straight from disk (readRun),
 // mirroring the shape runPlan itself writes so every reader treats the two
 // the same way.
-async function recordDeadEngineStop(dir) {
+async function recordDeadEngineStop(dir, cfg) {
   appendRunLog(dir, { ts: new Date().toISOString(), event: "run-stop", reason: "dead-engine" });
   const run = readRun(dir);
   const tasks = run.tasks.map((t) => ({
@@ -388,7 +388,7 @@ async function recordDeadEngineStop(dir) {
   const git = makeGit(spawnSync);
   const worktreesKept = reposFromManifest(fs, dir)
     .filter((repo) => fs.existsSync(repo))
-    .flatMap((repo) => registeredForRun(git, repo, dir).filter((r) => r.branch)
+    .flatMap((repo) => registeredForRun(git, repo, dir, { cfg }).filter((r) => r.branch)
       .map((r) => ({ name: basename(r.path), branch: r.branch, path: r.path })));
 
   const summary = {
@@ -418,7 +418,7 @@ async function cmdStop(rest) {
   const live = runLiveness(dir, { heartbeatMs });
   if (live.finishedMs != null) { err(`swarm: ${dir} already finished — nothing to stop.`); return 1; }
   if (live.stoppedMs != null) { err(`swarm: ${dir} already stopped — nothing to stop.`); return 1; }
-  if (live.abortedMs != null) return await recordDeadEngineStop(dir);
+  if (live.abortedMs != null) return await recordDeadEngineStop(dir, cfg);
 
   const { writeFileSync } = await import("node:fs");
   writeFileSync(stopPath(dir), "");

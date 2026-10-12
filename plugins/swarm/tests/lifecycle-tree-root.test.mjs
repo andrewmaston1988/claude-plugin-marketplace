@@ -1,11 +1,5 @@
-// The lifecycle consumers of the tree-root resolver: prune and the nudge must find a
-// run's trees where the resolver now puts them (outside the run dir), the CLI's
-// dead-engine recovery must record them, and the run's own history must be untouched
-// by the scratch root being deleted.
-//
-// Its own file rather than grown inside prune.test.mjs or prune-nudge.test.mjs: both
-// are near the file-size ratchet, and every row here needs a REAL tree created by the
-// resolver, not the unit-test fakes those files use.
+// Prune, nudge and dead-engine recovery must find resolver-created trees while
+// the run keeps its own history, even if the scratch root is later deleted.
 import { test } from "node:test";
 import { equal, ok, deepEqual } from "node:assert/strict";
 import { spawnSync } from "node:child_process";

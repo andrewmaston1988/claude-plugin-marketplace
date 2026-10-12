@@ -606,12 +606,12 @@ test("stop: live engine via the claude shim writes the stop file, run exits 1, r
 test("stop: dead engine discovers a real orphaned worktree via manifest cwd, records it, and prints the prune hint", () => {
   const repo = initPruneRepo();
   const dir = tmp();
+  const home = gateHome(join(dir, "home"), { heartbeatSecs: 0.1, treeRoot: join(dir, "external-tree-root") });
+  const resultsDir = join(dir, "out");
   try {
-    const home = gateHome(join(dir, "home"), { heartbeatSecs: 0.1 });
-    const resultsDir = join(dir, "out");
     mkdirSync(resultsDir, { recursive: true });
     writeFileSync(join(resultsDir, "manifest.json"), JSON.stringify({ resultsDir, cwd: repo, tasks: [] }));
-    const wt = prepareIsolation({ id: "impl", originalCwd: repo, cwd: repo }, { worktreeBranchPrefix: "swarm/", treeRoot: join(home, "worktrees") }, resultsDir, { addTimeoutMs: WORKTREE_ADD_TIMEOUT_MS, base: gitOut(["rev-parse", "HEAD"], repo) });
+    const wt = prepareIsolation({ id: "impl", originalCwd: repo, cwd: repo }, { worktreeBranchPrefix: "swarm/", treeRoot: join(dir, "external-tree-root") }, resultsDir, { addTimeoutMs: WORKTREE_ADD_TIMEOUT_MS, base: gitOut(["rev-parse", "HEAD"], repo) });
 
     const lines = [
       JSON.stringify({ ts: new Date().toISOString(), event: "run-start", tasks: [{ id: "impl", provider: "claude", model: "claude-haiku-4-5-20251001" }] }),
@@ -631,7 +631,7 @@ test("stop: dead engine discovers a real orphaned worktree via manifest cwd, rec
     equal(summary.worktreesKept[0].path, wt.path);
     equal(summary.worktreesKept[0].branch, "swarm/impl");
   } finally {
-    spawnSync("git", ["worktree", "remove", "--force", treeDirFor(resultsDir, "impl", { treeRoot: join(home, "worktrees") })], { cwd: repo, windowsHide: true });
+    spawnSync("git", ["worktree", "remove", "--force", treeDirFor(resultsDir, "impl", { treeRoot: join(dir, "external-tree-root") })], { cwd: repo, windowsHide: true });
     rmSync(dir, { recursive: true, force: true });
     rmSync(repo, { recursive: true, force: true });
   }

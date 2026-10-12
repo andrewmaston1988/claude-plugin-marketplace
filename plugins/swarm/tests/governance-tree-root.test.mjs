@@ -1,10 +1,5 @@
-// Governance and the scratch tree root. A swarm-made tree used to sit under the
-// swarm home, so judging it by the repo it was cut from only had to widen inside
-// `home`. Trees now live under `treeRoot`, which an operator may point at another
-// drive — where `isUnderRoot(cwd, home)` is false and a writer leaf would be
-// refused for a cwd swarm itself created.
-//
-// Split out of governance.test.mjs, which is already past the file-size ceiling.
+// A tree under an out-of-home treeRoot must be judged by its source repo,
+// while the allowedRoots gate continues to bind.
 import { test } from "node:test";
 import { equal, ok } from "node:assert/strict";
 import { mkdirSync, rmSync } from "node:fs";

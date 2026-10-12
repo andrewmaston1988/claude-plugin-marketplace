@@ -65,12 +65,9 @@ export function resolveWorktreeName(t) {
 // normalisation (separators, win32 case, trailing separator), not string equality.
 const samePath = (a, b) => isUnderRoot(a, b) && isUnderRoot(b, a);
 
-// The resolver's inverse, for a task rebuilt from a RECORDED run rather than from
-// the manifest: `swarm ask` carries a finished leaf's cwd, not its tree name. The
-// name is not always the id — deterministic-steps renames each forEach clone to
-// `<id>-<i>`, so a clone's `fix[0]` runs in the tree named `fix-0`. Undefined when
-// the cwd is outside every tree (a reader in the live repo, the digest in engine
-// scratch).
+// Resolve a recorded task cwd to its tree name; records cover legacy, reconfigured and
+// moved trees. forEach clones use their worktreeName, not their task id. Undefined means
+// the cwd is outside every tree, such as a live-repo reader or digest scratch.
 export function worktreeNameFromCwd(cwd, resultsDir, cfg) {
   if (typeof cwd !== "string" || !cwd) return undefined;
   const p = resolve(cwd);

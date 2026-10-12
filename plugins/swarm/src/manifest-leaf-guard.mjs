@@ -5,7 +5,7 @@
 import { spawnSync as nodeSpawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { basename } from "node:path";
-import { checkoutToplevel } from "./worktree.mjs";
+import { checkoutToplevel, treeRootFor } from "./worktree.mjs";
 import { swarmHome } from "./config.mjs";
 import { mcpTools } from "./manifest-task-policy.mjs";
 
@@ -58,7 +58,7 @@ export function guardFor(originalCwd, cfg, io = defaultManifestIo()) {
   return { name: project.name, command };
 }
 
-export function defaultManifestIo() {
+export function defaultManifestIo(cfg) {
   return {
     spawnSync: (command, opts) => nodeSpawnSync(command, { shell: true, encoding: "utf8", ...opts }),
     stdout: (line) => console.log(line),
@@ -69,6 +69,7 @@ export function defaultManifestIo() {
     mcpTools,
     // Governance judges a tree under the swarm home by its repo; tests point this at a temp dir.
     home: swarmHome(),
+    treeRoot: treeRootFor(cfg),
     platform: process.platform,
   };
 }

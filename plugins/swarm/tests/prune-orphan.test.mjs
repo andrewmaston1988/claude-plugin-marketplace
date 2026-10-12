@@ -6,7 +6,7 @@ import { spawnSync } from "node:child_process";
 import { test } from "node:test";
 import { equal, ok } from "node:assert/strict";
 import { mkdtempSync, rmSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { runCli } from "./helpers/cli.mjs";
 import { treeDirFor } from "../src/worktree.mjs";
@@ -40,7 +40,8 @@ test("prune finds a run's leaf trees when the manifest's cwd worktree is gone", 
     const real = runCli(["prune", resultsDir], { cwd: root, env: { SWARM_HOME: join(root, "home") } });
     equal(real.status, 0, real.stdout + real.stderr);
     ok(!existsSync(leaf), "the leaf tree is removed");
-    ok(!git(["worktree", "list"], repo).stdout.includes("wt-impl"), "and unregistered from git");
+    const registered = git(["worktree", "list"], repo).stdout.split(/\r?\n/).filter((line) => line.startsWith("worktree ")).map((line) => resolve(line.slice("worktree ".length).trim()));
+    ok(!registered.includes(resolve(leaf)), "the resolved tree path is unregistered from git");
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

@@ -3,7 +3,7 @@
 //
 // Split from worktree.test.mjs rather than appended to it: that file is already
 // over the file-size ratchet's 500-line ceiling, so it may not grow.
-import { test } from "node:test";
+import { after, test } from "node:test";
 import { equal, ok, deepEqual } from "node:assert/strict";
 import { mkdtempSync, mkdirSync, writeFileSync, existsSync, readFileSync, readdirSync } from "node:fs";
 import { join, resolve, basename, dirname } from "node:path";
@@ -18,6 +18,14 @@ import { git, initRepo, cleanup, commitAll, dropWorktree, CFG, ADD } from "./hel
 
 // A run dir in the REAL shape — under <swarmHome>/runs/<encoded>/<run> — because
 // runOfTree can only invert the formula against the runs root it was built from.
+const previousHome = process.env.SWARM_HOME;
+const ownedHome = mkdtempSync(join(tmpdir(), "swarm-tree-root-home-"));
+process.env.SWARM_HOME = ownedHome;
+after(() => {
+  if (previousHome === undefined) delete process.env.SWARM_HOME;
+  else process.env.SWARM_HOME = previousHome;
+  cleanup(ownedHome);
+});
 const runDir = (name) => join(swarmHome(), "runs", "C--code-repo", name);
 const recordPath = (resultsDir, name) => join(resultsDir, "trees", `${name}.json`);
 // A cfg whose trees land somewhere the test owns, so nothing touches the real
