@@ -3,8 +3,22 @@
 // git-state member — one corrective turn in the leaf's own session, then a failure.
 import { reaskLeaf } from "./leaf-contract.mjs";
 import { holdsEditTools } from "../manifest-task-policy.mjs";
+import { codexSandbox } from "../codex.mjs";
 
 export const UNCOMMITTED_WORK = "UNCOMMITTED_WORK";
+
+// Whether the leaf can edit files by its own runner's mechanism — the one place the
+// provider rule lives. Codex edits through apply_patch and its shell, so its sandbox
+// decides (a Bash-only Codex leaf under workspace-write IS an editor); a Claude leaf
+// edits through its Edit/Write/NotebookEdit tools, and Bash alone does not count.
+export function canEditFiles(task, runner, cfg) {
+  if (runner !== "codex") return holdsEditTools(task.allowedTools);
+  try {
+    return codexSandbox(task, { config: cfg }) === "workspace-write";
+  } catch {
+    return false; // an unusable sandbox word never dispatched: the leaf did not run
+  }
+}
 
 // `files: null` is a status git could not answer. It counts as dirty: passing a leaf
 // on an unanswered question is how its edits get lost.
@@ -31,11 +45,11 @@ function commitAsk(u, taskIds) {
 // leaf's ORIGINAL output: the re-ask is housekeeping, and its reply ("committed")
 // would otherwise replace the answer the contract already validated.
 //
-// Only a leaf holding Edit or Write is judged. A Bash-only leaf (reviewer, verifier)
-// runs commands and authors nothing, so its tree is handed back as it always was.
+// Only a leaf that can edit files is judged (`canEditFiles`). A Claude Bash-only leaf
+// (reviewer, verifier) authors nothing, so its tree is handed back as it always was.
 export async function enforceCommitted(task, r, collect, taskIds, deps) {
   let collected = collect();
-  if (!holdsEditTools(task.allowedTools)) {
+  if (!canEditFiles(task, deps.runner, deps.cfg)) {
     const { uncommitted, ...rest } = collected;
     return { r, collected: rest };
   }

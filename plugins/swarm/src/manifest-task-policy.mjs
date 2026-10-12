@@ -32,10 +32,9 @@ export function hasWriteTools(allowedTools) {
   return toolNames(allowedTools).some((t) => WRITE_TOOLS.has(t));
 }
 
-// A leaf that authors files, as against one whose Bash only runs checks: the
-// commit gate judges these alone.
+// The Claude leaf that authors files, as against one whose Bash only runs checks.
 export function holdsEditTools(allowedTools) {
-  return toolNames(allowedTools).some((t) => t === "edit" || t === "write");
+  return toolNames(allowedTools).some((t) => t === "edit" || t === "write" || t === "notebookedit");
 }
 
 // THE rule for which tree a task lives in, and the only one: a leaf that can write

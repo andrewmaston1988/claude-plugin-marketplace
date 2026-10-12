@@ -180,6 +180,12 @@ export function createLaunch(ctx) {
         }
       }
 
+      // Which runner ran the leaf (a fallback may have swapped it): the commit gate's
+      // editor test is runner-specific, and the result below records the same identity.
+      const resultIdentity = task.provider !== undefined
+        ? { provider: r.provider || ctx.resolvedIdentity(task).provider, runner: r.runner || ctx.providerRegistry.get(r.provider || ctx.resolvedIdentity(task).provider).runnerId }
+        : {};
+
       // The tree group's final link is measured here, before the result is built: a writer
       // that ends with edits outside git history is failed, not recorded ok.
       let collected = null;
@@ -190,6 +196,7 @@ export function createLaunch(ctx) {
           isIntegrateSource: ctx.isIntegrateSourceId(task.id),
         }), groupTaskIds, {
           taskCwd, resultsDir: plan.resultsDir, cfg, io, hooks: ctx.streamHooks(task), runtime: ctx.runtime, runTask,
+          runner: resultIdentity.runner,
         });
         r = gate.r;
         collected = gate.collected;
@@ -200,9 +207,6 @@ export function createLaunch(ctx) {
       // Non-Claude models keep the manifest name verbatim: ':cloud' is a
       // routing/governance identity an init-reported bare name must not clobber.
       const stamped = r.realModel && isClaudeModel(task.model) && r.realModel !== task.model;
-      const resultIdentity = task.provider !== undefined
-        ? { provider: r.provider || ctx.resolvedIdentity(task).provider, runner: r.runner || ctx.providerRegistry.get(r.provider || ctx.resolvedIdentity(task).provider).runnerId }
-        : {};
       const result = {
         id: task.id,
         model: stamped ? r.realModel : task.model,
