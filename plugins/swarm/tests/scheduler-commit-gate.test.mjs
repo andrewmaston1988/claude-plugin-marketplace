@@ -1,12 +1,14 @@
-// The commit gate's scope and its run.log trail: only leaves holding Edit or Write are
-// judged, an unmeasurable tree counts as dirty, and a failure says why in run.log.
+// The commit gate's scope and its run.log trail: only leaves that can edit files by
+// their runner's own mechanism are judged, an unmeasurable tree counts as dirty, and
+// a failure says why in run.log.
 import { test } from "node:test";
 import { equal, ok } from "node:assert/strict";
 import { readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { runPlan } from "../src/scheduler.mjs";
 import { readResult } from "../src/results.mjs";
-import { CFG, tmp, task, plan, fakeSpawnFactory, makeIo, sentPrompt, streamOut } from "./helpers/scheduler-fixtures.mjs";
+import { CFG, tmp, task, plan, fakeSpawnFactory, makeIo, sentPrompt, streamOut, usageEnv, codexReading } from "./helpers/scheduler-fixtures.mjs";
 
 const worktreeWith = (uncommitted, collects = []) => ({
   prepareIsolation: (t, cfg, resultsDir) => ({ path: join(resultsDir, "wt-impl"), branch: "swarm/impl", name: "impl", head: "h", repo: resultsDir, reused: false }),
@@ -83,6 +85,61 @@ test("a Write-only leaf is gated like an Edit leaf", async () => {
     const r = await runPlan(p, CFG, io);
     equal(r.summary.tasks[0].state, "failed");
     equal(spawn.calls.length, 2);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a NotebookEdit leaf is gated like an Edit leaf", async () => {
+  const dir = tmp();
+  try {
+    const spawn = fakeSpawnFactory((call, i) => ({ output: streamOut(i ? "done" : "answer", "sess-nb") }));
+    const io = makeIo(spawn, { worktree: worktreeWith({ files: 1, commitsAhead: 0 }) });
+    const p = plan(dir, [task("impl", { worktreeName: "impl", allowedTools: "Read,NotebookEdit" })]);
+    const r = await runPlan(p, CFG, io);
+    equal(r.summary.tasks[0].state, "failed");
+    equal(spawn.calls.length, 2);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// Codex edits through apply_patch and its shell under workspace-write, so its sandbox
+// — not its tool names — says whether it is an editor.
+const codexStream = (text) => [
+  JSON.stringify({ type: "thread.started", thread_id: "thread-gate" }),
+  JSON.stringify({ type: "response.output_text.delta", delta: text }),
+  JSON.stringify({ type: "response.completed", response: { usage: { input_tokens: 1, output_tokens: 1 } } }),
+].join("\n") + "\n";
+
+async function runCodexLeaf(dir, over, uncommitted) {
+  const cwd = tmpdir();
+  const cfg = { providers: { claude: { enabled: true }, ollama: { enabled: true, allowedRoots: [] }, codex: { enabled: true, path: "codex", allowedRoots: [cwd] } }, timeoutMs: 600000 };
+  const spawn = fakeSpawnFactory((call, i) => ({ output: codexStream(i ? "committed" : "answer") }));
+  const io = makeIo(spawn, { env: usageEnv({ codex: codexReading() }), worktree: worktreeWith(uncommitted) });
+  const p = plan(dir, [task("impl", { model: "gpt-5-codex", provider: "codex", cwd, originalCwd: cwd, worktreeName: "impl", ...over })], { concurrency: 1 });
+  const r = await runPlan(p, cfg, io);
+  return { r, spawn, p };
+}
+
+test("a Codex leaf under workspace-write is judged even holding only Bash", async () => {
+  const dir = tmp();
+  try {
+    const { r, spawn, p } = await runCodexLeaf(dir, { allowedTools: "Read,Grep,Glob,Bash" }, { files: 2, commitsAhead: 0 });
+    equal(r.summary.tasks[0].state, "failed");
+    equal(spawn.calls.length, 2, "one commit re-ask before failing");
+    equal(readResult(p.resultsDir, "impl").errorCode, "UNCOMMITTED_WORK");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a Codex leaf on an explicit read-only sandbox is not judged, whatever its tool names", async () => {
+  const dir = tmp();
+  try {
+    const { r, spawn } = await runCodexLeaf(dir, { allowedTools: "Read,Edit", sandbox: "read-only" }, { files: 2, commitsAhead: 0 });
+    equal(r.summary.tasks[0].state, "ok");
+    equal(spawn.calls.length, 1, "no commit re-ask");
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
