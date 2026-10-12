@@ -28,8 +28,9 @@ async function main() {
   try { config = loadConfig(undefined, process.env); } catch { process.exit(0); }
   if (config?.swarm?.pruneNudge === false) process.exit(0);
   // `skipNudged` is this path's alone: `swarm status --mine` still names a run the hook
-  // has already announced, or the line would point at an empty listing.
-  const runs = projectRunsHoldingWorktrees({ home: swarmHome(process.env), toplevel, sessionId, skipNudged: true });
+  // has already announced, or the line would point at an empty listing. The config is
+  // handed in so tree discovery reads `treeRoot` without loading it once per run.
+  const runs = projectRunsHoldingWorktrees({ home: swarmHome(process.env), toplevel, sessionId, skipNudged: true, cfg: config });
   const decision = decidePruneNudge({ ...runs, env: process.env, config });
   if (!decision.block) process.exit(0);
 
