@@ -188,7 +188,19 @@ export function collect(task, cfg, wt, { isChainFollower = false, isIntegrateSou
     path: wt.path,
     porcelain: status.stdout,
     diffstat: diffstat.stdout,
+    uncommitted: measureUncommitted(wt),
   };
+}
+
+// What the leaf left outside git history. `--untracked-files=all` so a new directory
+// counts its files, not one path. Commits ahead is a plain rev-list count, not
+// `unlandedCount`'s patch cherry, which answers Infinity when git fails.
+function measureUncommitted(wt) {
+  const dirty = git(["status", "--porcelain", "--untracked-files=all"], wt.path, { timeout: 60000 });
+  const ahead = git(["rev-list", "--count", `${wt.head}..HEAD`], wt.path, { timeout: 60000 });
+  // null, not 0: a status git could not answer must never read as a clean tree.
+  const files = dirty.status === 0 ? dirty.stdout.split(/\r?\n/).filter(Boolean).length : null;
+  return { files, commitsAhead: ahead.status === 0 ? Number(ahead.stdout) || 0 : 0 };
 }
 
 // Fold sibling branches into one tree so a later leaf can carry on from the

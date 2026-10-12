@@ -48,6 +48,12 @@ export function tldrLine(output) {
 // Quoted and attributed, so the grader reads the leaf's claim rather than a
 // verdict someone already reached for them.
 export function noteFor(result) {
+  // The engine's own measurement, not the leaf's claim: its work never reached a commit.
+  if (result?.errorCode === "UNCOMMITTED_WORK" && result.uncommitted) {
+    const { files, commitsAhead } = result.uncommitted;
+    const left = files === null ? "tree could not be measured" : `${files} uncommitted file${files === 1 ? "" : "s"} left in the tree`;
+    return `engine: ${left}, ${commitsAhead} commit${commitsAhead === 1 ? "" : "s"} ahead (UNCOMMITTED_WORK)`;
+  }
   const line = tldrLine(result?.output);
   return line ? `leaf says: "${line}"` : "";
 }

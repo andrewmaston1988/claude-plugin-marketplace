@@ -386,7 +386,7 @@ test("scheduler resume: a failed isolated leaf re-enters its kept worktree AND r
   ].join("\n") + "\n";
   try {
     const spawn = fakeSpawnFactory((call, i) => {
-      writeFileSync(join(call.opts.cwd, "partial.txt"), `work ${i}\n`); // change the tree so it is kept
+      writeFileSync(join(call.opts.cwd, "partial.txt"), `work ${i}\n`); commitAll(call.opts.cwd, `leaf ${i}`); // commit, so the tree is kept
       return i === 0
         ? { output: streamOut("boom", SID, true), exit: 1 }    // first attempt fails, but a session exists
         : { output: streamOut("done", SID, false), exit: 0 };  // the resume succeeds
@@ -423,7 +423,7 @@ test("scheduler integration: a writer runs IN its worktree; summary lists kept b
   try {
     const spawn = fakeSpawnFactory((call) => {
       // leaf "writes" into its cwd — which must be the worktree, not the repo
-      writeFileSync(join(call.opts.cwd, "made-by-leaf.txt"), "output\n");
+      writeFileSync(join(call.opts.cwd, "made-by-leaf.txt"), "output\n"); commitAll(call.opts.cwd, "leaf work");
       return { output: "done" };
     });
     const io = makeIo(spawn);
@@ -449,7 +449,7 @@ test("scheduler integration: a writer runs IN its worktree; summary lists kept b
       `process.stdout.write(require("fs").readFileSync(${JSON.stringify(join(p.resultsDir, "results", "impl.json"))},"utf8"))`],
       { encoding: "utf8", windowsHide: true }).stdout);
     equal(res.worktree.kept, true);
-    ok(res.worktree.porcelain.includes("made-by-leaf.txt"));
+    ok(res.worktree.diffstat.includes("made-by-leaf.txt"), "the committed work is in the kept tree's diffstat");
   } finally {
     spawnSync("git", ["worktree", "remove", "--force", join(dir, "run", "wt-impl")], { cwd: repo, windowsHide: true });
     cleanup(dir, repo);

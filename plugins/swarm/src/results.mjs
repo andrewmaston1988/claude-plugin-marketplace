@@ -41,6 +41,7 @@ import { enginePath } from "./config.mjs";
 //                       (child-manifest task ids are namespaced "<node>~<childId>")
 //                         { ts, event: "truncate-prompt", id, depId, kept, total }   {{result:}} cut to the inline cap
 //                         { ts, event: "leaf-contract-retry", id, attempt }   a corrective re-ask fired — schema/citation/coverage, or the 2nd/3rd schema-only turn
+//                         { ts, event: "leaf-contract-retry", id, attempt, reason: "uncommitted", files }   the commit re-ask of an Edit/Write writer's dirty tree (files: null = tree not measurable)
 //                         { ts, event: "citations", id, checked, drifted, refuted }   N3 mechanical verification
 //                         { ts, event: "coverage", id, status, required, read, missed, retried }   mustRead read-coverage check
 //                         { ts, event: "cost-warn", unit, projected, threshold }   single-shot projection warn

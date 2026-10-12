@@ -213,6 +213,7 @@ function privateLeaf(id, repo, over = {}) {
 
 const writingSpawn = () => fakeSpawnFactory((call) => {
   writeFileSync(join(call.opts.cwd, "out.txt"), "x\n");
+  commitAllInRepo(call.opts.cwd, "leaf work");
   return {};
 });
 
@@ -244,6 +245,7 @@ test("two runs of one manifest in a repo: run-scoped branches keep the second of
       { resultsDir, concurrency: 1 });
     const spawn = fakeSpawnFactory((call) => {
       writeFileSync(join(call.opts.cwd, "untracked.txt"), "x\n");
+      commitAllInRepo(call.opts.cwd, "leaf work");
       return {};
     });
     const r1 = await runPlan(mk(join(dir1, "run")), CFG, makeIo(spawn));

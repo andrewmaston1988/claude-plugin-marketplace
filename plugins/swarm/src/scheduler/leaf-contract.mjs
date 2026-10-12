@@ -45,6 +45,27 @@ const coverageStamp = (cov) => ({
   missedItems: cov.missedItems, uncoverable: cov.uncoverable,
 });
 
+// One more turn in the leaf's own session, its cost and turns folded into `cur`.
+// The contract re-asks and the engine's commit re-ask both go through here; what the
+// reply MEANS is the caller's to judge, so `next` comes back beside `combined`.
+export async function reaskLeaf(task, cur, retryPrompt, { taskCwd, resultsDir, cfg, io, hooks, runtime, runTask, log }) {
+  appendRunLog(resultsDir, {
+    ts: new Date().toISOString(), event: "leaf-contract-retry", id: task.id,
+    ...runtime?.identity?.(task), ...log,
+  });
+  const leafLog = createWriteStream(join(resultsDir, "results", `${task.id}.log`), { flags: "a" });
+  const next = await runTask({ ...task, cwd: taskCwd, resume: cur.sessionId }, retryPrompt, cfg, io, leafLog, hooks, runtime);
+  const combined = {
+    ...cur,
+    durationMs: cur.durationMs + next.durationMs,
+    tokens: addTokens(cur.tokens || emptyTokens(), next.tokens || emptyTokens()),
+    ...((cur.costUsd != null || next.costUsd != null) && { costUsd: (cur.costUsd || 0) + (next.costUsd || 0) }),
+    ...((cur.numTurns != null || next.numTurns != null) && { numTurns: (cur.numTurns || 0) + (next.numTurns || 0) }),
+    sessionId: next.sessionId ?? cur.sessionId,
+  };
+  return { next, combined };
+}
+
 export async function enforceLeafContract(task, r, taskCwd, resultsDir, cfg, io, hooks, runtime, runTask) {
   const runner = r.runner; // the runner that wrote this transcript — never runnerOf's claude default
   // Coverage is proven from the leaf's OWN transcript: parse its Read calls and
@@ -210,24 +231,16 @@ export async function enforceLeafContract(task, r, taskCwd, resultsDir, cfg, io,
       ? "Reply with ONLY the corrected JSON — no prose, no fences."
       : "Reply with your complete corrected answer, in the same form the task originally asked for.";
     const retryPrompt = `${blocks.join("\n\n")}\n${closing}`;
-    appendRunLog(resultsDir, {
-      ts: new Date().toISOString(), event: "leaf-contract-retry", id: task.id,
-      ...runtime?.identity?.(task), attempt: turns,
-      reason: schemaErrs ? "schema" : covAllowed ? "coverage" : "citations",
-      ...(covAllowed && { uncovered }),
+    const { next, combined } = await reaskLeaf(task, cur, retryPrompt, {
+      taskCwd, resultsDir, cfg, io, hooks, runtime, runTask,
+      log: {
+        attempt: turns,
+        reason: schemaErrs ? "schema" : covAllowed ? "coverage" : "citations",
+        ...(covAllowed && { uncovered }),
+      },
     });
-    const leafLog = createWriteStream(join(resultsDir, "results", `${task.id}.log`), { flags: "a" });
-    const next = await runTask({ ...task, cwd: taskCwd, resume: cur.sessionId }, retryPrompt, cfg, io, leafLog, hooks, runtime);
+    combined.schemaRetried = true;
 
-    const combined = {
-      ...cur,
-      durationMs: cur.durationMs + next.durationMs,
-      tokens: addTokens(cur.tokens || emptyTokens(), next.tokens || emptyTokens()),
-      ...((cur.costUsd != null || next.costUsd != null) && { costUsd: (cur.costUsd || 0) + (next.costUsd || 0) }),
-      ...((cur.numTurns != null || next.numTurns != null) && { numTurns: (cur.numTurns || 0) + (next.numTurns || 0) }),
-      sessionId: next.sessionId ?? cur.sessionId,
-      schemaRetried: true,
-    };
     // Re-ask process itself failed: the loop ends here. A schema miss is still fatal;
     // a citation/coverage correction that never ran falls back to the ORIGINAL output
     // and its first-pass annotations — a failed correction must not destroy findings

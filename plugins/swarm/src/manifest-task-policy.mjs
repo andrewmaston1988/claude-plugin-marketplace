@@ -23,12 +23,18 @@ export function defaultToolsFor(provider, mcp = []) {
   return provider === "codex" ? DEFAULT_TOOLS : [DEFAULT_TOOLS, "Skill", ...mcp].join(",");
 }
 
+const toolNames = (allowedTools) => String(allowedTools || "")
+  .split(",")
+  .map((t) => t.trim().toLowerCase().replace(/\(.*\)$/, ""))
+  .filter(Boolean);
+
 export function hasWriteTools(allowedTools) {
-  return String(allowedTools || "")
-    .split(",")
-    .map((t) => t.trim().toLowerCase().replace(/\(.*\)$/, ""))
-    .filter(Boolean)
-    .some((t) => WRITE_TOOLS.has(t));
+  return toolNames(allowedTools).some((t) => WRITE_TOOLS.has(t));
+}
+
+// The Claude leaf that authors files, as against one whose Bash only runs checks.
+export function holdsEditTools(allowedTools) {
+  return toolNames(allowedTools).some((t) => t === "edit" || t === "write" || t === "notebookedit");
 }
 
 // THE rule for which tree a task lives in, and the only one: a leaf that can write

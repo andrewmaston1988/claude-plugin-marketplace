@@ -127,6 +127,7 @@ test("a leaf launched after the live checkout moved is still cut from the dispat
         midRun = heads(repo);
       }
       writeFileSync(join(call.opts.cwd, "leaf.txt"), "work\n");
+      commitAllInRepo(call.opts.cwd, "leaf work"); // a writer's deliverable is its commits
       return { output: "done" };
     });
     const io = makeIo(spawn);
@@ -139,10 +140,10 @@ test("a leaf launched after the live checkout moved is still cut from the dispat
 
     ok(midRun && midRun !== dispatch, "precondition: the live checkout moved during the run");
     const secondTree = join(p.resultsDir, "wt-second");
-    equal(gitInRepo(["rev-parse", "HEAD"], secondTree), dispatch,
+    equal(gitInRepo(["rev-parse", "HEAD~1"], secondTree), dispatch,
       "the second leaf's tree must sit on the dispatch commit, not the checkout's later HEAD");
-    equal(gitInRepo(["rev-parse", "HEAD"], join(p.resultsDir, "wt-first")),
-      gitInRepo(["rev-parse", "HEAD"], secondTree),
+    equal(gitInRepo(["rev-parse", "HEAD~1"], join(p.resultsDir, "wt-first")),
+      gitInRepo(["rev-parse", "HEAD~1"], secondTree),
       "siblings launched either side of the mid-run commit share ONE base");
     equal(spawnSync("git", ["merge-base", "--is-ancestor", midRun, "HEAD"],
       { cwd: secondTree, windowsHide: true }).status, 1,

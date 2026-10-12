@@ -267,7 +267,7 @@ a second manifest is almost never needed. Invoke it before drafting, alongside
 | Investigation | Read-only tools (the default), closed question, ≤10-bullet return contract |
 | Review | Prompt demands a JSON verdict; engine stores raw + parsed |
 | Generation | `outputDir`; nothing to declare — name the resolved absolute path in the prompt, since it resolves against the dispatch cwd while the leaf writes inside its own worktree |
-| Implementation | write tools — results are branches to review; unchanged worktrees are removed, changed ones kept and listed in the summary. Its prompt carries the three required lines below |
+| Implementation | write tools — results are branches to review; unchanged worktrees are removed, changed ones kept and listed in the summary; a writer that ends with uncommitted work is re-asked once, then failed `UNCOMMITTED_WORK`. Its prompt carries the three required lines below |
 
 **The write tools decide where a leaf runs, and nothing else does.** A leaf holding `Edit`, `Write` or `Bash` gets a private worktree cut from the commit the run pinned at dispatch, on a run-scoped branch `swarm/<run>/<id>`; a read-only leaf reads the live repo at the `cwd` it was given. Only a writer needs its `cwd` inside a git repo — a reader reads logs or a data dump outside any repo just as well.
 
