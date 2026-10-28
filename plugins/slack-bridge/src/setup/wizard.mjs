@@ -250,7 +250,8 @@ export async function runWizard({ paths, log }) {
     say("Step 8/9 — Smoke test\n");
     const noop = { info() {}, warn() {}, child() { return noop; } };
     const web = createWebClient({ token: config.tokens.bot, log: noop });
-    const results = await runDoctor({ config, paths, web, log: noop });
+    const appWeb = createWebClient({ token: config.tokens.app, log: noop });
+    const results = await runDoctor({ config, paths, web, appWeb, log: noop });
     printDoctor(results);
 
     const failed = results.filter(r => !r.ok);

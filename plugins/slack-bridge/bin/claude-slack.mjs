@@ -141,8 +141,9 @@ if (cmd === "doctor") {
   const config = await loadConfig({ configPath: configArg });
   const log = createLogger({ logDir: paths.logDir, tag: "doctor" });
   const web = createWebClient({ token: config.tokens.bot, log });
+  const appWeb = createWebClient({ token: config.tokens.app, log });
   const { runDoctor, printDoctor } = await import("../src/doctor/index.mjs");
-  const results = await runDoctor({ config, paths, web, log });
+  const results = await runDoctor({ config, paths, web, appWeb, log });
   printDoctor(results, { json: rest.includes("--json") });
   const exitCode = results.some(c => !c.ok) ? 1 : 0;
   setTimeout(() => process.exit(exitCode), 150);
