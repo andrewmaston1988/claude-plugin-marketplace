@@ -332,8 +332,9 @@ export function createBroker({
     };
     if (req.method !== "POST") {
       if (req.url === "/health") {
-        reapDead();
-        persist();
+        // Pure read: every client probes this before it acts — a waiter probes
+        // on each arm — and reaping here would delete the queue the caller is
+        // about to collect whenever the registered pid has died.
         return json(200, { status: "ok", lease: true, single_flight: true, peers: Object.keys(state.peers).length });
       }
       res.writeHead(200);

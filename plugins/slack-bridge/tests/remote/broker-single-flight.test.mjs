@@ -15,9 +15,10 @@ async function startBroker(t, opts = {}) {
     });
     return res.json();
   };
+  const get = async (path) => (await fetch(`http://127.0.0.1:${port}${path}`)).json();
   const peer = (await call("/register", REG)).id;
   const armed = async () => (await call("/list-peers", { scope: "machine", cwd: "", git_root: null }))[0]?.armed;
-  return { call, peer, armed, port };
+  return { call, get, peer, armed, port };
 }
 
 const waiter = (pid, started_at) => ({ pid, started_at });
@@ -137,6 +138,33 @@ test("a re-arm with no older waiter leaves the take alone", async (t) => {
   await call("/wait", { id: peer, timeout_ms: 10, waiter: waiter(process.pid, 1) });
   assert.equal((await call("/take-messages", { id: peer, lease: true })).messages.length, 0);
   assert.equal(take.messages.length, 1);
+});
+
+// The probe is the first call every client makes — arming a waiter probes, and
+// a client re-probes before an upgrade. Reaping inside it deletes the queue the
+// caller was about to collect, so it must stay side-effect free.
+test("a health probe leaves a dead peer's queue intact", async (t) => {
+  let dead = false;
+  const { call, get, peer } = await startBroker(t, {
+    _kill: () => { if (dead) throw new Error("ESRCH"); },
+  });
+  await call("/send-message", { from_id: "sender", to_id: peer, text: "queued" });
+  dead = true;
+  assert.equal((await get("/health")).status, "ok");
+  const taken = await call("/take-messages", { id: peer });
+  assert.deepEqual(taken.messages.map((m) => m.text), ["queued"]);
+});
+
+// Reaping still belongs on the routes that own it.
+test("list-peers still reaps a dead peer's queue", async (t) => {
+  let dead = false;
+  const { call, peer } = await startBroker(t, {
+    _kill: () => { if (dead) throw new Error("ESRCH"); },
+  });
+  await call("/send-message", { from_id: "sender", to_id: peer, text: "queued" });
+  dead = true;
+  assert.deepEqual(await call("/list-peers", { scope: "machine", cwd: "", git_root: null }), []);
+  assert.deepEqual((await call("/take-messages", { id: peer })).messages, []);
 });
 
 test("a dead identity mark does not block a replacement arm", async (t) => {
