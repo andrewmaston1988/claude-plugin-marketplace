@@ -112,7 +112,14 @@ export function createBrokerClient({
   async function leasedTake(path, body, opts, { autoAck = true } = {}) {
     const res = await brokerFetch(path, { ...body, lease: true }, opts);
     const ids = (res?.messages ?? []).map((m) => m.id);
-    const ack = () => (ids.length === 0 ? Promise.resolve() : brokerFetch("/ack", { id: body.id, ids }).catch(() => {}));
+    // A caller that passes a subset has handled only those messages: clearing
+    // the rest would drop them, since the broker only redelivers what stays
+    // leased. Ids the take never held are skipped so a stale caller cannot
+    // clear someone else's message.
+    const ack = (subset) => {
+      const clearing = Array.isArray(subset) ? ids.filter((id) => subset.includes(id)) : ids;
+      return clearing.length === 0 ? Promise.resolve() : brokerFetch("/ack", { id: body.id, ids: clearing }).catch(() => {});
+    };
     if (autoAck) await ack();
     return { ...(res ?? {}), ack };
   }

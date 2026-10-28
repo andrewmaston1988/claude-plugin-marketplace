@@ -41,6 +41,33 @@ for (const [name, call] of [["wait", (c) => c.wait("p1", 55_000)], ["takeMessage
   });
 }
 
+// A reply that failed to post must stay leased so the broker redelivers it, so
+// the caller acks only what it actually posted — never the whole take.
+test("ack: a subset clears only the posted ids, and never ids the take did not hold", async () => {
+  const acks = [];
+  const _fetch = async (url, opts = {}) => {
+    const path = new URL(url).pathname;
+    if (path === "/ack") {
+      acks.push(JSON.parse(opts.body));
+      return { ok: true, json: async () => ({ ok: true }) };
+    }
+    return { ok: true, json: async () => ({ messages: [{ id: 7 }, { id: 9 }, { id: 11 }] }) };
+  };
+  const res = await createBrokerClient({ port: 1, _fetch }).wait("p1", 55_000);
+
+  await res.ack([7, 11]);
+  assert.deepEqual(acks, [{ id: "p1", ids: [7, 11] }], "only the posted ids are cleared");
+
+  await res.ack([9, 999]);
+  assert.deepEqual(acks.at(-1), { id: "p1", ids: [9] }, "an id outside the take is not sent");
+
+  await res.ack([]);
+  assert.equal(acks.length, 2, "an empty subset acks nothing, so the whole take redelivers");
+
+  await res.ack();
+  assert.deepEqual(acks.at(-1), { id: "p1", ids: [7, 9, 11] }, "no argument still acks the whole take");
+});
+
 test("takeMessages: a failed ack still returns the messages (the lease redelivers)", async () => {
   const _fetch = async (url) => {
     if (url.endsWith("/ack")) return { ok: false, status: 404, text: async () => "not found" };
