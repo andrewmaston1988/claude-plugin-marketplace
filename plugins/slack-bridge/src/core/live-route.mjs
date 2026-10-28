@@ -92,6 +92,7 @@ async function finalizeWindow(window, { timeout = false, errorMessage = null } =
 
   const { web, channel, threadTs, placeholderTs, heartbeat, cmdEcho, config, log, chunks } = window;
   let delivered = false;
+  const deliveryOutcomes = [];
   try {
     await heartbeat?.stop();
     if (timeout || chunks.length === 0) {
@@ -111,11 +112,13 @@ async function finalizeWindow(window, { timeout = false, errorMessage = null } =
             cmdEcho, extensions: null, sessionId: null, config,
           });
           delivered = true;
+          deliveryOutcomes[i] = true;
         } else {
           const postParams = { channel, text: mdToSlack(chunks[i]) };
           if (threadTs) postParams.thread_ts = threadTs;
           await web.chatPostMessage(postParams);
           delivered = true;
+          deliveryOutcomes[i] = true;
         }
       }
     }
@@ -126,7 +129,7 @@ async function finalizeWindow(window, { timeout = false, errorMessage = null } =
     } catch {}
   } finally {
     await clearStatus({ web, channel, log });
-    for (const resolve of window.deliveryWaiters.splice(0)) resolve(delivered);
+    for (const { resolve, chunkIndex } of window.deliveryWaiters.splice(0)) resolve(deliveryOutcomes[chunkIndex] === true);
   }
   return delivered;
 }
@@ -268,13 +271,14 @@ async function handleBrokerMessage({ message, claims, web, config, log }) {
   if (window) {
     if (!window.chunks.length) await abandonOlderWindows(window);
     window.chunks.push(text);
+    const chunkIndex = window.chunks.length - 1;
     // Restart the quiet gap: stop the window's deadline firing mid-collection,
     // then finalise once the session has stopped sending.
     clearTimeout(window.timeoutTimer);
     clearTimeout(window.quietTimer);
     window.quietTimer = setTimeout(() => { void finalizeWindow(window); }, QUIET_GAP_MS);
     window.quietTimer.unref?.();
-    return new Promise((resolve) => window.deliveryWaiters.push(resolve));
+    return new Promise((resolve) => window.deliveryWaiters.push({ resolve, chunkIndex }));
   }
 
   await clearStatus({ web, channel, log });
@@ -319,16 +323,17 @@ export function startReplyLoop({
         continue;
       }
       if (superseded) { await _sleep(1000); continue; }
-      const dispatches = [];
-      for (const message of messages) {
-        dispatches.push(handleBrokerMessage({ message, claims, web, config, log }).then(
-          (posted) => posted === true,
-          (e) => { log.error("reply loop: dispatch failed", { error: e.message }); return true; },
-        ));
-      }
+      const successfulIds = [];
+      const dispatches = messages.map((message) => handleBrokerMessage({ message, claims, web, config, log }).then(
+        (posted) => {
+          if (posted === true) successfulIds.push(message.id);
+          return posted === true;
+        },
+        (e) => { log.error("reply loop: dispatch failed", { error: e.message }); return false; },
+      ));
       if (dispatches.length) {
-        void Promise.all(dispatches).then((posted) => {
-          if (posted.every(Boolean)) return ack?.();
+        void Promise.all(dispatches).then(() => {
+          if (successfulIds.length) return ack?.(successfulIds);
         });
       }
     }
