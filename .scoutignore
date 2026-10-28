@@ -124,7 +124,7 @@ cldr-data
 #     over 2 MB are skipped by symbol extraction and over ~2 MB by the embed
 #     cap, but they are still READ first. If your repo carries vendored API-doc
 #     XML beside a third-party DLL, a WiX-generated script, or similar, add
-#     the pattern here — e.g. `**/Third Party/**` or `*.xml` scoped to that
+#     the pattern here — e.g. `*Third Party/*` or `*.xml` scoped to that
 #     directory. Check `.scout/extraction-warnings.log` after a run: every
 #     oversize skip is named there.
 
