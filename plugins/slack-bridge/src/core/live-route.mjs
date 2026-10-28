@@ -245,7 +245,7 @@ export async function routeToLiveSession({
  * when none is open. A message from a peer
  * with no claim has nowhere to go and is dropped with a log.
  */
-async function handleBrokerMessage({ message, claims, web, config, log }) {
+async function handleBrokerMessage({ message, claims, web, config, log, _quietGapMs = QUIET_GAP_MS }) {
   const fromId = message?.from_id;
   // hasOwn-style lookup over the claims store: one claim per peer, so the entry
   // is the reply's destination channel.
@@ -276,7 +276,7 @@ async function handleBrokerMessage({ message, claims, web, config, log }) {
     // then finalise once the session has stopped sending.
     clearTimeout(window.timeoutTimer);
     clearTimeout(window.quietTimer);
-    window.quietTimer = setTimeout(() => { void finalizeWindow(window); }, QUIET_GAP_MS);
+    window.quietTimer = setTimeout(() => { void finalizeWindow(window); }, _quietGapMs);
     window.quietTimer.unref?.();
     return new Promise((resolve) => window.deliveryWaiters.push({ resolve, chunkIndex }));
   }
@@ -296,6 +296,7 @@ async function handleBrokerMessage({ message, claims, web, config, log }) {
 export function startReplyLoop({
   broker, claims, web, config, log,
   _sleep = (ms) => new Promise((r) => setTimeout(r, ms)),
+  _quietGapMs = QUIET_GAP_MS,
 }) {
   const abort = new AbortController();
   let failures = 0;
@@ -324,7 +325,7 @@ export function startReplyLoop({
       }
       if (superseded) { await _sleep(1000); continue; }
       const successfulIds = [];
-      const dispatches = messages.map((message) => handleBrokerMessage({ message, claims, web, config, log }).then(
+      const dispatches = messages.map((message) => handleBrokerMessage({ message, claims, web, config, log, _quietGapMs }).then(
         (posted) => {
           if (posted === true) successfulIds.push(message.id);
           return posted === true;

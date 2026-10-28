@@ -48,6 +48,8 @@ test("reply loop acks posted replies from a partially unclaimed batch", async ()
 
 test("reply loop acks only the chunks posted before a later chunk fails", async () => {
   const ackCalls = [];
+  let acked;
+  const ackAwaited = new Promise((resolve) => { acked = resolve; });
   let waits = 0;
   let loop;
   const broker = { sendMessage: async () => ({ ok: true }), wait: async () => {
@@ -58,7 +60,7 @@ test("reply loop acks only the chunks posted before a later chunk fails", async 
         { id: "chunk-1", from_id: "chunk-peer", text: "first chunk", kind: "text" },
         { id: "chunk-2", from_id: "chunk-peer", text: "second chunk", kind: "text" },
       ],
-      ack: async (ids) => ackCalls.push(ids)
+      ack: async (ids) => { ackCalls.push(ids); acked(); }
     };
   } };
   const web = {
@@ -74,8 +76,11 @@ test("reply loop acks only the chunks posted before a later chunk fails", async 
     config: { remote: { replyTimeoutMs: 60_000 } }, log: { ...log, child: () => log },
     _startHeartbeat: () => ({ stop: async () => {} }),
   });
-  loop = startReplyLoop({ broker, claims: { all: () => ({ C1: { peer_id: "chunk-peer" } }) }, web, config, log });
-  await new Promise((resolve) => setTimeout(resolve, 1100));
+  loop = startReplyLoop({
+    broker, claims: { all: () => ({ C1: { peer_id: "chunk-peer" } }) }, web, config, log,
+    _quietGapMs: 5,
+  });
+  await ackAwaited;
   loop.stop();
   await loop.done;
   assert.deepEqual(ackCalls, [["chunk-1"]]);
