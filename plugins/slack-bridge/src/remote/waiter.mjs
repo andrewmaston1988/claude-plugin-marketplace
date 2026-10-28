@@ -29,13 +29,19 @@ const brokerStatus = (e) => Number(/^Broker error \([^)]*\): (\d{3})/.exec(e?.me
 // dead-pid peers and drops their queued messages, and its upgrade path restarts
 // a broker that answers. Reachability is the only question it may answer.
 // A refused upgrade is not fatal — the waiter's own retry/backoff covers a
-// broker that is still starting.
+// broker that is still starting. The reason still has to reach the operator:
+// the bin builds this client with no log, so the client's own diagnostics are
+// noops, and a silent fall-through retries until the cap with no clue why.
 export async function prepareBroker({ client }) {
   if (await client.health()) return;
   try {
     await client.ensureBroker();
-  } catch {
-    // Fall through to runWaiter, which retries transient failures.
+  } catch (e) {
+    try {
+      process.stderr.write(`WAIT: broker upgrade failed — ${e?.message ?? e}\n`);
+    } catch {
+      // No stderr to write to; the fall-through is still the contract.
+    }
   }
 }
 

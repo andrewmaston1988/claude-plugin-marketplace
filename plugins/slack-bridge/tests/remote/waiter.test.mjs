@@ -190,6 +190,18 @@ test("a refused broker upgrade falls through and the waiter still delivers", asy
   assert.equal(code, 0, "a failed upgrade degrades to a running waiter, not an exit");
 });
 
+test("a refused broker upgrade names its reason on stderr before falling through", async () => {
+  const original = Object.getOwnPropertyDescriptor(process, "stderr");
+  let written = "";
+  Object.defineProperty(process, "stderr", { value: { write: (s) => { written += s; } }, configurable: true });
+  try {
+    const reason = "broker on port 7898 predates single-flight waits and refused /shutdown — stop it by PID";
+    const client = { health: async () => null, ensureBroker: async () => { throw new Error(reason); } };
+    await prepareBroker({ client });
+    assert.ok(written.includes(reason), `refusal reason missing from stderr: ${JSON.stringify(written)}`);
+  } finally { Object.defineProperty(process, "stderr", original); }
+});
+
 test("clock passes WAIT_CAP_MS → WAIT EXPIRED, returns 0; cap < Bash timeout", async () => {
   const h = harness([]);
   const code = await h.run();
