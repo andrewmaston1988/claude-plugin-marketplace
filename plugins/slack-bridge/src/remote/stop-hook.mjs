@@ -1,7 +1,9 @@
 // Stop + PostToolUse + PreToolUse(AskUserQuestion) hook for a session holding a
 // Slack claim: mirrors the turn's assistant text to the channel, posts a tool
-// status line or the pending question, and on Stop blocks once when no waiter is armed. Any error allows — a broken hook must
-// never wedge a session.
+// status line or the pending question, and on Stop blocks whenever no live waiter
+// is armed. A question is denied rather than opened as a terminal dialog, which
+// nothing in Slack can answer. Any error allows — a broken hook must never wedge
+// a session.
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { getPaths } from "../paths.mjs";
@@ -78,6 +80,19 @@ export function formatQuestion(input) {
   }).join("\n\n");
 }
 
+// A claimed session cannot answer a terminal dialog: nobody is at the keyboard,
+// and the reply the operator types in Slack is never consumed. Denying the tool
+// turns it into a plain-text ask, which the mirror already carries to the channel.
+const DENY_DIALOG = {
+  hookSpecificOutput: {
+    hookEventName: "PreToolUse",
+    permissionDecision: "deny",
+    permissionDecisionReason:
+      "This session is under Slack remote control: a terminal dialog cannot be answered. " +
+      "Ask the question in plain text, with the options, and end your turn — the text is mirrored to Slack.",
+  },
+};
+
 export async function runHook({
   raw,
   stateDir = getPaths().stateDir,
@@ -85,15 +100,25 @@ export async function runHook({
   _createClient = createBrokerClient,
   _sleep = (ms) => new Promise((r) => setTimeout(r, ms)),
 }) {
+  let input, session;
   try {
-    const input = JSON.parse(raw);
-    const event = input.hook_event_name;
-    const isQuestion = event === "PreToolUse" && input.tool_name === "AskUserQuestion";
-    if (event !== "Stop" && event !== "PostToolUse" && !isQuestion) return null;
-    // Absent file = no claim held: exit before any config load or broker call,
-    // which is what keeps PostToolUse cheap on unclaimed sessions.
-    const session = readSessionFile(stateDir, input.session_id);
-    if (!session) return null;
+    input = JSON.parse(raw);
+  } catch {
+    return null;
+  }
+  const event = input?.hook_event_name;
+  const isQuestion = event === "PreToolUse" && input?.tool_name === "AskUserQuestion";
+  if (event !== "Stop" && event !== "PostToolUse" && !isQuestion) return null;
+  // Absent file = no claim held: exit before any config load or broker call,
+  // which is what keeps PostToolUse cheap on unclaimed sessions.
+  try {
+    session = readSessionFile(stateDir, input.session_id);
+  } catch {
+    return null;
+  }
+  if (!session) return null;
+
+  try {
     const config = _loadConfig({ configPath: session.configPath });
     const client = _createClient({
       port: config.remote?.brokerPort ?? 7898,
@@ -101,16 +126,20 @@ export async function runHook({
       configPath: session.configPath,
     });
 
-    // Mirror first, on every event — including a retried stop (stop_hook_active),
+    // Mirror first, on every event and on every stop — a retried stop included,
     // which must not drop that turn's text. A mirror failure must not cost the nudge.
     try {
       await mirror({ stateDir, sessionId: input.session_id, transcriptPath: input.transcript_path, session, client });
     } catch {}
 
     if (isQuestion) {
-      const text = formatQuestion(input.tool_input);
-      if (text) await client.sendMessage(session.peerId, "slack-bridge", text, { kind: "question" });
-      return null;
+      // Mirror, then deny. A failed post costs the operator sight of the question,
+      // which is recoverable; a dialog nobody can answer parks the turn for good.
+      try {
+        const text = formatQuestion(input.tool_input);
+        if (text) await client.sendMessage(session.peerId, "slack-bridge", text, { kind: "question" });
+      } catch {}
+      return DENY_DIALOG;
     }
 
     if (event === "PostToolUse") {
@@ -119,15 +148,16 @@ export async function runHook({
       return null;
     }
 
-    if (input.stop_hook_active) return null;
     if (await isArmed(client, session.peerId, _sleep)) return null;
     const channel = String(session.channel ?? "").replace(/^#/, "");
     const cmd = waitCommand(session.peerId, { configPath: session.configPath });
     return {
       decision: "block",
-      reason: `Slack channel #${channel} is claimed but no waiter is armed. Run: ${cmd} (run_in_background, timeout ${BASH_TIMEOUT_MS}).`,
+      reason: `Slack channel #${channel} is claimed but no waiter is armed. Run: ${cmd} (run_in_background, timeout ${BASH_TIMEOUT_MS}), or release the claim with slack_release if this channel is done.`,
     };
   } catch {
-    return null;
+    // Every other error allows, but a claimed session must never be left on an
+    // unanswerable dialog: fall back to the deny when the path was a question.
+    return isQuestion ? DENY_DIALOG : null;
   }
 }

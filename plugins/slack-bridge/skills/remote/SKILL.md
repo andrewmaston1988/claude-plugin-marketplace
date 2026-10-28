@@ -54,11 +54,12 @@ Notes:
 
 - The waiter caps itself short of the Bash limit: after ~1 h 55 m it prints `WAIT EXPIRED — re-arm: <command>` and exits 0, so an expiry is a wake with an instruction, not a silent death. Re-arm and carry on.
 - If the waiter died and you want to check by hand, `check_messages` still works — it takes anything queued for this session.
-- A `Stop` hook blocks a turn once when the channel is claimed and no waiter is armed, handing you the exact command in the block reason. Re-arm and finish the turn.
+- `WAIT SUPERSEDED` means a newer waiter already owns this peer — the normal re-arm already happened, so there is nothing for you to do.
+- A `Stop` hook blocks any turn that ends with the channel claimed and no waiter listening, handing you the exact command in the block reason. Re-arm and finish the turn — while the channel is claimed you are never allowed to stop listening.
 
 ## Replying
 
-Reply normally — just write your answer, as you would in any other turn. The plugin's `PostToolUse` and `Stop` hooks mirror the turn to the claimed channel: your narration posts as messages, and tool calls render as **one status line edited in place**, finalised when the turn stops. A `PreToolUse` hook mirrors an `AskUserQuestion` (question and options) to the channel, but the dialog can only be answered at the terminal.
+Reply normally — just write your answer, as you would in any other turn. The plugin's `PostToolUse` and `Stop` hooks mirror the turn to the claimed channel: your narration posts as messages, and tool calls render as **one status line edited in place**, finalised when the turn stops. A claimed session asks in plain text rather than through `AskUserQuestion`: a `PreToolUse` hook mirrors the question and its options to the channel and then denies the tool, because the terminal dialog cannot be answered from Slack. Write the question with its options as normal text and end the turn.
 
 Do **not** answer with a tool call. There is nothing to send by hand — the hooks already post your text, so a tool call per message wastes context and can post the same reply twice.
 
