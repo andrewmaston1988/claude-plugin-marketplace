@@ -28,7 +28,7 @@ async function freePort() {
 }
 
 async function checkNamed(config, name) {
-  const results = await runDoctor({ config, paths, web: {}, log: noop });
+  const results = await runDoctor({ config, paths, web: {}, appWeb: {}, log: noop });
   const found = results.find((r) => r.name === name);
   assert.ok(found, `${name} check must run`);
   return found;
@@ -65,6 +65,25 @@ test("endpoint 5xx is still a failure", async () => {
   } finally {
     await new Promise((r) => srv.close(r));
   }
+});
+
+test("app-token check uses the app-token client, not the bot client", async () => {
+  // apps.connections.open only accepts an app-level token. Calling it with the bot
+  // token returns not_allowed_token_type, so a check wired to the bot client can
+  // never pass however healthy the app token is.
+  const config = configFor(await freePort());
+  const web = {
+    appsConnectionsOpen: async () => {
+      throw Object.assign(new Error("Slack apps.connections.open: not_allowed_token_type"), {
+        slackError: "not_allowed_token_type",
+      });
+    },
+  };
+  const appWeb = { appsConnectionsOpen: async () => ({ ok: true, url: "wss://example" }) };
+  const results = await runDoctor({ config, paths, web, appWeb, log: noop });
+  const found = results.find((r) => r.name === "App token (apps.connections.open)");
+  assert.ok(found, "app-token check must run");
+  assert.equal(found.ok, true, `app-token check must use the app client — got: ${found.detail}`);
 });
 
 test("channel-create mode without operatorUserId fails — created channels would not invite the operator", async () => {

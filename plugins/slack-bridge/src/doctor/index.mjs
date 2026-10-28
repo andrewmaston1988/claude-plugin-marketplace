@@ -13,10 +13,10 @@ const execFileAsync = promisify(execFile);
 /**
  * Run all doctor checks and return results.
  *
- * @param {{ config: object, paths: object, web: object, log: object }} opts
+ * @param {{ config: object, paths: object, web: object, appWeb: object, log: object }} opts
  * @returns {Promise<Check[]>}
  */
-export async function runDoctor({ config, paths, web, log }) {
+export async function runDoctor({ config, paths, web, appWeb, log }) {
   const checks = [];
 
   const check = (name, fn) =>
@@ -49,7 +49,8 @@ export async function runDoctor({ config, paths, web, log }) {
   });
 
   await check("App token (apps.connections.open)", async () => {
-    const info = await web.appsConnectionsOpen();
+    // App-level token only — the bot token returns not_allowed_token_type here.
+    const info = await appWeb.appsConnectionsOpen();
     // We only validate the response; don't actually open the WS
     if (!info.url) throw new Error("no WSS URL returned");
     return "WSS URL ok";
