@@ -25,6 +25,20 @@ export const defaultOut = (s) => new Promise((resolve, reject) => {
 
 const brokerStatus = (e) => Number(/^Broker error \([^)]*\): (\d{3})/.exec(e?.message ?? "")?.[1] ?? 0);
 
+// Arming must not hand a live broker to ensureBroker: its health check reaps
+// dead-pid peers and drops their queued messages, and its upgrade path restarts
+// a broker that answers. Reachability is the only question it may answer.
+// A refused upgrade is not fatal — the waiter's own retry/backoff covers a
+// broker that is still starting.
+export async function prepareBroker({ client }) {
+  if (await client.health()) return;
+  try {
+    await client.ensureBroker();
+  } catch {
+    // Fall through to runWaiter, which retries transient failures.
+  }
+}
+
 export async function runWaiter({
   peerId,
   client,
@@ -76,6 +90,10 @@ export async function runWaiter({
     }
   }
   const hours = ((_now() - start) / 3_600_000).toFixed(1);
-  out(`WAIT EXPIRED after ${hours}h — re-arm: ${waitCommand(peerId, { configPath })}\n`);
+  try {
+    await out(`WAIT EXPIRED after ${hours}h — re-arm: ${waitCommand(peerId, { configPath })}\n`);
+  } catch {
+    return 1;
+  }
   return 0;
 }
