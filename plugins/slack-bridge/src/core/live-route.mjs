@@ -276,8 +276,10 @@ async function handleBrokerMessage({ message, claims, web, config, log, _quietGa
     // then finalise once the session has stopped sending.
     clearTimeout(window.timeoutTimer);
     clearTimeout(window.quietTimer);
+    // The quiet gap is the only thing that will resolve this chunk's delivery waiter,
+    // so it must keep the event loop alive: unref'd, it is dropped when it is the last
+    // pending work and the waiter never settles.
     window.quietTimer = setTimeout(() => { void finalizeWindow(window); }, _quietGapMs);
-    window.quietTimer.unref?.();
     return new Promise((resolve) => window.deliveryWaiters.push({ resolve, chunkIndex }));
   }
 
