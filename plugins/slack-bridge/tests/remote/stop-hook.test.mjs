@@ -157,15 +157,21 @@ test("peer row gone from the broker → allow (the claim is dead, the command wo
   assert.equal(await hook(env, fakeClient({ peerRow: false })), null);
 });
 
-test("stop_hook_active → allow, AND new turn text after the cursor is still mirrored (B1)", async (t) => {
+test("stop_hook_active while unarmed → still blocks, and that turn's text is still mirrored (B1)", async (t) => {
   const env = setup(t);
   await prime(env);
   env.append(textEntry("a1", "retried stop text"));
   const client = fakeClient({ armed: [false] });
-  const out = await hook(env, client, { active: true });
-  assert.equal(out, null);
-  assert.equal(client.listCalls, 0, "no re-arm check on the second stop");
+  const sleeps = [];
+  const out = await hook(env, client, { active: true, sleeps });
+  assert.equal(out?.decision, "block", "a retried stop is not waved through");
+  assert.equal(client.listCalls, 7, "the whole 3 s re-check runs on a retried stop");
   assert.deepEqual(textSends(client).map((s) => s.text), ["retried stop text"]);
+});
+
+test("stop_hook_active with a live waiter → allow (B1)", async (t) => {
+  const env = setup(t);
+  assert.equal(await hook(env, fakeClient({ armed: [true] }), { active: true }), null);
 });
 
 test("broker unreachable → allow, never throws", async (t) => {
@@ -426,13 +432,40 @@ test("PreToolUse AskUserQuestion → the question and every option reach Slack a
   await prime(env);
   const client = fakeClient({ armed: [true] });
   const out = await hook(env, client, { event: "PreToolUse", tool: { name: "AskUserQuestion", input: QUESTION } });
-  assert.equal(out, null, "the hook never blocks or rewrites the question");
+  assert.equal(out?.hookSpecificOutput?.permissionDecision, "deny", "a claimed session must not open a terminal dialog");
   const questions = client.sends.filter((s) => s.kind === "question");
   assert.equal(questions.length, 1, `one question message, got ${JSON.stringify(client.sends)}`);
   const text = questions[0].text;
   for (const needle of ["Which branch should the fix land on?", "followups", "the open followups branch", "new branch", "cut a fresh one"]) {
     assert.ok(text.includes(needle), `question message must carry "${needle}": ${text}`);
   }
+});
+
+test("PreToolUse AskUserQuestion → mirrored before the deny, so the operator still sees the question", async (t) => {
+  const env = setup(t);
+  await prime(env);
+  env.append(textEntry("a1", "about to ask"));
+  const client = fakeClient({ armed: [true] });
+  const out = await hook(env, client, { event: "PreToolUse", tool: { name: "AskUserQuestion", input: QUESTION } });
+  assert.equal(out?.hookSpecificOutput?.hookEventName, "PreToolUse");
+  assert.equal(out?.hookSpecificOutput?.permissionDecision, "deny");
+  assert.match(out.hookSpecificOutput.permissionDecisionReason, /plain text/);
+  assert.deepEqual(client.sends.map((s) => s.kind), ["text", "question"], "the question is mirrored before the deny");
+});
+
+test("PreToolUse AskUserQuestion with a failing Slack post → still denied (a hidden question beats a frozen turn)", async (t) => {
+  const env = setup(t);
+  await prime(env);
+  const out = await hook(env, fakeClient({ fail: true }), { event: "PreToolUse", tool: { name: "AskUserQuestion", input: QUESTION } });
+  assert.equal(out?.hookSpecificOutput?.permissionDecision, "deny");
+});
+
+test("PreToolUse AskUserQuestion on an unclaimed session → allow, the dialog opens as usual", async (t) => {
+  const env = setup(t, { claimed: false });
+  const client = fakeClient({ armed: [true] });
+  const out = await hook(env, client, { event: "PreToolUse", tool: { name: "AskUserQuestion", input: QUESTION } });
+  assert.equal(out, null);
+  assert.equal(client.sends.length, 0);
 });
 
 test("PreToolUse for any other tool → nothing sent", async (t) => {

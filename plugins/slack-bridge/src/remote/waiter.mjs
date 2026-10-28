@@ -14,13 +14,42 @@ export function waitFooter(peerId, { configPath } = {}) {
   return `Reply normally — your text is mirrored to Slack. Then re-arm: run ${waitCommand(peerId, { configPath })} with run_in_background and timeout ${BASH_TIMEOUT_MS}.`;
 }
 
+export const defaultOut = (s) => new Promise((resolve, reject) => {
+  const onError = (err) => { process.stdout.off("error", onError); reject(err); };
+  process.stdout.once("error", onError);
+  process.stdout.write(s, (err) => {
+    process.stdout.off("error", onError);
+    if (err) reject(err); else resolve();
+  });
+});
+
 const brokerStatus = (e) => Number(/^Broker error \([^)]*\): (\d{3})/.exec(e?.message ?? "")?.[1] ?? 0);
+
+// Arming must not hand a live broker to ensureBroker: its health check reaps
+// dead-pid peers and drops their queued messages, and its upgrade path restarts
+// a broker that answers. Reachability is the only question it may answer.
+// A refused upgrade is not fatal — the waiter's own retry/backoff covers a
+// broker that is still starting. The reason still has to reach the operator:
+// the bin builds this client with no log, so the client's own diagnostics are
+// noops, and a silent fall-through retries until the cap with no clue why.
+export async function prepareBroker({ client }) {
+  if (await client.health()) return;
+  try {
+    await client.ensureBroker();
+  } catch (e) {
+    try {
+      process.stderr.write(`WAIT: broker upgrade failed — ${e?.message ?? e}\n`);
+    } catch {
+      // No stderr to write to; the fall-through is still the contract.
+    }
+  }
+}
 
 export async function runWaiter({
   peerId,
   client,
   configPath,
-  out = (s) => process.stdout.write(s),
+  out = defaultOut,
   _now = () => Date.now(),
   _sleep = (ms) => new Promise((r) => setTimeout(r, ms)),
   _signal = (ms) => AbortSignal.timeout(ms),
@@ -34,13 +63,13 @@ export async function runWaiter({
     } catch (e) {
       const status = brokerStatus(e);
       if (status === 401) {
-        out(`WAIT FAILED: broker rejected the token (401) — check remote.controlToken in the config.\n`);
+        await out(`WAIT FAILED: broker rejected the token (401) — check remote.controlToken in the config.\n`);
         return 2;
       }
       // A 4xx is a broker that will never answer this request (e.g. an old broker
       // with no /wait): retrying would hang silently for the whole cap.
       if (status >= 400 && status < 500) {
-        out(`WAIT FAILED: ${e.message}\n`);
+        await out(`WAIT FAILED: ${e.message}\n`);
         return 1;
       }
       // Everything else — connection drops (isConnectionError), aborts of a
@@ -52,13 +81,25 @@ export async function runWaiter({
     }
     backoff = BACKOFF_START_MS;
     const messages = res?.messages ?? [];
+    if (res?.superseded) {
+      await out(`WAIT SUPERSEDED — a newer waiter holds peer ${peerId}; this one exits without consuming.\n`);
+      return 0;
+    }
     if (messages.length > 0) {
-      for (const m of messages) out(`SLACK: ${m.text}\n`);
-      out(waitFooter(peerId, { configPath }) + "\n");
+      try {
+        await out(messages.map((m) => `SLACK: ${m.text}\n`).join("") + waitFooter(peerId, { configPath }) + "\n");
+      } catch {
+        return 1;
+      }
+      await res.ack?.();
       return 0;
     }
   }
   const hours = ((_now() - start) / 3_600_000).toFixed(1);
-  out(`WAIT EXPIRED after ${hours}h — re-arm: ${waitCommand(peerId, { configPath })}\n`);
+  try {
+    await out(`WAIT EXPIRED after ${hours}h — re-arm: ${waitCommand(peerId, { configPath })}\n`);
+  } catch {
+    return 1;
+  }
   return 0;
 }

@@ -1,9 +1,7 @@
 // Forked from plugins/claude-peers/src/broker/index.mjs (port 7898, distinct from
 // claude-peers' 7899). Keeps ad-hoc-sender auto-registration, self-heal, and
-// corrupt-file quarantine; drops /set-summary. Delivery: /wait long-polls and
-// /take-messages takes — both consume, so a message reaches exactly one consumer.
-// A take with `lease: true` holds the rows until /ack, so a response lost on the
-// wire is redelivered when the lease runs out; a take without it consumes outright.
+// corrupt-file quarantine; drops /set-summary. Only the newest waiter per peer
+// consumes. Leased rows remain queued until delivery is acknowledged.
 import http from "node:http";
 import fs from "node:fs";
 import { emptyState, loadState, saveState } from "./broker-store.mjs";
@@ -23,6 +21,7 @@ const RESERVED_PEER_IDS = new Set(["slack-bridge"]);
 // first in the normal case.
 const RETAIN_MS = 24 * 60 * 60 * 1000;
 const LEASE_MS = 30_000;
+const UNKNOWN_WAITER = Object.freeze({ pid: 0, started_at: 0 });
 
 const MAX_BODY_BYTES = 1_000_000;
 // Armed = a /wait for the peer is open, or one returned within this grace. The
@@ -57,12 +56,21 @@ export function createBroker({
   // waiter's retry re-arms within a window.
   const waiters = new Map();      // peerId -> Set of open waiters
   const armedUntil = new Map();   // peerId -> epoch ms the grace runs to
+  const waiterGen = new Map();    // peerId -> newest { pid, started_at } seen
   // The injected _now returns a Date, so every armed comparison has to go through
   // epoch ms: `now + WAIT_GRACE_MS` on a Date is string concatenation and armed
   // would then never be true.
   const nowMs = () => _now().getTime();
+  const isNewer = (a, b) => a.started_at > b.started_at || (a.started_at === b.started_at && a.pid > b.pid);
+  const asIdentity = (w) =>
+    Number.isInteger(w?.pid) && Number.isFinite(w?.started_at) ? { pid: w.pid, started_at: w.started_at } : UNKNOWN_WAITER;
+  const isStale = (identity, mark) => {
+    if (identity === UNKNOWN_WAITER) return mark !== undefined && mark !== UNKNOWN_WAITER;
+    return mark !== undefined && mark !== UNKNOWN_WAITER && isNewer(mark, identity);
+  };
+  const markIsAlive = (pid) => { try { _kill(pid); return true; } catch (e) { return e.code === "EPERM"; } };
   const isArmed = (id) =>
-    (waiters.get(id)?.size ?? 0) > 0 || (armedUntil.get(id) ?? 0) > nowMs();
+    [...(waiters.get(id) ?? [])].some((w) => !w.superseded) || (armedUntil.get(id) ?? 0) > nowMs();
 
   const persist = () => { if (stateFile) saveState(stateFile, state); };
 
@@ -88,6 +96,8 @@ export function createBroker({
   function reap(id) {
     delete state.peers[id];
     state.messages = state.messages.filter((m) => m.to_id !== id);
+    waiterGen.delete(id);
+    armedUntil.delete(id);
   }
 
   function purgeExpired() {
@@ -122,6 +132,14 @@ export function createBroker({
     return mine.map(({ leased_until, delivered, ...m }) => ({ ...m, kind: normaliseKind(m.kind) }));
   }
 
+  function releaseLeased(id) {
+    let changed = false;
+    for (const m of state.messages) {
+      if (m.to_id === id && m.leased_until) { delete m.leased_until; changed = true; }
+    }
+    if (changed) persist();
+  }
+
   // Hand the peer's queue to exactly ONE waiter and leave the others open: two
   // waiters for one peer must never both be given the same message. Nothing
   // ready (a lease timer firing after its ack) leaves the waiter open.
@@ -136,7 +154,8 @@ export function createBroker({
     const set = waiters.get(id);
     if (!set || set.size === 0) return;
     if (!state.messages.some((m) => isReady(m, id))) return;
-    const waiter = set.values().next().value;
+    const waiter = [...set].find((w) => !w.superseded);
+    if (!waiter) return;
     waiter.finish(takeMessagesFor(id, waiter.lease));
   }
 
@@ -252,21 +271,38 @@ export function createBroker({
     "/wait"(body, ctx) {
       const id = body.id;
       const lease = body.lease === true;
-      const queued = takeMessagesFor(id, lease);
-      if (queued.length > 0) return { messages: queued };
+      const identity = asIdentity(body.waiter);
+      const identified = identity !== UNKNOWN_WAITER;
+      const mark = waiterGen.get(id);
+      const stale = isStale(identity, mark) && markIsAlive(mark.pid);
+      if (stale && identified) return { messages: [], superseded: true };
+      if (!stale) {
+        if (identified) waiterGen.set(id, identity);
+        const open = [...(waiters.get(id) ?? [])].filter((w) => !w.superseded);
+        if (open.length > 0) releaseLeased(id);
+        for (const w of open) w.supersede();
+        const queued = takeMessagesFor(id, lease);
+        if (queued.length > 0) return { messages: queued };
+      }
       return new Promise((resolve) => {
         let timer;
         const waiter = {
           lease,
-          finish(messages) {
+          superseded: stale,
+          identified,
+          supersede() {
+            waiter.superseded = true;
+            if (waiter.identified) waiter.finish([], true);
+          },
+          finish(messages, superseded = false) {
             clearTimeout(timer);
             const set = waiters.get(id);
             if (set) { set.delete(waiter); if (set.size === 0) waiters.delete(id); }
-            armedUntil.set(id, nowMs() + WAIT_GRACE_MS);
-            resolve({ messages });
+            if (!superseded) armedUntil.set(id, nowMs() + WAIT_GRACE_MS);
+            resolve(superseded ? { messages: [], superseded: true } : { messages });
           },
         };
-        timer = setTimeout(() => waiter.finish([]), Number(body.timeout_ms ?? WAIT_WINDOW_MS));
+        timer = setTimeout(() => waiter.finish([], waiter.superseded), Number(body.timeout_ms ?? WAIT_WINDOW_MS));
         if (!waiters.has(id)) waiters.set(id, new Set());
         waiters.get(id).add(waiter);
         // The client hung up: drop the waiter without arming, so the peer reads
@@ -296,9 +332,10 @@ export function createBroker({
     };
     if (req.method !== "POST") {
       if (req.url === "/health") {
-        reapDead();
-        persist();
-        return json(200, { status: "ok", lease: true, peers: Object.keys(state.peers).length });
+        // Pure read: every client probes this before it acts — a waiter probes
+        // on each arm — and reaping here would delete the queue the caller is
+        // about to collect whenever the registered pid has died.
+        return json(200, { status: "ok", lease: true, single_flight: true, peers: Object.keys(state.peers).length });
       }
       res.writeHead(200);
       return res.end("slack-bridge remote-control broker");

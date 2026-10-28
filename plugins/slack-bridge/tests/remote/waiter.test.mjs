@@ -2,7 +2,8 @@
 // and an injected clock/sleep stand in for the broker — no network, no waiting.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { runWaiter, waitFooter } from "../../src/remote/waiter.mjs";
+import { EventEmitter } from "node:events";
+import { runWaiter, prepareBroker, waitFooter } from "../../src/remote/waiter.mjs";
 import { WAIT_CAP_MS, WAIT_WINDOW_MS, BASH_TIMEOUT_MS, waitCommand } from "../../src/remote/wait-constants.mjs";
 import { getPaths } from "../../src/paths.mjs";
 
@@ -20,7 +21,12 @@ function fakeClient(script) {
         if (!signal) return new Promise(() => {}); // truly never settles without an abort
         return new Promise((_, reject) => signal.addEventListener("abort", () => reject(signal.reason)));
       }
-      return Promise.resolve({ messages: step.map((text) => ({ from_id: "slack-bridge", text, kind: "text" })) });
+      if (step?.superseded) return Promise.resolve({ messages: [], superseded: true });
+      if (step && !Array.isArray(step)) return Promise.resolve(step);
+      return Promise.resolve({
+        messages: step.map((text) => ({ from_id: "slack-bridge", text, kind: "text" })),
+        ack: step.ack,
+      });
     },
   };
 }
@@ -63,6 +69,66 @@ test("every message in the batch is printed", async () => {
   assert.match(h.output(), /SLACK: one\nSLACK: two\n/);
 });
 
+test("ack follows an out that resolves late", async () => {
+  const order = [];
+  const client = { wait: async () => ({ messages: [{ text: "hi" }], ack: async () => order.push("ack") }) };
+  const run = runWaiter({ peerId: "p1", client, out: async () => { await Promise.resolve(); order.push("out"); }, _now: () => 0 });
+  assert.equal(await run, 0);
+  assert.deepEqual(order, ["out", "ack"]);
+});
+
+test("a throwing out leaves the lease unacked", async () => {
+  let acked = 0;
+  const client = { wait: async () => ({ messages: [{ text: "hi" }], ack: async () => { acked++; } }) };
+  const code = await runWaiter({ peerId: "p1", client, out: async () => { throw new Error("EPIPE"); }, _now: () => 0 });
+  assert.equal(code, 1);
+  assert.equal(acked, 0);
+});
+
+test("a superseded window prints its line and exits without a footer", async () => {
+  const client = { wait: async () => ({ messages: [], superseded: true }) };
+  let output = "";
+  let clockCalls = 0;
+  const code = await runWaiter({ peerId: "p1", client, out: async (s) => { output += s; }, _now: () => clockCalls++ < 2 ? 0 : WAIT_CAP_MS });
+  assert.equal(code, 0);
+  assert.match(output, /WAIT SUPERSEDED/);
+  assert.doesNotMatch(output, /SLACK:|Reply normally/);
+});
+
+test("the default out resolves on the write callback", async () => {
+  const original = Object.getOwnPropertyDescriptor(process, "stdout");
+  const stub = new EventEmitter();
+  let callback;
+  stub.write = (_text, cb) => { callback = cb; return false; };
+  Object.defineProperty(process, "stdout", { value: stub, configurable: true });
+  let settled = false;
+  try {
+    const client = { wait: async () => ({ messages: [{ text: "hi" }] }) };
+    const writing = runWaiter({ peerId: "p1", client, _now: () => 0 }).then(() => { settled = true; });
+    await Promise.resolve();
+    assert.equal(settled, false);
+    assert.equal(typeof callback, "function");
+    callback();
+    await writing;
+    assert.equal(settled, true);
+  } finally { Object.defineProperty(process, "stdout", original); }
+});
+
+test("the default out rejects on a stdout error and removes its listener", async () => {
+  const original = Object.getOwnPropertyDescriptor(process, "stdout");
+  const stub = new EventEmitter();
+  const swallow = () => {};
+  stub.on("error", swallow);
+  stub.write = () => { queueMicrotask(() => stub.emit("error", new Error("EPIPE"))); return false; };
+  Object.defineProperty(process, "stdout", { value: stub, configurable: true });
+  try {
+    const client = { wait: async () => ({ messages: [{ text: "hi" }] }) };
+    const code = await runWaiter({ peerId: "p1", client, _now: () => 0 });
+    assert.equal(code, 1);
+    assert.deepEqual(stub.listeners("error"), [swallow]);
+  } finally { Object.defineProperty(process, "stdout", original); }
+});
+
 test("ECONNRESET twice then a message → returns 0 with the message, retry count 2", async () => {
   const h = harness([reset("ECONNRESET"), reset("ECONNRESET"), ["after reconnect"]]);
   const code = await h.run();
@@ -91,6 +157,51 @@ test("404 from a pre-/wait broker → fatal, not a silent 2 h retry loop", async
   assert.equal(h.client.calls.length, 1);
 });
 
+test("arming never routes a live broker into ensureBroker", async () => {
+  let ensured = 0;
+  const client = {
+    health: async () => ({ status: "ok", lease: true, single_flight: true }),
+    ensureBroker: async () => { ensured++; },
+  };
+  await prepareBroker({ client });
+  assert.equal(ensured, 0, "a reachable broker must not be probed through the restart path");
+});
+
+test("arming leaves a live pre-single-flight broker alone", async () => {
+  let ensured = 0;
+  const client = {
+    health: async () => ({ status: "ok", lease: true }),
+    ensureBroker: async () => { ensured++; },
+  };
+  await prepareBroker({ client });
+  assert.equal(ensured, 0, "reachable is all the probe decides — never 'good enough to keep'");
+});
+
+test("a refused broker upgrade falls through and the waiter still delivers", async () => {
+  let ensured = 0;
+  const client = {
+    health: async () => null,
+    ensureBroker: async () => { ensured++; throw new Error("failed to start broker daemon on port 7898 after 6s"); },
+    wait: async () => ({ messages: [{ text: "after a refused upgrade" }] }),
+  };
+  await prepareBroker({ client });
+  const code = await runWaiter({ peerId: "p1", client, out: () => {}, _now: () => 0 });
+  assert.equal(ensured, 1, "the upgrade is attempted");
+  assert.equal(code, 0, "a failed upgrade degrades to a running waiter, not an exit");
+});
+
+test("a refused broker upgrade names its reason on stderr before falling through", async () => {
+  const original = Object.getOwnPropertyDescriptor(process, "stderr");
+  let written = "";
+  Object.defineProperty(process, "stderr", { value: { write: (s) => { written += s; } }, configurable: true });
+  try {
+    const reason = "broker on port 7898 predates single-flight waits and refused /shutdown — stop it by PID";
+    const client = { health: async () => null, ensureBroker: async () => { throw new Error(reason); } };
+    await prepareBroker({ client });
+    assert.ok(written.includes(reason), `refusal reason missing from stderr: ${JSON.stringify(written)}`);
+  } finally { Object.defineProperty(process, "stderr", original); }
+});
+
 test("clock passes WAIT_CAP_MS → WAIT EXPIRED, returns 0; cap < Bash timeout", async () => {
   const h = harness([]);
   const code = await h.run();
@@ -99,6 +210,18 @@ test("clock passes WAIT_CAP_MS → WAIT EXPIRED, returns 0; cap < Bash timeout",
   assert.ok(h.output().includes(waitCommand("p1")));
   assert.equal(h.client.calls.length, Math.ceil(WAIT_CAP_MS / WAIT_WINDOW_MS));
   assert.ok(WAIT_CAP_MS < BASH_TIMEOUT_MS);
+});
+
+test("a failing out at expiry is caught, not an unobserved rejection", async () => {
+  let clockCalls = 0;
+  const client = { wait: async () => ({ messages: [] }) };
+  const code = await runWaiter({
+    peerId: "p1",
+    client,
+    out: async () => { throw new Error("EPIPE"); },
+    _now: () => (clockCalls++ === 0 ? 0 : WAIT_CAP_MS),
+  });
+  assert.equal(code, 1);
 });
 
 // The mock hang holds no handle, so an unref'd AbortSignal.timeout lets the loop
