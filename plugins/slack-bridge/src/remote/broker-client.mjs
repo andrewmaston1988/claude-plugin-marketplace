@@ -5,6 +5,7 @@ import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const processIdentity = () => ({ pid: process.pid, started_at: Date.now() - Math.round(process.uptime() * 1000) });
 
 // A thrown fetch means the broker is unreachable; a broker error response is an
 // ordinary Error from our own !ok branch and must NOT trigger a respawn.
@@ -24,6 +25,7 @@ export function createBrokerClient({
   _execPath = process.execPath,
   _setInterval = setInterval,
   _sleep = sleep,
+  identity = processIdentity(),
 } = {}) {
   const baseUrl = `http://127.0.0.1:${port}`;
   // /health stays unauthenticated on purpose: it's the liveness probe that
@@ -67,10 +69,10 @@ export function createBrokerClient({
 
   async function doEnsureBroker() {
     const h = await health();
-    if (h?.lease) return;
+    const capable = (value) => value?.lease === true && value?.single_flight === true;
+    if (capable(h)) return;
     if (h) {
-      // A pre-lease broker consumes on take, so a lost response loses the message.
-      log("broker predates leased takes — restarting it");
+      log("broker predates single-flight waits — restarting it");
       await _fetch(`${baseUrl}/shutdown`, { method: "POST", headers: authHeaders, signal: AbortSignal.timeout(2000) }).catch(() => {});
       for (let i = 0; i < 20 && (await health()); i++) await _sleep(150);
     } else {
@@ -80,9 +82,9 @@ export function createBrokerClient({
     for (let i = 0; i < 30; i++) {
       await _sleep(200);
       const up = await health();
-      if (up?.lease) return;
+      if (capable(up)) return;
       // Still the old broker: it refused /shutdown (a token mismatch 401s it).
-      if (up && h) throw new Error(`broker on port ${port} predates leased takes and refused /shutdown — stop it by PID`);
+      if (up && h) throw new Error(`broker on port ${port} predates single-flight waits and refused /shutdown — stop it by PID`);
     }
     throw new Error(`failed to start broker daemon on port ${port} after 6s`);
   }
@@ -107,11 +109,12 @@ export function createBrokerClient({
   // Acking only once the response is in hand is what makes a lost response a
   // redelivery. A failed ack (or a pre-lease broker's 404) costs at most a
   // duplicate when the lease runs out, never the message.
-  async function leasedTake(path, body, opts) {
+  async function leasedTake(path, body, opts, { autoAck = true } = {}) {
     const res = await brokerFetch(path, { ...body, lease: true }, opts);
     const ids = (res?.messages ?? []).map((m) => m.id);
-    if (ids.length > 0) await brokerFetch("/ack", { id: body.id, ids }).catch(() => {});
-    return res;
+    const ack = () => (ids.length === 0 ? Promise.resolve() : brokerFetch("/ack", { id: body.id, ids }).catch(() => {}));
+    if (autoAck) await ack();
+    return { ...(res ?? {}), ack };
   }
 
   return {
@@ -130,7 +133,7 @@ export function createBrokerClient({
     // the window. The caller owns the deadline — pass an AbortSignal.timeout one
     // window wide, so a half-open socket becomes a retry instead of a hang.
     wait: (id, timeoutMs, { signal } = {}) =>
-      leasedTake("/wait", { id, timeout_ms: timeoutMs }, { signal }),
+      leasedTake("/wait", { id, timeout_ms: timeoutMs, waiter: identity }, { signal }, { autoAck: false }),
     takeMessages: (id) => leasedTake("/take-messages", { id }),
     register: (body) => brokerFetch("/register", body),
     heartbeat: (id) => brokerFetch("/heartbeat", { id }),

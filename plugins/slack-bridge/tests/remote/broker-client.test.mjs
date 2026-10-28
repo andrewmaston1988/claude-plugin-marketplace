@@ -5,7 +5,7 @@ import { createBrokerClient } from "../../src/remote/broker-client.mjs";
 test("wait: the retry after a connection error keeps the caller's abort signal", async () => {
   const signals = [];
   const _fetch = async (url, opts = {}) => {
-    if (url.endsWith("/health")) return { ok: true, json: async () => ({ status: "ok", lease: true }) };
+    if (url.endsWith("/health")) return { ok: true, json: async () => ({ status: "ok", lease: true, single_flight: true }) };
     signals.push(opts.signal);
     if (signals.length === 1) throw new TypeError("fetch failed");
     return { ok: true, json: async () => [] };
@@ -20,7 +20,7 @@ test("wait: the retry after a connection error keeps the caller's abort signal",
 // Item 10: wait and takeMessages ask for a lease and ack what they received, so a
 // response lost on the wire is redelivered instead of dropped.
 for (const [name, call] of [["wait", (c) => c.wait("p1", 55_000)], ["takeMessages", (c) => c.takeMessages("p1")]]) {
-  test(`${name}: requests a lease and acks the ids it received`, async () => {
+  test(`${name}: requests a lease`, async () => {
     const calls = [];
     const _fetch = async (url, opts = {}) => {
       const path = new URL(url).pathname;
@@ -28,10 +28,16 @@ for (const [name, call] of [["wait", (c) => c.wait("p1", 55_000)], ["takeMessage
       const body = path === "/ack" ? { ok: true } : { messages: [{ id: 7, text: "a" }, { id: 9, text: "b" }] };
       return { ok: true, json: async () => body };
     };
-    const res = await call(createBrokerClient({ port: 1, _fetch }));
+    const client = createBrokerClient({ port: 1, _fetch, identity: { pid: 33, started_at: 44 } });
+    const res = await call(client);
     assert.deepEqual(res.messages.map((m) => m.id), [7, 9]);
     assert.equal(calls[0].body.lease, true);
-    assert.deepEqual(calls[1], { path: "/ack", body: { id: "p1", ids: [7, 9] } });
+    if (name === "wait") {
+      assert.deepEqual(calls[0].body.waiter, { pid: 33, started_at: 44 });
+      assert.equal(calls.some((c) => c.path === "/ack"), false);
+      await res.ack();
+    }
+    assert.deepEqual(calls.at(-1), { path: "/ack", body: { id: "p1", ids: [7, 9] } });
   });
 }
 
@@ -44,9 +50,8 @@ test("takeMessages: a failed ack still returns the messages (the lease redeliver
   assert.deepEqual(res.messages.map((m) => m.text), ["a"]);
 });
 
-// A broker from before leases consumes on take, so a lost response loses the
-// message. /health advertises `lease`; ensureBroker replaces a broker without it.
-test("ensureBroker: replaces a running broker that does not advertise leases", async () => {
+// A broker from before single-flight stays alive across plugin upgrades.
+test("ensureBroker: replaces a running lease-only broker", async () => {
   const calls = [];
   let up = true;
   let spawned = 0;
@@ -56,7 +61,7 @@ test("ensureBroker: replaces a running broker that does not advertise leases", a
     if (path === "/shutdown") { up = false; return { ok: true, json: async () => ({}) }; }
     if (path === "/health") {
       if (!up) throw new TypeError("fetch failed");
-      return { ok: true, json: async () => (spawned ? { status: "ok", lease: true } : { status: "ok" }) };
+      return { ok: true, json: async () => (spawned ? { status: "ok", lease: true, single_flight: true } : { status: "ok", lease: true }) };
     }
     throw new Error(`unexpected ${path}`);
   };
@@ -74,13 +79,13 @@ test("ensureBroker: a pre-lease broker that refuses /shutdown is an error, not a
     throw new Error(`unexpected ${path}`);
   };
   const client = createBrokerClient({ port: 1, _fetch, _spawn: () => ({ unref() {} }), _sleep: async () => {} });
-  await assert.rejects(client.ensureBroker(), /predates leased takes/);
+  await assert.rejects(client.ensureBroker(), /predates single-flight waits/);
 });
 
 test("ensureBroker: keeps a running broker that advertises leases", async () => {
   let spawned = 0;
   const _fetch = async (url) => {
-    if (url.endsWith("/health")) return { ok: true, json: async () => ({ status: "ok", lease: true }) };
+    if (url.endsWith("/health")) return { ok: true, json: async () => ({ status: "ok", lease: true, single_flight: true }) };
     throw new Error(`unexpected ${url}`);
   };
   await createBrokerClient({ port: 1, _fetch, _spawn: () => { spawned++; return { unref() {} }; } }).ensureBroker();

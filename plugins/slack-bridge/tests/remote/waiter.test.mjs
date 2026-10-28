@@ -2,7 +2,8 @@
 // and an injected clock/sleep stand in for the broker — no network, no waiting.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { runWaiter, waitFooter } from "../../src/remote/waiter.mjs";
+import { EventEmitter } from "node:events";
+import { runWaiter, waitFooter, defaultOut } from "../../src/remote/waiter.mjs";
 import { WAIT_CAP_MS, WAIT_WINDOW_MS, BASH_TIMEOUT_MS, waitCommand } from "../../src/remote/wait-constants.mjs";
 import { getPaths } from "../../src/paths.mjs";
 
@@ -20,7 +21,12 @@ function fakeClient(script) {
         if (!signal) return new Promise(() => {}); // truly never settles without an abort
         return new Promise((_, reject) => signal.addEventListener("abort", () => reject(signal.reason)));
       }
-      return Promise.resolve({ messages: step.map((text) => ({ from_id: "slack-bridge", text, kind: "text" })) });
+      if (step?.superseded) return Promise.resolve({ messages: [], superseded: true });
+      if (step && !Array.isArray(step)) return Promise.resolve(step);
+      return Promise.resolve({
+        messages: step.map((text) => ({ from_id: "slack-bridge", text, kind: "text" })),
+        ack: step.ack,
+      });
     },
   };
 }
@@ -61,6 +67,62 @@ test("every message in the batch is printed", async () => {
   const h = harness([["one", "two"]]);
   assert.equal(await h.run(), 0);
   assert.match(h.output(), /SLACK: one\nSLACK: two\n/);
+});
+
+test("ack follows an out that resolves late", async () => {
+  const order = [];
+  const client = { wait: async () => ({ messages: [{ text: "hi" }], ack: async () => order.push("ack") }) };
+  const run = runWaiter({ peerId: "p1", client, out: async () => { await Promise.resolve(); order.push("out"); }, _now: () => 0 });
+  assert.equal(await run, 0);
+  assert.deepEqual(order, ["out", "ack"]);
+});
+
+test("a throwing out leaves the lease unacked", async () => {
+  let acked = 0;
+  const client = { wait: async () => ({ messages: [{ text: "hi" }], ack: async () => { acked++; } }) };
+  const code = await runWaiter({ peerId: "p1", client, out: async () => { throw new Error("EPIPE"); }, _now: () => 0 });
+  assert.equal(code, 1);
+  assert.equal(acked, 0);
+});
+
+test("a superseded window prints its line and exits without a footer", async () => {
+  const client = { wait: async () => ({ messages: [], superseded: true }) };
+  let output = "";
+  const code = await runWaiter({ peerId: "p1", client, out: async (s) => { output += s; }, _now: () => 0 });
+  assert.equal(code, 0);
+  assert.match(output, /WAIT SUPERSEDED/);
+  assert.doesNotMatch(output, /SLACK:|Reply normally/);
+});
+
+test("the default out resolves on the write callback", async () => {
+  const original = Object.getOwnPropertyDescriptor(process, "stdout");
+  const stub = new EventEmitter();
+  let callback;
+  stub.write = (_text, cb) => { callback = cb; return false; };
+  Object.defineProperty(process, "stdout", { value: stub, configurable: true });
+  let settled = false;
+  try {
+    const writing = defaultOut("data").then(() => { settled = true; });
+    await Promise.resolve();
+    assert.equal(settled, false);
+    callback();
+    await writing;
+    assert.equal(settled, true);
+  } finally { Object.defineProperty(process, "stdout", original); }
+});
+
+test("the default out rejects on a stdout error and removes its listener", async () => {
+  const original = Object.getOwnPropertyDescriptor(process, "stdout");
+  const stub = new EventEmitter();
+  stub.write = () => false;
+  Object.defineProperty(process, "stdout", { value: stub, configurable: true });
+  try {
+    const writing = defaultOut("data");
+    const listener = stub.listeners("error")[0];
+    stub.emit("error", new Error("EPIPE"));
+    await assert.rejects(writing, /EPIPE/);
+    assert.equal(stub.listeners("error").includes(listener), false);
+  } finally { Object.defineProperty(process, "stdout", original); }
 });
 
 test("ECONNRESET twice then a message → returns 0 with the message, retry count 2", async () => {

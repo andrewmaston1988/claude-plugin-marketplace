@@ -43,7 +43,7 @@ function removeWindow(window) {
 function openRouteWindow({ web, peerId, channel, threadTs, placeholderTs, heartbeat, cmdEcho, config, log }) {
   const window = {
     web, peerId, channel, threadTs, placeholderTs, heartbeat, cmdEcho, config, log,
-    chunks: [], done: false, timeoutTimer: null, quietTimer: null,
+    chunks: [], deliveryWaiters: [], done: false, timeoutTimer: null, quietTimer: null,
   };
   const windows = routeWindows.get(peerId) ?? [];
   windows.push(window);
@@ -84,13 +84,14 @@ function releaseQuestion(peerId) {
  * chatUpdate(text:"") otherwise clobbers the reply body.
  */
 async function finalizeWindow(window, { timeout = false, errorMessage = null } = {}) {
-  if (window.done) return;
+  if (window.done) return false;
   window.done = true;
   clearTimeout(window.timeoutTimer);
   clearTimeout(window.quietTimer);
   removeWindow(window);
 
   const { web, channel, threadTs, placeholderTs, heartbeat, cmdEcho, config, log, chunks } = window;
+  let delivered = false;
   try {
     await heartbeat?.stop();
     if (timeout || chunks.length === 0) {
@@ -98,6 +99,7 @@ async function finalizeWindow(window, { timeout = false, errorMessage = null } =
         web, channel, placeholderTs, threadTs,
         message: errorMessage ?? "live session didn't reply in time",
       });
+      delivered = true;
     } else {
       for (let i = 0; i < chunks.length; i++) {
         if (i === 0) {
@@ -108,19 +110,25 @@ async function finalizeWindow(window, { timeout = false, errorMessage = null } =
             responseText: chunks[i], existingSession: window.peerId, isFirstInSession: false,
             cmdEcho, extensions: null, sessionId: null, config,
           });
+          delivered = true;
         } else {
           const postParams = { channel, text: mdToSlack(chunks[i]) };
           if (threadTs) postParams.thread_ts = threadTs;
           await web.chatPostMessage(postParams);
+          delivered = true;
         }
       }
     }
   } catch (e) {
     log.error("failed to post live-session reply", { channel, error: e.message });
-    await postError({ web, channel, placeholderTs: null, threadTs, message: `live session reply post failed: ${e.message}` });
+    try {
+      await postError({ web, channel, placeholderTs: null, threadTs, message: `live session reply post failed: ${e.message}` });
+    } catch {}
   } finally {
     await clearStatus({ web, channel, log });
+    for (const resolve of window.deliveryWaiters.splice(0)) resolve(delivered);
   }
+  return delivered;
 }
 
 // The window a reply or status belongs to: one already collecting a reply keeps
@@ -157,12 +165,15 @@ async function postStatus({ web, channel, text, log }) {
   try {
     if (existing) {
       await web.chatUpdate({ channel, ts: existing, text });
+      return true;
     } else {
       const posted = await web.chatPostMessage({ channel, text });
       if (posted?.ts) statusLines.set(channel, posted.ts);
+      return true;
     }
   } catch (e) {
     log.warn("status line update failed", { channel, error: e.message });
+    return false;
   }
 }
 
@@ -238,7 +249,7 @@ async function handleBrokerMessage({ message, claims, web, config, log }) {
   const entry = Object.entries(claims.all()).find(([, c]) => c?.peer_id === fromId);
   if (!entry) {
     log.warn("reply dropped: no claim for peer", { peer_id: fromId });
-    return;
+    return false;
   }
   const [channel] = entry;
   const text = String(message?.text ?? "");
@@ -248,10 +259,10 @@ async function handleBrokerMessage({ message, claims, web, config, log }) {
 
   const window = targetWindow(fromId);
   if (message.kind === "status") {
-    if (!text) return;
+    if (!text) return false;
     if (window) window.heartbeat?.setStatus?.(text);
-    else await postStatus({ web, channel, text, log });
-    return;
+    else return postStatus({ web, channel, text, log });
+    return true;
   }
 
   if (window) {
@@ -263,15 +274,17 @@ async function handleBrokerMessage({ message, claims, web, config, log }) {
     clearTimeout(window.quietTimer);
     window.quietTimer = setTimeout(() => { void finalizeWindow(window); }, QUIET_GAP_MS);
     window.quietTimer.unref?.();
-    return;
+    return new Promise((resolve) => window.deliveryWaiters.push(resolve));
   }
 
   await clearStatus({ web, channel, log });
   const postParams = { channel, text: mdToSlack(text) };
   try {
     await web.chatPostMessage(postParams);
+    return true;
   } catch (e) {
     log.warn("failed to post live-session reply", { channel, error: e.message });
+    return false;
   }
 }
 
@@ -286,13 +299,17 @@ export function startReplyLoop({
   const done = (async () => {
     while (!abort.signal.aborted) {
       let messages;
+      let ack;
+      let superseded = false;
       try {
         // The client owns the deadline: a half-open socket aborts one window late
         // rather than hanging the waiter forever.
         const res = await broker.wait("slack-bridge", WAIT_WINDOW_MS, {
-          signal: AbortSignal.timeout(WAIT_WINDOW_MS + 10_000),
+          signal: AbortSignal.any([abort.signal, AbortSignal.timeout(WAIT_WINDOW_MS + 10_000)]),
         });
         messages = res?.messages ?? [];
+        ack = res?.ack;
+        superseded = res?.superseded === true;
         failures = 0;
       } catch (e) {
         if (abort.signal.aborted) break;
@@ -301,12 +318,18 @@ export function startReplyLoop({
         await _sleep(Math.min(1000 * 2 ** (failures - 1), 30_000));
         continue;
       }
+      if (superseded) { await _sleep(1000); continue; }
+      const dispatches = [];
       for (const message of messages) {
-        try {
-          await handleBrokerMessage({ message, claims, web, config, log });
-        } catch (e) {
-          log.error("reply loop: dispatch failed", { error: e.message });
-        }
+        dispatches.push(handleBrokerMessage({ message, claims, web, config, log }).then(
+          (posted) => posted === true,
+          (e) => { log.error("reply loop: dispatch failed", { error: e.message }); return true; },
+        ));
+      }
+      if (dispatches.length) {
+        void Promise.all(dispatches).then((posted) => {
+          if (posted.every(Boolean)) return ack?.();
+        });
       }
     }
   })();
