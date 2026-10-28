@@ -12,8 +12,8 @@ test("reply loop backs off on superseded before re-arming", async () => {
   const broker = { wait: async () => {
     waits++;
     if (waits === 1) return { messages: [], superseded: true };
-    if (signal.aborted) throw signal.reason;
-    return new Promise((resolve, reject) => signal.addEventListener("abort", () => reject(signal.reason), { once: true }));
+    loop.stop();
+    return { messages: [] };
   } };
   loop = startReplyLoop({ broker, claims: { all: () => ({}) }, web: {}, config, log,
     _sleep: async (ms) => { sleeps.push(ms); loop.stop(); } });
@@ -49,11 +49,34 @@ test("reply loop acks after the Slack post succeeds", async () => {
       messages: [{ from_id: "p1", text: "reply", kind: "text" }],
       ack: async () => { events.push("ack"); loop.stop(); },
     };
-    if (signal.aborted) throw signal.reason;
-    return new Promise((resolve, reject) => signal.addEventListener("abort", () => reject(signal.reason), { once: true }));
+    loop.stop();
+    return { messages: [] };
   } };
   const web = { chatPostMessage: async () => { events.push("post"); return { ts: "1" }; } };
   loop = startReplyLoop({ broker, claims: { all: () => ({ channel: { peer_id: "p1" } }) }, web, config, log });
   await loop.done;
+  await new Promise((resolve) => setTimeout(resolve, 10));
   assert.deepEqual(events, ["post", "ack"]);
+});
+
+// Regression guard: a failed Slack post must leave its leased reply unacked.
+test("reply loop does not ack when the Slack post fails", async () => {
+  let acked = false;
+  let loop;
+  let waits = 0;
+  const broker = { wait: async () => {
+    waits++;
+    if (waits === 1) return {
+      messages: [{ from_id: "p1", text: "reply", kind: "text" }],
+      ack: async () => { acked = true; },
+    };
+    loop.stop();
+    return { messages: [] };
+  } };
+  const web = { chatPostMessage: async () => { throw new Error("Slack unavailable"); } };
+  loop = startReplyLoop({ broker, claims: { all: () => ({ channel: { peer_id: "p1" } }) }, web, config, log });
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  loop.stop();
+  await loop.done;
+  assert.equal(acked, false);
 });

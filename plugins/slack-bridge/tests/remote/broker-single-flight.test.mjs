@@ -76,6 +76,7 @@ test("armed ignores a superseded waiter", async (t) => {
   assert.deepEqual(await older, { messages: [], superseded: true });
 });
 
+// Regression guard: an equal live identity may re-arm at a window boundary.
 test("same identity re-arming is not stale", async (t) => {
   const { call, peer } = await startBroker(t);
   const identity = waiter(process.pid, Date.now());
@@ -87,6 +88,7 @@ test("same identity re-arming is not stale", async (t) => {
   assert.equal((await second).messages[0].text, "re-armed");
 });
 
+// Regression guard: unidentified pre-upgrade arms retain their old behavior.
 test("two pre-upgrade arms both consume", async (t) => {
   const { call, peer } = await startBroker(t);
   const first = call("/wait", { id: peer, timeout_ms: 1000 });

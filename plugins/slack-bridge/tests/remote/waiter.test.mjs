@@ -3,7 +3,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
-import { runWaiter, waitFooter, defaultOut } from "../../src/remote/waiter.mjs";
+import { runWaiter, waitFooter } from "../../src/remote/waiter.mjs";
 import { WAIT_CAP_MS, WAIT_WINDOW_MS, BASH_TIMEOUT_MS, waitCommand } from "../../src/remote/wait-constants.mjs";
 import { getPaths } from "../../src/paths.mjs";
 
@@ -88,7 +88,8 @@ test("a throwing out leaves the lease unacked", async () => {
 test("a superseded window prints its line and exits without a footer", async () => {
   const client = { wait: async () => ({ messages: [], superseded: true }) };
   let output = "";
-  const code = await runWaiter({ peerId: "p1", client, out: async (s) => { output += s; }, _now: () => 0 });
+  let clockCalls = 0;
+  const code = await runWaiter({ peerId: "p1", client, out: async (s) => { output += s; }, _now: () => clockCalls++ < 2 ? 0 : WAIT_CAP_MS });
   assert.equal(code, 0);
   assert.match(output, /WAIT SUPERSEDED/);
   assert.doesNotMatch(output, /SLACK:|Reply normally/);
@@ -102,9 +103,11 @@ test("the default out resolves on the write callback", async () => {
   Object.defineProperty(process, "stdout", { value: stub, configurable: true });
   let settled = false;
   try {
-    const writing = defaultOut("data").then(() => { settled = true; });
+    const client = { wait: async () => ({ messages: [{ text: "hi" }] }) };
+    const writing = runWaiter({ peerId: "p1", client, _now: () => 0 }).then(() => { settled = true; });
     await Promise.resolve();
     assert.equal(settled, false);
+    assert.equal(typeof callback, "function");
     callback();
     await writing;
     assert.equal(settled, true);
@@ -114,14 +117,15 @@ test("the default out resolves on the write callback", async () => {
 test("the default out rejects on a stdout error and removes its listener", async () => {
   const original = Object.getOwnPropertyDescriptor(process, "stdout");
   const stub = new EventEmitter();
-  stub.write = () => false;
+  const swallow = () => {};
+  stub.on("error", swallow);
+  stub.write = () => { queueMicrotask(() => stub.emit("error", new Error("EPIPE"))); return false; };
   Object.defineProperty(process, "stdout", { value: stub, configurable: true });
   try {
-    const writing = defaultOut("data");
-    const listener = stub.listeners("error")[0];
-    stub.emit("error", new Error("EPIPE"));
-    await assert.rejects(writing, /EPIPE/);
-    assert.equal(stub.listeners("error").includes(listener), false);
+    const client = { wait: async () => ({ messages: [{ text: "hi" }] }) };
+    const code = await runWaiter({ peerId: "p1", client, _now: () => 0 });
+    assert.equal(code, 1);
+    assert.deepEqual(stub.listeners("error"), [swallow]);
   } finally { Object.defineProperty(process, "stdout", original); }
 });
 
