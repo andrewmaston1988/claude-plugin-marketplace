@@ -3,7 +3,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
-import { runWaiter, waitFooter } from "../../src/remote/waiter.mjs";
+import { runWaiter, prepareBroker, waitFooter } from "../../src/remote/waiter.mjs";
 import { WAIT_CAP_MS, WAIT_WINDOW_MS, BASH_TIMEOUT_MS, waitCommand } from "../../src/remote/wait-constants.mjs";
 import { getPaths } from "../../src/paths.mjs";
 
@@ -157,6 +157,39 @@ test("404 from a pre-/wait broker → fatal, not a silent 2 h retry loop", async
   assert.equal(h.client.calls.length, 1);
 });
 
+test("arming never routes a live broker into ensureBroker", async () => {
+  let ensured = 0;
+  const client = {
+    health: async () => ({ status: "ok", lease: true, single_flight: true }),
+    ensureBroker: async () => { ensured++; },
+  };
+  await prepareBroker({ client });
+  assert.equal(ensured, 0, "a reachable broker must not be probed through the restart path");
+});
+
+test("arming leaves a live pre-single-flight broker alone", async () => {
+  let ensured = 0;
+  const client = {
+    health: async () => ({ status: "ok", lease: true }),
+    ensureBroker: async () => { ensured++; },
+  };
+  await prepareBroker({ client });
+  assert.equal(ensured, 0, "reachable is all the probe decides — never 'good enough to keep'");
+});
+
+test("a refused broker upgrade falls through and the waiter still delivers", async () => {
+  let ensured = 0;
+  const client = {
+    health: async () => null,
+    ensureBroker: async () => { ensured++; throw new Error("failed to start broker daemon on port 7898 after 6s"); },
+    wait: async () => ({ messages: [{ text: "after a refused upgrade" }] }),
+  };
+  await prepareBroker({ client });
+  const code = await runWaiter({ peerId: "p1", client, out: () => {}, _now: () => 0 });
+  assert.equal(ensured, 1, "the upgrade is attempted");
+  assert.equal(code, 0, "a failed upgrade degrades to a running waiter, not an exit");
+});
+
 test("clock passes WAIT_CAP_MS → WAIT EXPIRED, returns 0; cap < Bash timeout", async () => {
   const h = harness([]);
   const code = await h.run();
@@ -165,6 +198,18 @@ test("clock passes WAIT_CAP_MS → WAIT EXPIRED, returns 0; cap < Bash timeout",
   assert.ok(h.output().includes(waitCommand("p1")));
   assert.equal(h.client.calls.length, Math.ceil(WAIT_CAP_MS / WAIT_WINDOW_MS));
   assert.ok(WAIT_CAP_MS < BASH_TIMEOUT_MS);
+});
+
+test("a failing out at expiry is caught, not an unobserved rejection", async () => {
+  let clockCalls = 0;
+  const client = { wait: async () => ({ messages: [] }) };
+  const code = await runWaiter({
+    peerId: "p1",
+    client,
+    out: async () => { throw new Error("EPIPE"); },
+    _now: () => (clockCalls++ === 0 ? 0 : WAIT_CAP_MS),
+  });
+  assert.equal(code, 1);
 });
 
 // The mock hang holds no handle, so an unref'd AbortSignal.timeout lets the loop
