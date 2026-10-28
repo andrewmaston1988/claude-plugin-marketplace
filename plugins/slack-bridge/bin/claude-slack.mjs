@@ -265,6 +265,7 @@ if (cmd === "wait") {
   const { createBrokerClient } = await import("../src/remote/broker-client.mjs");
   const { runWaiter } = await import("../src/remote/waiter.mjs");
   const client = createBrokerClient({ port: config.remote?.brokerPort ?? 7898, token: config.remote?.controlToken ?? null, configPath: configArg });
+  await client.ensureBroker();
   const exitCode = await runWaiter({ peerId, client, configPath: configArg });
   setTimeout(() => process.exit(exitCode), 150);
   process.exitCode = exitCode;

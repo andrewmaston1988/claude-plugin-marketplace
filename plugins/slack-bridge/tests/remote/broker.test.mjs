@@ -132,6 +132,7 @@ test("GET /health reports ok and a peer count", async (t) => {
   assert.equal(body.status, "ok");
   assert.equal(typeof body.peers, "number");
   assert.equal(body.lease, true, "clients replace a broker that does not advertise leases");
+  assert.equal(body.single_flight, true);
 });
 
 test("POST /shutdown closes the broker gracefully", async (t) => {
@@ -426,14 +427,12 @@ test("two open waiters for one peer, one send: exactly one receives it", async (
   const { call } = await startBroker(t);
   const { body: a } = await call("/register", { ...REG, pid: process.pid });
   const { body: b } = await call("/register", { ...REG, pid: process.ppid });
-  const w1 = call("/wait", { id: b.id, timeout_ms: 5000 });
-  const w2 = call("/wait", { id: b.id, timeout_ms: 400 });
+  const w1 = call("/wait", { id: b.id, timeout_ms: 5000, waiter: { pid: process.pid, started_at: 1 } });
+  const w2 = call("/wait", { id: b.id, timeout_ms: 5000, waiter: { pid: process.pid, started_at: 2 } });
   await sleep(50);
+  assert.equal((await w1).body.superseded, true);
   await call("/send-message", { from_id: a.id, to_id: b.id, text: "one copy only" });
-  const results = await Promise.all([w1, w2]);
-  const nonEmpty = results.filter((r) => r.body.messages.length > 0);
-  assert.equal(nonEmpty.length, 1, "exactly one waiter may be handed the message");
-  assert.equal(nonEmpty[0].body.messages[0].text, "one copy only");
+  assert.equal((await w2).body.messages[0].text, "one copy only");
 });
 
 // A1: `req.on("close")` fires as soon as the request body is consumed, so

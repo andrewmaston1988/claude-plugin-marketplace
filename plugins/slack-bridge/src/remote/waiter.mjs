@@ -14,13 +14,22 @@ export function waitFooter(peerId, { configPath } = {}) {
   return `Reply normally — your text is mirrored to Slack. Then re-arm: run ${waitCommand(peerId, { configPath })} with run_in_background and timeout ${BASH_TIMEOUT_MS}.`;
 }
 
+export const defaultOut = (s) => new Promise((resolve, reject) => {
+  const onError = (err) => { process.stdout.off("error", onError); reject(err); };
+  process.stdout.once("error", onError);
+  process.stdout.write(s, (err) => {
+    process.stdout.off("error", onError);
+    if (err) reject(err); else resolve();
+  });
+});
+
 const brokerStatus = (e) => Number(/^Broker error \([^)]*\): (\d{3})/.exec(e?.message ?? "")?.[1] ?? 0);
 
 export async function runWaiter({
   peerId,
   client,
   configPath,
-  out = (s) => process.stdout.write(s),
+  out = defaultOut,
   _now = () => Date.now(),
   _sleep = (ms) => new Promise((r) => setTimeout(r, ms)),
   _signal = (ms) => AbortSignal.timeout(ms),
@@ -34,13 +43,13 @@ export async function runWaiter({
     } catch (e) {
       const status = brokerStatus(e);
       if (status === 401) {
-        out(`WAIT FAILED: broker rejected the token (401) — check remote.controlToken in the config.\n`);
+        await out(`WAIT FAILED: broker rejected the token (401) — check remote.controlToken in the config.\n`);
         return 2;
       }
       // A 4xx is a broker that will never answer this request (e.g. an old broker
       // with no /wait): retrying would hang silently for the whole cap.
       if (status >= 400 && status < 500) {
-        out(`WAIT FAILED: ${e.message}\n`);
+        await out(`WAIT FAILED: ${e.message}\n`);
         return 1;
       }
       // Everything else — connection drops (isConnectionError), aborts of a
@@ -52,9 +61,17 @@ export async function runWaiter({
     }
     backoff = BACKOFF_START_MS;
     const messages = res?.messages ?? [];
+    if (res?.superseded) {
+      await out(`WAIT SUPERSEDED — a newer waiter holds peer ${peerId}; this one exits without consuming.\n`);
+      return 0;
+    }
     if (messages.length > 0) {
-      for (const m of messages) out(`SLACK: ${m.text}\n`);
-      out(waitFooter(peerId, { configPath }) + "\n");
+      try {
+        await out(messages.map((m) => `SLACK: ${m.text}\n`).join("") + waitFooter(peerId, { configPath }) + "\n");
+      } catch {
+        return 1;
+      }
+      await res.ack?.();
       return 0;
     }
   }
