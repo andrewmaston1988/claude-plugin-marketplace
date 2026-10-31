@@ -309,6 +309,14 @@ export function loadManifest(path, cfg, cwd = process.cwd(), { args, fromRegistr
         checkHeadroom(digestIdentity.provider, raw.digest.model, "digest", headroom, errors, warnings);
       }
       checkDenylist(raw.digest.model, "digest", cfg, errors);
+      // The digest is a leaf too, so it takes the same Claude-only credential lane.
+      if (raw.digest.billing !== undefined) {
+        if (raw.digest.billing !== "api") {
+          errors.push('digest.billing only accepts "api" — e.g. "billing": "api" to bill the digest leaf to Anthropic API credits');
+        } else if (digestIdentity && digestIdentity.provider !== "claude") {
+          errors.push(`digest.billing "api" is Claude-only — the digest dispatches on provider '${digestIdentity.provider}'; drop "billing", or move the digest to a Claude model`);
+        }
+      }
       const report = raw.digest.report;
       if (report !== undefined && report !== true && report !== false && typeof report !== "string") {
         errors.push("digest.report must be true, false, or a steering string for the report body");
@@ -317,6 +325,7 @@ export function loadManifest(path, cfg, cwd = process.cwd(), { args, fromRegistr
         model: raw.digest.model,
         provider: digestIdentity?.provider,
         instructions: raw.digest.instructions || "",
+        ...(raw.digest.billing !== undefined && { billing: raw.digest.billing }),
         ...(report && { report }),
       };
     }
@@ -374,7 +383,7 @@ export function effectivePlanDoc(plan) {
     // `workspace` and `branch` are recorded as authored — a derived tree is not authored,
     // and there is no longer any normalised form to project back.
     if (t.branchName !== undefined) o.branch = t.branchName;
-    for (const k of ["provider", "fallbackModel", "fallbackProvider", "effort", "allowedTools", "after", "when", "forEach", "compute", "returns", "verifyCitations", "workspace", "outputDir", "mustRead", "contextWindow"]) {
+    for (const k of ["provider", "fallbackModel", "fallbackProvider", "effort", "allowedTools", "after", "when", "forEach", "compute", "returns", "verifyCitations", "workspace", "outputDir", "mustRead", "contextWindow", "billing"]) {
       if (t[k] !== undefined && t[k] !== "" && !(Array.isArray(t[k]) && t[k].length === 0)) o[k] = t[k];
     }
     if (t.childPlan) o.child = t.childPlan.tasks.map(strip);

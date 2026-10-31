@@ -53,6 +53,15 @@ export function normalizeTasks(rawTasks, { cwd, resultsDir, cfg, defaultTimeoutM
       if (provider) checkGovernance(provider, t.model, originalCwd, l, cfg, errors, io);
       checkDenylist(t.model, l, cfg, errors);
       if (provider) checkHeadroom(provider, t.model, l, headroom, errors, warnings);
+      // The credential lane is one provider's: billing "api" maps a key into the Claude
+      // runner's child env and clears the Claude routing vars, and means nothing elsewhere.
+      if (t.billing !== undefined) {
+        if (t.billing !== "api") {
+          errors.push(`${l}: billing only accepts "api" — e.g. "billing": "api" to bill this leaf to Anthropic API credits`);
+        } else if (provider && provider !== "claude") {
+          errors.push(`${l}: billing "api" is Claude-only — this leaf dispatches on provider '${provider}'; drop "billing", or move the leaf to a Claude model`);
+        }
+      }
       if (t.fallbackModel !== undefined) {
         if (typeof t.fallbackModel !== "string" || !t.fallbackModel) {
           errors.push(`${l}: fallbackModel must be a model name string`);
@@ -65,6 +74,11 @@ export function normalizeTasks(rawTasks, { cwd, resultsDir, cfg, defaultTimeoutM
             const fallback = resolveProvider({ model: t.fallbackModel, provider: t.fallbackProvider }, cfg, cache, `${l} fallback`, errors, providerRegistry);
             fallbackProvider = fallback?.provider;
             if (fallbackProvider) {
+              // launch.mjs rewrites model/provider on fallback, so the leaf would carry
+              // billing into a provider that cannot honour it and die at dispatch.
+              if (t.billing === "api" && fallbackProvider !== "claude") {
+                errors.push(`${l}: a billed leaf may not fall back to provider '${fallbackProvider}' — drop "billing", or choose a Claude fallback (e.g. "fallbackModel": "claude-haiku-4-5-20251001", "fallbackProvider": "claude")`);
+              }
               // The effort pinned for the primary is sent to the fallback too, so it
               // must satisfy whatever the fallback's own provider declares.
               if (resolvedEffort !== undefined) {
@@ -165,6 +179,7 @@ export function normalizeTasks(rawTasks, { cwd, resultsDir, cfg, defaultTimeoutM
       ...(!isCompute && !isManifest && t.returns && typeof t.returns === "object" && !Array.isArray(t.returns) && { returns: t.returns }),
       ...(!isCompute && !isManifest && !isIntegrate && Array.isArray(t.mustRead) && { mustRead: t.mustRead }),
       ...(!isCompute && !isManifest && !isIntegrate && t.contextWindow !== undefined && { contextWindow: t.contextWindow }),
+      ...(!isCompute && !isManifest && !isIntegrate && t.billing !== undefined && { billing: t.billing }),
       ...(typeof t.verifyCitations === "boolean" && { verifyCitations: t.verifyCitations }),
       ...(t.settings && typeof t.settings === "object" && !Array.isArray(t.settings) && { settings: t.settings }),
       ...(childPlans?.has(t.id) && { childPlan: childPlans.get(t.id) }),

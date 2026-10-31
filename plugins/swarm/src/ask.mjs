@@ -86,10 +86,25 @@ export async function askLeaf({ resultsDir, taskId, question, model, provider, c
   // falls back to the same runner-dependent default normalize would have filled in,
   // so an ask keeps the confinement the original dispatch ran under.
   const fallbackTools = defaultToolsFor(identity.provider, _mcpTools());
+  // billing "api" is Claude-only, and an ask may override the model onto another
+  // provider. Carrying the lane there would throw at dispatch, so it rides only a
+  // Claude ask of a task that already ran billed.
+  const laneOf = (task) => (identity.provider === "claude" && task?.billing === "api" ? { billing: "api" } : {});
   const tasks = isTopLevel
-    ? manifest.tasks.map((t) => (t.id === taskId
-        ? { ...t, ...(treeName !== undefined && { worktreeName: treeName }), after: t.after || [], provider: identity.provider, allowedTools: prior.allowedTools || fallbackTools, timeoutMs: cfg.timeoutMs ?? DEFAULT_TIMEOUT_MS }
-        : { ...t, after: t.after || [] }))
+    ? manifest.tasks.map((t) => {
+        if (t.id !== taskId) return { ...t, after: t.after || [] };
+        const leaf = { ...t };
+        delete leaf.billing; // re-added by laneOf below, only when the ask stays on Claude
+        return {
+          ...leaf,
+          ...(treeName !== undefined && { worktreeName: treeName }),
+          after: t.after || [],
+          provider: identity.provider,
+          allowedTools: prior.allowedTools || fallbackTools,
+          timeoutMs: cfg.timeoutMs ?? DEFAULT_TIMEOUT_MS,
+          ...laneOf(t),
+        };
+      })
     : [
         ...manifest.tasks.map((t) => ({ ...t, after: t.after || [] })),
         {
@@ -102,6 +117,7 @@ export async function askLeaf({ resultsDir, taskId, question, model, provider, c
           timeoutMs: cfg.timeoutMs ?? DEFAULT_TIMEOUT_MS,
           after: [],
           ...(treeName !== undefined && { worktreeName: treeName }),
+          ...laneOf(prior),
           // The digest's cwd is engine scratch, outside every tree; without this the
           // id fallback would name `wt-__digest` and deny every write it makes there.
           ...(taskId === DIGEST_ID && { isDigest: true }),

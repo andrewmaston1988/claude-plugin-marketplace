@@ -2,6 +2,7 @@ import { readFileSync, existsSync, writeFileSync, renameSync, mkdirSync } from "
 import { join, dirname, isAbsolute } from "node:path";
 import { homedir } from "node:os";
 import { fileURLToPath } from "node:url";
+import { CLAUDE_ROUTING_ENV } from "./claude-billing.mjs";
 
 const DEFAULTS_PATH = fileURLToPath(new URL("../config.default.json", import.meta.url));
 
@@ -144,6 +145,27 @@ function validateModelDenylist(value, path) {
   }
 }
 
+// The billed lane maps this variable's value into ANTHROPIC_API_KEY for one leaf's child
+// env. Naming a variable Claude Code already reads would move every leaf that inherits
+// it: ANTHROPIC_API_KEY outranks subscription OAuth, and the routing vars outrank the
+// key outright. An empty name could never resolve to anything.
+const FORBIDDEN_API_KEY_ENV = new Set(["ANTHROPIC_API_KEY", ...CLAUDE_ROUTING_ENV]);
+
+function validateApiKeyEnv(cfg) {
+  const claude = cfg.providers?.claude;
+  if (!isPlainObject(claude) || claude.apiKeyEnv === undefined) return;
+  const v = claude.apiKeyEnv;
+  if (typeof v !== "string" || !v) {
+    throw new Error('providers.claude.apiKeyEnv must be a non-empty variable name — e.g. "SWARM_ANTHROPIC_API_KEY"');
+  }
+  if (FORBIDDEN_API_KEY_ENV.has(v)) {
+    throw new Error(
+      `providers.claude.apiKeyEnv must not name '${v}' — Claude Code already reads it, so every leaf that inherits it changes credentials. ` +
+      `Use a dedicated name, e.g. "SWARM_ANTHROPIC_API_KEY"`,
+    );
+  }
+}
+
 function validateProviderConfig(cfg) {
   if (!isPlainObject(cfg.providers)) throw new Error('providers must be an object — e.g. "providers": {"codex": {"enabled": false}}');
   // Top level is the default every provider inherits; a provider entry narrows it.
@@ -153,6 +175,7 @@ function validateProviderConfig(cfg) {
     if (typeof provider.enabled !== "boolean") throw new Error(`providers.${id}.enabled must be true or false`);
     validateAllowedRoots(provider.allowedRoots, `providers.${id}.allowedRoots`);
   }
+  validateApiKeyEnv(cfg);
 }
 
 // treeRoot moves every leaf tree out of the run dir. null is the documented
@@ -322,7 +345,10 @@ export function initConfig(overridePath, env = process.env) {
   const added = [];
   for (const key of leafKeys(defaults)) {
     if (getPath(user, key).found) continue;
-    if (!created && key === "providers.claude.enabled") continue;
+    // Claude's block is all-or-nothing on a file that already exists: `enabled` is
+    // deliberately left out, so filling only a sibling would write `{ apiKeyEnv }`
+    // with no `enabled` — a claude block the next loadConfig refuses.
+    if (!created && key.startsWith("providers.claude.")) continue;
     setPath(user, key, getPath(defaults, key).value);
     added.push(key);
   }

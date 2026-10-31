@@ -499,6 +499,22 @@ test("substituteTemplates never truncates a {{resultPath:}} reference", () => {
   }
 });
 
+// The durable identity lands in run-start, and every reader rebuilds the roster from
+// it. A billed leaf that loses `billing` there renders as a plain subscription leaf.
+test("run-start carries billing, so the roster can label a billed leaf", async () => {
+  const dir = tmp();
+  try {
+    const spawn = fakeSpawnFactory(() => ({ output: "done" }));
+    const io = makeIo(spawn);
+    io.env.SWARM_ANTHROPIC_API_KEY = "sk-test";
+    const p = plan(dir, [task("a", { cwd: dir, billing: "api" })]);
+    await runPlan(p, CFG, io);
+    const lines = readFileSync(join(p.resultsDir, "run.log"), "utf8").trim().split("\n").map((line) => JSON.parse(line));
+    const start = lines.find((line) => line.event === "run-start");
+    equal(start.tasks[0].billing, "api");
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
 // The p5-review failure: find-deletions re-ran, but verify-deletions (which exists
 // ONLY to check it) was skipped on its previous-pass `ok`, and __digest was skipped
 // AND digest.md rewritten from the previous run's body. The run then reported success

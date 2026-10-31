@@ -2,6 +2,7 @@
 // the per-node shape rules that apply before any relation between tasks is read.
 
 import { CONTEXT_WINDOWS } from "./contracts.mjs";
+import { CLAUDE_ROUTING_ENV } from "./claude-billing.mjs";
 import { hasWriteTools, isAgentless } from "./manifest-task-policy.mjs";
 
 const ID_RE = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
@@ -14,15 +15,19 @@ const KNOWN_TASK_KEYS = new Set([
   "id", "prompt", "model", "provider", "fallbackModel", "fallbackProvider", "effort", "allowedTools", "cwd",
   "workspace", "branch", "outputDir", "timeoutMs", "after", "compute", "when", "forEach",
   "returns", "verifyCitations", "manifest", "integrate", "settings", "leafGuard",
-  "mustRead", "contextWindow",
+  "mustRead", "contextWindow", "billing",
 ]);
 
 // A manifest task is an agentless container for its child's tasks — every
 // leaf-shaped key on the node itself is an authoring mistake.
 const MANIFEST_BANNED_KEYS = [
   "prompt", "model", "compute", "returns", "workspace", "branch", "allowedTools",
-  "outputDir", "effort", "fallbackModel", "mustRead", "contextWindow",
+  "outputDir", "effort", "fallbackModel", "mustRead", "contextWindow", "billing",
 ];
+
+// `--settings` env outranks the child env, so a billed task that sets any of these
+// displaces the key swarm passes or restores a routing var the lane cleared.
+const BILLED_FORBIDDEN_ENV = new Set(["ANTHROPIC_API_KEY", ...CLAUDE_ROUTING_ENV]);
 
 // The scheduler spreads these last so a task's own `env` can't override them;
 // `--settings`' env block is a second, higher-precedence path to the same
@@ -74,7 +79,7 @@ export function validateTaskShapes(rawTasks, errors, label) {
     } else if (t.compute !== undefined) {
       // Agentless: a compute step never spawns a leaf, so leaf-only keys are
       // authoring mistakes worth naming individually.
-      const agentKeys = ["model", "prompt", "fallbackModel", "effort", "allowedTools", "workspace", "branch", "outputDir", "contextWindow"]
+      const agentKeys = ["model", "prompt", "fallbackModel", "effort", "allowedTools", "workspace", "branch", "outputDir", "contextWindow", "billing"]
         .filter((k) => t[k] !== undefined);
       if (agentKeys.length) {
         errors.push(`${l}: compute tasks are agentless — remove ${agentKeys.join("/")}; the expression runs in the engine, no leaf is spawned`);
@@ -86,7 +91,7 @@ export function validateTaskShapes(rawTasks, errors, label) {
       // Agentless like compute: the engine merges, no leaf is spawned.
       // `workspace`/`branch` too: an integrate node's tree is `integrate.into`, so naming
       // one here would validate and be silently ignored.
-      const agentKeys = ["model", "prompt", "fallbackModel", "effort", "allowedTools", "returns", "workspace", "branch", "outputDir", "contextWindow"]
+      const agentKeys = ["model", "prompt", "fallbackModel", "effort", "allowedTools", "returns", "workspace", "branch", "outputDir", "contextWindow", "billing"]
         .filter((k) => t[k] !== undefined);
       if (agentKeys.length) {
         errors.push(`${l}: integrate tasks are agentless — remove ${agentKeys.join("/")}; the merge runs in the engine, no leaf is spawned`);
@@ -171,6 +176,13 @@ export function validateTaskShapes(rawTasks, errors, label) {
       for (const { key, remedy } of LEAF_GUARD_ENV_KEYS) {
         if (Object.hasOwn(t.settings.env, key)) {
           errors.push(`${l}: settings.env may not set '${key}' — it is engine-controlled; ${remedy}`);
+        }
+      }
+      if (t.billing === "api") {
+        for (const key of BILLED_FORBIDDEN_ENV) {
+          if (Object.hasOwn(t.settings.env, key)) {
+            errors.push(`${l}: settings.env may not set '${key}' on a billed task — --settings env outranks the API key swarm passes to the leaf; remove it from "settings"`);
+          }
         }
       }
     }

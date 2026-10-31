@@ -133,12 +133,13 @@ export function readRunLog(content, { now = Date.now() } = {}) {
       if (entry.numTurns != null) turns.set(entry.id, entry.numTurns);
     }
   }
-  const tasks = roster.map(({ id, model, provider, runner, providerInferred, runnerInferred }) => {
+  const tasks = roster.map(({ id, model, provider, runner, billing, providerInferred, runnerInferred }) => {
     const st = state.get(id) || "pending";
     const last = lastEvent.get(id);
     return {
       id, model,
       ...(provider ? { provider } : {}), ...(runner ? { runner } : {}),
+      ...(billing ? { billing } : {}),
       ...(providerInferred ? { providerInferred: true } : {}),
       ...(runnerInferred ? { runnerInferred: true } : {}),
       state: st,
@@ -207,7 +208,7 @@ export function topology(tasks, manifest) {
   const rows = tasks.map((t) => ({ ...t }));
   const present = new Set(rows.map((r) => r.id));
   for (const [id, d] of defs) {
-    if (!present.has(id)) rows.push({ id, model: d.model || "", ...(d.provider ? { provider: d.provider } : {}), ...(d.runner ? { runner: d.runner } : {}), state: "pending", after: undefined });
+    if (!present.has(id)) rows.push({ id, model: d.model || "", ...(d.provider ? { provider: d.provider } : {}), ...(d.runner ? { runner: d.runner } : {}), ...(d.billing ? { billing: d.billing } : {}), state: "pending", after: undefined });
   }
   const kindOf = (d) => (d.forEach ? "forEach" : d.child ? "manifest" : d.compute || d.integrate || !d.model ? "agentless" : "leaf");
   for (const r of rows) {

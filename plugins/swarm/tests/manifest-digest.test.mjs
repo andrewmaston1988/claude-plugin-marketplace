@@ -255,3 +255,26 @@ test("digest argv: --allowedTools is exactly Read, or Read,Write in report mode"
     }
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
+
+// The digest is a leaf too: billing must survive plan construction into the engine's
+// own task, or a run whose every other leaf is billed still spends the subscription.
+test("digest.billing: only \"api\" is accepted, and the generated digest carries it to dispatch", () => {
+  const dir = tmp();
+  try {
+    const bad = writeManifest(dir, {
+      tasks: [claudeTask()],
+      digest: { provider: "claude", model: "claude-haiku-4-5-20251001", billing: "apu" },
+    }, "bad-billing.json");
+    ok(errorsOf(() => loadManifest(bad, CFG, dir)).some((e) => e.includes("digest.billing") && e.includes('"api"')), "a bad digest lane must name the field");
+
+    const good = writeManifest(dir, {
+      tasks: [claudeTask()],
+      digest: { provider: "claude", model: "claude-haiku-4-5-20251001", billing: "api" },
+    }, "good-billing.json");
+    const plan = loadManifest(good, CFG, dir);
+    equal(plan.digest.billing, "api");
+    const digestTask = buildDigestTask(plan);
+    equal(digestTask.billing, "api", "the generated digest task is what the scheduler dispatches");
+    buildDispatch(digestTask, digestTask.prompt, CFG);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
