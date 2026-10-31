@@ -181,6 +181,21 @@ is what keeps a fresh install from refusing every task against a roots list nobo
 yet. If the operator names no root at all, leave it off and say plainly that swarm will dispatch
 nothing until they name one; that is a real answer, not a stage left unfinished.
 
+### API-credit billing — not a stage, only on request
+
+Nothing here needs a question unless the operator wants a leaf billed to Anthropic API
+credits instead of the subscription. If they ask, explain: a task opts in per leaf with
+`"billing": "api"` on a Claude task (nothing else changes for a task that does not), and
+the key comes from the environment variable named by `providers.claude.apiKeyEnv`
+(default `SWARM_ANTHROPIC_API_KEY`, appendix) — set in the shell that launches swarm,
+never written to config, never printed. A missing or empty variable refuses the run
+before dispatch, naming the variable. The billed leaf shows as `claude-api/<model>`,
+runs without a subscription, and each result records the credential used in
+`apiKeySource`. Limitations to say out loud: a `settings.json` env `ANTHROPIC_API_KEY`
+outranks the child env and is not cleared; the key is readable by that leaf's tools; a
+mixed run on an exhausted subscription still aborts; spent credit is found at dispatch.
+The only config decision is the variable name, and only when they want the feature.
+
 ### Stage 3 — standing consent (`swarm.always`)
 
 Every fan-out normally stops at an offer gate: a question showing the manifest, the model
@@ -318,6 +333,7 @@ from the appendix. If no, close.
 | `allowedRoots` | *(unset)* | Stage 2. The root list for EVERY provider, Claude included. Unset = unconfigured, which dispatches nothing; `[]` = denied on purpose, which is a different refusal. |
 | `providers.<name>.allowedRoots` | *(unset)* | Narrowing only — intersected with `allowedRoots`, so it can never add or widen a root. Set it when one provider must be held to less than the default. |
 | `providers.claude.enabled` | `false` | Stage 2. The host provider, turned on WITH the roots — governance refuses a provider that has no roots, so a fresh install ships it off and the walk enables it as the roots land. |
+| `providers.claude.apiKeyEnv` | `SWARM_ANTHROPIC_API_KEY` | Which environment variable a `"billing": "api"` leaf reads its Anthropic key from — the only API-credit config key; the key itself is never stored in config. Rejected when empty, when it names `ANTHROPIC_API_KEY`, or when it names one of the five routing variables a billed leaf clears. Not a stage: asked only when the operator wants API-credit billing. |
 | `providers.ollama.enabled` | `false` | Stage 1. Turns the Ollama provider on for dispatch. `false` is the shipped default, so declining an untouched file writes nothing; the probe result leads the question but never flips this on its own. |
 | `providers.ollama.url` | `http://localhost:11434` | Ollama endpoint the `:cloud` leaves talk to; pinged before an Ollama run, unreachable = refuse. |
 | `providers.ollama.mode` | `env` | `env` = plain `claude -p` with the Ollama endpoint and model injected; `launch` = shell out through `launchCmd`. |
