@@ -2,7 +2,7 @@
 // the per-node shape rules that apply before any relation between tasks is read.
 
 import { CONTEXT_WINDOWS } from "./contracts.mjs";
-import { CLAUDE_ROUTING_ENV } from "./claude-billing.mjs";
+import { CLAUDE_CREDENTIAL_ENV } from "./claude-billing.mjs";
 import { hasWriteTools, isAgentless } from "./manifest-task-policy.mjs";
 
 const ID_RE = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
@@ -27,7 +27,7 @@ const MANIFEST_BANNED_KEYS = [
 
 // `--settings` env outranks the child env, so a billed task that sets any of these
 // displaces the key swarm passes or restores a routing var the lane cleared.
-const BILLED_FORBIDDEN_ENV = new Set(["ANTHROPIC_API_KEY", ...CLAUDE_ROUTING_ENV]);
+const BILLED_FORBIDDEN_ENV = new Set(CLAUDE_CREDENTIAL_ENV);
 
 // The scheduler spreads these last so a task's own `env` can't override them;
 // `--settings`' env block is a second, higher-precedence path to the same

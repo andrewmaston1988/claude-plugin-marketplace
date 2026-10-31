@@ -199,7 +199,7 @@ async function preflightClaude({ config: cfg = {}, fetch, now, io, env, tasks = 
       throw new Error(
         `billing "api" needs a key in ${name} — ${billed.length} leaf(s) cannot dispatch: ` +
         `${billed.map((t) => t.id).join(", ")}. Set it in the environment that launches swarm; ` +
-        `the engine never reads or prints the value.`,
+        `the engine never prints the value.`,
       );
     }
   }

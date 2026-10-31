@@ -2,7 +2,7 @@ import { readFileSync, existsSync, writeFileSync, renameSync, mkdirSync } from "
 import { join, dirname, isAbsolute } from "node:path";
 import { homedir } from "node:os";
 import { fileURLToPath } from "node:url";
-import { CLAUDE_ROUTING_ENV } from "./claude-billing.mjs";
+import { CLAUDE_CREDENTIAL_ENV } from "./claude-billing.mjs";
 
 const DEFAULTS_PATH = fileURLToPath(new URL("../config.default.json", import.meta.url));
 
@@ -149,7 +149,7 @@ function validateModelDenylist(value, path) {
 // env. Naming a variable Claude Code already reads would move every leaf that inherits
 // it: ANTHROPIC_API_KEY outranks subscription OAuth, and the routing vars outrank the
 // key outright. An empty name could never resolve to anything.
-const FORBIDDEN_API_KEY_ENV = new Set(["ANTHROPIC_API_KEY", ...CLAUDE_ROUTING_ENV]);
+const FORBIDDEN_API_KEY_ENV = new Set(CLAUDE_CREDENTIAL_ENV);
 
 function validateApiKeyEnv(cfg) {
   const claude = cfg.providers?.claude;
