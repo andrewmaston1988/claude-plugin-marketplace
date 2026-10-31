@@ -3,7 +3,7 @@
 // scheduler-dispatch.test.mjs, which is over the 500-line bar and may not grow.
 import { test } from "node:test";
 import { equal, rejects } from "node:assert/strict";
-import { rmSync, mkdtempSync } from "node:fs";
+import { rmSync, mkdtempSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { runPlan } from "../src/scheduler.mjs";
@@ -21,6 +21,22 @@ const billedIo = (spawn, over = {}) => makeIo(spawn, {
 
 const billedTask = (id, dir, over = {}) => task(id, {
   provider: "claude", model: "claude-sonnet-5", cwd: dir, originalCwd: dir, billing: "api", ...over,
+});
+
+// The durable identity lands in run-start, and every reader rebuilds the roster from
+// it. A billed leaf that loses `billing` there renders as a plain subscription leaf.
+test("run-start carries billing, so the roster can label a billed leaf", async () => {
+  const dir = tmp();
+  try {
+    const spawn = fakeSpawnFactory(() => ({ output: "done" }));
+    const io = makeIo(spawn);
+    io.env.SWARM_ANTHROPIC_API_KEY = "sk-test";
+    const p = plan(dir, [task("a", { cwd: dir, billing: "api" })]);
+    await runPlan(p, CFG, io);
+    const lines = readFileSync(join(p.resultsDir, "run.log"), "utf8").trim().split("\n").map((line) => JSON.parse(line));
+    const start = lines.find((line) => line.event === "run-start");
+    equal(start.tasks[0].billing, "api");
+  } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
 test("billing: launch records result.billing", async () => {
