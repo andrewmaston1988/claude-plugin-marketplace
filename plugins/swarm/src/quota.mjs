@@ -7,7 +7,6 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
 import { usageReading, patchUsageEnvelope, recordUsageError, quotaTtlMs } from "./usage-cache.mjs";
-import { isApiBilled } from "./claude-billing.mjs";
 
 export const DEFAULT_QUOTA_PATTERNS = [
   "usage limit reached",
@@ -22,19 +21,6 @@ export const DEFAULT_USAGE_URL = "https://api.anthropic.com/api/oauth/usage";
 // keyed on the suffix so a later meter needs no edit. Deliberately NOT in `quotaPatterns`:
 // that list is the operator's to narrow, and `config init` never adds to an already-set key.
 const PROVIDER_QUOTA_PATTERNS = ["usage limit, add extra usage"];
-
-// A billed leaf spends prepaid credit, not a subscription allowance, and the CLI
-// words that failure differently. Kept apart from PROVIDER_QUOTA_PATTERNS so the
-// subscription lane can never classify a spent balance (or the reverse).
-export const CREDIT_QUOTA_PATTERNS = ["credit balance is too low"];
-
-// The pattern list for one leaf: the operator's own list (or the shipped one) plus
-// the credit wording, and only for a billed leaf. `cfg.quotaPatterns` is returned
-// untouched otherwise, so the subscription lane stays byte-identical.
-export function quotaPatternsFor(task, cfg) {
-  if (!isApiBilled(task)) return cfg?.quotaPatterns;
-  return [...(cfg?.quotaPatterns ?? DEFAULT_QUOTA_PATTERNS), ...CREDIT_QUOTA_PATTERNS];
-}
 
 export function matchQuota(text, patterns = DEFAULT_QUOTA_PATTERNS) {
   const t = String(text || "").toLowerCase();

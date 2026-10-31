@@ -1,8 +1,7 @@
 {
   "providers": {
     "claude": {
-      "enabled": false,
-      "apiKeyEnv": "SWARM_ANTHROPIC_API_KEY"
+      "enabled": false
     },
     "ollama": {
       "enabled": false,

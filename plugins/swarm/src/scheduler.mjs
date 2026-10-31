@@ -29,7 +29,6 @@ import { createDeterministicSteps } from "./scheduler/deterministic-steps.mjs";
 import { createLaunch } from "./scheduler/launch.mjs";
 import { releaseEngine } from "./engine-lock.mjs";
 import { holdNote } from "./usage.mjs";
-import { isApiBilled } from "./claude-billing.mjs";
 
 export function launcherSession(env = process.env) {
   return env.CODEX_SESSION_ID || env.CLAUDE_CODE_SESSION_ID || null;
@@ -180,8 +179,8 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), {
         const readUsage = providerRegistry.capability(providerId, "readUsage");
         if (readUsage) {
           const usage = await readUsage(context);
-          if (usage?.exhausted && providerTasks.some((t) => !t.fallbackModel && !isApiBilled(t))) {
-            const undefended = providerTasks.filter((t) => !t.fallbackModel && !isApiBilled(t)).map((t) => t.id).join(", ");
+          if (usage?.exhausted && providerTasks.some((t) => !t.fallbackModel)) {
+            const undefended = providerTasks.filter((t) => !t.fallbackModel).map((t) => t.id).join(", ");
             // Stale means the last number anyone saw, not a live verdict. A real
             // exhaustion is still caught at dispatch by the quota path, so this
             // warns and continues rather than grounding the run.

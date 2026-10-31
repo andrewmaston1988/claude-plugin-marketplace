@@ -1,11 +1,9 @@
 import { test } from "node:test";
 import { deepEqual, equal, ok, rejects, throws } from "node:assert/strict";
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { join, sep } from "node:path";
 import { tmpdir } from "node:os";
 import { allowedRootsFor, createProviderRegistry, defaultProviderAdapters, probeProvider, providerConfig } from "../src/providers.mjs";
-import { runPlan } from "../src/scheduler.mjs";
-import { fakeSpawnFactory, makeIo } from "./helpers/fake-io.mjs";
 import { assertProviderAdapterContract } from "./helpers/provider-contract.mjs";
 
 const config = {
@@ -338,91 +336,4 @@ test("probe: a preflight reporting ok:false keeps its own error text", async () 
     capabilities: { preflight: async () => ({ ok: false, error: "endpoint refused" }) },
   }]);
   deepEqual(await probeProvider("ollama", { config: {}, registry }), { id: "ollama", ok: false, detail: "endpoint refused", probed: true });
-});
-
-// ── billing: "api" — the key check and the exhausted-subscription exemption ──
-
-const KEY_VAR = "SWARM_ANTHROPIC_API_KEY";
-const EXHAUSTED = { limits: [{ kind: "session", percent: 100, resets_at: "2026-09-20T16:00:00Z", severity: "exceeded" }] };
-
-function billedTask(id, dir, over = {}) {
-  return {
-    id, prompt: `do ${id}`, provider: "claude", model: "claude-sonnet-5", allowedTools: "Read",
-    billing: "api", cwd: dir, originalCwd: dir, timeoutMs: 5000, after: [], ...over,
-  };
-}
-
-function billingRun(dir, tasks, { key = "sk-test", usage = EXHAUSTED, cfg = {} } = {}) {
-  const home = join(dir, "home");
-  mkdirSync(home, { recursive: true });
-  writeFileSync(join(home, "creds.json"), JSON.stringify({ claudeAiOauth: { accessToken: "t" } }));
-  const spawn = fakeSpawnFactory(() => ({ output: "ok" }));
-  const io = makeIo(spawn, {
-    fetch: async () => ({ ok: true, status: 200, json: async () => usage }),
-    env: {
-      PATH: process.env.PATH, SWARM_HOME: home, SWARM_CREDENTIALS: join(home, "creds.json"),
-      ...(key != null && { [KEY_VAR]: key }),
-    },
-  });
-  const plan = { cwd: dir, resultsDir: join(dir, "run"), concurrency: 1, tasks, goal: "" };
-  const config = {
-    providers: { claude: { enabled: true } },
-    allowedRoots: [dir], concurrency: 1, timeoutMs: 5000, resultInlineCap: 4000,
-    worktreeBranchPrefix: "swarm/", ...cfg,
-  };
-  return { io, spawn, plan, config };
-}
-
-// A billed leaf spends prepaid credit, so a spent subscription allowance must not
-// ground it — neither at the preflight nor at the scheduler's own gate.
-test("billing: a run of only billed leaves dispatches through an exhausted subscription", async () => {
-  const dir = mkdtempSync(join(tmpdir(), "swarm-providers-"));
-  try {
-    const { io, spawn, plan, config } = billingRun(dir, [billedTask("billed-a", dir)]);
-    const r = await runPlan(plan, config, io);
-    equal(spawn.calls.length, 1, "subscription exhaustion must not ground a billed leaf");
-    equal(r.summary.tasks[0].state, "ok");
-  } finally { rmSync(dir, { recursive: true, force: true }); }
-});
-
-test("billing: a missing key aborts before dispatch, naming the variable and the leaves", async () => {
-  const dir = mkdtempSync(join(tmpdir(), "swarm-providers-"));
-  try {
-    const { io, spawn, plan, config } = billingRun(
-      dir,
-      [billedTask("billed-a", dir), billedTask("billed-b", dir)],
-      { key: null, usage: { limits: [{ kind: "session", percent: 6, resets_at: "R" }] } },
-    );
-    await rejects(
-      () => runPlan(plan, config, io),
-      (error) => error.message.includes(KEY_VAR)
-        && error.message.includes("billed-a") && error.message.includes("billed-b")
-        && !/sk-/.test(error.message),
-    );
-    equal(spawn.calls.length, 0, "a keyless run must not burn a dispatch");
-  } finally { rmSync(dir, { recursive: true, force: true }); }
-});
-
-// quotaPreflight disables the usage fetch, never this check — an exhausted
-// subscription with no reading is exactly the case a keyless run would reach.
-test("billing: the key check runs with quotaPreflight false", async () => {
-  const dir = mkdtempSync(join(tmpdir(), "swarm-providers-"));
-  try {
-    const { io, spawn, plan, config } = billingRun(dir, [billedTask("billed-a", dir)], { key: null });
-    await rejects(
-      () => runPlan(plan, { ...config, quotaPreflight: false }, io),
-      (error) => error.message.includes(KEY_VAR) && error.message.includes("billed-a"),
-    );
-    equal(spawn.calls.length, 0);
-  } finally { rmSync(dir, { recursive: true, force: true }); }
-});
-
-// RED (revert): make the key check unconditional and the setup probe — which
-// passes no tasks and never dispatches — reports a healthy provider as refused.
-test("billing: a probe with no tasks and no key still reports the provider ok", async () => {
-  const r = await probeProvider("claude", {
-    config: { providers: { claude: { enabled: true } } },
-    fetch: async () => ({ ok: false, status: 500 }),
-  });
-  deepEqual(r, { id: "claude", ok: true, detail: null, probed: true });
 });

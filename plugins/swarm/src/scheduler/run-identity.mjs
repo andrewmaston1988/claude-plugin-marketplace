@@ -12,12 +12,7 @@ export function createRunIdentity(ctx) {
   const durableIdentity = (task) => {
     if (task?.provider === undefined) return {};
     const identity = resolvedIdentity(task);
-    // The lane is part of the identity every roster reader rebuilds its label from.
-    return {
-      provider: identity.provider,
-      runner: providerRegistry.get(identity.provider).runnerId,
-      ...(task.billing && { billing: task.billing }),
-    };
+    return { provider: identity.provider, runner: providerRegistry.get(identity.provider).runnerId };
   };
 
   // Cooperative stop: a control file, not a pid-kill — Windows TerminateProcess

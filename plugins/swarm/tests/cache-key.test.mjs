@@ -213,20 +213,3 @@ test("resume: an unchanged forEach manifest node replays whole — parent and it
     rmSync(dir, { recursive: true, force: true });
   }
 });
-
-// The lane is part of what the leaf does: moving a task onto API credits changes the
-// credential it spends, so the prior result must not replay as if nothing moved.
-test("resume: flipping a leaf to billing api re-runs instead of replaying the cached result", async () => {
-  const dir = tmp();
-  try {
-    await runPlan(loadPlan(dir, one("say hello")), CFG, makeIo(fakeSpawnFactory(() => ({ output: "one" }))));
-    const second = loadPlan(dir, one("say hello", { billing: "api" }));
-    const spawn = fakeSpawnFactory(() => ({ output: "two" }));
-    const io = makeIo(spawn);
-    io.env.SWARM_ANTHROPIC_API_KEY = "sk-test";
-    await runPlan(second, CFG, io);
-    equal(spawn.calls.length, 1, "a leaf that moved onto API credits must run again — its credential changed");
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-  }
-});

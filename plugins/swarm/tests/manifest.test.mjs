@@ -9,7 +9,7 @@ import { test } from "node:test";
 import { equal, ok, deepEqual, throws } from "node:assert/strict";
 import { writeFileSync, rmSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
-import { ValidationError, effectivePlanDoc } from "../src/manifest.mjs";
+import { ValidationError } from "../src/manifest.mjs";
 import { loadManifest } from "./helpers/repo-io.mjs";
 import { CFG, writeManifest, tmp, errorsOf, claudeTask } from "./helpers/manifest-fixtures.mjs";
 
@@ -306,38 +306,6 @@ test("model-authored manifests: markdown fences around the JSON are tolerated", 
     writeFileSync(p, "```json\n" + JSON.stringify({ tasks: [claudeTask()] }) + "\n```\n");
     const plan = loadManifest(p, CFG, dir);
     equal(plan.tasks.length, 1);
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-  }
-});
-
-test("billing: accepted as a task key, kept by normalize, and projected into the effective plan", () => {
-  const dir = tmp();
-  try {
-    const p = writeManifest(dir, { tasks: [claudeTask({ billing: "api" })] });
-    const plan = loadManifest(p, CFG, dir);
-    equal(plan.tasks[0].billing, "api", "dispatch, the key lookup, and the label all read the normalized task");
-    equal(effectivePlanDoc(plan).tasks[0].billing, "api", "the persisted snapshot must record the lane the leaf ran on");
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-  }
-});
-
-test("billing is refused on every agentless node", () => {
-  const dir = tmp();
-  try {
-    const p = writeManifest(dir, {
-      tasks: [
-        { id: "m", manifest: "child.json", billing: "api" },
-        { id: "c", compute: "1 + 1", billing: "api" },
-        { id: "i", integrate: { into: "feat", from: ["c"] }, billing: "api" },
-      ],
-    });
-    const errs = errorsOf(() => loadManifest(p, CFG, dir));
-    const agentless = { m: "agentless container", c: "compute tasks are agentless", i: "integrate tasks are agentless" };
-    for (const id of ["m", "c", "i"]) {
-      ok(errs.some((e) => e.includes(`task '${id}'`) && e.includes("billing") && e.includes(agentless[id])), `${id}: ${errs.join("\n")}`);
-    }
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
