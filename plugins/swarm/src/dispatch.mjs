@@ -11,6 +11,7 @@ import { defaultCodexRunnerAdapter } from "./codex.mjs";
 import { cwdAllowed, defaultGovernanceIo } from "./governance.mjs";
 import { applyWriteGuard } from "../hooks/leaf-write-guard.mjs";
 import { runnerParserFactories } from "./stream.mjs";
+import { isApiBilled, applyBillingRouting } from "./claude-billing.mjs";
 
 // Build the argv + env for one task dispatch. Pure — no process interaction.
 //
@@ -24,6 +25,11 @@ import { runnerParserFactories } from "./stream.mjs";
 // Anthropic pricing on token counts and trip the ceiling mid-task; Claude
 // dispatch is interactive-supervised, so the manifest preview is the budget gate.
 function buildClaudeInvocation(task, prompt, cfg, providerId) {
+  // A billed leaf bills a key the claude runner maps for it; no other runner
+  // knows that route, and its routing clear would be meaningless there.
+  if (isApiBilled(task) && providerId !== "claude") {
+    throw new Error('billing "api" is only supported on a Claude provider — name "provider": "claude" with a Claude model, or drop "billing" to bill the subscription');
+  }
   const claudePath = cfg.claudePath || "claude";
   const ollama = providerConfig(cfg, "ollama");
   // The engine's typed write targets reach this runner as a flat root list: the
@@ -42,6 +48,10 @@ function buildClaudeInvocation(task, prompt, cfg, providerId) {
     ? { env: { CLAUDE_CODE_DISABLE_1M_CONTEXT: "0" } }
     : null;
   const settings = base || taskSettings ? deepMerge(base || {}, taskSettings || {}) : null;
+  // A billed leaf always materialises --settings: with none authored, the inline
+  // clear is the only layer above the shell, and without it the leaf inherits the
+  // parent's ANTHROPIC_AUTH_TOKEN and bills the subscription under a claude-api label.
+  const leafSettings = isApiBilled(task) ? applyBillingRouting(settings ?? {}) : settings;
   // `[1m]` is matched by the CLI on the model name; provider endpoints still need
   // the bare id, so this suffix must never reach ANTHROPIC_MODEL.
   const cliModel = task.contextWindow === CONTEXT_WINDOW_1M ? `${task.model}[1m]` : task.model;
@@ -59,7 +69,7 @@ function buildClaudeInvocation(task, prompt, cfg, providerId) {
     // A shell env var LOSES to the user's settings.json env block, and Claude Code
     // has no [1m] model alias — --settings is highest-precedence in the CLI's
     // settings chain, so it's the only route that overrides that block per-leaf.
-    ...(settings ? ["--settings", JSON.stringify(settings)] : []),
+    ...(leafSettings ? ["--settings", JSON.stringify(leafSettings)] : []),
     // interrogation path: continue an existing leaf session (`swarm ask`)
     ...(task.resume ? ["--resume", task.resume] : []),
     "--output-format", "stream-json", "--verbose",
