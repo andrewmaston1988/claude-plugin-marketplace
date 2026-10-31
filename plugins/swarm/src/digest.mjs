@@ -149,6 +149,7 @@ export function buildDigestTask(plan) {
     timeoutMs,
     after: plan.tasks.map((t) => t.id),
     isDigest: true,
+    ...(plan.digest.billing !== undefined && { billing: plan.digest.billing }),
     ...(writeRoots && { writeRoots }),
   };
 }

@@ -70,6 +70,9 @@ const finishedMs = (t) =>
 // would otherwise be ambiguous in this view.
 export function displayIdentity(value, roster = []) {
   const model = String(value?.model || "?");
+  // A billed leaf spends a different credential, so it reads as a different lane
+  // regardless of how many providers run the same model id.
+  if (value?.billing === "api") return `claude-api/${model}`;
   const providers = new Set(roster.filter((row) => row?.model === model && row?.provider).map((row) => row.provider));
   return providers.size > 1 && value?.provider ? `${value.provider}/${model}` : model;
 }

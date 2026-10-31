@@ -14,6 +14,7 @@ import { TEMPLATE_RE } from "../coverage.mjs";
 import { matchQuota, DEFAULT_QUOTA_PATTERNS } from "../quota.mjs";
 import { normalizeForCompare } from "../roots.mjs";
 import { hasWriteTools, resolveWorktreeName, leafWriteGuardRoots } from "../manifest-task-policy.mjs";
+import { billingSpawnEnv } from "../claude-billing.mjs";
 
 const RATE_LIMIT_RE = /rate.?limit|429|too many requests/i;
 const EXIT_DRAIN_MS = 2000;
@@ -186,6 +187,10 @@ export function runTask(task, prompt, cfg, io, leafLog, { onTokens, onActivity, 
           ...(io.env || process.env),
           CORRELATION_ID: (io.env || process.env).CORRELATION_ID || `swarm:${task.id}`,
           ...env,
+          // A billed leaf's key reaches the child and nothing else: the inline
+          // --settings clear outranks this env for every routing variable, and a
+          // key in argv would be visible in the process list.
+          ...billingSpawnEnv(task, cfg, io.env || process.env),
           SWARM_WRITE_GUARD_ROOTS: env.SWARM_WRITE_GUARD_ROOTS ?? "",
           SWARM_LEAF: "1",
           ...(task.leafGuard && { SWARM_LEAF_GUARD: task.leafGuard.command, SWARM_LEAF_GUARD_PROJECT: task.leafGuard.name }),

@@ -10,7 +10,8 @@ import { scratchPath as digestScratchPath } from "../digest.mjs";
 import { readResult, writeResult, appendRunLog, writeDigestMd, formatTokens } from "../results.mjs";
 import { taskKey, writeTaskResult } from "../task-key.mjs";
 import { addTokens, emptyTokens, tokenTotal, workTokens } from "../stream.mjs";
-import { parseQuotaReset } from "../quota.mjs";
+import { parseQuotaReset, quotaPatternsFor } from "../quota.mjs";
+import { isApiBilled } from "../claude-billing.mjs";
 import { removeCachedModel, ENTITLEMENT_RE } from "../discovery.mjs";
 import { ALIVE_STATES } from "../runlog.mjs";
 import { projectRun } from "../estimate.mjs";
@@ -229,6 +230,9 @@ export function createLaunch(ctx) {
       // interrogation fields: `swarm ask` resumes this session in this cwd;
       // originalCwd (pre worktree redirect) is the governance identity
       if (r.sessionId) result.sessionId = r.sessionId;
+      // Which credential the child actually used — the only evidence a billed
+      // leaf really spent its key rather than the subscription.
+      if (r.apiKeySource != null) result.apiKeySource = r.apiKeySource;
       if (r.schemaRetried) result.schemaRetried = true;
       if (r.schemaErrors) result.schemaErrors = r.schemaErrors;
       // The leaf's own output on a schema failure — what a re-run re-asks from.
@@ -262,6 +266,7 @@ export function createLaunch(ctx) {
       result.originalCwd = task.originalCwd;
       if (task.checkoutToplevel) result.checkoutToplevel = task.checkoutToplevel;
       result.allowedTools = task.allowedTools;
+      if (task.billing) result.billing = task.billing;
 
       // Semantic contract failures bypass transcript classification; a stray 429 cannot retry them.
       // A memory stop is checked first because the valve may kill without a classifiable message.
@@ -271,7 +276,7 @@ export function createLaunch(ctx) {
       const st = isMemoryStop ? "memory"
         : r.ok ? "ok"
         : r.schemaErrors || r.coverageFailed || r.errorCode === "schema_error" || r.errorCode === UNCOMMITTED_WORK ? "failed"
-        : classifyFailure({ timedOut: r.timedOut, output: r.raw, stopped: ctx.stopRequested }, cfg.quotaPatterns);
+        : classifyFailure({ timedOut: r.timedOut, output: r.raw, stopped: ctx.stopRequested }, quotaPatternsFor(task, cfg));
       if (isMemoryStop) {
         // runTask's generic mid-stream message tells a reader not to kill or
         // diff-hunt — exactly backwards here, where the kill was deliberate.
@@ -399,7 +404,9 @@ export function createLaunch(ctx) {
           for (const t of tasks) {
             if (isAgentless(t) || ctx.state.get(t.id) !== "pending" || t.fallbackModel) continue;
             const candidate = ctx.resolvedIdentity(t);
-            const sameScope = candidate.provider === current.provider && (
+            // Lanes never cross: a spent balance says nothing about the
+            // subscription allowance, or the reverse.
+            const sameScope = candidate.provider === current.provider && isApiBilled(t) === isApiBilled(task) && (
               current.provider !== "claude" || !quotaFamily || quotaFamily === familyOf(t.model)
             );
             if (sameScope) {

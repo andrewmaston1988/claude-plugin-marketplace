@@ -6,6 +6,7 @@ import { readClaudeCatalog, claudeCatalogIdentity } from "./claude-models.mjs";
 import { readClaudeUsage } from "./claude-usage.mjs";
 import { staleNotes } from "./usage.mjs";
 import { isUnderRoot, normalizeForCompare } from "./roots.mjs";
+import { isApiBilled, apiKeyEnvName } from "./claude-billing.mjs";
 
 // The registry's one list of capability names — `capability()` refuses anything
 // not on it, and the adapter-contract test helper imports it rather than copying.
@@ -188,6 +189,20 @@ export async function probeProvider(id, { config = {}, registry, fetch = globalT
 export const readNow = (now) => (typeof now === "function" ? now() : typeof now === "number" ? now : Date.now());
 
 async function preflightClaude({ config: cfg = {}, fetch, now, io, env, tasks = [] } = {}) {
+  // Before the quotaPreflight return: that flag disables the usage fetch, never
+  // the key. A keyless billed leaf could only die at dispatch, and the error would
+  // not say which variable to set. The value itself is never read into the message.
+  const billed = tasks.filter(isApiBilled);
+  if (billed.length) {
+    const name = apiKeyEnvName(cfg);
+    if (!env?.[name]) {
+      throw new Error(
+        `billing "api" needs a key in ${name} — ${billed.length} leaf(s) cannot dispatch: ` +
+        `${billed.map((t) => t.id).join(", ")}. Set it in the environment that launches swarm; ` +
+        `the engine never prints the value.`,
+      );
+    }
+  }
   if (cfg.quotaPreflight === false) return { ok: true };
   const q = await checkQuota({
     cfg,
@@ -214,7 +229,8 @@ async function preflightClaude({ config: cfg = {}, fetch, now, io, env, tasks = 
     });
   if (q?.exhausted || q?.exhaustedScopes?.length) {
     const doomed = tasks.filter(
-      (t) => !t.fallbackModel && (q.exhausted || blockedScope(t.model))
+      // A billed leaf draws on prepaid credit, not this allowance.
+      (t) => !t.fallbackModel && !isApiBilled(t) && (q.exhausted || blockedScope(t.model))
     );
     if (doomed.length) {
       const hit = q.exhausted ? q.worst : blockedScope(doomed[0].model);

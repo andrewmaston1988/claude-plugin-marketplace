@@ -171,3 +171,66 @@ test("preflight: an exhausted Claude reading aborts before dispatch", async () =
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+// ── billing: "api" — the scheduler's own usage gate (src/scheduler.mjs) ───────
+
+function billedProviderSetup(dir) {
+  const home = join(dir, "home");
+  mkdirSync(home, { recursive: true });
+  writeFileSync(join(home, "creds.json"), JSON.stringify({ claudeAiOauth: { accessToken: "t" } }));
+  const usage = { limits: [{ kind: "session", percent: 100, resets_at: "2026-09-20T16:00:00Z", severity: "exceeded" }] };
+  const spawn = fakeSpawnFactory(() => ({ output: "ok" }));
+  const io = makeIo(spawn, {
+    env: {
+      PATH: process.env.PATH, SWARM_HOME: home, SWARM_CREDENTIALS: join(home, "creds.json"),
+      SWARM_ANTHROPIC_API_KEY: "sk-test",
+    },
+    fetch: async () => ({ ok: true, status: 200, json: async () => usage }),
+  });
+  return { io, spawn };
+}
+
+const claudeLeaf = (id, dir, over = {}) => ({
+  id, prompt: `do ${id}`, provider: "claude", model: "claude-sonnet-5", allowedTools: "Read",
+  cwd: dir, originalCwd: dir, timeoutMs: 5000, after: [], ...over,
+});
+
+// quotaPreflight is off so the preflight cannot be what lets this through: the
+// row exists for the gate in runPlan, which reads the exhausted reading itself.
+const claudeCfg = (dir) => ({
+  ...CFG, providers: { claude: { enabled: true } }, allowedRoots: [dir], quotaPreflight: false,
+});
+
+test("billing: a run of only billed leaves passes the scheduler's usage gate", async () => {
+  const dir = tmp();
+  try {
+    const { io, spawn } = billedProviderSetup(dir);
+    const r = await runPlan(
+      buildPlan(dir, [claudeLeaf("billed", dir, { billing: "api" })]),
+      claudeCfg(dir), io, { providerUsage: true },
+    );
+    equal(spawn.calls.length, 1, "a billed leaf must not be grounded by subscription exhaustion");
+    equal(r.summary.tasks[0].state, "ok");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// RED (revert): filter billed leaves out of the `.some()` but not out of the named
+// list, and the abort blames a leaf that spends credits for the allowance's state.
+test("billing: a mixed run still aborts, naming only the undefended subscription leaf", async () => {
+  const dir = tmp();
+  try {
+    const { io, spawn } = billedProviderSetup(dir);
+    await rejects(
+      () => runPlan(
+        buildPlan(dir, [claudeLeaf("billed", dir, { billing: "api" }), claudeLeaf("sub", dir)]),
+        claudeCfg(dir), io, { providerUsage: true },
+      ),
+      (error) => error.message.includes("sub") && !error.message.includes("billed"),
+    );
+    equal(spawn.calls.length, 0);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
