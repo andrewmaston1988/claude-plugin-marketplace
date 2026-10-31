@@ -14,7 +14,7 @@ import { costBands, costSettings } from "../src/cost-settings.mjs";
 import { defaultProviderRegistry } from "../src/default-providers.mjs";
 import { loadCorpus, estimateRun, formatEstimate, leafCounts, integrateCaps } from "../src/estimate.mjs";
 import { citationPaths } from "../src/citations.mjs";
-import { formatKeptWorktrees, listLeaves, stopPath, appendRunLog, writeSummary, resultPath } from "../src/results.mjs";
+import { formatKeptWorktrees, listLeaves, stopPath, appendRunLog, writeSummary, resultPath, displayIdentity } from "../src/results.mjs";
 import { identityOf, identityKey } from "../src/contracts.mjs";
 import { runLiveness, readRun, ALIVE_STATES } from "../src/runlog.mjs";
 import { registeredForRun, makeGit, reposFromManifest } from "../src/prune.mjs";
@@ -130,12 +130,6 @@ export async function readProviderUsage(cfg, { registry = defaultProviderRegistr
   return { usages, errors };
 }
 
-function displayModel(value, roster = []) {
-  const model = value?.model || value;
-  const providers = new Set(roster.filter((row) => row?.model === model && row?.provider).map((row) => row.provider));
-  return providers.size > 1 && value?.provider ? `${value.provider}/${model}` : model;
-}
-
 function visibleProviderModels(rows, options) {
   const groups = new Map();
   for (const row of rows) {
@@ -221,7 +215,7 @@ async function cmdModels(rest = [], {
     const mark = showAll && m.supersededBy && !visible.has(identityKey(m)) ? ` [superseded by ${m.supersededBy}]` : "";
     const mult = multOf.get(m.model);
     const cost = m.provider && m.provider !== "ollama" ? "—" : mult == null ? "—" : onFrontier.has(m.model) ? `* ${mult.toFixed(1)}x` : `${mult.toFixed(1)}x`;
-    write(modelLine({ ...m, displayModel: displayModel(m, liveRoster) }) + mark + `  ${effortsCell(m, roster)}  ${cost}`);
+    write(modelLine({ ...m, displayModel: displayIdentity(m, liveRoster) }) + mark + `  ${effortsCell(m, roster)}  ${cost}`);
   }
   write(dim("* on the quality/cost frontier · N.Nx = meter weight vs the cheapest measured model (swarm cost) · — unmeasured, not free"));
   const hidden = liveRoster.length - shown.length;

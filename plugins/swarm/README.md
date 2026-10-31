@@ -44,7 +44,8 @@ Every other key (`providers.<name>.*`, `concurrency`, `timeoutMs`,
 `worktreeBranchPrefix`, `modelDenylist`, `providers.ollama.cloud.ollama.*`, `notifyCmd`,
 `grading.enabled`, `dashboard.*`, `swarm.always`) is documented inline in
 `config.default.json` with its default — `setup` walks the ones worth touching. Swarm
-never manages credentials; auth is your provider app's ambient sign-in.
+manages no credential itself — auth is your provider app's ambient sign-in — with one
+carve-out: a leaf may opt into Anthropic API credits (see **API-credit billing** below).
 
 **Provenance:** every fetched figure (`validate`, `run`, `models`, `ollama-usage`) says
 where it came from. A failed live fetch (expired cookie, network, timeout) still shows the
@@ -74,6 +75,51 @@ case-insensitive on Windows); an unmatched repo runs unguarded, interactive sess
 see it. Each guard is probed once at `validate` with a harmless payload, so a broken script
 fails the manifest before any leaf spends. A task opts out with `"leafGuard": false`
 only — nothing in `env`/`settings.env` can forge or clear the guard.
+
+### API-credit billing — per-leaf Anthropic credits
+
+Every Claude leaf bills the operator's **subscription** unless the task opts in:
+`"billing": "api"` on a task whose resolved provider is `claude`. Nothing else changes for
+a leaf that does not opt in. A billed leaf renders `claude-api/<model>` on the roster,
+`swarm status` and the dashboard:
+
+```json
+{ "id": "audit", "provider": "claude", "model": "claude-sonnet-5", "billing": "api", "prompt": "…" }
+```
+
+- **The key is env, never config.** The engine reads it from the variable named by
+  `providers.claude.apiKeyEnv` (default `SWARM_ANTHROPIC_API_KEY`), set in the shell that
+  launches swarm. The dedicated name is the point: `ANTHROPIC_API_KEY` in the parent env
+  is inherited by every leaf and would move them all onto credits, so exporting it fails
+  the config load. The engine never stores or prints the value; a missing or empty
+  variable refuses the run before dispatch, naming the variable and the leaves.
+- **Routing is neutralised per leaf.** A billed leaf's inline `--settings` empties
+  `ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_BASE_URL`, `CLAUDE_CODE_USE_BEDROCK`,
+  `CLAUDE_CODE_USE_VERTEX` and `CLAUDE_CODE_USE_FOUNDRY` — each outranks an API key in
+  Claude Code's credential chain — and the key travels only in the child process's env,
+  never in argv.
+- **Validation teaches.** `billing` accepts only `"api"`, only on a Claude task. A
+  non-Claude provider or `fallbackModel`, an agentless node (`manifest`/`compute`/
+  `integrate`), or a task `settings.env` naming `ANTHROPIC_API_KEY` or a routing key each
+  fails `validate` with the fix named.
+- **A billed leaf needs no subscription.** A run of only billed leaves dispatches on an
+  exhausted subscription; a mixed run still aborts on its undefended subscription leaves,
+  naming only those (`fallbackModel` is the way out). `"credit balance is too low"` from
+  an in-flight billed leaf classifies `quota` and sweeps only pending billed leaves —
+  spent credit never marks a subscription leaf `quota`, nor the reverse.
+
+**Limitations.**
+
+- A `settings.json` or managed-policy `env` setting `ANTHROPIC_API_KEY` outranks the
+  child env and cannot be cleared from argv; each result's `apiKeySource` records which
+  credential actually happened.
+- The key is readable by the billed leaf's tools, through its environment — no leaf is
+  sandboxed from the operator's env today.
+- Spent credit is discovered at dispatch: in-flight billed leaves fail, pending billed
+  leaves are marked `quota`.
+- Cost accounting for a billed leaf is unverified (`apiKeySource !== "none"` counts as
+  real-key spend) — check the first live billed leaf.
+- Probes cover `claude -p` only; swarm only ever spawns `-p`.
 
 **Requirements:** Node and `claude` on PATH for Claude leaves. Ollama `:cloud` rows need a
 recent Ollama with `/api/experimental/model-recommendations` (~v0.23+); Codex rows are opt-in

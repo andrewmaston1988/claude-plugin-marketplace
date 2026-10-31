@@ -17,7 +17,7 @@ const KEY_FIELDS = [
   "allowedTools", "cwd", "outputDir", "workspace", "worktreeName", "branchName",
   "contextWindow", "verifyCitations", "returns", "mustRead", "settings",
   "compute", "depAliases", "integrate", "forEach", "childPlan",
-  "manifestItem", "manifestIndex", "leafGuard",
+  "manifestItem", "manifestIndex", "leafGuard", "billing",
 ];
 
 // Key-order-independent, like manifest.mjs's canonicalize: the same definition

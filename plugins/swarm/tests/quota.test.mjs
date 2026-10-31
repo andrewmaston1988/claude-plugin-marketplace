@@ -5,7 +5,7 @@ import { createServer } from "node:http";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import {
-  matchQuota, parseQuotaReset, parseUsageLimits, checkQuota, DEFAULT_QUOTA_PATTERNS,
+  matchQuota, parseQuotaReset, parseUsageLimits, checkQuota, DEFAULT_QUOTA_PATTERNS, quotaPatternsFor,
 } from "../src/quota.mjs";
 import { runCliAsync } from "./helpers/cli.mjs";
 import { createCodexProviderAdapter } from "../src/codex.mjs";
@@ -25,6 +25,14 @@ test("matchQuota: recognises Anthropic limit messages, not rate limits", () => {
   ok(matchQuota("out of extra usage credits", DEFAULT_QUOTA_PATTERNS));
   ok(!matchQuota("429 Too Many Requests: rate limit exceeded", DEFAULT_QUOTA_PATTERNS));
   ok(!matchQuota("segfault", DEFAULT_QUOTA_PATTERNS));
+});
+
+// RED (revert): route quotaPatternsFor through a lane gate in matchQuota that
+// drops PROVIDER_QUOTA_PATTERNS for a non-billed leaf, and this row reddens —
+// Ollama's wording must keep classifying whatever lane the leaf is in.
+test("quotaPatternsFor: a non-billed leaf still classifies the provider's wording", () => {
+  const sub = { id: "s", provider: "ollama", model: "glm-5" };
+  ok(matchQuota("reached your weekly usage limit, add extra usage: ollama.com/settings", quotaPatternsFor(sub, {})));
 });
 
 test("parseQuotaReset: epoch suffix, human phrasing, or null", () => {
