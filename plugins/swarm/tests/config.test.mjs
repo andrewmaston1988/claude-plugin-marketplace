@@ -479,24 +479,3 @@ test("config concurrency is a ceiling: a manifest may ask for less, asking for m
     rmSync(dir, { recursive: true, force: true });
   }
 });
-
-// The key var is dedicated. ANTHROPIC_API_KEY is inherited by every leaf, and the
-// routing vars outrank an API key — naming either would move subscription leaves
-// onto credits just by exporting the variable.
-test("providers.claude.apiKeyEnv rejects ANTHROPIC_API_KEY, every routing var, and an empty name", () => {
-  const dir = tmp();
-  try {
-    const bad = ["ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL",
-      "CLAUDE_CODE_USE_BEDROCK", "CLAUDE_CODE_USE_VERTEX", "CLAUDE_CODE_USE_FOUNDRY", ""];
-    for (const [i, name] of bad.entries()) {
-      const p = join(dir, `cfg-${i}.json`);
-      writeFileSync(p, JSON.stringify({ providers: { claude: { apiKeyEnv: name } } }));
-      throws(() => loadConfig(p), (e) => e.message.includes("providers.claude.apiKeyEnv") && (name === "" || e.message.includes(name)));
-    }
-
-    // The shipped default is the one name a billed leaf maps from, so it must load.
-    equal(loadConfig(join(dir, "missing.json")).providers.claude.apiKeyEnv, "SWARM_ANTHROPIC_API_KEY");
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-  }
-});

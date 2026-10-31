@@ -16,8 +16,7 @@ import { makeIo, fakeSpawnFactory } from "./helpers/fake-io.mjs";
 import { readCachedUsage } from "../src/usage.mjs";
 import { cmdModels, cmdUsage, readProviderUsage } from "../scripts/swarm.mjs";
 import { runCli } from "./helpers/cli.mjs";
-import { readRunLog, topology } from "../src/runlog.mjs";
-import { displayIdentity, renderRoster } from "../src/results-render.mjs";
+import { readRunLog } from "../src/runlog.mjs";
 import { readResult, readSummary } from "../src/results.mjs";
 import { buildSnapshot } from "../src/serve/estate.mjs";
 import { createServer } from "../src/serve/server.mjs";
@@ -238,37 +237,4 @@ test("readProviderUsage walks a claude adapter's reading like any provider's", a
   } finally {
     rmSync(home, { recursive: true, force: true });
   }
-});
-
-// billing reaches the roster through two parsers: the run-start rows, and the
-// graph-only pending rows topology appends from the manifest snapshot. Lose it in
-// either and `swarm status` shows a billed leaf as a plain subscription leaf.
-test("readRunLog keeps billing on roster and pending rows, so status renders claude-api/<model>", () => {
-  const ts = new Date().toISOString();
-  const parsed = readRunLog([
-    JSON.stringify({ ts, event: "run-start", pid: 1, tasks: [{ id: "a", model: "claude-haiku-4-5-20251001", provider: "claude", runner: "claude", billing: "api" }] }),
-    JSON.stringify({ ts, id: "a", state: "ok", durationMs: 5 }),
-  ].join("\n"));
-  equal(parsed.tasks[0].billing, "api");
-  equal(displayIdentity(parsed.tasks[0]), "claude-api/claude-haiku-4-5-20251001");
-
-  const pending = topology([], { tasks: [{ id: "b", model: "claude-sonnet-5", provider: "claude", billing: "api" }] });
-  equal(pending.tasks[0].billing, "api");
-  equal(displayIdentity(pending.tasks[0]), "claude-api/claude-sonnet-5");
-});
-
-// One producer for the label. scripts/swarm.mjs used to carry displayModel — the same
-// ambiguity rule with a null guard — and a second copy drifts: the models list and the
-// run roster would word the same leaf differently.
-test("a billed leaf renders claude-api/<model>, and displayIdentity is its only producer", () => {
-  const model = "claude-haiku-4-5-20251001";
-  const row = { id: "a", model, provider: "claude", billing: "api", state: "ok" };
-  equal(displayIdentity(row), `claude-api/${model}`);
-  equal(displayIdentity(row, [row]), `claude-api/${model}`, "the billed prefix outranks the provider-ambiguity rule");
-
-  const rendered = renderRoster({ title: "t", tasks: [row], now: 1000, startedMs: 0, maxLines: null });
-  ok(rendered.includes(`claude-api/${model}`), rendered);
-
-  const cli = readFileSync(new URL("../scripts/swarm.mjs", import.meta.url), "utf8");
-  ok(!/function\s+displayModel\s*\(/.test(cli), "scripts/swarm.mjs must import displayIdentity instead of carrying a second display rule");
 });

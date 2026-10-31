@@ -242,22 +242,3 @@ test("write guard: the emitted command actually denies when a shell runs it", as
     equal(out.hookSpecificOutput.permissionDecision, "deny", "a write outside it is denied");
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
-
-// --settings env is a second, higher-precedence route into the leaf environment than
-// the child env swarm passes. A billed task could use it to displace the key, or to
-// restore the routing vars the billed lane clears — both silently bill the subscription.
-test("a billed task's settings.env may not name ANTHROPIC_API_KEY or a routing var", () => {
-  const dir = tmp();
-  try {
-    for (const key of ["ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL",
-      "CLAUDE_CODE_USE_BEDROCK", "CLAUDE_CODE_USE_VERTEX", "CLAUDE_CODE_USE_FOUNDRY"]) {
-      const p = writeManifest(dir, { tasks: [claudeTask({ billing: "api", settings: { env: { [key]: "x" } } })] }, `${key}.json`);
-      const errs = errorsOf(() => loadManifest(p, CFG, dir));
-      ok(errs.some((e) => e.includes("settings.env") && e.includes(key)), `${key}: ${errs.join("\n")}`);
-    }
-
-    // A non-billed task may still set them: only the billed lane owns that precedence.
-    const okPath = writeManifest(dir, { tasks: [claudeTask({ settings: { env: { ANTHROPIC_BASE_URL: "http://127.0.0.1:1" } } })] }, "unbilled.json");
-    deepEqual(loadManifest(okPath, CFG, dir).tasks[0].settings, { env: { ANTHROPIC_BASE_URL: "http://127.0.0.1:1" } });
-  } finally { rmSync(dir, { recursive: true, force: true }); }
-});
