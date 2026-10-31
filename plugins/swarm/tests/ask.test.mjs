@@ -480,10 +480,12 @@ test("an ask carries billing onto a clone and the digest, and drops it on a non-
       const lines = readFileSync(join(dir, "run.log"), "utf8").trim().split("\n").map((line) => JSON.parse(line));
       return lines.filter((line) => line.event === "run-start").at(-1);
     };
-    const ask = (taskId, extra = {}) => askLeaf({
-      resultsDir: dir, taskId, question: "?", cfg: CFG,
-      io: makeIo(fakeSpawnFactory(() => ({ output: STREAM }))), ...extra,
-    });
+    const ask = (taskId, extra = {}) => {
+      const io = makeIo(fakeSpawnFactory(() => ({ output: STREAM })));
+      // Asking a billed leaf spends credit, so the preflight wants its key.
+      io.env = { ...io.env, SWARM_ANTHROPIC_API_KEY: "sk-test" };
+      return askLeaf({ resultsDir: dir, taskId, question: "?", cfg: CFG, io, ...extra });
+    };
 
     await ask("fix[0]");
     equal(lastStart().tasks.find((t) => t.id === "fix[0]").billing, "api", "a clone's rebuilt task must keep the lane it ran on");
