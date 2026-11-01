@@ -26,7 +26,7 @@ export function shortArg(input) {
   return flat.length > ARG_MAX ? flat.slice(0, ARG_MAX - 1) + "…" : flat;
 }
 
-function readSessionFile(stateDir, sessionId) {
+export function readSessionFile(stateDir, sessionId) {
   if (typeof sessionId !== "string" || !SESSION_ID_RE.test(sessionId)) return null;
   const file = join(stateDir, "remote-sessions", `${sessionId}.json`);
   if (!existsSync(file)) return null;

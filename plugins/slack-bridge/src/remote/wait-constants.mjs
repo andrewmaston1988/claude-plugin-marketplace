@@ -31,3 +31,9 @@ export function waitCommand(peerId, { configPath } = {}) {
   if (configPath && configPath !== defaultConfigPath()) cmd += ` --config "${configPath}"`;
   return cmd;
 }
+
+// hooks.json's rewake-hook `timeout` (7200 s), pinned by a test. The harness
+// kills a hook at its timeout silently — no wake, the message stranded — so the
+// cap must clear it by more than one worst loop iteration: a window plus its
+// abort slack (65 s), ensureBroker's retries (~6 s) and a full backoff (30 s).
+export const HOOK_TIMEOUT_MS = 7_200_000;
