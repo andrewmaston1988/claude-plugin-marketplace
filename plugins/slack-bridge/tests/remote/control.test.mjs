@@ -252,3 +252,136 @@ test("DM-seize refuses when the operator has no DM with the bot yet", async (t) 
   assert.equal(r.body.ok, false);
   assert.match(r.body.error, /no DM/);
 });
+
+// ── Seize and release lines, and the history record ─────────────────────────
+// Every state change is a Slack attachment carrying the session GUID, so the
+// channel history reads back as a timeline of what held it and when.
+
+const GREEN = "#2eb67d";
+const YELLOW = "#ecb22e";
+const lineOf = (web, kind) => web.calls.find(([c, p]) => c === "chatPostMessage"
+  && (p.attachments ?? []).some((a) => a.color === kind));
+
+test("/claim posts the green seized line with the session GUID", async (t) => {
+  const web = makeWeb();
+  const { call } = await startControl(t, { web });
+  const r = await call("/claim", { peer_id: "peerA", session_id: "sess-abc", name: "demo" });
+  assert.equal(r.body.ok, true, JSON.stringify(r.body));
+  const line = lineOf(web, GREEN);
+  assert.ok(line, `no green attachment: ${JSON.stringify(web.calls)}`);
+  assert.equal(line[1].channel, "C-new");
+  assert.equal(line[1].attachments[0].text, "▶️ Claude session `sess-abc` seized this channel");
+});
+
+test("/release posts the yellow released line with the session GUID", async (t) => {
+  const web = makeWeb();
+  const { call } = await startControl(t, { web });
+  await call("/claim", { peer_id: "peerA", session_id: "sess-abc" });
+  const r = await call("/release", { peer_id: "peerA" });
+  assert.equal(r.body.ok, true);
+  const line = lineOf(web, YELLOW);
+  assert.ok(line, `no yellow attachment: ${JSON.stringify(web.calls)}`);
+  assert.equal(line[1].channel, "C-new");
+  assert.equal(line[1].attachments[0].text, "⏸️ Claude session `sess-abc` released this channel");
+});
+
+test("/release with no live claim posts nothing", async (t) => {
+  const web = makeWeb();
+  const { call } = await startControl(t, { web });
+  const r = await call("/release", { peer_id: "peerX" });
+  assert.equal(r.body.ok, true);
+  assert.ok(!lineOf(web, YELLOW), "nothing to announce");
+});
+
+test("a failed seize line does not fail the claim", async (t) => {
+  const web = makeWeb();
+  web.chatPostMessage = async (p) => { web.calls.push(["chatPostMessage", p]); throw new Error("channel_not_found"); };
+  const logged = [];
+  const { call, claims } = await startControl(t, { web, log: (msg, extra) => logged.push([msg, extra]) });
+  const r = await call("/claim", { peer_id: "peerA", session_id: "sess-abc" });
+  assert.equal(r.body.ok, true, "the claim stands even when the line cannot be posted");
+  assert.equal(claims.get("C-new").peer_id, "peerA");
+  assert.ok(logged.some(([m]) => /seize line/i.test(m)), JSON.stringify(logged));
+});
+
+// The record outlives the claim and supplies the GUID for the red block, so it
+// must exist BEFORE the claim does — a claim without one is a channel that
+// silently loses its no-spawn rule.
+test("/claim writes the history record before the claim", async (t) => {
+  const store = createClaimsStore({ path: path.join(fs.mkdtempSync(path.join(os.tmpdir(), "ctrl-")), "claims.json") });
+  const seenAtClaim = [];
+  const wrapped = {
+    ...store,
+    claim(peerId, channel, opts) {
+      seenAtClaim.push(store.history(channel));
+      return store.claim(peerId, channel, opts);
+    },
+  };
+  const { call } = await startControl(t, { claims: wrapped });
+  const r = await call("/claim", { peer_id: "peerA", session_id: "sess-abc", name: "demo" });
+  assert.equal(r.body.ok, true);
+  assert.deepEqual(seenAtClaim, [{ session_id: "sess-abc", channel_name: "rc-demo" }]);
+});
+
+// ── Re-seize reuses the channel ─────────────────────────────────────────────
+
+function memberWeb({ channels = [], lookupError = null } = {}) {
+  let creates = 0;
+  const web = makeWeb();
+  const create = web.conversationsCreate;
+  web.conversationsCreate = async (p) => {
+    creates++;
+    if (creates === 1) {
+      const e = new Error(`name_taken: ${p.name}`);
+      e.slackError = "name_taken";
+      web.calls.push(["conversationsCreate", p]);
+      throw e;
+    }
+    return create(p);
+  };
+  web.usersConversations = async (p) => {
+    web.calls.push(["usersConversations", p]);
+    if (lookupError) throw lookupError;
+    return { ok: true, channels };
+  };
+  return web;
+}
+
+test("name_taken with a claimable member channel reuses it: no suffix, one create call", async (t) => {
+  const web = memberWeb({ channels: [{ id: "C-old", name: "rc-demo", is_member: true }] });
+  const { call, claims } = await startControl(t, { web });
+  const r = await call("/claim", { peer_id: "peerA", name: "demo" });
+  assert.equal(r.body.ok, true, JSON.stringify(r.body));
+  assert.equal(r.body.channel, "C-old", "the existing channel is reused");
+  assert.equal(r.body.channel_name, "rc-demo", "and keeps its name");
+  assert.equal(web.calls.filter(([c]) => c === "conversationsCreate").length, 1, "no suffix create");
+  assert.equal(claims.get("C-old").peer_id, "peerA");
+});
+
+test("name_taken with a held channel takes the next suffix and never claims the held one", async (t) => {
+  const web = memberWeb({ channels: [{ id: "C-held", name: "rc-demo", is_member: true }] });
+  const claims = createClaimsStore({ path: path.join(fs.mkdtempSync(path.join(os.tmpdir(), "ctrl-")), "claims.json") });
+  claims.claim("peerOther", "C-held", { channelName: "rc-demo" });
+  const { call } = await startControl(t, { web, claims });
+  const r = await call("/claim", { peer_id: "peerA", name: "demo" });
+  assert.equal(r.body.ok, true, JSON.stringify(r.body));
+  assert.equal(r.body.channel_name, "rc-demo-2", "the suffix is taken instead");
+  assert.equal(claims.get("C-held").peer_id, "peerOther", "the held channel is untouched");
+});
+
+test("a lookup failure falls through to the suffix and the seize succeeds", async (t) => {
+  const web = memberWeb({ lookupError: Object.assign(new Error("missing_scope"), { slackError: "missing_scope" }) });
+  const { call } = await startControl(t, { web });
+  const r = await call("/claim", { peer_id: "peerA", name: "demo" });
+  assert.equal(r.body.ok, true, JSON.stringify(r.body));
+  assert.equal(r.body.channel_name, "rc-demo-2");
+});
+
+test("a reused channel still gets its topic and operator invite", async (t) => {
+  const web = memberWeb({ channels: [{ id: "C-old", name: "rc-demo", is_member: true }] });
+  const { call } = await startControl(t, { web, operatorUserId: "U-operator" });
+  const r = await call("/claim", { peer_id: "peerA", name: "demo" });
+  assert.equal(r.body.ok, true);
+  assert.ok(web.calls.some(([c, p]) => c === "conversationsSetTopic" && p.channel === "C-old"), JSON.stringify(web.calls));
+  assert.ok(web.calls.some(([c, p]) => c === "conversationsInvite" && p.channel === "C-old" && p.users === "U-operator"));
+});
