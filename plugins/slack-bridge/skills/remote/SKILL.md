@@ -31,7 +31,7 @@ If the operator has named the chat and the harness recorded it, your `name` is i
 
 It returns the channel name, e.g. `Slack remote ready: #rc-slack-bridge-remote-control — live session a1b2c3d4`. Report the channel name to the operator verbatim — tell them to DM it from a second device — then end your turn. There is nothing to arm or run.
 
-If `slack_seize` is unavailable (the `slack-bridge-remote` MCP server isn't wired user-scoped), report that and stop — see "If the tool is missing" below. If it fails because no Claude session id was available, the claim has already been released; report the error.
+If `slack_seize` is unavailable (the `slack-bridge-remote` MCP server isn't wired user-scoped), report that and stop — see "If the tool is missing" below. If it fails because no Claude session id was available, it also tried to release the claim; the error says whether that worked — report it, and if the release failed, call `slack_release`.
 
 ## Receiving messages
 
@@ -48,7 +48,7 @@ Notes:
 
 - A message sent while you are mid-turn arrives when the turn ends.
 - After about 1 h 55 m with no message, the waiter wakes you once with `Slack waiter expired after <h>h. Nothing to do; end your turn and it restarts.` Do exactly that: end the turn.
-- `WAIT FAILED: ...` means the broker refused the waiter (a 401 names `remote.controlToken`). Report it to the operator; the next turn retries.
+- `WAIT FAILED: ...` means the waiter could not start (a bad config) or the broker refused it (a 401 names `remote.controlToken`). Report it to the operator. That failure already woke you once; the waiter then stays quiet for 10 minutes before it tries again, so fix what you can in this turn.
 - If you suspect a message went missing, `check_messages` still works — it takes anything queued for this session.
 - `/clear` changes the session id and ends remote control: messages queue and nothing wakes you. Seize again to recover.
 

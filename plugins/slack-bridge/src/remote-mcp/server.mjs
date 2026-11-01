@@ -249,10 +249,13 @@ export function createRemoteMcpServer({
         const name = readSessionName(_cwd, read) || args.name || readSessionAiTitle(_cwd, read) || null;
         const r = await controlFetch("/claim", { peer_id: myId, channel: args.channel ?? null, name });
         // No mapping, no waiter: the Stop hook finds the claim by session id, so
-        // without one the operator would be talking to nobody. Undo the claim.
+        // without one the operator would be talking to nobody. Undo the claim,
+        // and say only what the release actually did — a failed /release leaves
+        // the claim live, so claiming otherwise sends the operator away wrong.
         if (!writeSessionMapping(myId, r.channel)) {
-          await controlFetch("/release", { peer_id: myId }).catch(() => {});
-          return errText("Seize failed", "no Claude session id was available, so no Stop hook could deliver Slack messages to this session. The claim was released.");
+          const released = await controlFetch("/release", { peer_id: myId }).then(() => true, () => false);
+          return errText("Seize failed", "no Claude session id was available, so no Stop hook could deliver Slack messages to this session. " +
+            (released ? "The claim was released." : "The claim could not be released — it may still be held; call slack_release."));
         }
         const label = r.is_dm ? "your DM with the bot" : r.channel_name ? "#" + r.channel_name : r.channel;
         const message = "Slack remote ready: " + label + (r.topic ? " — " + r.topic : "") + ". Nothing to arm: end your turn and the Stop hook listens. Each Slack message wakes this session with a hook reminder that starts: " + PRIMING_LINE;

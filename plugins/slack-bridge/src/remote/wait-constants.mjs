@@ -16,3 +16,7 @@ export const WAIT_CAP_MS = 6_900_000;
 // cap must clear it by more than one worst loop iteration: a window plus its
 // abort slack (65 s), ensureBroker's retries (~6 s) and a full backoff (30 s).
 export const HOOK_TIMEOUT_MS = 7_200_000;
+
+// After a WAIT FAILED wake the hook stays silent this long, so a deterministic
+// failure (a rotated token, a bad config) cannot burn a turn on every Stop.
+export const FAILURE_COOLDOWN_MS = 600_000;

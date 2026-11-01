@@ -7,7 +7,8 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { runRewakeHook } from "../../src/remote/rewake-hook.mjs";
-import { HOOK_TIMEOUT_MS, WAIT_CAP_MS, WAIT_WINDOW_MS } from "../../src/remote/wait-constants.mjs";
+import { PRIMING_LINE } from "../../src/remote/waiter.mjs";
+import { FAILURE_COOLDOWN_MS, HOOK_TIMEOUT_MS, WAIT_CAP_MS, WAIT_WINDOW_MS } from "../../src/remote/wait-constants.mjs";
 
 const SID = "sess-1";
 const PEER = "peer-a";
@@ -24,7 +25,16 @@ function setup(t, { claimed = true } = {}) {
     fs.writeFileSync(sessionFile, JSON.stringify({ peerId, configPath, channel: "rc-test" }));
   };
   if (claimed) claim();
-  return { stateDir, configPath, sessionFile, claim };
+  // The repeat-failure marker: a WAIT FAILED wake leaves one behind, and a fresh
+  // one silences the next Stops so a deterministic failure cannot burn turns.
+  const failureMarker = path.join(stateDir, "remote-sessions", `${SID}.failed`);
+  const failAt = (mtimeMs) => {
+    fs.writeFileSync(failureMarker, "");
+    const d = new Date(mtimeMs);
+    fs.utimesSync(failureMarker, d, d);
+  };
+  const failAged = (ageMs) => failAt(Date.now() - ageMs);
+  return { stateDir, configPath, sessionFile, claim, failureMarker, failAged, failAt };
 }
 
 function fakeClient({ peers = [PEER], fail = false, healthThrows = false } = {}) {
@@ -44,7 +54,7 @@ function fakeClient({ peers = [PEER], fail = false, healthThrows = false } = {})
   };
 }
 
-function run(env, { client = fakeClient(), raw, loads, creates, runner = async () => 0, signal } = {}) {
+function run(env, { client = fakeClient(), raw, loads, creates, runner = async () => 0, signal, now } = {}) {
   return runRewakeHook({
     raw: raw ?? JSON.stringify({ session_id: SID, hook_event_name: "Stop" }),
     stateDir: env.stateDir,
@@ -52,6 +62,7 @@ function run(env, { client = fakeClient(), raw, loads, creates, runner = async (
     _createClient: (opts) => { creates?.push(opts); return client; },
     _runWaiter: runner,
     _signal: signal,
+    _now: now,
   });
 }
 
@@ -97,6 +108,71 @@ test("bad JSON on stdin → 0", async (t) => {
   const loads = [];
   assert.equal(await run(env, { raw: "{not json", loads }), 0);
   assert.deepEqual(loads, []);
+});
+
+// --- repeat-failure guard: a deterministic failure wakes once, then stays quiet ---
+
+test("a fresh failure marker → 0 with no config load and no broker call", async (t) => {
+  const env = setup(t);
+  env.failAged(60_000);
+  const loads = [];
+  const creates = [];
+  let ran = 0;
+  const code = await run(env, { loads, creates, runner: async () => { ran++; return 2; } });
+  assert.equal(code, 0, "a repeat failure must not wake the session again");
+  assert.deepEqual(loads, []);
+  assert.deepEqual(creates, []);
+  assert.equal(ran, 0);
+});
+
+test("the marker expires with the injected clock, then the waiter runs again", async (t) => {
+  const env = setup(t);
+  const markerAt = Date.now() - 5_000;
+  env.failAt(markerAt);
+  const loads = [];
+  const { seen, runner } = capture();
+  const code = await run(env, {
+    loads,
+    runner: async (o) => { await runner(o); return 2; },
+    now: () => markerAt + FAILURE_COOLDOWN_MS,
+  });
+  assert.equal(code, 2);
+  assert.equal(seen.peerId, PEER);
+  assert.deepEqual(loads, [env.configPath]);
+});
+
+test("an aged marker under the cooldown still suppresses the wake", async (t) => {
+  const env = setup(t);
+  const markerAt = Date.now() - 5_000;
+  env.failAt(markerAt);
+  let ran = 0;
+  const code = await run(env, {
+    runner: async () => { ran++; return 2; },
+    now: () => markerAt + FAILURE_COOLDOWN_MS - 1,
+  });
+  assert.equal(code, 0);
+  assert.equal(ran, 0);
+});
+
+test("a WAIT FAILED outcome writes the failure marker", async (t) => {
+  const env = setup(t);
+  const code = await run(env, { runner: async ({ out }) => { await out("WAIT FAILED: broker rejected the token (401)\n"); return 2; } });
+  assert.equal(code, 2);
+  assert.ok(fs.existsSync(env.failureMarker), "a failure that wakes must leave a marker");
+});
+
+test("a message wake does not write the failure marker", async (t) => {
+  const env = setup(t);
+  const code = await run(env, { runner: async ({ out }) => { await out(`${PRIMING_LINE}\nSLACK: hi\n`); return 2; } });
+  assert.equal(code, 2);
+  assert.equal(fs.existsSync(env.failureMarker), false);
+});
+
+test("an expiry wake does not write the failure marker", async (t) => {
+  const env = setup(t);
+  const code = await run(env, { runner: async ({ out }) => { await out("Slack waiter expired after 1.9h. Nothing to do; end your turn and it restarts.\n"); return 2; } });
+  assert.equal(code, 2);
+  assert.equal(fs.existsSync(env.failureMarker), false);
 });
 
 test("claimed → runs the waiter for the claim's peer with the claim's config, returns its code", async (t) => {
@@ -150,6 +226,7 @@ test("a load failure after the claim is found writes WAIT FAILED and wakes (2)",
     assert.deepEqual(io.errs, [`WAIT FAILED: ${label === "prepareBroker" ? "bridge down" : label === "config load" ? "bad config" : "no port"}\n`], label);
     assert.deepEqual(io.outs, [], label);
     assert.equal(ran, 0, label);
+    assert.ok(fs.existsSync(env.failureMarker), `${label}: a failure that wakes must leave a marker`);
   }
 });
 
@@ -202,6 +279,16 @@ test("a listPeers failure leaves stillNeeded true", async (t) => {
   const { seen, runner } = capture();
   await run(env, { runner, client: fakeClient({ fail: true }) });
   assert.equal(await seen.stillNeeded(), true);
+});
+
+test("the docs carry the exact priming line the waiter sends", () => {
+  const docs = {
+    "README.md": fileURLToPath(new URL("../../README.md", import.meta.url)),
+    "skills/remote/SKILL.md": fileURLToPath(new URL("../../skills/remote/SKILL.md", import.meta.url)),
+  };
+  for (const [label, file] of Object.entries(docs)) {
+    assert.ok(fs.readFileSync(file, "utf8").includes(PRIMING_LINE), `${label} has drifted from waiter.mjs PRIMING_LINE`);
+  }
 });
 
 test("hooks.json Stop runs rewake-hook with asyncRewake, and its timeout matches HOOK_TIMEOUT_MS", () => {

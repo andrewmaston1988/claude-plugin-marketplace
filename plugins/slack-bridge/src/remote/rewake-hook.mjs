@@ -3,14 +3,43 @@
 // idle session with the waiter's stderr as a system reminder; the turn that wake
 // runs ends in another Stop, which starts the next waiter. The broker's /wait
 // supersede keeps it single-flight when a Stop fires with a waiter still open.
+import { mkdirSync, renameSync, statSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { getPaths } from "../paths.mjs";
 import { loadConfig } from "../config.mjs";
 import { createBrokerClient } from "./broker-client.mjs";
 import { readSessionFile } from "./stop-hook.mjs";
 import { runWaiter, prepareBroker, writeTo } from "./waiter.mjs";
+import { FAILURE_COOLDOWN_MS } from "./wait-constants.mjs";
 
 // asyncRewake hands stderr to the model; stdout goes nowhere it can read.
 const stderrOut = (s) => writeTo(process.stderr, s);
+
+// A deterministic failure (a rotated token, a bad config) would otherwise wake
+// the session on every Stop: the wake's own turn ends in another Stop, which
+// fails the same way, forever. The marker records the last such wake.
+const failureMarkerPath = (stateDir, sessionId) => join(stateDir, "remote-sessions", `${sessionId}.failed`);
+
+// Atomic so a concurrent Stop never reads a half-written marker as absent.
+function writeFailureMarker(stateDir, sessionId) {
+  const destination = failureMarkerPath(stateDir, sessionId);
+  const tmp = `${destination}.tmp`;
+  try {
+    mkdirSync(dirname(destination), { recursive: true });
+    writeFileSync(tmp, "");
+    renameSync(tmp, destination);
+  } catch {
+    // An unwritable marker must not cost the wake itself.
+  }
+}
+
+function recentlyFailed(stateDir, sessionId, now) {
+  try {
+    return now - statSync(failureMarkerPath(stateDir, sessionId)).mtimeMs < FAILURE_COOLDOWN_MS;
+  } catch {
+    return false;
+  }
+}
 
 export async function runRewakeHook({
   raw,
@@ -19,6 +48,7 @@ export async function runRewakeHook({
   _createClient = createBrokerClient,
   _runWaiter = runWaiter,
   _signal = AbortSignal.timeout,
+  _now = () => Date.now(),
 }) {
   let input, session;
   // Absent file = no claim held: exit before any config load or broker call,
@@ -30,6 +60,18 @@ export async function runRewakeHook({
     return 0;
   }
   if (!session) return 0;
+
+  // A recent failure already woke a turn; another Stop inside the cooldown would
+  // fail identically. Stay silent and try again once it lapses.
+  if (recentlyFailed(stateDir, input.session_id, _now())) return 0;
+
+  // The waiter's own wake text is the signal: a WAIT FAILED line means the next
+  // Stop would repeat the failure, so this run leaves the marker behind.
+  let failed = false;
+  const out = (s) => {
+    if (String(s).startsWith("WAIT FAILED")) failed = true;
+    return stderrOut(s);
+  };
 
   // A load failure after the claim is found must wake the session: exiting
   // silently would leave the operator's claim deaf until their next turn.
@@ -43,7 +85,8 @@ export async function runRewakeHook({
     });
     await prepareBroker({ client });
   } catch (e) {
-    await stderrOut(`WAIT FAILED: ${e?.message ?? e}\n`).catch(() => {});
+    await out(`WAIT FAILED: ${e?.message ?? e}\n`).catch(() => {});
+    writeFailureMarker(stateDir, input.session_id);
     return 2;
   }
 
@@ -63,5 +106,7 @@ export async function runRewakeHook({
     return peers.some((p) => p.id === session.peerId);
   };
 
-  return _runWaiter({ peerId: session.peerId, client, stillNeeded, out: stderrOut });
+  const code = await _runWaiter({ peerId: session.peerId, client, stillNeeded, out });
+  if (failed) writeFailureMarker(stateDir, input.session_id);
+  return code;
 }

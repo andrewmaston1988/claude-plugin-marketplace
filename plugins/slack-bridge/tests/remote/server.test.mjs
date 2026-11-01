@@ -146,7 +146,7 @@ function tmpState() {
   return path.join(fs.mkdtempSync(path.join(os.tmpdir(), "slack-remote-mcp-")), "state.json");
 }
 
-async function serverWithBroker(t, { sessionId = "session-123", sessionReader = () => ({ sessionId }), projectsDir = tmpProjectsDir(), cwd = process.cwd(), claims = [], releases = [] } = {}) {
+async function serverWithBroker(t, { sessionId = "session-123", sessionReader = () => ({ sessionId }), projectsDir = tmpProjectsDir(), cwd = process.cwd(), claims = [], releases = [], releaseFails = false } = {}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "slack-remote-mcp-state-"));
   const stateDir = path.join(root, "state");
   const broker = createBroker({ stateFile: tmpState() });
@@ -162,6 +162,7 @@ async function serverWithBroker(t, { sessionId = "session-123", sessionReader = 
       if (url.endsWith("/claim")) claims.push(JSON.parse(options.body));
       if (url.endsWith("/claim")) return new Response(JSON.stringify({ ok: true, channel: "C123", channel_name: "test" }));
       if (url.endsWith("/release")) releases.push(JSON.parse(options.body));
+      if (url.endsWith("/release") && releaseFails) return new Response(JSON.stringify({ ok: false, error: "control /release: 500" }), { status: 500 });
       if (url.endsWith("/release")) return new Response(JSON.stringify({ ok: true }));
       return fetch(url, options);
     },
@@ -205,6 +206,20 @@ test("slack_seize with no session id releases the claim and returns an error", a
   const result = await server._onRequest("tools/call", { name: "slack_seize", arguments: {} });
   assert.equal(result.isError, true, result.content[0].text);
   assert.match(result.content[0].text, /^Seize failed: /);
+  assert.match(result.content[0].text, /The claim was released\./);
+  assert.deepEqual(releases, [{ peer_id: server._myId() }]);
+  assert.equal(fs.existsSync(path.join(stateDir, "remote-sessions")), false);
+});
+
+test("slack_seize with no session id does not claim a release that failed", async (t) => {
+  const releases = [];
+  const { server, stateDir } = await serverWithBroker(t, { sessionReader: () => null, releases, releaseFails: true });
+  const result = await server._onRequest("tools/call", { name: "slack_seize", arguments: {} });
+  const text = result.content[0].text;
+  assert.equal(result.isError, true, text);
+  assert.match(text, /^Seize failed: /);
+  assert.doesNotMatch(text, /The claim was released/, "the awaited /release never resolved");
+  assert.match(text, /could not be released/i, text);
   assert.deepEqual(releases, [{ peer_id: server._myId() }]);
   assert.equal(fs.existsSync(path.join(stateDir, "remote-sessions")), false);
 });
