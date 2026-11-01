@@ -1,4 +1,4 @@
-// Stop / PostToolUse hook: re-arm nudge + live mirror of the turn's text. A
+// Stop / PostToolUse hook: live mirror of the turn's text, question deny. A
 // fake broker client, a tmp stateDir and a fixture transcript — no network.
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -8,7 +8,6 @@ import path from "node:path";
 import { runHook, shortArg, formatQuestion } from "../../src/remote/stop-hook.mjs";
 import { mdToSlack } from "../../src/markdown/index.mjs";
 import { createBrokerClient } from "../../src/remote/broker-client.mjs";
-import { waitCommand, BASH_TIMEOUT_MS } from "../../src/remote/wait-constants.mjs";
 
 const SID = "sess-1";
 const PEER = "peer-a";
@@ -76,20 +75,18 @@ async function prime(env) {
 
 const textSends = (c) => c.sends.filter((s) => s.kind === "text");
 
-// --- re-arm decision ---
+// --- no re-arm decision: the asyncRewake hook owns the waiter ---
 
-test("claim held + not armed → block whose reason carries the waitCommand", async (t) => {
-  const env = setup(t);
-  const out = await hook(env, fakeClient({ armed: [false] }));
-  assert.equal(out?.decision, "block");
-  assert.ok(out.reason.includes(waitCommand(PEER, { configPath: env.configPath })), out.reason);
-  assert.ok(out.reason.includes(String(BASH_TIMEOUT_MS)));
-  assert.match(out.reason, /#rc-test/);
-});
-
-test("claim held + armed → allow", async (t) => {
-  const env = setup(t);
-  assert.equal(await hook(env, fakeClient({ armed: [true] })), null);
+test("Stop never returns a block, claimed or not, with no peer armed", async (t) => {
+  for (const claimed of [true, false]) {
+    for (const peerRow of [true, false]) {
+      const env = setup(t, { claimed });
+      const client = fakeClient({ armed: [false], peerRow });
+      assert.equal(await hook(env, client), null, `claimed=${claimed} peerRow=${peerRow}`);
+      assert.equal(await hook(env, client, { active: true }), null, `retried stop, claimed=${claimed}`);
+      assert.equal(client.listCalls, 0, "Stop never asks the broker whether a waiter is armed");
+    }
+  }
 });
 
 test("unknown session_id (no remote-sessions file) → allow, no config load, no broker client (A4)", async (t) => {
@@ -115,10 +112,12 @@ test("non-default configPath in the remote-sessions file → hook authenticates 
     tokens: { bot: "xoxb", app: "xapp" }, claude: { cwd: "." },
     remote: { brokerPort: 45678, controlToken: "custom-token" },
   }));
+  await prime(env);
+  env.append(textEntry("a1", "authed text"));
   const seen = [];
   const _fetch = async (url, init) => {
     seen.push({ url, auth: init.headers?.Authorization });
-    return new Response(JSON.stringify([{ id: PEER, armed: true }]), { status: 200 });
+    return new Response(JSON.stringify({ ok: true }), { status: 200 });
   };
   const out = await runHook({
     raw: JSON.stringify({ session_id: SID, transcript_path: env.transcript, hook_event_name: "Stop" }),
@@ -127,51 +126,19 @@ test("non-default configPath in the remote-sessions file → hook authenticates 
     _sleep: async () => {},
   });
   assert.equal(out, null);
-  const list = seen.find((s) => s.url.endsWith("/list-peers"));
-  assert.ok(list, JSON.stringify(seen));
-  assert.equal(list.auth, "Bearer custom-token");
-  assert.match(list.url, /:45678\//);
+  const send = seen.find((s) => s.url.endsWith("/send-message"));
+  assert.ok(send, JSON.stringify(seen));
+  assert.equal(send.auth, "Bearer custom-token");
+  assert.match(send.url, /:45678\//);
 });
 
-test("not armed at first, armed on the 2nd re-check → allow (A3)", async (t) => {
-  const env = setup(t);
-  const sleeps = [];
-  const client = fakeClient({ armed: [false, false, true] });
-  assert.equal(await hook(env, client, { sleeps }), null);
-  assert.equal(client.listCalls, 3);
-  assert.deepEqual(sleeps, [500, 500]);
-});
-
-test("never armed → re-checks every 500 ms for 3 s, then blocks (A3)", async (t) => {
-  const env = setup(t);
-  const sleeps = [];
-  const client = fakeClient({ armed: [false] });
-  const out = await hook(env, client, { sleeps });
-  assert.equal(out?.decision, "block");
-  assert.equal(client.listCalls, 7);
-  assert.equal(sleeps.reduce((a, b) => a + b, 0), 3000);
-});
-
-test("peer row gone from the broker → allow (the claim is dead, the command would be wrong)", async (t) => {
-  const env = setup(t);
-  assert.equal(await hook(env, fakeClient({ peerRow: false })), null);
-});
-
-test("stop_hook_active while unarmed → still blocks, and that turn's text is still mirrored (B1)", async (t) => {
+test("stop_hook_active → that turn's text is still mirrored (B1)", async (t) => {
   const env = setup(t);
   await prime(env);
   env.append(textEntry("a1", "retried stop text"));
   const client = fakeClient({ armed: [false] });
-  const sleeps = [];
-  const out = await hook(env, client, { active: true, sleeps });
-  assert.equal(out?.decision, "block", "a retried stop is not waved through");
-  assert.equal(client.listCalls, 7, "the whole 3 s re-check runs on a retried stop");
+  assert.equal(await hook(env, client, { active: true }), null);
   assert.deepEqual(textSends(client).map((s) => s.text), ["retried stop text"]);
-});
-
-test("stop_hook_active with a live waiter → allow (B1)", async (t) => {
-  const env = setup(t);
-  assert.equal(await hook(env, fakeClient({ armed: [true] }), { active: true }), null);
 });
 
 test("broker unreachable → allow, never throws", async (t) => {
@@ -317,13 +284,13 @@ test("mirror: a re-seize (remote-sessions file rewritten) restarts the cursor �
   assert.equal(env.cursor(), "a1");
 });
 
-test("mirror sends even when the same stop also blocks for re-arm", async (t) => {
+test("mirror sends on a Stop with no waiter armed", async (t) => {
   const env = setup(t);
   await prime(env);
   env.append(textEntry("a1", "reply text"));
   const client = fakeClient({ armed: [false] });
   const out = await hook(env, client);
-  assert.equal(out?.decision, "block");
+  assert.equal(out, null);
   assert.deepEqual(textSends(client).map((s) => s.text), ["reply text"]);
 });
 
