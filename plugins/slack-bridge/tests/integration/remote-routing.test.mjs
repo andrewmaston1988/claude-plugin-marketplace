@@ -82,6 +82,14 @@ function makeFakeBroker({ alive = new Set(), failWaits = 0 } = {}) {
       if (!inbox.has(peerId)) inbox.set(peerId, []);
       inbox.get(peerId).push(message);
     },
+    // One /wait response carrying several messages: the loop dispatches them in
+    // parallel, which is the race the single-flight open has to survive.
+    deliverAll(peerId, messages) {
+      const wake = waiters.get(peerId);
+      if (wake) { waiters.delete(peerId); wake(messages); return; }
+      if (!inbox.has(peerId)) inbox.set(peerId, []);
+      inbox.get(peerId).push(...messages);
+    },
     wait(id, timeoutMs, { signal } = {}) {
       broker.waitCalls++;
       if (failures > 0) { failures--; return Promise.reject(new TypeError("fetch failed")); }
@@ -105,7 +113,7 @@ function makePayload({ channel, text = "", subtype, client_msg_id }) {
 
 // One routed/claimed channel with a live peer, a started reply loop, and the
 // injected heartbeat — everything a routing test needs. `t.after` stops the loop.
-function setup(t, { replyTimeoutMs = 3000, claims: preClaims = [], alive: aliveOverride } = {}) {
+function setup(t, { replyTimeoutMs = 3000, claims: preClaims = [], alive: aliveOverride, quietGapMs = 1000 } = {}) {
   _resetRouteState();
   const claims = createClaimsStore({ path: tmpClaims() });
   for (const [peer, channel] of preClaims) claims.claim(peer, channel);
@@ -116,7 +124,7 @@ function setup(t, { replyTimeoutMs = 3000, claims: preClaims = [], alive: aliveO
   const hb = makeHeartbeat(web.calls);
   const log = makeLog();
   const config = { slack: {}, claude: { cwd: "/tmp", timeout: 1000 }, remote: { replyTimeoutMs } };
-  const loop = startReplyLoop({ broker, claims, web, log, _sleep: async () => {} });
+  const loop = startReplyLoop({ broker, claims, web, config, log, _sleep: async () => {}, _quietGapMs: quietGapMs, _startHeartbeat: hb.start });
   t.after(() => loop.stop());
   // ONE queue for the whole test, as the bridge has: it is the serialisation the
   // "a routed message must not hold the channel queue" case depends on.
@@ -144,6 +152,10 @@ async function waitFor(pred, timeoutMs = 3000) {
   throw new Error("waitFor timed out");
 }
 const hasPost = (web, needle) => web.calls.some(([t, p]) => t === "post" && typeof p.text === "string" && p.text.includes(needle));
+// The state blocks are attachments, so a plain-text search misses them.
+const posted = (web, needle) => web.calls.some(([t, p]) => t === "post"
+  && (String(p.text ?? "").includes(needle)
+    || (p.attachments ?? []).some((a) => String(a.text ?? "").includes(needle))));
 const hasUpdate = (web, needle) => web.calls.some(([t, p]) => t === "update" && typeof p.text === "string" && p.text.includes(needle));
 const idxOf = (web, pred) => web.calls.findIndex(pred);
 
@@ -213,16 +225,57 @@ test("heartbeat stops before the reply lands (no heartbeat update after the repl
   assert.ok(stopIdx >= 0 && stopIdx < replyIdx, "stop() must land before the reply update, or a heartbeat tick clobbers it");
 });
 
-test("reply timeout → 'didn't reply in time' posted, heartbeat stopped, claim retained", async (t) => {
+// ── Soft timeout and ceiling ─────────────────────────────────────────────────
+
+const NO_REPLY_RE = /^No reply after \d+m\. Your message stays queued\.$/;
+
+test("at replyTimeoutMs the placeholder is NOT replaced — the status softens to 'Still working' and the heartbeat runs on", async (t) => {
   const s = setup(t, { claims: [["peerC", "C3"]], replyTimeoutMs: 200 });
   const rc = makeRunClaude();
   await slack(s, makePayload({ channel: "C3", text: "hello", client_msg_id: "m-route-4" }), { runClaude: rc });
+  const placeholderTs = placeholderTss(s.web)[0];
 
-  await waitFor(() => hasUpdate(s.web, "didn't reply"), 3000);
+  await waitFor(() => s.hb.instances[0].statuses.length === 1, 3000);
 
-  assert.equal(rc.calls.length, 0, "must not spawn on a claimed+live channel even on timeout");
-  assert.ok(s.claims.get("C3"), "claim must be retained after a reply timeout (peer may be slow, not dead)");
-  assert.equal(s.hb.instances[0].stopped, true, "the timeout branch stops the heartbeat");
+  assert.equal(
+    s.hb.instances[0].statuses[0],
+    "Still working. Your message is queued and arrives when the current turn ends.",
+    "the deadline becomes a status, not an error",
+  );
+  assert.ok(
+    !s.web.calls.some(([ty, p]) => ty === "update" && p.ts === placeholderTs && /didn't reply|_Error:|No reply after/.test(String(p.text ?? ""))),
+    "the placeholder still holds the window — nothing replaced it with an error",
+  );
+  assert.equal(s.hb.instances[0].stopped, false, "the heartbeat keeps running past the soft notice");
+  assert.equal(rc.calls.length, 0, "must not spawn on a claimed+live channel");
+});
+
+test("a reply after the soft notice lands in the original placeholder", async (t) => {
+  const s = setup(t, { claims: [["peerCS", "C-soft"]], replyTimeoutMs: 200 });
+  await slack(s, makePayload({ channel: "C-soft", text: "hello", client_msg_id: "m-soft-reply" }));
+  const placeholderTs = placeholderTss(s.web)[0];
+  await waitFor(() => s.hb.instances[0].statuses.length === 1, 3000);
+
+  s.broker.deliver("slack-bridge", { from_id: "peerCS", text: "the late answer" });
+  await waitFor(() => hasUpdate(s.web, "the late answer"), 4000);
+
+  const reply = s.web.calls.find(([ty, p]) => ty === "update" && p.text === "the late answer")[1];
+  assert.equal(reply.ts, placeholderTs, "the late reply keeps the placeholder the soft notice was showing in");
+});
+
+test("at the ceiling the window closes with the no-reply text and the claim is kept", async (t) => {
+  const s = setup(t, { claims: [["peerCC", "C-ceil"]], replyTimeoutMs: 200 });
+  await slack(s, makePayload({ channel: "C-ceil", text: "hello", client_msg_id: "m-ceil" }));
+
+  await waitFor(
+    () => s.web.calls.some(([ty, p]) => ty === "update" && NO_REPLY_RE.test(String(p.text ?? ""))),
+    6000,
+  );
+
+  const close = s.web.calls.find(([ty, p]) => ty === "update" && NO_REPLY_RE.test(String(p.text ?? "")))[1];
+  assert.equal(close.attachments?.length, 0, "the ceiling closes the block rather than wrapping an error");
+  assert.ok(s.claims.get("C-ceil"), "the claim survives the ceiling — a slow peer is not a dead one");
+  assert.equal(s.hb.instances[0].stopped, true, "the heartbeat stops at the ceiling");
 });
 
 test("send failure → error posted, heartbeat stopped, no window left open", async (t) => {
@@ -377,14 +430,14 @@ test("question → resolves the open window; messages sent while it is pending d
   await slack(s, makePayload({ channel: "C-Q", text: "followups", client_msg_id: "m-q-2" }));
   await waitFor(() => s.broker.sendCalls.length === 2);
   await delay(600);
-  assert.ok(!hasUpdate(s.web, "didn't reply"), "a message sent while a question is pending must not time out");
+  assert.equal(s.hb.instances[1].statuses.length, 0, "a held window gets no soft notice while the dialog is pending");
 
   s.broker.deliver("slack-bridge", { from_id: "peerQ", kind: "status", text: "Bash: git switch" });
-  await waitFor(() => hasUpdate(s.web, "didn't reply"), 3000);
+  await waitFor(() => s.hb.instances[1].statuses.length === 1, 3000);
 });
 
-test("question pending and the session never moves → the held window still times out at the ceiling", async (t) => {
-  const s = setup(t, { claims: [["peerD", "C-D"]], replyTimeoutMs: 50 });
+test("question pending and the session never moves → the held window goes straight to the ceiling, no soft notice", async (t) => {
+  const s = setup(t, { claims: [["peerD", "C-D"]], replyTimeoutMs: 80 });
   await slack(s, makePayload({ channel: "C-D", text: "fix it", client_msg_id: "m-d-1" }));
   await waitFor(() => s.broker.sendCalls.length === 1);
   s.broker.deliver("slack-bridge", { from_id: "peerD", kind: "question", text: "Which branch?" });
@@ -392,7 +445,9 @@ test("question pending and the session never moves → the held window still tim
 
   await slack(s, makePayload({ channel: "C-D", text: "followups", client_msg_id: "m-d-2" }));
   await waitFor(() => s.broker.sendCalls.length === 2);
-  await waitFor(() => hasUpdate(s.web, "didn't reply"), 3000);
+  await delay(300);
+  assert.equal(s.hb.instances[1].statuses.length, 0, "a held window skips the soft notice and arms the ceiling directly");
+  await waitFor(() => s.web.calls.some(([ty, p]) => ty === "update" && NO_REPLY_RE.test(String(p.text ?? ""))), 4000);
   assert.equal(s.hb.instances[1].stopped, true, "the held window's heartbeat stops at the ceiling");
 });
 
@@ -411,29 +466,134 @@ test("broker ECONNRESET mid-loop → the loop retries and delivers the next repl
   assert.ok(broker.waitCalls >= 3, "two failed windows were retried, not fatal");
 });
 
-test("status messages → one Slack message edited in place, cleared when the reply finalises", async (t) => {
-  const s = setup(t, { claims: [["peerH", "C-H"]] });
+// ── Terminal turns: the same _Working…_ block as a Slack turn ────────────────
+
+test("a status with no open window opens the _Working…_ block and starts a heartbeat", async (t) => {
+  const s = setup(t, { claims: [["peerH", "C-H"]], replyTimeoutMs: 60_000 });
   s.broker.deliver("slack-bridge", { from_id: "peerH", kind: "status", text: "Bash: node --test" });
-  await waitFor(() => hasPost(s.web, "Bash: node --test"), 2000);
-  const statusTs = s.web.calls.find(([ty, p]) => ty === "post" && p.text?.includes("Bash:"))[1]._ts;
 
-  s.broker.deliver("slack-bridge", { from_id: "peerH", kind: "status", text: "Read: handler.mjs" });
-  s.broker.deliver("slack-bridge", { from_id: "peerH", kind: "status", text: "Edit: handler.mjs" });
-  await waitFor(() => s.web.calls.filter(([ty, p]) => ty === "update" && p.ts === statusTs).length >= 2, 3000);
+  await waitFor(() => s.hb.instances.length === 1 && s.hb.instances[0].statuses.length === 1, 3000);
 
+  const [ts] = placeholderTss(s.web);
+  assert.ok(ts, "a status with no window posts the heartbeat's _Working…_ placeholder");
+  const block = s.web.calls.find(([ty, p]) => ty === "post" && p._ts === ts)[1];
+  assert.equal(block.attachments[0].text, "_Working…_");
+  assert.equal(s.hb.instances[0].ts, ts, "the heartbeat drives that placeholder");
+  assert.deepEqual(s.hb.instances[0].statuses, ["Bash: node --test"]);
+});
+
+test("two statuses dispatched together post one placeholder", async (t) => {
+  const s = setup(t, { claims: [["peerH2", "C-H2"]], replyTimeoutMs: 60_000 });
+  s.broker.deliverAll("slack-bridge", [
+    { from_id: "peerH2", kind: "status", text: "Bash: node --test" },
+    { from_id: "peerH2", kind: "status", text: "Read: handler.mjs" },
+  ]);
+
+  await waitFor(() => s.hb.instances.length === 1 && s.hb.instances[0].statuses.length === 2, 3000);
+  assert.equal(placeholderTss(s.web).length, 1, "opening is single-flight per peer");
+  assert.deepEqual(s.hb.instances[0].statuses, ["Bash: node --test", "Read: handler.mjs"]);
+});
+
+test("a reply to a terminal window lands in its placeholder", async (t) => {
+  const s = setup(t, { claims: [["peerH3", "C-H3"]], replyTimeoutMs: 60_000 });
+  s.broker.deliver("slack-bridge", { from_id: "peerH3", kind: "status", text: "Bash: npm test" });
+  await waitFor(() => s.hb.instances.length === 1, 3000);
+  const [ts] = placeholderTss(s.web);
+
+  s.broker.deliver("slack-bridge", { from_id: "peerH3", text: "all green" });
+  await waitFor(() => hasUpdate(s.web, "all green"), 4000);
+  const reply = s.web.calls.find(([ty, p]) => ty === "update" && p.text === "all green")[1];
+  assert.equal(reply.ts, ts, "the turn's reply replaces the block the tool opened");
+});
+
+test("kind:turn-end deletes a terminal window's placeholder and posts nothing", async (t) => {
+  const s = setup(t, { claims: [["peerH4", "C-H4"]], replyTimeoutMs: 60_000 });
+  s.broker.deliver("slack-bridge", { from_id: "peerH4", kind: "status", text: "Bash: ls" });
+  await waitFor(() => s.hb.instances.length === 1, 3000);
+  const [ts] = placeholderTss(s.web);
+  const postsBefore = s.web.calls.filter(([ty]) => ty === "post").length;
+
+  s.broker.deliver("slack-bridge", { from_id: "peerH4", kind: "turn-end" });
+  await waitFor(() => s.web.calls.some(([ty, p]) => ty === "delete" && p.ts === ts), 3000);
+
+  assert.equal(s.hb.instances[0].stopped, true, "the ceiling/heartbeat is stopped");
   assert.equal(
-    s.web.calls.filter(([ty, p]) => ty === "post" && [(p.text ?? "")].some((x) => x.includes("Read:") || x.includes("Edit:"))).length,
-    0,
-    "later status messages edit the one line, they do not post again",
+    s.web.calls.filter(([ty]) => ty === "post").length,
+    postsBefore,
+    "turn-end posts nothing — the block just goes",
   );
-  const last = s.web.calls.filter(([ty, p]) => ty === "update" && p.ts === statusTs).pop()[1];
-  assert.equal(last.text, "Edit: handler.mjs", "the line shows the newest tool");
+  assert.ok(!s.web.calls.some(([ty, p]) => ty === "update" && p.ts === ts && /No reply|_Error:/.test(String(p.text ?? ""))),
+    "nothing replaced the placeholder with text");
+});
 
-  s.broker.deliver("slack-bridge", { from_id: "peerH", text: "done with the tools" });
-  await waitFor(() => hasPost(s.web, "done with the tools"), 2000);
+test("a terminal window outlives replyTimeoutMs while a tool runs", async (t) => {
+  const s = setup(t, { claims: [["peerH5", "C-H5"]], replyTimeoutMs: 80 });
+  s.broker.deliver("slack-bridge", { from_id: "peerH5", kind: "status", text: "Bash: long build" });
+  await waitFor(() => s.hb.instances.length === 1, 3000);
+  const [ts] = placeholderTss(s.web);
+
+  await delay(400); // five soft windows' worth: replyTimeoutMs does not apply
+
+  assert.equal(s.hb.instances[0].stopped, false, "the block is still live");
+  assert.deepEqual(s.hb.instances[0].statuses, ["Bash: long build"], "the tool status and no soft notice");
+  assert.ok(!s.web.calls.some(([ty, p]) => ty === "delete" && p.ts === ts), "the placeholder was not torn down");
+});
+
+test("a status within 5s of a window closing opens nothing", async (t) => {
+  const s = setup(t, { claims: [["peerH6", "C-H6"]], replyTimeoutMs: 60_000 });
+  await slack(s, makePayload({ channel: "C-H6", text: "go", client_msg_id: "m-late-1" }));
+  await waitFor(() => s.broker.sendCalls.length === 1);
+  s.broker.deliver("slack-bridge", { from_id: "peerH6", text: "answered" });
+  await waitFor(() => hasUpdate(s.web, "answered"), 4000);
+
+  // PostToolUse is async: this status can land after the reply already closed the window.
+  s.broker.deliver("slack-bridge", { from_id: "peerH6", kind: "status", text: "Edit: handler.mjs" });
+  await delay(200);
+
+  assert.equal(placeholderTss(s.web).length, 1, "the late status opens no second block");
+  assert.equal(s.hb.instances.length, 1, "and starts no heartbeat");
+});
+
+// ── A prompt typed at the terminal is mirrored to Slack ─────────────────────
+
+test("kind:prompt posts under the operator's name and icon, and opens one terminal window", async (t) => {
+  const s = setup(t, { claims: [["peerP", "C-P"]], replyTimeoutMs: 60_000 });
+  s.config.remote.operatorName = "Andrew";
+  s.config.remote.operatorIconUrl = "https://example.test/avatar.png";
+  s.broker.deliver("slack-bridge", { from_id: "peerP", kind: "prompt", text: "typed at the terminal" });
+
+  await waitFor(() => hasPost(s.web, "typed at the terminal"), 3000);
+  const post = s.web.calls.find(([ty, p]) => ty === "post" && p.text === "typed at the terminal")[1];
+  assert.equal(post.username, "Andrew");
+  assert.equal(post.icon_url, "https://example.test/avatar.png");
+  await waitFor(() => s.hb.instances.length === 1, 3000);
+  assert.equal(placeholderTss(s.web).length, 1, "the typed prompt opens exactly one working block");
+});
+
+test("kind:prompt with no operator name posts a keyboard-marked message under the bot's name", async (t) => {
+  const s = setup(t, { claims: [["peerP2", "C-P2"]], replyTimeoutMs: 60_000 });
+  s.broker.deliver("slack-bridge", { from_id: "peerP2", kind: "prompt", text: "hello from the terminal" });
+
+  await waitFor(() => hasPost(s.web, "hello from the terminal"), 3000);
+  const post = s.web.calls.find(([ty, p]) => ty === "post" && p.text?.includes("hello from the terminal"))[1];
+  assert.equal(post.text, "⌨️ hello from the terminal");
+  assert.equal("username" in post, false, "no custom username without remote.operatorName");
+});
+
+test("a mirrored terminal prompt coming back as a Slack event is ignored as a bot message", async (t) => {
+  const s = setup(t, { claims: [["peerP3", "C-P3"]], replyTimeoutMs: 60_000 });
+  const rc = makeRunClaude();
+
+  // The loop's second half: our own custom-username post is delivered back as an
+  // event. Slack marks bot posts with bot_id, and the handler drops them there.
+  await slack(s, { ...makePayload({ channel: "C-P3", text: "typed at the terminal", client_msg_id: "m-echo" }), bot_id: "B0BRIDGE" }, { runClaude: rc });
+  await delay(100);
+
+  assert.equal(s.broker.sendCalls.length, 0, "the mirrored prompt must not be routed back into the session");
+  assert.equal(rc.calls.length, 0, "and must not spawn");
   assert.ok(
-    s.web.calls.some(([ty, p]) => ty === "delete" && p.ts === statusTs),
-    "the text reply finalises/clears the status line",
+    s.log.entries.some((e) => e[0] === "info" && e[1] === "message skipped" && e[2]?.reason === "bot_message"),
+    "the skip is the bot filter, not an empty-text accident",
   );
 });
 

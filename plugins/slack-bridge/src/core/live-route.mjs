@@ -2,7 +2,7 @@ import { mdToSlack } from "../markdown/index.mjs";
 import { startHeartbeat } from "../heartbeat/loop.mjs";
 import { isConnectionError } from "../remote/broker-client.mjs";
 import { WAIT_WINDOW_MS } from "../remote/wait-constants.mjs";
-import { postResponse, postError } from "./reply-post.mjs";
+import { postResponse, postError, safeUpdate } from "./reply-post.mjs";
 
 // routeToLiveSession returns once the message is handed to the broker — the channel
 // queue is never held across the reply; the daemon reply loop resolves the window.
@@ -12,11 +12,18 @@ import { postResponse, postError } from "./reply-post.mjs";
 // lands in one window, in order.
 const QUIET_GAP_MS = 1_000;
 
+// A status with no window is a PostToolUse line that lost the race with the reply
+// or the turn-end that closed it. Late by that little means stale, not news.
+const LATE_STATUS_MS = 5_000;
+
 const routeWindows = new Map();  // peer_id → open windows, oldest first
-const statusLines = new Map();   // channel → ts of its in-place status line
 // Peers sitting on an AskUserQuestion dialog: they can't reply until the operator
 // answers it, so windows opened meanwhile hold their timeout until the peer moves.
 const pendingQuestion = new Set();
+// One placeholder-post in flight per peer: status messages arrive in parallel, and
+// two that both found no window must not post two blocks.
+const openingWindows = new Map();  // peer_id → in-flight openWorkingWindow promise
+const lastClosedAt = new Map();    // peer_id → ms its last window closed
 
 /** Test hook: drop window/status state between cases. */
 export function _resetRouteState() {
@@ -28,8 +35,9 @@ export function _resetRouteState() {
     }
   }
   routeWindows.clear();
-  statusLines.clear();
   pendingQuestion.clear();
+  openingWindows.clear();
+  lastClosedAt.clear();
 }
 
 function removeWindow(window) {
@@ -40,9 +48,9 @@ function removeWindow(window) {
   if (!windows.length) routeWindows.delete(window.peerId);
 }
 
-function openRouteWindow({ web, peerId, channel, threadTs, placeholderTs, heartbeat, cmdEcho, config, log }) {
+function openRouteWindow({ web, peerId, channel, threadTs, placeholderTs, heartbeat, cmdEcho, config, log, terminal = false }) {
   const window = {
-    web, peerId, channel, threadTs, placeholderTs, heartbeat, cmdEcho, config, log,
+    web, peerId, channel, threadTs, placeholderTs, heartbeat, cmdEcho, config, log, terminal,
     chunks: [], deliveryWaiters: [], done: false, timeoutTimer: null, quietTimer: null,
   };
   const windows = routeWindows.get(peerId) ?? [];
@@ -57,12 +65,36 @@ function openRouteWindow({ web, peerId, channel, threadTs, placeholderTs, heartb
 // A held window still gets a ceiling: a peer that dies on the dialog never moves.
 const HELD_CEILING_FACTOR = 12;
 
-// The window's own deadline. Nothing else posts on its behalf: the reply loop
-// only ever sees a window that is still open.
+// What the deadline becomes. It is not an error: the session is slow, and the
+// message is still queued behind whatever it is doing.
+export const SOFT_TIMEOUT_TEXT = "Still working. Your message is queued and arrives when the current turn ends.";
+
+export function noReplyText(ceilingMs) {
+  return `No reply after ${Math.max(1, Math.round(ceilingMs / 60_000))}m. Your message stays queued.`;
+}
+
+// The soft deadline, then the ceiling behind it. A held or terminal window has no
+// message to time out, so it arms the ceiling directly.
 function armTimeout(window) {
   const ms = window.config.remote?.replyTimeoutMs ?? 300_000;
-  window.timeoutTimer = setTimeout(() => { void finalizeWindow(window, { timeout: true }); },
-    window.held ? ms * HELD_CEILING_FACTOR : ms);
+  if (window.terminal || window.held) {
+    armCeiling(window, HELD_CEILING_FACTOR * ms);
+    return;
+  }
+  window.timeoutTimer = setTimeout(() => {
+    window.heartbeat?.setStatus?.(SOFT_TIMEOUT_TEXT);
+    armCeiling(window, (HELD_CEILING_FACTOR - 1) * ms, HELD_CEILING_FACTOR * ms);
+  }, ms);
+  window.timeoutTimer.unref?.();
+}
+
+function armCeiling(window, remainingMs, totalMs = remainingMs) {
+  window.timeoutTimer = setTimeout(() => {
+    // A terminal window has no queued message to explain: it just goes, exactly
+    // as it would at turn-end.
+    if (window.terminal) { void closeWindows(window.peerId, { terminalOnly: true }); return; }
+    void finalizeWindow(window, { timeout: true, notice: noReplyText(totalMs) });
+  }, remainingMs);
   window.timeoutTimer.unref?.();
 }
 
@@ -83,19 +115,24 @@ function releaseQuestion(peerId) {
  * BEFORE the reply lands in every branch — the .py canon: a final tick's
  * chatUpdate(text:"") otherwise clobbers the reply body.
  */
-async function finalizeWindow(window, { timeout = false, errorMessage = null } = {}) {
+async function finalizeWindow(window, { timeout = false, errorMessage = null, notice = null } = {}) {
   if (window.done) return false;
   window.done = true;
   clearTimeout(window.timeoutTimer);
   clearTimeout(window.quietTimer);
   removeWindow(window);
+  lastClosedAt.set(window.peerId, Date.now());
 
   const { web, channel, threadTs, placeholderTs, heartbeat, cmdEcho, config, log, chunks } = window;
   let delivered = false;
   const deliveryOutcomes = [];
   try {
     await heartbeat?.stop();
-    if (timeout || chunks.length === 0) {
+    if (notice) {
+      // The ceiling is a close, not a failure: no `_Error:` wrapper, no attachment.
+      await safeUpdate({ web, channel, ts: placeholderTs, threadTs, params: { text: notice, attachments: [] } });
+      delivered = true;
+    } else if (timeout || chunks.length === 0) {
       await postError({
         web, channel, placeholderTs, threadTs,
         message: errorMessage ?? "live session didn't reply in time",
@@ -128,10 +165,37 @@ async function finalizeWindow(window, { timeout = false, errorMessage = null } =
       await postError({ web, channel, placeholderTs: null, threadTs, message: `live session reply post failed: ${e.message}` });
     } catch {}
   } finally {
-    await clearStatus({ web, channel, log });
     for (const { resolve, chunkIndex } of window.deliveryWaiters.splice(0)) resolve(deliveryOutcomes[chunkIndex] === true);
   }
   return delivered;
+}
+
+/**
+ * Close a peer's windows without posting anything: heartbeat stopped, placeholder
+ * deleted. Used when the peer leaves (turn-end) or is gone (a disconnect), where
+ * finalizeWindow would write text about a message nobody is going to answer.
+ */
+async function closeWindows(peerId, { terminalOnly = false } = {}) {
+  for (const w of [...(routeWindows.get(peerId) ?? [])]) {
+    if (terminalOnly && !w.terminal) continue;
+    w.done = true;
+    clearTimeout(w.timeoutTimer);
+    clearTimeout(w.quietTimer);
+    removeWindow(w);
+    lastClosedAt.set(peerId, Date.now());
+    for (const { resolve } of w.deliveryWaiters.splice(0)) resolve(false);
+    try {
+      await w.heartbeat?.stop();
+      await w.web.chatDelete({ channel: w.channel, ts: w.placeholderTs });
+    } catch (e) {
+      w.log.warn("placeholder delete failed", { channel: w.channel, error: e.message });
+    }
+  }
+}
+
+/** Close every window a peer has open — the daemon uses this when the peer dies. */
+export async function closePeerWindows(peerId) {
+  return closeWindows(peerId);
 }
 
 // The window a reply or status belongs to: one already collecting a reply keeps
@@ -151,6 +215,7 @@ async function abandonOlderWindows(target) {
     clearTimeout(w.timeoutTimer);
     clearTimeout(w.quietTimer);
     removeWindow(w);
+    lastClosedAt.set(target.peerId, Date.now());
     try {
       await w.heartbeat?.stop();
       await w.web.chatDelete({ channel: w.channel, ts: w.placeholderTs });
@@ -160,46 +225,15 @@ async function abandonOlderWindows(target) {
   }
 }
 
-// Tool calls render as ONE line per channel, edited in place (the turn mirror sends
-// them as kind:"status"). The next text reply finalises it, so a stale "Bash: …"
-// line does not linger under the answer.
-async function postStatus({ web, channel, text, log }) {
-  const existing = statusLines.get(channel);
-  try {
-    if (existing) {
-      await web.chatUpdate({ channel, ts: existing, text });
-      return true;
-    } else {
-      const posted = await web.chatPostMessage({ channel, text });
-      if (posted?.ts) statusLines.set(channel, posted.ts);
-      return true;
-    }
-  } catch (e) {
-    log.warn("status line update failed", { channel, error: e.message });
-    return false;
-  }
-}
-
-async function clearStatus({ web, channel, log }) {
-  const ts = statusLines.get(channel);
-  if (!ts) return;
-  statusLines.delete(channel);
-  try {
-    await web.chatDelete({ channel, ts });
-  } catch (e) {
-    log.warn("status line clear failed", { channel, error: e.message });
-  }
-}
-
 /**
- * Route a claimed channel's message to its live session: placeholder + heartbeat,
- * hand it to the broker, register the window, return. The reply loop resolves the
- * window when the session answers; the window's own timer posts "didn't reply in
- * time" if it never does. The claim is retained either way — slow is not dead.
+ * Post the grey `_Working…_` block and start its heartbeat, then register the
+ * window. Shared by every turn shape that shows a block: a routed Slack message,
+ * a typed prompt at the terminal, and a tool status with no window already open.
+ * Returns null when the placeholder could not be posted.
  */
-export async function routeToLiveSession({
-  web, channel, threadTs, text, claim, broker, config, log, cmdEcho,
-  _startHeartbeat = startHeartbeat,
+async function openWorkingWindow({
+  web, peerId, channel, threadTs = null, config, log, cmdEcho = "", prompt = null,
+  _startHeartbeat = startHeartbeat, terminal = false,
 }) {
   let placeholderTs = null;
   try {
@@ -213,20 +247,52 @@ export async function routeToLiveSession({
     placeholderTs = posted.ts;
   } catch (e) {
     log.error("failed to post routed placeholder", { channel, error: e.message });
-    return;
+    return null;
   }
 
   // The spawn path's heartbeat minus extensions (their snippet describes spawned
   // sessions) and minus the echo: the operator's message is already right above.
   const heartbeat = _startHeartbeat({
     web, channel, ts: placeholderTs, cmdEcho: "", log: log.child("heartbeat"),
-    extensions: null, sessionId: claim.peer_id, config,
+    extensions: null, sessionId: peerId, config,
   });
-  if (config.slack?.verbMode === "haiku") {
-    heartbeat.setTool("working", { prompt: text.slice(0, 80) });
+  if (prompt && config.slack?.verbMode === "haiku") {
+    heartbeat.setTool("working", { prompt: prompt.slice(0, 80) });
   }
 
-  const window = openRouteWindow({ web, peerId: claim.peer_id, channel, threadTs, placeholderTs, heartbeat, cmdEcho, config, log });
+  return openRouteWindow({ web, peerId, channel, threadTs, placeholderTs, heartbeat, cmdEcho, config, log, terminal });
+}
+
+// Status messages are dispatched in parallel, so two can both find no window.
+// One post per peer in flight keeps that to a single block.
+function openWorkingWindowOnce(opts) {
+  const inflight = openingWindows.get(opts.peerId);
+  if (inflight) return inflight;
+  const p = (async () => {
+    try {
+      return await openWorkingWindow(opts);
+    } finally {
+      if (openingWindows.get(opts.peerId) === p) openingWindows.delete(opts.peerId);
+    }
+  })();
+  openingWindows.set(opts.peerId, p);
+  return p;
+}
+
+/**
+ * Route a claimed channel's message to its live session: placeholder + heartbeat,
+ * hand it to the broker, register the window, return. The reply loop resolves the
+ * window when the session answers; the window's own timers soften the deadline and
+ * then close it at the ceiling. The claim is retained either way — slow is not dead.
+ */
+export async function routeToLiveSession({
+  web, channel, threadTs, text, claim, broker, config, log, cmdEcho,
+  _startHeartbeat = startHeartbeat,
+}) {
+  const window = await openWorkingWindow({
+    web, peerId: claim.peer_id, channel, threadTs, config, log, cmdEcho, prompt: text, _startHeartbeat,
+  });
+  if (!window) return;
 
   try {
     const r = await broker.sendMessage("slack-bridge", claim.peer_id, text);
@@ -239,13 +305,18 @@ export async function routeToLiveSession({
 }
 
 /**
- * One broker message from the daemon peer → its claim channel. kind:"status" shows
- * in the open window's placeholder, else on the channel's one status line; a text
- * or question reply resolves the newest open window (abandoning older ones), or posts directly
- * when none is open. A message from a peer
- * with no claim has nowhere to go and is dropped with a log.
+ * One broker message from the daemon peer → its claim channel.
+ *
+ *   status    → into the open window; with none, opens a terminal window.
+ *   prompt    → a prompt typed at the terminal: posted to the channel under the
+ *               operator's name, then a terminal window unless one is open.
+ *   turn-end  → the turn is over: close the peer's terminal windows, post nothing.
+ *   text / question → resolve the newest open window (abandoning older ones), or
+ *               post directly when none is open.
+ *
+ * A message from a peer with no claim has nowhere to go and is dropped with a log.
  */
-async function handleBrokerMessage({ message, claims, web, config, log, _quietGapMs = QUIET_GAP_MS }) {
+async function handleBrokerMessage({ message, claims, web, config, log, _quietGapMs = QUIET_GAP_MS, _startHeartbeat = startHeartbeat }) {
   const fromId = message?.from_id;
   // hasOwn-style lookup over the claims store: one claim per peer, so the entry
   // is the reply's destination channel.
@@ -260,11 +331,52 @@ async function handleBrokerMessage({ message, claims, web, config, log, _quietGa
   if (message.kind === "question") pendingQuestion.add(fromId);
   else releaseQuestion(fromId);
 
+  if (message.kind === "turn-end") {
+    await closeWindows(fromId, { terminalOnly: true });
+    return true;
+  }
+
+  if (message.kind === "prompt") {
+    if (!text) return false;
+    const postParams = { channel, text: mdToSlack(text) };
+    const name = config.remote?.operatorName ?? null;
+    const icon = config.remote?.operatorIconUrl ?? null;
+    if (name) postParams.username = name;
+    if (icon) postParams.icon_url = icon;
+    // No custom identity to post under: mark it as typed somewhere else, so it
+    // reads as the operator's terminal rather than as the bot talking to itself.
+    if (!name && !icon) postParams.text = `⌨️ ${text}`;
+    try {
+      await web.chatPostMessage(postParams);
+    } catch (e) {
+      log.warn("failed to post terminal prompt", { channel, error: e.message });
+      return false;
+    }
+    if (!targetWindow(fromId)) {
+      await openWorkingWindowOnce({
+        web, peerId: fromId, channel, config, log, _startHeartbeat, terminal: true,
+      });
+    }
+    return true;
+  }
+
   const window = targetWindow(fromId);
   if (message.kind === "status") {
     if (!text) return false;
-    if (window) window.heartbeat?.setStatus?.(text);
-    else return postStatus({ web, channel, text, log });
+    if (window) {
+      window.heartbeat?.setStatus?.(text);
+      return true;
+    }
+    // PostToolUse is async: a status can land after the reply or turn-end closed
+    // the window it belonged to. Posting it then leaves a stale block that a
+    // later reply can never resolve.
+    const closedAt = lastClosedAt.get(fromId);
+    if (closedAt !== undefined && Date.now() - closedAt < LATE_STATUS_MS) return true;
+    const opened = await openWorkingWindowOnce({
+      web, peerId: fromId, channel, config, log, _startHeartbeat, terminal: true,
+    });
+    if (!opened) return false;
+    opened.heartbeat?.setStatus?.(text);
     return true;
   }
 
@@ -283,7 +395,6 @@ async function handleBrokerMessage({ message, claims, web, config, log, _quietGa
     return new Promise((resolve) => window.deliveryWaiters.push({ resolve, chunkIndex }));
   }
 
-  await clearStatus({ web, channel, log });
   const postParams = { channel, text: mdToSlack(text) };
   try {
     await web.chatPostMessage(postParams);
@@ -299,6 +410,7 @@ export function startReplyLoop({
   broker, claims, web, config, log,
   _sleep = (ms) => new Promise((r) => setTimeout(r, ms)),
   _quietGapMs = QUIET_GAP_MS,
+  _startHeartbeat = startHeartbeat,
 }) {
   const abort = new AbortController();
   let failures = 0;
@@ -327,7 +439,7 @@ export function startReplyLoop({
       }
       if (superseded) { await _sleep(1000); continue; }
       const successfulIds = [];
-      const dispatches = messages.map((message) => handleBrokerMessage({ message, claims, web, config, log, _quietGapMs }).then(
+      const dispatches = messages.map((message) => handleBrokerMessage({ message, claims, web, config, log, _quietGapMs, _startHeartbeat }).then(
         (posted) => {
           if (posted === true) successfulIds.push(message.id);
           return posted === true;
