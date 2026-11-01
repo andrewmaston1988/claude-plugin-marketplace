@@ -214,7 +214,7 @@ Limits: a message sent during a foreground tool call waits for the turn to end. 
 
 If the live session doesn't reply within `remote.replyTimeoutMs` (default 300 s), the placeholder changes to *Still working. Your message is queued and arrives when the current turn ends.* and the heartbeat keeps running — a slow turn is not a failure, and a late reply lands in that same block. At 12× `replyTimeoutMs` the block closes with `No reply after <n>m. Your message stays queued.` and **the claim is kept**. While the session has an `AskUserQuestion` pending the timer goes straight to that ceiling: the question is mirrored to Slack, and on a claimed session the terminal dialog is denied so the session asks in plain text instead.
 
-When the claiming session dies, the bridge says so rather than falling silent: within about 30 s it posts a red `⚠️ SESSION DISCONNECTED — Claude session `<guid>` is disconnected` block and releases the claim. Red means gone — process death — and never means slow; a session that is alive but busy stays on the soft notice.
+When the claiming session dies, the bridge says so rather than falling silent: within about 30 s it posts a red `⚠️ Claude session `<guid>` is disconnected` block and releases the claim. Red means gone — process death — and never means slow; a session that is alive but busy stays on the soft notice.
 
 An `#rc-*` channel that was once seized never spawns `claude -p`, so one channel never holds two transcripts. After a release or a disconnect, a message there gets the red block and nothing else — or `Bridge can't reach the broker. Your message was not delivered.` during a broker outage. A channel with no seize behind it behaves as it always has.
 
@@ -242,7 +242,7 @@ Restart any interactive session you want to control this way so it picks up the 
 - **Default (`createChannels: false`):** `/remote` seizes an **existing DM** with the bot. No new Slack scopes are required.
 - **Channel-create (`createChannels: true`):** add `channels:write` and `channels:manage` to the bot token, and `/remote` creates a dedicated `#rc-<context-slug>` channel instead.
 - **Seizing an existing channel:** the bot must already be a member (`/invite @<bot>`), or hold `channels:join` (in the shipped app manifest) so it can join the channel itself.
-- **Signing terminal prompts:** `chat:write.customize` is in the shipped manifest so a prompt typed at the terminal can post under `remote.operatorName`. An app installed before it was added must re-apply the manifest, or those posts arrive with a `⌨️` prefix instead.
+- **Signing terminal prompts:** `chat:write.customize` is in the shipped manifest so a prompt typed at the terminal can post under `remote.operatorName`. An app installed before it was added must re-apply the manifest, or those posts arrive with a `⌨️` prefix instead: a post Slack rejects for its custom identity is retried once as the plain `⌨️` post. A prompt with no `remote.operatorName` set carries that prefix whether or not `remote.operatorIconUrl` is set.
 
 ### Using it from a live session
 

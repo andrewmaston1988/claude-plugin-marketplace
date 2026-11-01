@@ -3,10 +3,10 @@ import { readSession, channelModel, writeSession, clearSession, setChannelModel 
 import { startHeartbeat } from "../heartbeat/loop.mjs";
 import { fetchHistory } from "../history-bootstrap/index.mjs";
 import { safeUpdate, postResponse, postError } from "./reply-post.mjs";
-import { routeToLiveSession, startReplyLoop, _resetRouteState } from "./live-route.mjs";
+import { routeToLiveSession, startReplyLoop, _resetRouteState, _closedMarks } from "./live-route.mjs";
 import { markDisconnected, isRemoteChannel, postDisconnectNotice } from "./disconnect.mjs";
 
-export { safeUpdate, postResponse, postError, routeToLiveSession, startReplyLoop, _resetRouteState };
+export { safeUpdate, postResponse, postError, routeToLiveSession, startReplyLoop, _resetRouteState, _closedMarks };
 
 const DEDUP_SIZE = 64;
 const MODEL_NAME = /^[A-Za-z0-9][A-Za-z0-9._:-]*$/;

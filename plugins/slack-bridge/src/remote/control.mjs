@@ -81,13 +81,14 @@ export function createControlServer({
   // A re-seize must not fork a second #rc-demo: on name_taken, find the channel
   // of exactly that name. users.conversations lists the bot's own channels, so
   // membership is implied; canClaim is the real test — a channel another peer
-  // holds is never taken over. A failed or unhelpful lookup returns null.
+  // holds is never taken over. Public only: conversations.create makes public
+  // channels, and the manifest holds channels:read but no groups:read.
   async function findReusableChannel(peerId, name) {
     if (typeof web.usersConversations !== "function") return null;
     let cursor = null;
     do {
       const page = await web.usersConversations({
-        types: "public_channel,private_channel", limit: 200, ...(cursor ? { cursor } : {}),
+        types: "public_channel", limit: 200, ...(cursor ? { cursor } : {}),
       });
       for (const ch of page?.channels ?? []) {
         if (ch?.name === name && ch.id && claims.canClaim(peerId, ch.id).ok) return ch;

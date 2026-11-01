@@ -358,6 +358,18 @@ test("name_taken with a claimable member channel reuses it: no suffix, one creat
   assert.equal(claims.get("C-old").peer_id, "peerA");
 });
 
+// conversations.create makes public channels, and the manifest grants
+// channels:read but no groups:read — asking for private_channel risks a
+// missing_scope that silently degrades every re-seize to a -2 suffix.
+test("the re-seize lookup asks only for public channels, which the manifest covers", async (t) => {
+  const web = memberWeb({ channels: [{ id: "C-old", name: "rc-demo", is_member: true }] });
+  const { call } = await startControl(t, { web });
+  await call("/claim", { peer_id: "peerA", name: "demo" });
+
+  const lookup = web.calls.find(([c]) => c === "usersConversations");
+  assert.equal(lookup[1].types, "public_channel");
+});
+
 test("name_taken with a held channel takes the next suffix and never claims the held one", async (t) => {
   const web = memberWeb({ channels: [{ id: "C-held", name: "rc-demo", is_member: true }] });
   const claims = createClaimsStore({ path: path.join(fs.mkdtempSync(path.join(os.tmpdir(), "ctrl-")), "claims.json") });

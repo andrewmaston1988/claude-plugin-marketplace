@@ -114,7 +114,7 @@ test("claim — peer dead, no model: claim released, disconnect block, hint post
   const { runClaude, posts } = await send({ store: makeStore(), remote });
   assert.deepEqual(remote.released, ["P1"]);
   assert.equal(runClaude.calls.length, 0);
-  assert.match(posts[0].attachments[0].text, /SESSION DISCONNECTED/);
+  assert.match(posts[0].attachments[0].text, /is disconnected/);
   assert.deepEqual(posts.map(p => p.text), ["", HINT]);
 });
 

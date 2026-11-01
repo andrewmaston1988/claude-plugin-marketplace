@@ -222,7 +222,7 @@ test("a refused broker upgrade names its reason on stderr before falling through
   let written = "";
   Object.defineProperty(process, "stderr", { value: { write: (s) => { written += s; } }, configurable: true });
   try {
-    const reason = "broker on port 7898 predates single-flight waits and refused /shutdown — stop it by PID";
+    const reason = "broker on port 7898 lacks required capabilities and refused /shutdown — stop it by PID";
     const client = { health: async () => null, ensureBroker: async () => { throw new Error(reason); } };
     await prepareBroker({ client });
     assert.ok(written.includes(reason), `refusal reason missing from stderr: ${JSON.stringify(written)}`);

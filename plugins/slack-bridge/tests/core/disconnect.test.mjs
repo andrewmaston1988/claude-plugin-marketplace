@@ -6,7 +6,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { sweepClaims, markDisconnected, isRemoteChannel } from "../../src/core/disconnect.mjs";
+import { sweepClaims, markDisconnected, isRemoteChannel, disconnectText } from "../../src/core/disconnect.mjs";
 import { routeToLiveSession, _resetRouteState } from "../../src/core/live-route.mjs";
 import { createClaimsStore } from "../../src/remote/claims.mjs";
 
@@ -55,7 +55,7 @@ function makeHeartbeat(calls) {
 }
 
 const redBlocks = (web) => web.calls.filter(([t, p]) =>
-  t === "post" && (p.attachments ?? []).some((a) => a.color === RED && String(a.text).includes("SESSION DISCONNECTED")));
+  t === "post" && (p.attachments ?? []).some((a) => a.color === RED && String(a.text).includes("is disconnected")));
 
 // A claimed channel with a routed window open, ready to be swept.
 async function claimedWithWindow({ channel = "C1", peer = "peerA", name = "rc-demo", sessionId = "sess-1" } = {}) {
@@ -84,8 +84,7 @@ test("a claim whose peer is absent gets one red block with the GUID, its windows
   const blocks = redBlocks(web);
   assert.equal(blocks.length, 1, "one block, posted without the operator having to send anything");
   const text = blocks[0][1].attachments[0].text;
-  assert.match(text, /SESSION DISCONNECTED/);
-  assert.match(text, /sess-1/, "the block names the session that went");
+  assert.equal(text, "⚠️ Claude session `sess-1` is disconnected");
   assert.equal(claims.get(channel), null, "the claim is released");
   assert.equal(hb.instances[0].stopped, true, "the heartbeat is stopped");
   assert.equal(hb.instances[0].statuses.length, 0, "no soft notice on the way out");
@@ -97,6 +96,11 @@ test("a claim whose peer is absent gets one red block with the GUID, its windows
     !web.calls.some(([t, p]) => t === "update" && /stays queued|No reply after/.test(String(p.text ?? ""))),
     "nothing is written into the dead session's placeholder",
   );
+});
+
+test("the block names the session in backticks, as the seize and release lines do, and stays readable without one", () => {
+  assert.equal(disconnectText("abc-123"), "⚠️ Claude session `abc-123` is disconnected");
+  assert.equal(disconnectText(null), "⚠️ Claude session is disconnected");
 });
 
 test("a listPeers failure disconnects nothing — an unreachable broker is no reading", async () => {

@@ -3,6 +3,7 @@
 // detached and retries — mirrors the claude-peers MCP server's ensureBroker.
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import { KINDS } from "./broker.mjs";
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const processIdentity = () => ({ pid: process.pid, started_at: Date.now() - Math.round(process.uptime() * 1000) });
@@ -69,10 +70,14 @@ export function createBrokerClient({
 
   async function doEnsureBroker() {
     const h = await health();
-    const capable = (value) => value?.lease === true && value?.single_flight === true;
+    // A broker that does not carry every kind downgrades an unknown one to "text":
+    // a terminal prompt would post as Claude's reply and turn-end would never close
+    // the block. It is detached, so an update leaves it running until this restart.
+    const capable = (value) => value?.lease === true && value?.single_flight === true
+      && Array.isArray(value?.kinds) && KINDS.every((k) => value.kinds.includes(k));
     if (capable(h)) return;
     if (h) {
-      log("broker predates single-flight waits — restarting it");
+      log("broker is missing required capabilities — restarting it");
       await _fetch(`${baseUrl}/shutdown`, { method: "POST", headers: authHeaders, signal: AbortSignal.timeout(2000) }).catch(() => {});
       for (let i = 0; i < 20 && (await health()); i++) await _sleep(150);
     } else {
@@ -84,7 +89,7 @@ export function createBrokerClient({
       const up = await health();
       if (capable(up)) return;
       // Still the old broker: it refused /shutdown (a token mismatch 401s it).
-      if (up && h) throw new Error(`broker on port ${port} predates single-flight waits and refused /shutdown — stop it by PID`);
+      if (up && h) throw new Error(`broker on port ${port} lacks required capabilities and refused /shutdown — stop it by PID`);
     }
     throw new Error(`failed to start broker daemon on port ${port} after 6s`);
   }

@@ -24,8 +24,11 @@ const LEASE_MS = 30_000;
 const UNKNOWN_WAITER = Object.freeze({ pid: 0, started_at: 0 });
 
 const MAX_BODY_BYTES = 1_000_000;
-const KINDS = new Set(["status", "question", "prompt", "turn-end"]);
-const normaliseKind = (kind) => (KINDS.has(kind) ? kind : "text");
+// Published on /health: a client must replace a broker that would downgrade one
+// of these to "text", because a detached broker outlives a plugin update.
+export const KINDS = Object.freeze(["status", "question", "prompt", "turn-end"]);
+const KIND_SET = new Set(KINDS);
+const normaliseKind = (kind) => (KIND_SET.has(kind) ? kind : "text");
 
 export function createBroker({
   stateFile = null,
@@ -323,7 +326,7 @@ export function createBroker({
         // Pure read: every client probes this before it acts — a waiter probes
         // on each arm — and reaping here would delete the queue the caller is
         // about to collect whenever the registered pid has died.
-        return json(200, { status: "ok", lease: true, single_flight: true, peers: Object.keys(state.peers).length });
+        return json(200, { status: "ok", lease: true, single_flight: true, kinds: KINDS, peers: Object.keys(state.peers).length });
       }
       res.writeHead(200);
       return res.end("slack-bridge remote-control broker");

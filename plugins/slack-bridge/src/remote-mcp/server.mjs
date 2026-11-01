@@ -42,7 +42,7 @@ export const TOOLS = [
   },
   {
     name: "slack_release",
-    description: "Release the seized Slack channel. The next Slack message on it falls back to a fresh claude -p spawn.",
+    description: "Release the seized Slack channel. A released #rc-* channel stays remote: a message there gets the disconnected block, never a spawned session.",
     inputSchema: { type: "object", properties: {} },
   },
   {
@@ -273,7 +273,7 @@ export function createRemoteMcpServer({
       try {
         await controlFetch("/release", { peer_id: myId });
         deleteSessionMapping();
-        return text("Released the Slack channel. The next Slack message falls back to a fresh claude -p spawn.");
+        return text("Released the Slack channel. An #rc-* channel stays remote: a message there gets the disconnected block, never a spawned session.");
       } catch (e) {
         return errText("Release failed", e);
       }

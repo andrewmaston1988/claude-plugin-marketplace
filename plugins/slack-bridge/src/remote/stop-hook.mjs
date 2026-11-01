@@ -154,8 +154,8 @@ export async function runHook({
       return null;
     }
 
-    // The turn is over: the daemon closes this peer's terminal block. Sent after
-    // the mirror, so the last text is not racing the delete.
+    // The turn is over: the daemon closes this peer's terminal block. The mirror
+    // goes first so its text is already in the window.
     await client.sendMessage(session.peerId, "slack-bridge", "", { kind: "turn-end" });
     return null;
   } catch {

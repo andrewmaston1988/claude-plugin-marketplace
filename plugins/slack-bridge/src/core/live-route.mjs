@@ -40,6 +40,20 @@ export function _resetRouteState() {
   lastClosedAt.clear();
 }
 
+/** Test hook: the close marks, so a case can age one. */
+export function _closedMarks() { return lastClosedAt; }
+
+// Every close marks the peer, so the 5 s late-status guard can drop a status
+// that lost the race. Prune on write: a mark older than that window is dead
+// weight, and one entry per peer would otherwise live as long as the daemon.
+function markClosed(peerId) {
+  const now = Date.now();
+  lastClosedAt.set(peerId, now);
+  for (const [id, at] of lastClosedAt) {
+    if (now - at >= LATE_STATUS_MS) lastClosedAt.delete(id);
+  }
+}
+
 function removeWindow(window) {
   const windows = routeWindows.get(window.peerId);
   if (!windows) return;
@@ -121,7 +135,7 @@ async function finalizeWindow(window, { timeout = false, errorMessage = null, no
   clearTimeout(window.timeoutTimer);
   clearTimeout(window.quietTimer);
   removeWindow(window);
-  lastClosedAt.set(window.peerId, Date.now());
+  markClosed(window.peerId);
 
   const { web, channel, threadTs, placeholderTs, heartbeat, cmdEcho, config, log, chunks } = window;
   let delivered = false;
@@ -178,11 +192,14 @@ async function finalizeWindow(window, { timeout = false, errorMessage = null, no
 async function closeWindows(peerId, { terminalOnly = false } = {}) {
   for (const w of [...(routeWindows.get(peerId) ?? [])]) {
     if (terminalOnly && !w.terminal) continue;
+    // A turn-end races the quiet gap: the answer is already in this window and
+    // its timer will post it. Deleting is for a block with nothing to say.
+    if (w.chunks.length) continue;
     w.done = true;
     clearTimeout(w.timeoutTimer);
     clearTimeout(w.quietTimer);
     removeWindow(w);
-    lastClosedAt.set(peerId, Date.now());
+    markClosed(peerId);
     for (const { resolve } of w.deliveryWaiters.splice(0)) resolve(false);
     try {
       await w.heartbeat?.stop();
@@ -215,7 +232,7 @@ async function abandonOlderWindows(target) {
     clearTimeout(w.timeoutTimer);
     clearTimeout(w.quietTimer);
     removeWindow(w);
-    lastClosedAt.set(target.peerId, Date.now());
+    markClosed(target.peerId);
     try {
       await w.heartbeat?.stop();
       await w.web.chatDelete({ channel: w.channel, ts: w.placeholderTs });
@@ -304,18 +321,8 @@ export async function routeToLiveSession({
   // Return here: the queue is released and the next Slack message is its own turn.
 }
 
-/**
- * One broker message from the daemon peer → its claim channel.
- *
- *   status    → into the open window; with none, opens a terminal window.
- *   prompt    → a prompt typed at the terminal: posted to the channel under the
- *               operator's name, then a terminal window unless one is open.
- *   turn-end  → the turn is over: close the peer's terminal windows, post nothing.
- *   text / question → resolve the newest open window (abandoning older ones), or
- *               post directly when none is open.
- *
- * A message from a peer with no claim has nowhere to go and is dropped with a log.
- */
+// One broker message from the daemon peer to its claim channel. A message from a
+// peer with no claim has nowhere to go and is dropped with a log.
 async function handleBrokerMessage({ message, claims, web, config, log, _quietGapMs = QUIET_GAP_MS, _startHeartbeat = startHeartbeat }) {
   const fromId = message?.from_id;
   // hasOwn-style lookup over the claims store: one claim per peer, so the entry
@@ -339,19 +346,30 @@ async function handleBrokerMessage({ message, claims, web, config, log, _quietGa
   if (message.kind === "prompt") {
     if (!text) return false;
     const converted = mdToSlack(text);
-    const postParams = { channel, text: converted };
     const name = config.remote?.operatorName ?? null;
     const icon = config.remote?.operatorIconUrl ?? null;
+    // Only the name signs a post; an icon cannot. Without one, mark the text as
+    // typed elsewhere so it never reads as the bot talking to itself.
+    const plain = `⌨️ ${converted}`;
+    const postParams = { channel, text: name ? converted : plain };
     if (name) postParams.username = name;
     if (icon) postParams.icon_url = icon;
-    // No custom identity to post under: mark it as typed somewhere else, so it
-    // reads as the operator's terminal rather than as the bot talking to itself.
-    if (!name && !icon) postParams.text = `⌨️ ${converted}`;
     try {
       await web.chatPostMessage(postParams);
     } catch (e) {
-      log.warn("failed to post terminal prompt", { channel, error: e.message });
-      return false;
+      if (!name && !icon) {
+        log.warn("failed to post terminal prompt", { channel, error: e.message });
+        return false;
+      }
+      // Slack rejects a custom identity without chat:write.customize. A prompt
+      // that never posts is retried on every lease, so fall back once.
+      log.warn("terminal prompt rejected with the custom identity — retrying plain", { channel, error: e.message });
+      try {
+        await web.chatPostMessage({ channel, text: plain });
+      } catch (e2) {
+        log.warn("failed to post terminal prompt", { channel, error: e2.message });
+        return false;
+      }
     }
     if (!targetWindow(fromId)) {
       await openWorkingWindowOnce({
@@ -382,9 +400,11 @@ async function handleBrokerMessage({ message, claims, web, config, log, _quietGa
   }
 
   if (window) {
-    if (!window.chunks.length) await abandonOlderWindows(window);
+    // Push before the await: a turn-end dispatched in the same batch checks
+    // chunks.length, and a yield here would let it delete the block this lands in.
     window.chunks.push(text);
     const chunkIndex = window.chunks.length - 1;
+    if (chunkIndex === 0) await abandonOlderWindows(window);
     // Restart the quiet gap: stop the window's deadline firing mid-collection,
     // then finalise once the session has stopped sending.
     clearTimeout(window.timeoutTimer);

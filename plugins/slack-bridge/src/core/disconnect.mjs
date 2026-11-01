@@ -4,13 +4,9 @@ import { closePeerWindows } from "./live-route.mjs";
 
 const DISCONNECTED_COLOR = "#d00000";
 
-/**
- * The operator's own words: a red block reading SESSION DISCONNECTED, with the
- * session GUID, so a dead session is never mistaken for a slow one.
- */
+/** The GUID in backticks, as the seize and release lines do, so a dead session is named. */
 export function disconnectText(sessionId) {
-  const guid = sessionId ? `\`${sessionId}\`` : "unknown";
-  return `⚠️ SESSION DISCONNECTED — Claude session ${guid} is disconnected`;
+  return sessionId ? `⚠️ Claude session \`${sessionId}\` is disconnected` : "⚠️ Claude session is disconnected";
 }
 
 export async function postDisconnectNotice({ channel, sessionId = null, web, log }) {
@@ -28,14 +24,9 @@ export async function postDisconnectNotice({ channel, sessionId = null, web, log
 }
 
 /**
- * Post the red block, close the peer's windows and release the claim.
- *
- * The claim is re-read and released BEFORE the first await: the daemon's sweep
- * and the handler's dead-peer branch race on the same claim, and both posting
- * would leave two blocks. A channel re-seized meanwhile no longer names this
- * peer, so its new session is never marked dead.
- *
- * Returns true when this call is the one that acted.
+ * Post the red block, close the peer's windows and release the claim. The claim
+ * is re-read and released BEFORE the first await, so a racing sweep or a re-seize
+ * cannot post a second block. Returns true when this call is the one that acted.
  */
 export async function markDisconnected({ claim, web, claims, log }) {
   const channel = claim?.channel;
