@@ -5,30 +5,9 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import { createBroker } from "../../src/remote/broker.mjs";
-
-function tmpState() {
-  return path.join(fs.mkdtempSync(path.join(os.tmpdir(), "slack-remote-broker-")), "state.json");
-}
-
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-
-async function startBroker(t, opts = {}) {
-  const broker = createBroker({ stateFile: opts.stateFile ?? tmpState(), ...opts });
-  t.after(() => broker.close());
-  const port = await broker.listen(0);
-  const call = async (p, body) => {
-    const res = await fetch(`http://127.0.0.1:${port}${p}`, {
-      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
-    });
-    return { status: res.status, body: await res.json() };
-  };
-  return { broker, port, call };
-}
-
-const REG = { pid: process.pid, cwd: "C:/work/a", git_root: "C:/work/a", tty: null, summary: "live session" };
+import { tmpState, sleep, startBroker, REG } from "./broker-harness.mjs";
 
 test("register assigns an 8-char id and the peer appears in list-peers", async (t) => {
   const { call } = await startBroker(t);
@@ -486,47 +465,6 @@ test("/register stores session_id and /list-peers exposes it", async (t) => {
   const { body: peers } = await call("/list-peers", { scope: "machine", cwd: "x", git_root: null });
   assert.equal(peers.find((p) => p.id === a.id).session_id, "sess-abc");
   assert.equal(peers.find((p) => p.id === b.id).session_id, null, "absent session_id must read as null");
-});
-
-test("a sent message carries kind; only kind 'status' is treated as a status", async (t) => {
-  const { call } = await startBroker(t);
-  const { body: a } = await call("/register", { ...REG, pid: process.pid });
-  const { body: b } = await call("/register", { ...REG, pid: process.ppid });
-  await call("/send-message", { from_id: a.id, to_id: b.id, text: "plain" });
-  await call("/send-message", { from_id: a.id, to_id: b.id, text: "Read: a.mjs", kind: "status" });
-  await call("/send-message", { from_id: a.id, to_id: b.id, text: "mislabelled", kind: "banana" });
-  const { body: taken } = await call("/take-messages", { id: b.id });
-  assert.deepEqual(taken.messages.map((m) => m.kind), ["text", "status", "text"]);
-});
-
-test("kind survives a round-trip through /wait", async (t) => {
-  const { call } = await startBroker(t);
-  const { body: a } = await call("/register", { ...REG, pid: process.pid });
-  const { body: b } = await call("/register", { ...REG, pid: process.ppid });
-  await call("/send-message", { from_id: a.id, to_id: b.id, text: "Bash: ls", kind: "status" });
-  const { body: waited } = await call("/wait", { id: b.id, timeout_ms: 1000 });
-  assert.equal(waited.messages[0].kind, "status");
-});
-
-test("kind question survives the broker, so a pending AskUserQuestion reaches the daemon as one", async (t) => {
-  const { call } = await startBroker(t);
-  const { body: a } = await call("/register", { ...REG, pid: process.pid });
-  const { body: b } = await call("/register", { ...REG, pid: process.ppid });
-  await call("/send-message", { from_id: a.id, to_id: b.id, text: "Which?", kind: "question" });
-  const { body: waited } = await call("/wait", { id: b.id, timeout_ms: 1000 });
-  assert.equal(waited.messages[0].kind, "question");
-});
-
-test("kind prompt and turn-end survive the broker unchanged", async (t) => {
-  const { call } = await startBroker(t);
-  const { body: a } = await call("/register", { ...REG, pid: process.pid });
-  const { body: b } = await call("/register", { ...REG, pid: process.ppid });
-  await call("/send-message", { from_id: a.id, to_id: b.id, text: "typed here", kind: "prompt" });
-  await call("/send-message", { from_id: a.id, to_id: b.id, text: "", kind: "turn-end" });
-  const { body: waited } = await call("/wait", { id: b.id, timeout_ms: 1000 });
-  // An unknown kind is downgraded to "text", which would post a prompt as if it
-  // were Claude's reply and a turn-end as an empty line.
-  assert.deepEqual(waited.messages.map((m) => m.kind), ["prompt", "turn-end"]);
 });
 
 // A7: the push path is gone with the channel notification. Two delivery

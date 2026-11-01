@@ -20,6 +20,7 @@ oauth_config:
       - app_mentions:read
       - chat:write
       - chat:write.public
+      - chat:write.customize
       - chat:delete
       - channels:history
       - channels:read

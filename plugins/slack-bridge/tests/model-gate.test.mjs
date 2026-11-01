@@ -92,7 +92,11 @@ function claimed(isAlive) {
   const released = [];
   return {
     released,
-    claims: { get: () => ({ peer_id: "P1" }), release: async id => { released.push(id); } },
+    claims: {
+      get: () => ({ peer_id: "P1", channel: "C1" }),
+      release: async id => { released.push(id); },
+      history: () => null,
+    },
     broker: { isAlive },
   };
 }
@@ -105,12 +109,13 @@ test("claim — broker unreachable, no model: spawns with model omitted, no hint
   assert.ok(!posts.some(p => p.text === HINT));
 });
 
-test("claim — peer dead, no model: claim reaped, hint posted, no spawn", async () => {
+test("claim — peer dead, no model: claim released, disconnect block, hint posted, no spawn", async () => {
   const remote = claimed(async () => false);
   const { runClaude, posts } = await send({ store: makeStore(), remote });
   assert.deepEqual(remote.released, ["P1"]);
   assert.equal(runClaude.calls.length, 0);
-  assert.deepEqual(posts.map(p => p.text), [HINT]);
+  assert.match(posts[0].attachments[0].text, /SESSION DISCONNECTED/);
+  assert.deepEqual(posts.map(p => p.text), ["", HINT]);
 });
 
 // --- /model ---

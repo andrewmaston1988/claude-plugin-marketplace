@@ -338,14 +338,15 @@ async function handleBrokerMessage({ message, claims, web, config, log, _quietGa
 
   if (message.kind === "prompt") {
     if (!text) return false;
-    const postParams = { channel, text: mdToSlack(text) };
+    const converted = mdToSlack(text);
+    const postParams = { channel, text: converted };
     const name = config.remote?.operatorName ?? null;
     const icon = config.remote?.operatorIconUrl ?? null;
     if (name) postParams.username = name;
     if (icon) postParams.icon_url = icon;
     // No custom identity to post under: mark it as typed somewhere else, so it
     // reads as the operator's terminal rather than as the bot talking to itself.
-    if (!name && !icon) postParams.text = `⌨️ ${text}`;
+    if (!name && !icon) postParams.text = `⌨️ ${converted}`;
     try {
       await web.chatPostMessage(postParams);
     } catch (e) {

@@ -572,11 +572,11 @@ test("kind:prompt posts under the operator's name and icon, and opens one termin
 
 test("kind:prompt with no operator name posts a keyboard-marked message under the bot's name", async (t) => {
   const s = setup(t, { claims: [["peerP2", "C-P2"]], replyTimeoutMs: 60_000 });
-  s.broker.deliver("slack-bridge", { from_id: "peerP2", kind: "prompt", text: "hello from the terminal" });
+  s.broker.deliver("slack-bridge", { from_id: "peerP2", kind: "prompt", text: "**hello** from the terminal" });
 
-  await waitFor(() => hasPost(s.web, "hello from the terminal"), 3000);
-  const post = s.web.calls.find(([ty, p]) => ty === "post" && p.text?.includes("hello from the terminal"))[1];
-  assert.equal(post.text, "⌨️ hello from the terminal");
+  await waitFor(() => hasPost(s.web, "hello"), 3000);
+  const post = s.web.calls.find(([ty, p]) => ty === "post" && p.text?.includes("hello"))[1];
+  assert.equal(post.text, "⌨️ *hello* from the terminal", "the keyboard branch converts markdown like every other post");
   assert.equal("username" in post, false, "no custom username without remote.operatorName");
 });
 
