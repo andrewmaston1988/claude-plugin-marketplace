@@ -386,6 +386,7 @@ if (config.remote?.controlToken) {
     const { createClaimsStore } = await import("../src/remote/claims.mjs");
     const { createBrokerClient } = await import("../src/remote/broker-client.mjs");
     const { createControlServer } = await import("../src/remote/control.mjs");
+    const { sweepClaims } = await import("../src/core/disconnect.mjs");
     // claims takes the logger object (log?.warn); broker-client and control call
     // log(msg, extra) as a plain function — same adapter as the remote-mcp branch.
     const fnLog = (msg, extra) => log.info(msg, extra);
@@ -400,16 +401,14 @@ if (config.remote?.controlToken) {
     await broker.ensureBroker();
     await control.listen(config.remote.controlPort);
     log.info("remote-control ready", { brokerPort: config.remote.brokerPort, controlPort: config.remote.controlPort });
-    // Periodically drop claims whose live session has died, so a dead session's
-    // channel falls back to the spawn path within ~30s rather than waiting on the
-    // per-message liveness check.
-    const reapTimer = setInterval(() => {
-      broker.listPeers()
-        .then((peers) => { const alive = new Set(peers.map((p) => p.id)); return claims.reapDead({ isAlive: async (id) => alive.has(id) }); })
-        .then((reaped) => { if (reaped.length) log.info("reaped stale remote claims", { reaped }); })
+    // Say a dead session is dead, within ~30s and without waiting for the operator
+    // to send a message first, then let the channel fall back to the spawn path.
+    const sweepTimer = setInterval(() => {
+      sweepClaims({ broker, claims, web, log })
+        .then((dropped) => { if (dropped.length) log.info("disconnected dead remote claims", { dropped }); })
         .catch(() => {});
     }, 30_000);
-    reapTimer.unref?.();
+    sweepTimer.unref?.();
     remote = { claims, broker, control };
   } catch (e) {
     // Remote control is auxiliary: a broker that won't start or a taken control

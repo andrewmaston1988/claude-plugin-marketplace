@@ -66,7 +66,7 @@ function makeHeartbeat(calls) {
 
 // Fake broker client: in-memory, no HTTP. `deliver` pushes a message addressed to
 // the daemon peer; the loop's open `wait` takes it (or it queues until one opens).
-function makeFakeBroker({ alive = new Set(), failWaits = 0 } = {}) {
+function makeFakeBroker({ alive = new Set(), failWaits = 0, down = false } = {}) {
   const sendCalls = [];
   const inbox = new Map();     // peerId → queued messages
   const waiters = new Map();   // peerId → resolve fn
@@ -74,7 +74,7 @@ function makeFakeBroker({ alive = new Set(), failWaits = 0 } = {}) {
   const broker = {
     sendCalls,
     waitCalls: 0,
-    async isAlive(peerId) { return alive.has(peerId); },
+    async isAlive(peerId) { if (down) throw new TypeError("fetch failed"); return alive.has(peerId); },
     async sendMessage(fromId, toId, text) { sendCalls.push({ from_id: fromId, to_id: toId, text }); return { ok: true }; },
     deliver(peerId, message) {
       const wake = waiters.get(peerId);
@@ -113,13 +113,13 @@ function makePayload({ channel, text = "", subtype, client_msg_id }) {
 
 // One routed/claimed channel with a live peer, a started reply loop, and the
 // injected heartbeat — everything a routing test needs. `t.after` stops the loop.
-function setup(t, { replyTimeoutMs = 3000, claims: preClaims = [], alive: aliveOverride, quietGapMs = 1000 } = {}) {
+function setup(t, { replyTimeoutMs = 3000, claims: preClaims = [], alive: aliveOverride, quietGapMs = 1000, down = false } = {}) {
   _resetRouteState();
   const claims = createClaimsStore({ path: tmpClaims() });
   for (const [peer, channel] of preClaims) claims.claim(peer, channel);
   // By default every claimed peer is live; a test passes `alive: []` to kill them.
   const alive = aliveOverride ?? preClaims.map(([peer]) => peer);
-  const broker = makeFakeBroker({ alive: new Set(alive) });
+  const broker = makeFakeBroker({ alive: new Set(alive), down });
   const web = makeWeb();
   const hb = makeHeartbeat(web.calls);
   const log = makeLog();
@@ -607,13 +607,69 @@ test("unclaimed channel → runClaude spawn path taken, no broker send", async (
   assert.equal(s.broker.sendCalls.length, 0, "no broker send for an unclaimed channel");
 });
 
-test("claimed channel + dead peer → fallback spawn, claim reaped, no broker send", async (t) => {
+test("claimed channel + dead peer → red block, fallback spawn, claim reaped, no broker send", async (t) => {
   const s = setup(t, { alive: [], claims: [["peerB", "C2"]] });
   const rc = makeRunClaude();
   await slack(s, makePayload({ channel: "C2", text: "hello", client_msg_id: "m-route-3" }), { runClaude: rc });
   await waitFor(() => rc.calls.length === 1, 3000);
   assert.equal(s.broker.sendCalls.length, 0, "must not send to a dead peer");
   assert.equal(s.claims.get("C2"), null, "the dead peer's claim must be reaped");
+  assert.ok(posted(s.web, "SESSION DISCONNECTED"), "the operator is told the session is gone, not just that it was slow");
+});
+
+// ── The #rc-* guard ─────────────────────────────────────────────────────────
+// A channel that was once seized never spawns a claude -p session: the two
+// transcripts in one channel are confusing to read back. The record outlives the
+// claim, so this holds after release; a channel with no record is untouched.
+
+test("a message in an unclaimed once-seized #rc-* channel posts the red block and never spawns", async (t) => {
+  const s = setup(t, { claims: [] });
+  s.claims.recordHistory("C-rc", { session_id: "sess-gone", channel_name: "rc-demo" });
+  const rc = makeRunClaude();
+  await slack(s, makePayload({ channel: "C-rc", text: "still there?", client_msg_id: "m-rc-1" }), { runClaude: rc });
+  await delay(150);
+
+  assert.equal(rc.calls.length, 0, "an rc channel must never spawn");
+  assert.equal(s.broker.sendCalls.length, 0);
+  assert.ok(posted(s.web, "SESSION DISCONNECTED"), JSON.stringify(s.web.calls));
+  assert.ok(posted(s.web, "sess-gone"), "the block names the session that went");
+});
+
+test("a released non-rc channel still reaches the spawn path and shows no block", async (t) => {
+  const s = setup(t, { claims: [] });
+  s.claims.recordHistory("C-ops", { session_id: "sess-ops", channel_name: "ops" });
+  const rc = makeRunClaude();
+  await slack(s, makePayload({ channel: "C-ops", text: "hi", client_msg_id: "m-rc-2" }), { runClaude: rc });
+  await waitFor(() => rc.calls.length === 1, 3000);
+
+  assert.ok(!posted(s.web, "SESSION DISCONNECTED"), "a hand-made channel keeps the ordinary behaviour");
+});
+
+test("a dead peer's #rc-* channel gets one red block and never spawns", async (t) => {
+  const s = setup(t, { alive: [], claims: [["peerD", "C-rc3"]] });
+  s.claims.recordHistory("C-rc3", { session_id: "sess-dead", channel_name: "rc-dead" });
+  const rc = makeRunClaude();
+  await slack(s, makePayload({ channel: "C-rc3", text: "hello", client_msg_id: "m-rc-4" }), { runClaude: rc });
+  await delay(150);
+
+  assert.equal(rc.calls.length, 0, "no spawn in an rc channel, dead peer or not");
+  assert.equal(s.broker.sendCalls.length, 0);
+  const blocks = s.web.calls.filter(([t, p]) => t === "post"
+    && (p.attachments ?? []).some((a) => String(a.text ?? "").includes("SESSION DISCONNECTED")));
+  assert.equal(blocks.length, 1, "one block, not two");
+  assert.equal(s.claims.get("C-rc3"), null, "the claim is released");
+});
+
+test("a broker outage in an #rc-* channel posts the broker message and never spawns", async (t) => {
+  const s = setup(t, { claims: [["peerC", "C-rc2"]], down: true });
+  s.claims.recordHistory("C-rc2", { session_id: "sess-live", channel_name: "rc-live" });
+  const rc = makeRunClaude();
+  await slack(s, makePayload({ channel: "C-rc2", text: "hi", client_msg_id: "m-rc-3" }), { runClaude: rc });
+  await delay(150);
+
+  assert.equal(rc.calls.length, 0, "the broker-down exception does not reach an rc channel");
+  assert.ok(posted(s.web, "Bridge can't reach the broker. Your message was not delivered."), JSON.stringify(s.web.calls));
+  assert.ok(s.claims.get("C-rc2"), "a broker outage keeps the claim — slow is not dead");
 });
 
 
