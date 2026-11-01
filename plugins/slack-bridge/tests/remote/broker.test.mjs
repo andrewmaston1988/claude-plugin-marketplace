@@ -517,6 +517,18 @@ test("kind question survives the broker, so a pending AskUserQuestion reaches th
   assert.equal(waited.messages[0].kind, "question");
 });
 
+test("kind prompt and turn-end survive the broker unchanged", async (t) => {
+  const { call } = await startBroker(t);
+  const { body: a } = await call("/register", { ...REG, pid: process.pid });
+  const { body: b } = await call("/register", { ...REG, pid: process.ppid });
+  await call("/send-message", { from_id: a.id, to_id: b.id, text: "typed here", kind: "prompt" });
+  await call("/send-message", { from_id: a.id, to_id: b.id, text: "", kind: "turn-end" });
+  const { body: waited } = await call("/wait", { id: b.id, timeout_ms: 1000 });
+  // An unknown kind is downgraded to "text", which would post a prompt as if it
+  // were Claude's reply and a turn-end as an empty line.
+  assert.deepEqual(waited.messages.map((m) => m.kind), ["prompt", "turn-end"]);
+});
+
 // A7: the push path is gone with the channel notification. Two delivery
 // semantics for one direction is what /take-messages + /wait would have had to
 // reconcile, so the route is deleted outright rather than left as a third.

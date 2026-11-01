@@ -5,9 +5,11 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { runHook, shortArg, formatQuestion } from "../../src/remote/stop-hook.mjs";
 import { mdToSlack } from "../../src/markdown/index.mjs";
 import { createBrokerClient } from "../../src/remote/broker-client.mjs";
+import { PRIMING_LINE } from "../../src/remote/waiter.mjs";
 
 const SID = "sess-1";
 const PEER = "peer-a";
@@ -55,9 +57,10 @@ function setup(t, { claimed = true, configPath } = {}) {
   return { dir, stateDir, transcript, configPath: cfg, append, cursorFile, cursor };
 }
 
-function hook(env, client, { event = "Stop", active = false, tool, sleeps, loads, createOpts, raw } = {}) {
+function hook(env, client, { event = "Stop", active = false, tool, sleeps, loads, createOpts, raw, prompt } = {}) {
   const input = { session_id: SID, transcript_path: env.transcript, hook_event_name: event, stop_hook_active: active };
   if (tool) Object.assign(input, { tool_name: tool.name, tool_input: tool.input });
+  if (prompt !== undefined) input.prompt = prompt;
   return runHook({
     raw: raw ?? JSON.stringify(input),
     stateDir: env.stateDir,
@@ -374,6 +377,80 @@ test("a lock older than 10 s is stale and broken (B2)", async (t) => {
   assert.deepEqual(textSends(client).map((s) => s.text), ["after stale lock"]);
   assert.equal(env.cursor(), "a1");
   assert.ok(!fs.existsSync(lock), "lock released after the op");
+});
+
+// --- the other half of the conversation: prompts typed at the terminal ---
+// The transcript cannot supply these — a wake is a `user` row there, so reading
+// those rows would post the operator's own Slack text back into Slack.
+
+test("UserPromptSubmit on a claimed session sends the typed prompt as kind:prompt", async (t) => {
+  const env = setup(t);
+  await prime(env);
+  const client = fakeClient();
+  assert.equal(await hook(env, client, { event: "UserPromptSubmit", prompt: "run the tests again" }), null);
+  assert.deepEqual(client.sends.map((s) => [s.kind, s.text]), [["prompt", "run the tests again"]]);
+});
+
+test("UserPromptSubmit on an unclaimed session sends nothing", async (t) => {
+  const env = setup(t, { claimed: false });
+  const client = fakeClient();
+  assert.equal(await hook(env, client, { event: "UserPromptSubmit", prompt: "typed in a normal session" }), null);
+  assert.equal(client.sends.length, 0);
+});
+
+test("a rewake prompt starting <task-notification> sends nothing, with or without the priming line", async (t) => {
+  const env = setup(t);
+  await prime(env);
+  const client = fakeClient();
+  for (const prompt of [
+    `<task-notification>\n<task-id>x</task-id>\n</task-notification>`,
+    `<task-notification>\nSLACK: hello\n${PRIMING_LINE}`,
+  ]) {
+    await hook(env, client, { event: "UserPromptSubmit", prompt });
+  }
+  assert.equal(client.sends.length, 0, JSON.stringify(client.sends));
+});
+
+test("a prompt carrying the priming line sends nothing — the operator's Slack text is not echoed back", async (t) => {
+  const env = setup(t);
+  await prime(env);
+  const client = fakeClient();
+  await hook(env, client, { event: "UserPromptSubmit", prompt: `SLACK: what is the status\n${PRIMING_LINE}` });
+  assert.equal(client.sends.length, 0);
+});
+
+test("an empty prompt sends nothing", async (t) => {
+  const env = setup(t);
+  await prime(env);
+  const client = fakeClient();
+  await hook(env, client, { event: "UserPromptSubmit", prompt: "   " });
+  assert.equal(client.sends.length, 0);
+});
+
+test("Stop sends kind:turn-end after the mirror, so the terminal block closes", async (t) => {
+  const env = setup(t);
+  await prime(env);
+  env.append(textEntry("a1", "the answer"));
+  const client = fakeClient();
+  await hook(env, client);
+  assert.deepEqual(client.sends.map((s) => s.kind), ["text", "turn-end"], JSON.stringify(client.sends));
+  assert.equal(client.sends[1].to, "slack-bridge");
+});
+
+test("Stop still sends turn-end when there was no new text", async (t) => {
+  const env = setup(t);
+  await prime(env);
+  const client = fakeClient();
+  await hook(env, client);
+  assert.deepEqual(client.sends.map((s) => s.kind), ["turn-end"]);
+});
+
+test("hooks.json runs stop-hook on UserPromptSubmit, async so a prompt is never held up", () => {
+  const file = fileURLToPath(new URL("../../hooks/hooks.json", import.meta.url));
+  const entries = (JSON.parse(fs.readFileSync(file, "utf8")).hooks.UserPromptSubmit ?? []).flatMap((g) => g.hooks);
+  const mirror = entries.filter((h) => /claude-slack\.mjs" stop-hook$/.test(h.command ?? ""));
+  assert.equal(mirror.length, 1, JSON.stringify(entries));
+  assert.equal(mirror[0].async, true, "the mirror must not delay the prompt");
 });
 
 // --- AskUserQuestion (item 13) ---

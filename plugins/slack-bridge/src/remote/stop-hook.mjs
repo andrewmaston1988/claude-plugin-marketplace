@@ -10,6 +10,7 @@ import { getPaths } from "../paths.mjs";
 import { loadConfig } from "../config.mjs";
 import { createBrokerClient } from "./broker-client.mjs";
 import { readTranscriptFrom, textAfter, textOf, readCursor, writeCursor, tryLock } from "./transcript-tail.mjs";
+import { PRIMING_LINE } from "./waiter.mjs";
 
 const SESSION_ID_RE = /^[A-Za-z0-9_-]+$/;
 const ARG_MAX = 80;
@@ -80,6 +81,13 @@ const DENY_DIALOG = {
   },
 };
 
+// A wake arrives as a prompt too, so not every UserPromptSubmit is the operator
+// typing. A rewake carries <task-notification>, and a Slack message carries the
+// priming line — mirroring either would post the operator's own text back at them.
+function isEchoedPrompt(prompt) {
+  return prompt.startsWith("<task-notification>") || prompt.includes(PRIMING_LINE);
+}
+
 export async function runHook({
   raw,
   stateDir = getPaths().stateDir,
@@ -94,7 +102,8 @@ export async function runHook({
   }
   const event = input?.hook_event_name;
   const isQuestion = event === "PreToolUse" && input?.tool_name === "AskUserQuestion";
-  if (event !== "Stop" && event !== "PostToolUse" && !isQuestion) return null;
+  const isPrompt = event === "UserPromptSubmit";
+  if (event !== "Stop" && event !== "PostToolUse" && !isQuestion && !isPrompt) return null;
   // Absent file = no claim held: exit before any config load or broker call,
   // which is what keeps PostToolUse cheap on unclaimed sessions.
   try {
@@ -129,13 +138,25 @@ export async function runHook({
       return DENY_DIALOG;
     }
 
+    if (isPrompt) {
+      const prompt = String(input.prompt ?? "").trim();
+      // A wake is not the operator typing: skip it, and skip anything else that
+      // came from Slack rather than the keyboard.
+      if (prompt && !isEchoedPrompt(prompt)) {
+        await client.sendMessage(session.peerId, "slack-bridge", prompt, { kind: "prompt" });
+      }
+      return null;
+    }
+
     if (event === "PostToolUse") {
       const arg = shortArg(input.tool_input);
       await client.sendMessage(session.peerId, "slack-bridge", arg ? `${input.tool_name}: ${arg}` : String(input.tool_name), { kind: "status" });
       return null;
     }
 
-    // Stop ends after the mirror: the asyncRewake hook starts the next waiter.
+    // The turn is over: the daemon closes this peer's terminal block. Sent after
+    // the mirror, so the last text is not racing the delete.
+    await client.sendMessage(session.peerId, "slack-bridge", "", { kind: "turn-end" });
     return null;
   } catch {
     // Every other error allows, but a claimed session must never be left on an

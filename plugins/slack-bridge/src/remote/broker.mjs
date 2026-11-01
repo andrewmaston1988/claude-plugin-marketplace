@@ -24,7 +24,7 @@ const LEASE_MS = 30_000;
 const UNKNOWN_WAITER = Object.freeze({ pid: 0, started_at: 0 });
 
 const MAX_BODY_BYTES = 1_000_000;
-const KINDS = new Set(["status", "question"]);
+const KINDS = new Set(["status", "question", "prompt", "turn-end"]);
 const normaliseKind = (kind) => (KINDS.has(kind) ? kind : "text");
 
 export function createBroker({
