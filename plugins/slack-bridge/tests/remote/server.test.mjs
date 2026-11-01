@@ -7,7 +7,7 @@ import os from "node:os";
 import path from "node:path";
 import { PassThrough } from "node:stream";
 import { readSessionName, readSessionAiTitle, encodeCwd, createRemoteMcpServer, INSTRUCTIONS } from "../../src/remote-mcp/server.mjs";
-import { BASH_TIMEOUT_MS, waitCommand } from "../../src/remote/wait-constants.mjs";
+import { PRIMING_LINE } from "../../src/remote/waiter.mjs";
 import { createBroker } from "../../src/remote/broker.mjs";
 
 function tmpProjectsDir() {
@@ -140,13 +140,13 @@ test("readSessionName finds a custom-title set further back than the last 1 MB",
     "a title beyond the last 1 MB must still be found");
 });
 
-// --- delivery: background waiter ---
+// --- delivery: the asyncRewake hook, nothing for the model to arm ---
 
 function tmpState() {
   return path.join(fs.mkdtempSync(path.join(os.tmpdir(), "slack-remote-mcp-")), "state.json");
 }
 
-async function serverWithBroker(t, { sessionId = "session-123", sessionReader = () => ({ sessionId }), projectsDir = tmpProjectsDir(), cwd = process.cwd(), claims = [] } = {}) {
+async function serverWithBroker(t, { sessionId = "session-123", sessionReader = () => ({ sessionId }), projectsDir = tmpProjectsDir(), cwd = process.cwd(), claims = [], releases = [], releaseFails = false } = {}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "slack-remote-mcp-state-"));
   const stateDir = path.join(root, "state");
   const broker = createBroker({ stateFile: tmpState() });
@@ -161,6 +161,8 @@ async function serverWithBroker(t, { sessionId = "session-123", sessionReader = 
     _fetch: async (url, options) => {
       if (url.endsWith("/claim")) claims.push(JSON.parse(options.body));
       if (url.endsWith("/claim")) return new Response(JSON.stringify({ ok: true, channel: "C123", channel_name: "test" }));
+      if (url.endsWith("/release")) releases.push(JSON.parse(options.body));
+      if (url.endsWith("/release") && releaseFails) return new Response(JSON.stringify({ ok: false, error: "control /release: 500" }), { status: 500 });
       if (url.endsWith("/release")) return new Response(JSON.stringify({ ok: true }));
       return fetch(url, options);
     },
@@ -173,26 +175,53 @@ async function serverWithBroker(t, { sessionId = "session-123", sessionReader = 
   return { server, broker, call, port, stateDir };
 }
 
-test("initialize: instructions describe seize, background wait, normal reply and re-arm", async (t) => {
+test("initialize: instructions describe seize, the hook wake and a normal reply, with nothing to arm", async (t) => {
   const { server } = await serverWithBroker(t);
   const res = await server._onRequest("initialize", {});
   assert.equal(res.instructions, INSTRUCTIONS);
-  assert.match(res.instructions, /run_in_background/);
-  assert.match(res.instructions, /bash_timeout_ms/);
-  assert.match(res.instructions, /reply normally/);
-  assert.match(res.instructions, /re-arm/);
+  assert.ok(res.instructions.includes(PRIMING_LINE), "the seize-time text repeats the per-message priming line");
+  assert.match(res.instructions, /nothing to arm/i);
+  assert.match(res.instructions, /reply normally/i);
+  assert.doesNotMatch(res.instructions, /run_in_background|bash_timeout_ms|wait_command|re-arm/);
   assert.doesNotMatch(res.instructions, /CronCreate|slack_post|<channel source=/);
 });
 
-test("slack_seize returns wait command and timeout, and writes the session mapping", async (t) => {
+test("slack_seize returns no wait command or timeout, and writes the session mapping", async (t) => {
   const { server, stateDir } = await serverWithBroker(t);
   const result = await server._onRequest("tools/call", { name: "slack_seize", arguments: {} });
   const value = result.content[0].text;
-  assert.match(value, /Run the wait command/);
-  assert.equal(result.wait_command, waitCommand(server._myId(), { configPath: "/tmp/remote-config.json" }));
-  assert.equal(result.bash_timeout_ms, BASH_TIMEOUT_MS);
+  assert.equal(result.isError, undefined, value);
+  assert.match(value, /^Slack remote ready: #test\./);
+  assert.ok(value.includes(PRIMING_LINE), value);
+  assert.doesNotMatch(value, /wait command|run_in_background|re-arm/i);
+  assert.equal("wait_command" in result, false);
+  assert.equal("bash_timeout_ms" in result, false);
   const mapping = JSON.parse(fs.readFileSync(path.join(stateDir, "remote-sessions", "session-123.json"), "utf8"));
   assert.deepEqual(mapping, { peerId: server._myId(), configPath: "/tmp/remote-config.json", channel: "C123" });
+});
+
+test("slack_seize with no session id releases the claim and returns an error", async (t) => {
+  const releases = [];
+  const { server, stateDir } = await serverWithBroker(t, { sessionReader: () => null, releases });
+  const result = await server._onRequest("tools/call", { name: "slack_seize", arguments: {} });
+  assert.equal(result.isError, true, result.content[0].text);
+  assert.match(result.content[0].text, /^Seize failed: /);
+  assert.match(result.content[0].text, /The claim was released\./);
+  assert.deepEqual(releases, [{ peer_id: server._myId() }]);
+  assert.equal(fs.existsSync(path.join(stateDir, "remote-sessions")), false);
+});
+
+test("slack_seize with no session id does not claim a release that failed", async (t) => {
+  const releases = [];
+  const { server, stateDir } = await serverWithBroker(t, { sessionReader: () => null, releases, releaseFails: true });
+  const result = await server._onRequest("tools/call", { name: "slack_seize", arguments: {} });
+  const text = result.content[0].text;
+  assert.equal(result.isError, true, text);
+  assert.match(text, /^Seize failed: /);
+  assert.doesNotMatch(text, /The claim was released/, "the awaited /release never resolved");
+  assert.match(text, /could not be released/i, text);
+  assert.deepEqual(releases, [{ peer_id: server._myId() }]);
+  assert.equal(fs.existsSync(path.join(stateDir, "remote-sessions")), false);
 });
 
 test("slack_release deletes the session mapping", async (t) => {

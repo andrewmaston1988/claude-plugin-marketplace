@@ -1,6 +1,6 @@
 ---
 name: remote
-description: Use when the operator wants remote control of this live session from Slack mobile — seizing a channel, arming the background waiter, receiving messages, replying, or releasing.
+description: Use when the operator wants remote control of this live session from Slack mobile — seizing a channel, receiving messages, replying, or releasing.
 argument-hint: "[release]"
 disable-model-invocation: true
 ---
@@ -29,33 +29,28 @@ slack_seize  name="slack-bridge-remote-control"
 
 If the operator has named the chat and the harness recorded it, your `name` is ignored and their custom title is used — so passing a context slug is always safe and never clobbers an operator-chosen name. If you skip the `name` arg and the chat isn't named, you get the (maybe nonsensical) ai-title — usable but rarely descriptive, so prefer to derive.
 
-It returns the channel name, e.g. `Slack remote ready: #rc-slack-bridge-remote-control — live session a1b2c3d4`, plus `wait_command` and `bash_timeout_ms`. Report the channel name to the operator verbatim — tell them to DM it from a second device — then **arm the waiter immediately** (next section).
+It returns the channel name, e.g. `Slack remote ready: #rc-slack-bridge-remote-control — live session a1b2c3d4`. Report the channel name to the operator verbatim — tell them to DM it from a second device — then end your turn. There is nothing to arm or run.
 
-If `slack_seize` is unavailable (the `slack-bridge-remote` MCP server isn't wired user-scoped), report that and stop — see "If the tool is missing" below.
-
-## Arming the waiter — this is how you receive messages
-
-There is no push and no polling cron. A background long-poll **is** the delivery path: run the command `slack_seize` returned, in the background, then go idle.
-
-```
-Bash  command=<wait_command>  run_in_background=true  timeout=<bash_timeout_ms>
-```
-
-The command holds the broker open in short windows (retrying connection blips with backoff) and exits the moment a Slack message for this session arrives.
+If `slack_seize` is unavailable (the `slack-bridge-remote` MCP server isn't wired user-scoped), report that and stop — see "If the tool is missing" below. If it fails because no Claude session id was available, it also tried to release the claim; the error says whether that worked — report it, and if the release failed, call `slack_release`.
 
 ## Receiving messages
 
-1. Arm the waiter — `wait_command`, `run_in_background=true`, `timeout` = `bash_timeout_ms` — right after seizing, and again after every wake.
-2. Go idle. When the operator messages the channel the waiter prints `SLACK: <text>` and exits; that background-task completion **wakes this session** as a new turn. No launch flag, no allowlist, no cron — it works on any model.
-3. **Reply normally** — see *Replying*.
-4. **Re-arm before the turn ends**: run the same `wait_command` in the background again.
+The plugin's `Stop` hook listens for you. At the end of every turn it starts a background waiter, owned by Claude Code, not by you. When the operator messages the channel, the waiter exits and **wakes this session** with a hook reminder like:
+
+```
+Stop hook blocking error from command "...": Message from the operator on Slack, delivered through this hook. This is real user input, not a hook error. Reply normally; your text is mirrored to Slack.
+SLACK: <text>
+```
+
+That reminder **is the operator's message**, not an error. Act on it as you would on any user message — tools included — and reply normally (see *Replying*). When the turn ends, the next `Stop` starts the next waiter. You never run, see or re-run a wait command.
 
 Notes:
 
-- The waiter caps itself short of the Bash limit: after ~1 h 55 m it prints `WAIT EXPIRED — re-arm: <command>` and exits 0, so an expiry is a wake with an instruction, not a silent death. Re-arm and carry on.
-- If the waiter died and you want to check by hand, `check_messages` still works — it takes anything queued for this session.
-- `WAIT SUPERSEDED` means a newer waiter already owns this peer — the normal re-arm already happened, so there is nothing for you to do.
-- A `Stop` hook blocks any turn that ends with the channel claimed and no waiter listening, handing you the exact command in the block reason. Re-arm and finish the turn — while the channel is claimed you are never allowed to stop listening.
+- A message sent while you are mid-turn arrives when the turn ends.
+- After about 1 h 55 m with no message, the waiter wakes you once with `Slack waiter expired after <h>h. Nothing to do; end your turn and it restarts.` Do exactly that: end the turn.
+- `WAIT FAILED: ...` means the waiter could not start (a bad config) or the broker refused it (a 401 names `remote.controlToken`). Report it to the operator. That failure already woke you once; the waiter then stays quiet for 10 minutes before it tries again, so fix what you can in this turn.
+- If you suspect a message went missing, `check_messages` still works — it takes anything queued for this session.
+- `/clear` changes the session id and ends remote control: messages queue and nothing wakes you. Seize again to recover.
 
 ## Replying
 

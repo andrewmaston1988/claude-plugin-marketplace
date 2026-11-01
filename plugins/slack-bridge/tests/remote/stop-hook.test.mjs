@@ -1,4 +1,4 @@
-// Stop / PostToolUse hook: re-arm nudge + live mirror of the turn's text. A
+// Stop / PostToolUse hook: live mirror of the turn's text, question deny. A
 // fake broker client, a tmp stateDir and a fixture transcript — no network.
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -8,22 +8,21 @@ import path from "node:path";
 import { runHook, shortArg, formatQuestion } from "../../src/remote/stop-hook.mjs";
 import { mdToSlack } from "../../src/markdown/index.mjs";
 import { createBrokerClient } from "../../src/remote/broker-client.mjs";
-import { waitCommand, BASH_TIMEOUT_MS } from "../../src/remote/wait-constants.mjs";
 
 const SID = "sess-1";
 const PEER = "peer-a";
 
-function fakeClient({ armed = [false], peerRow = true, sendDelay = null, fail = false } = {}) {
+function fakeClient({ sendDelay = null, fail = false } = {}) {
   const sends = [];
   let listCalls = 0;
   return {
     sends,
     get listCalls() { return listCalls; },
+    // Stop never asks the broker whether a waiter is armed: the asyncRewake hook
+    // owns the waiter, so any listPeers call is a regression, not a reading.
     async listPeers() {
-      if (fail) throw new Error("fetch failed");
-      const a = armed[Math.min(listCalls, armed.length - 1)];
       listCalls++;
-      return peerRow ? [{ id: PEER, armed: a }, { id: "other", armed: true }] : [{ id: "other", armed: true }];
+      throw new Error("Stop must never call listPeers");
     },
     async sendMessage(from, to, text, opts = {}) {
       if (fail) throw new Error("fetch failed");
@@ -71,25 +70,21 @@ function hook(env, client, { event = "Stop", active = false, tool, sleeps, loads
 // First hook after a seize: starts the cursor at the newest entry, sends nothing.
 async function prime(env) {
   env.append(userEntry("u0", "pre-seize prompt"), textEntry("a0", "PRE-SEIZE TEXT"));
-  await hook(env, fakeClient({ armed: [true] }), { event: "PostToolUse", tool: { name: "mcp__slack__slack_seize", input: {} } });
+  await hook(env, fakeClient(), { event: "PostToolUse", tool: { name: "mcp__slack__slack_seize", input: {} } });
 }
 
 const textSends = (c) => c.sends.filter((s) => s.kind === "text");
 
-// --- re-arm decision ---
+// --- no re-arm decision: the asyncRewake hook owns the waiter ---
 
-test("claim held + not armed → block whose reason carries the waitCommand", async (t) => {
-  const env = setup(t);
-  const out = await hook(env, fakeClient({ armed: [false] }));
-  assert.equal(out?.decision, "block");
-  assert.ok(out.reason.includes(waitCommand(PEER, { configPath: env.configPath })), out.reason);
-  assert.ok(out.reason.includes(String(BASH_TIMEOUT_MS)));
-  assert.match(out.reason, /#rc-test/);
-});
-
-test("claim held + armed → allow", async (t) => {
-  const env = setup(t);
-  assert.equal(await hook(env, fakeClient({ armed: [true] })), null);
+test("Stop never returns a block, claimed or not, and never asks the broker about a waiter", async (t) => {
+  for (const claimed of [true, false]) {
+    const env = setup(t, { claimed });
+    const client = fakeClient();
+    assert.equal(await hook(env, client), null, `claimed=${claimed}`);
+    assert.equal(await hook(env, client, { active: true }), null, `retried stop, claimed=${claimed}`);
+    assert.equal(client.listCalls, 0, "Stop never asks the broker whether a waiter is armed");
+  }
 });
 
 test("unknown session_id (no remote-sessions file) → allow, no config load, no broker client (A4)", async (t) => {
@@ -115,10 +110,12 @@ test("non-default configPath in the remote-sessions file → hook authenticates 
     tokens: { bot: "xoxb", app: "xapp" }, claude: { cwd: "." },
     remote: { brokerPort: 45678, controlToken: "custom-token" },
   }));
+  await prime(env);
+  env.append(textEntry("a1", "authed text"));
   const seen = [];
   const _fetch = async (url, init) => {
     seen.push({ url, auth: init.headers?.Authorization });
-    return new Response(JSON.stringify([{ id: PEER, armed: true }]), { status: 200 });
+    return new Response(JSON.stringify({ ok: true }), { status: 200 });
   };
   const out = await runHook({
     raw: JSON.stringify({ session_id: SID, transcript_path: env.transcript, hook_event_name: "Stop" }),
@@ -127,51 +124,19 @@ test("non-default configPath in the remote-sessions file → hook authenticates 
     _sleep: async () => {},
   });
   assert.equal(out, null);
-  const list = seen.find((s) => s.url.endsWith("/list-peers"));
-  assert.ok(list, JSON.stringify(seen));
-  assert.equal(list.auth, "Bearer custom-token");
-  assert.match(list.url, /:45678\//);
+  const send = seen.find((s) => s.url.endsWith("/send-message"));
+  assert.ok(send, JSON.stringify(seen));
+  assert.equal(send.auth, "Bearer custom-token");
+  assert.match(send.url, /:45678\//);
 });
 
-test("not armed at first, armed on the 2nd re-check → allow (A3)", async (t) => {
-  const env = setup(t);
-  const sleeps = [];
-  const client = fakeClient({ armed: [false, false, true] });
-  assert.equal(await hook(env, client, { sleeps }), null);
-  assert.equal(client.listCalls, 3);
-  assert.deepEqual(sleeps, [500, 500]);
-});
-
-test("never armed → re-checks every 500 ms for 3 s, then blocks (A3)", async (t) => {
-  const env = setup(t);
-  const sleeps = [];
-  const client = fakeClient({ armed: [false] });
-  const out = await hook(env, client, { sleeps });
-  assert.equal(out?.decision, "block");
-  assert.equal(client.listCalls, 7);
-  assert.equal(sleeps.reduce((a, b) => a + b, 0), 3000);
-});
-
-test("peer row gone from the broker → allow (the claim is dead, the command would be wrong)", async (t) => {
-  const env = setup(t);
-  assert.equal(await hook(env, fakeClient({ peerRow: false })), null);
-});
-
-test("stop_hook_active while unarmed → still blocks, and that turn's text is still mirrored (B1)", async (t) => {
+test("stop_hook_active → that turn's text is still mirrored (B1)", async (t) => {
   const env = setup(t);
   await prime(env);
   env.append(textEntry("a1", "retried stop text"));
-  const client = fakeClient({ armed: [false] });
-  const sleeps = [];
-  const out = await hook(env, client, { active: true, sleeps });
-  assert.equal(out?.decision, "block", "a retried stop is not waved through");
-  assert.equal(client.listCalls, 7, "the whole 3 s re-check runs on a retried stop");
+  const client = fakeClient();
+  assert.equal(await hook(env, client, { active: true }), null);
   assert.deepEqual(textSends(client).map((s) => s.text), ["retried stop text"]);
-});
-
-test("stop_hook_active with a live waiter → allow (B1)", async (t) => {
-  const env = setup(t);
-  assert.equal(await hook(env, fakeClient({ armed: [true] }), { active: true }), null);
 });
 
 test("broker unreachable → allow, never throws", async (t) => {
@@ -205,7 +170,7 @@ test("mirror: two text blocks + a tool_use + thinking after the cursor → ONE s
   await prime(env);
   assert.equal(env.cursor(), "a0");
   env.append(textEntry("a1", "first narration"), toolEntry("a2", "Bash", { command: "SECRET_TOOL_INPUT" }), thinkEntry("a3"), textEntry("a4", "second narration"));
-  const client = fakeClient({ armed: [true] });
+  const client = fakeClient();
   await hook(env, client);
   const texts = textSends(client);
   assert.equal(texts.length, 1);
@@ -220,9 +185,9 @@ test("mirror: second stop with no new entries → no send", async (t) => {
   const env = setup(t);
   await prime(env);
   env.append(textEntry("a1", "once"));
-  const c1 = fakeClient({ armed: [true] });
+  const c1 = fakeClient();
   await hook(env, c1);
-  const c2 = fakeClient({ armed: [true] });
+  const c2 = fakeClient();
   await hook(env, c2);
   assert.equal(textSends(c1).length, 1);
   assert.equal(textSends(c2).length, 0);
@@ -247,7 +212,7 @@ test("mirror: bytes before the stored offset are never re-read", async (t) => {
   env.append(textEntry("a1", "ALREADY READ"));
   writeCursorFile(env, { offset: fs.statSync(env.transcript).size });
   env.append(textEntry("a2", "fresh"));
-  const client = fakeClient({ armed: [true] });
+  const client = fakeClient();
   await hook(env, client);
   assert.deepEqual(textSends(client).map((s) => s.text), ["fresh"]);
   assert.equal(env.cursor(), "a2");
@@ -259,10 +224,10 @@ test("mirror: a half-written last line is left for the next read, then sent once
   const line = JSON.stringify(textEntry("a2", "second"));
   env.append(textEntry("a1", "first"));
   fs.appendFileSync(env.transcript, line.slice(0, 20));
-  const c1 = fakeClient({ armed: [true] });
+  const c1 = fakeClient();
   await hook(env, c1);
   fs.appendFileSync(env.transcript, line.slice(20) + "\n");
-  const c2 = fakeClient({ armed: [true] });
+  const c2 = fakeClient();
   await hook(env, c2);
   assert.deepEqual(textSends(c1).map((s) => s.text), ["first"]);
   assert.deepEqual(textSends(c2).map((s) => s.text), ["second"]);
@@ -272,14 +237,14 @@ test("mirror: a transcript rewritten under the offset falls back to the uuid cur
   const env = setup(t);
   await prime(env);
   env.append(textEntry("a1", "x".repeat(400)));
-  await hook(env, fakeClient({ armed: [true] }));
+  await hook(env, fakeClient());
   // Shorter rewrite (offset now past EOF), then a longer one (offset mid-line).
   for (const [uuid, text] of [["a2", "after short rewrite"], ["a3", "after long rewrite"]]) {
     const body = [textEntry("a1", "x"), textEntry(uuid, text)];
     if (uuid === "a3") body.unshift(userEntry("pad", "p".repeat(2000)));
     fs.writeFileSync(env.transcript, body.map((e) => JSON.stringify(e) + "\n").join(""));
     writeCursorFile(env, { uuid: "a1" });
-    const client = fakeClient({ armed: [true] });
+    const client = fakeClient();
     await hook(env, client);
     assert.deepEqual(textSends(client).map((s) => s.text), [text]);
   }
@@ -288,7 +253,7 @@ test("mirror: a transcript rewritten under the offset falls back to the uuid cur
 test("mirror: no claim → no send", async (t) => {
   const env = setup(t, { claimed: false });
   env.append(textEntry("a1", "unclaimed"));
-  const client = fakeClient({ armed: [true] });
+  const client = fakeClient();
   await hook(env, client);
   assert.equal(client.sends.length, 0);
   assert.ok(!fs.existsSync(env.cursorFile));
@@ -297,7 +262,7 @@ test("mirror: no claim → no send", async (t) => {
 test("mirror: first stop after seize sends nothing from before the seize", async (t) => {
   const env = setup(t);
   env.append(userEntry("u0", "hi"), textEntry("a0", "PRE-SEIZE TEXT"));
-  const client = fakeClient({ armed: [true] });
+  const client = fakeClient();
   await hook(env, client);
   assert.equal(textSends(client).length, 0);
   assert.equal(env.cursor(), "a0");
@@ -311,19 +276,19 @@ test("mirror: a re-seize (remote-sessions file rewritten) restarts the cursor �
   const f = path.join(env.stateDir, "remote-sessions", `${SID}.json`);
   const later = new Date(Date.now() + 5000);
   fs.utimesSync(f, later, later);
-  const client = fakeClient({ armed: [true] });
+  const client = fakeClient();
   await hook(env, client);
   assert.equal(textSends(client).length, 0);
   assert.equal(env.cursor(), "a1");
 });
 
-test("mirror sends even when the same stop also blocks for re-arm", async (t) => {
+test("mirror sends on a Stop with no waiter armed", async (t) => {
   const env = setup(t);
   await prime(env);
   env.append(textEntry("a1", "reply text"));
-  const client = fakeClient({ armed: [false] });
+  const client = fakeClient();
   const out = await hook(env, client);
-  assert.equal(out?.decision, "block");
+  assert.equal(out, null);
   assert.deepEqual(textSends(client).map((s) => s.text), ["reply text"]);
 });
 
@@ -331,7 +296,7 @@ test("PostToolUse: new narration is sent before the turn ends, then a status mes
   const env = setup(t);
   await prime(env);
   env.append(textEntry("a1", "running the tests now"), toolEntry("a2", "Bash", { command: "npm test" }));
-  const client = fakeClient({ armed: [false] });
+  const client = fakeClient();
   const out = await hook(env, client, { event: "PostToolUse", tool: { name: "Bash", input: { command: "npm test", description: "Run tests" } } });
   assert.equal(out, null);
   assert.deepEqual(client.sends.map((s) => [s.kind, s.text]), [
@@ -341,13 +306,11 @@ test("PostToolUse: new narration is sent before the turn ends, then a status mes
   assert.equal(client.listCalls, 0, "PostToolUse never checks armed");
 });
 
-test("PostToolUse never returns a block decision, even unarmed with nothing to mirror", async (t) => {
+test("PostToolUse never returns a block decision", async (t) => {
   const env = setup(t);
   await prime(env);
-  for (const armed of [[false], [true]]) {
-    const out = await hook(env, fakeClient({ armed }), { event: "PostToolUse", tool: { name: "Read", input: { file_path: "/a/b.txt" } } });
-    assert.equal(out, null);
-  }
+  const out = await hook(env, fakeClient(), { event: "PostToolUse", tool: { name: "Read", input: { file_path: "/a/b.txt" } } });
+  assert.equal(out, null);
 });
 
 test("shortArg picks the salient field, one line, truncated", () => {
@@ -369,7 +332,7 @@ test("two overlapping mirror invocations → each text sent exactly once, cursor
   env.append(textEntry("a1", "block one"));
   let release;
   const gate = new Promise((r) => { release = r; });
-  const client = fakeClient({ armed: [true], sendDelay: () => gate });
+  const client = fakeClient({ sendDelay: () => gate });
   const tool = { name: "Bash", input: { command: "ls" } };
   const first = hook(env, client, { event: "PostToolUse", tool });
   await new Promise((r) => setTimeout(r, 20)); // first now holds the lock, parked in sendMessage
@@ -391,7 +354,7 @@ test("a fresh lock makes the contender exit without sending; cursor untouched (B
   await prime(env);
   env.append(textEntry("a1", "held back"));
   fs.writeFileSync(env.cursorFile + ".lock", "");
-  const client = fakeClient({ armed: [true] });
+  const client = fakeClient();
   await hook(env, client, { event: "PostToolUse", tool: { name: "Bash", input: { command: "ls" } } });
   assert.equal(textSends(client).length, 0);
   assert.equal(env.cursor(), "a0");
@@ -406,7 +369,7 @@ test("a lock older than 10 s is stale and broken (B2)", async (t) => {
   fs.writeFileSync(lock, "");
   const old = new Date(Date.now() - 11_000);
   fs.utimesSync(lock, old, old);
-  const client = fakeClient({ armed: [true] });
+  const client = fakeClient();
   await hook(env, client, { event: "PostToolUse", tool: { name: "Bash", input: { command: "ls" } } });
   assert.deepEqual(textSends(client).map((s) => s.text), ["after stale lock"]);
   assert.equal(env.cursor(), "a1");
@@ -430,7 +393,7 @@ const QUESTION = {
 test("PreToolUse AskUserQuestion → the question and every option reach Slack as a question message", async (t) => {
   const env = setup(t);
   await prime(env);
-  const client = fakeClient({ armed: [true] });
+  const client = fakeClient();
   const out = await hook(env, client, { event: "PreToolUse", tool: { name: "AskUserQuestion", input: QUESTION } });
   assert.equal(out?.hookSpecificOutput?.permissionDecision, "deny", "a claimed session must not open a terminal dialog");
   const questions = client.sends.filter((s) => s.kind === "question");
@@ -445,7 +408,7 @@ test("PreToolUse AskUserQuestion → mirrored before the deny, so the operator s
   const env = setup(t);
   await prime(env);
   env.append(textEntry("a1", "about to ask"));
-  const client = fakeClient({ armed: [true] });
+  const client = fakeClient();
   const out = await hook(env, client, { event: "PreToolUse", tool: { name: "AskUserQuestion", input: QUESTION } });
   assert.equal(out?.hookSpecificOutput?.hookEventName, "PreToolUse");
   assert.equal(out?.hookSpecificOutput?.permissionDecision, "deny");
@@ -462,7 +425,7 @@ test("PreToolUse AskUserQuestion with a failing Slack post → still denied (a h
 
 test("PreToolUse AskUserQuestion on an unclaimed session → allow, the dialog opens as usual", async (t) => {
   const env = setup(t, { claimed: false });
-  const client = fakeClient({ armed: [true] });
+  const client = fakeClient();
   const out = await hook(env, client, { event: "PreToolUse", tool: { name: "AskUserQuestion", input: QUESTION } });
   assert.equal(out, null);
   assert.equal(client.sends.length, 0);
@@ -471,7 +434,7 @@ test("PreToolUse AskUserQuestion on an unclaimed session → allow, the dialog o
 test("PreToolUse for any other tool → nothing sent", async (t) => {
   const env = setup(t);
   await prime(env);
-  const client = fakeClient({ armed: [true] });
+  const client = fakeClient();
   await hook(env, client, { event: "PreToolUse", tool: { name: "Bash", input: { command: "ls" } } });
   assert.equal(client.sends.length, 0);
 });

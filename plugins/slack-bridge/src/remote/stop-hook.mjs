@@ -1,20 +1,17 @@
 // Stop + PostToolUse + PreToolUse(AskUserQuestion) hook for a session holding a
-// Slack claim: mirrors the turn's assistant text to the channel, posts a tool
-// status line or the pending question, and on Stop blocks whenever no live waiter
-// is armed. A question is denied rather than opened as a terminal dialog, which
-// nothing in Slack can answer. Any error allows — a broken hook must never wedge
-// a session.
+// Slack claim: mirrors the turn's assistant text to the channel and posts a tool
+// status line or the pending question. It never blocks a Stop: the waiter belongs
+// to the asyncRewake hook (rewake-hook.mjs), not the model. A question is denied
+// rather than opened as a terminal dialog, which nothing in Slack can answer. Any
+// error allows — a broken hook must never wedge a session.
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { getPaths } from "../paths.mjs";
 import { loadConfig } from "../config.mjs";
 import { createBrokerClient } from "./broker-client.mjs";
-import { waitCommand, BASH_TIMEOUT_MS } from "./wait-constants.mjs";
 import { readTranscriptFrom, textAfter, textOf, readCursor, writeCursor, tryLock } from "./transcript-tail.mjs";
 
 const SESSION_ID_RE = /^[A-Za-z0-9_-]+$/;
-const RECHECK_MS = 500;
-const RECHECKS = 6; // 3 s: covers a waiter still booting when the turn ends
 const ARG_MAX = 80;
 const ARG_KEYS = ["command", "file_path", "notebook_path", "pattern", "path", "url", "query", "skill", "description", "prompt"];
 
@@ -26,7 +23,7 @@ export function shortArg(input) {
   return flat.length > ARG_MAX ? flat.slice(0, ARG_MAX - 1) + "…" : flat;
 }
 
-function readSessionFile(stateDir, sessionId) {
+export function readSessionFile(stateDir, sessionId) {
   if (typeof sessionId !== "string" || !SESSION_ID_RE.test(sessionId)) return null;
   const file = join(stateDir, "remote-sessions", `${sessionId}.json`);
   if (!existsSync(file)) return null;
@@ -55,16 +52,6 @@ async function mirror({ stateDir, sessionId, transcriptPath, session, client }) 
     }
   } finally {
     release();
-  }
-}
-
-async function isArmed(client, peerId, _sleep) {
-  for (let i = 0; ; i++) {
-    const row = (await client.listPeers()).find((p) => p.id === peerId);
-    // No row: the peer was reaped, so its claim is dead and the command would name a stale id.
-    if (!row || row.armed) return true;
-    if (i === RECHECKS) return false;
-    await _sleep(RECHECK_MS);
   }
 }
 
@@ -98,7 +85,6 @@ export async function runHook({
   stateDir = getPaths().stateDir,
   _loadConfig = loadConfig,
   _createClient = createBrokerClient,
-  _sleep = (ms) => new Promise((r) => setTimeout(r, ms)),
 }) {
   let input, session;
   try {
@@ -127,7 +113,8 @@ export async function runHook({
     });
 
     // Mirror first, on every event and on every stop — a retried stop included,
-    // which must not drop that turn's text. A mirror failure must not cost the nudge.
+    // which must not drop that turn's text. A mirror failure must not cost the
+    // question deny or the status line.
     try {
       await mirror({ stateDir, sessionId: input.session_id, transcriptPath: input.transcript_path, session, client });
     } catch {}
@@ -148,13 +135,8 @@ export async function runHook({
       return null;
     }
 
-    if (await isArmed(client, session.peerId, _sleep)) return null;
-    const channel = String(session.channel ?? "").replace(/^#/, "");
-    const cmd = waitCommand(session.peerId, { configPath: session.configPath });
-    return {
-      decision: "block",
-      reason: `Slack channel #${channel} is claimed but no waiter is armed. Run: ${cmd} (run_in_background, timeout ${BASH_TIMEOUT_MS}), or release the claim with slack_release if this channel is done.`,
-    };
+    // Stop ends after the mirror: the asyncRewake hook starts the next waiter.
+    return null;
   } catch {
     // Every other error allows, but a claimed session must never be left on an
     // unanswerable dialog: fall back to the deny when the path was a question.

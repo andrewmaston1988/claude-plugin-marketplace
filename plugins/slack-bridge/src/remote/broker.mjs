@@ -24,10 +24,6 @@ const LEASE_MS = 30_000;
 const UNKNOWN_WAITER = Object.freeze({ pid: 0, started_at: 0 });
 
 const MAX_BODY_BYTES = 1_000_000;
-// Armed = a /wait for the peer is open, or one returned within this grace. The
-// grace covers the gap between the waiter's windows; without it a Stop hook that
-// lands mid-re-arm reads an armed session as unarmed and blocks it.
-const WAIT_GRACE_MS = 5_000;
 const KINDS = new Set(["status", "question"]);
 const normaliseKind = (kind) => (KINDS.has(kind) ? kind : "text");
 
@@ -55,11 +51,9 @@ export function createBroker({
   // In memory on purpose: a broker restart drops the open requests, and the
   // waiter's retry re-arms within a window.
   const waiters = new Map();      // peerId -> Set of open waiters
-  const armedUntil = new Map();   // peerId -> epoch ms the grace runs to
   const waiterGen = new Map();    // peerId -> newest { pid, started_at } seen
-  // The injected _now returns a Date, so every armed comparison has to go through
-  // epoch ms: `now + WAIT_GRACE_MS` on a Date is string concatenation and armed
-  // would then never be true.
+  // The injected _now returns a Date, so every lease comparison has to go through
+  // epoch ms: `now + _leaseMs` on a Date is string concatenation.
   const nowMs = () => _now().getTime();
   const isNewer = (a, b) => a.started_at > b.started_at || (a.started_at === b.started_at && a.pid > b.pid);
   const asIdentity = (w) =>
@@ -69,8 +63,6 @@ export function createBroker({
     return mark !== undefined && mark !== UNKNOWN_WAITER && isNewer(mark, identity);
   };
   const markIsAlive = (pid) => { try { _kill(pid); return true; } catch (e) { return e.code === "EPERM"; } };
-  const isArmed = (id) =>
-    [...(waiters.get(id) ?? [])].some((w) => !w.superseded) || (armedUntil.get(id) ?? 0) > nowMs();
 
   const persist = () => { if (stateFile) saveState(stateFile, state); };
 
@@ -97,7 +89,6 @@ export function createBroker({
     delete state.peers[id];
     state.messages = state.messages.filter((m) => m.to_id !== id);
     waiterGen.delete(id);
-    armedUntil.delete(id);
   }
 
   function purgeExpired() {
@@ -205,8 +196,7 @@ export function createBroker({
       }
       if (body.exclude_id) peers = peers.filter((p) => p.id !== body.exclude_id);
       persist();
-      // Copies, not the stored rows: armed is computed and must not be persisted.
-      return peers.map((p) => ({ ...p, session_id: p.session_id ?? null, armed: isArmed(p.id) }));
+      return peers.map((p) => ({ ...p, session_id: p.session_id ?? null }));
     },
 
     "/send-message"(body) {
@@ -298,15 +288,13 @@ export function createBroker({
             clearTimeout(timer);
             const set = waiters.get(id);
             if (set) { set.delete(waiter); if (set.size === 0) waiters.delete(id); }
-            if (!superseded) armedUntil.set(id, nowMs() + WAIT_GRACE_MS);
             resolve(superseded ? { messages: [], superseded: true } : { messages });
           },
         };
         timer = setTimeout(() => waiter.finish([], waiter.superseded), Number(body.timeout_ms ?? WAIT_WINDOW_MS));
         if (!waiters.has(id)) waiters.set(id, new Set());
         waiters.get(id).add(waiter);
-        // The client hung up: drop the waiter without arming, so the peer reads
-        // unarmed and the Stop hook can nudge. The messages stay queued.
+        // The client hung up: drop the waiter. The messages stay queued.
         ctx?.onDrop?.(() => {
           clearTimeout(timer);
           const set = waiters.get(id);

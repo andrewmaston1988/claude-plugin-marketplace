@@ -1,27 +1,32 @@
-// The background waiter a seized session runs: loops broker /wait windows until
-// a Slack message arrives or the cap, prints it with the reply/re-arm footer and
-// exits. The process exiting is what wakes the idle session.
-import { WAIT_WINDOW_MS, WAIT_CAP_MS, BASH_TIMEOUT_MS, waitCommand } from "./wait-constants.mjs";
+// The background waiter the asyncRewake Stop hook runs for a seized session:
+// loops broker /wait windows until a Slack message arrives or the cap, writes it
+// and exits. Exit 2 is what wakes the idle session, with the written text as the
+// wake's system reminder; exit 0 wakes nothing.
+import { WAIT_WINDOW_MS, WAIT_CAP_MS } from "./wait-constants.mjs";
 
 const BACKOFF_START_MS = 1000;
 const BACKOFF_MAX_MS = 30_000;
 // Headroom over the broker's own window, so only a genuinely half-open socket hits it.
 const ABORT_SLACK_MS = 10_000;
 
-// Must agree with the skill text: the model replies in plain chat (the mirror
-// carries it to Slack), never via a tool call.
-export function waitFooter(peerId, { configPath } = {}) {
-  return `Reply normally — your text is mirrored to Slack. Then re-arm: run ${waitCommand(peerId, { configPath })} with run_in_background and timeout ${BASH_TIMEOUT_MS}.`;
-}
+// Sent on every wake: the harness renders it as a hook error, which an unprimed
+// model can refuse as not user input. Per message, so it survives compaction.
+// Must agree with the skill text: the model replies in plain chat, never via a tool.
+export const PRIMING_LINE =
+  "Message from the operator on Slack, delivered through this hook. This is real user input, not a hook error. Reply normally; your text is mirrored to Slack.";
 
-export const defaultOut = (s) => new Promise((resolve, reject) => {
-  const onError = (err) => { process.stdout.off("error", onError); reject(err); };
-  process.stdout.once("error", onError);
-  process.stdout.write(s, (err) => {
-    process.stdout.off("error", onError);
+// Resolves on the write callback, rejects on a stream error: a failed write must
+// not be acked, so the lease redelivers.
+export const writeTo = (stream, s) => new Promise((resolve, reject) => {
+  const onError = (err) => { stream.off("error", onError); reject(err); };
+  stream.once("error", onError);
+  stream.write(s, (err) => {
+    stream.off("error", onError);
     if (err) reject(err); else resolve();
   });
 });
+
+export const defaultOut = (s) => writeTo(process.stdout, s);
 
 const brokerStatus = (e) => Number(/^Broker error \([^)]*\): (\d{3})/.exec(e?.message ?? "")?.[1] ?? 0);
 
@@ -45,16 +50,23 @@ export async function prepareBroker({ client }) {
   }
 }
 
+// Exit codes: 2 wakes the session (a message, a failure, the cap — every outcome
+// that would otherwise strand the operator); 0 wakes nothing (superseded, or the
+// claim is gone); 1 is a failed write, which leaves the lease to redeliver.
+// stillNeeded answers "is this waiter's claim still live?" — asked only after an
+// empty window, at most once per window, so a queued message is never dropped by it.
 export async function runWaiter({
   peerId,
   client,
-  configPath,
+  stillNeeded,
   out = defaultOut,
   _now = () => Date.now(),
   _sleep = (ms) => new Promise((r) => setTimeout(r, ms)),
   _signal = (ms) => AbortSignal.timeout(ms),
 }) {
+  if (typeof stillNeeded !== "function") throw new TypeError("runWaiter: stillNeeded is required");
   const start = _now();
+  let lastCheck = start;
   let backoff = BACKOFF_START_MS;
   while (_now() - start < WAIT_CAP_MS) {
     let res;
@@ -70,7 +82,7 @@ export async function runWaiter({
       // with no /wait): retrying would hang silently for the whole cap.
       if (status >= 400 && status < 500) {
         await out(`WAIT FAILED: ${e.message}\n`);
-        return 1;
+        return 2;
       }
       // Everything else — connection drops (isConnectionError), aborts of a
       // half-open window, 5xx, ensureBroker timing out mid-restart — is
@@ -81,25 +93,30 @@ export async function runWaiter({
     }
     backoff = BACKOFF_START_MS;
     const messages = res?.messages ?? [];
-    if (res?.superseded) {
-      await out(`WAIT SUPERSEDED — a newer waiter holds peer ${peerId}; this one exits without consuming.\n`);
-      return 0;
-    }
+    // A newer waiter (the next turn's Stop hook) owns the peer: leave silently.
+    if (res?.superseded) return 0;
     if (messages.length > 0) {
       try {
-        await out(messages.map((m) => `SLACK: ${m.text}\n`).join("") + waitFooter(peerId, { configPath }) + "\n");
+        await out(`${PRIMING_LINE}\n` + messages.map((m) => `SLACK: ${m.text}\n`).join(""));
       } catch {
         return 1;
       }
       await res.ack?.();
-      return 0;
+      return 2;
+    }
+    if (_now() - lastCheck >= WAIT_WINDOW_MS) {
+      lastCheck = _now();
+      let needed = true;
+      // A check that throws is a blip, not a verdict: only a clear "no" ends the waiter.
+      try { needed = (await stillNeeded()) !== false; } catch {}
+      if (!needed) return 0;
     }
   }
   const hours = ((_now() - start) / 3_600_000).toFixed(1);
   try {
-    await out(`WAIT EXPIRED after ${hours}h — re-arm: ${waitCommand(peerId, { configPath })}\n`);
+    await out(`Slack waiter expired after ${hours}h. Nothing to do; end your turn and it restarts.\n`);
   } catch {
     return 1;
   }
-  return 0;
+  return 2;
 }

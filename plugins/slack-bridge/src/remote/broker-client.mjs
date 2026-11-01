@@ -133,7 +133,10 @@ export function createBrokerClient({
       const peers = await brokerFetch("/list-peers", { scope: "machine", cwd: "", git_root: null, include_adhoc: true });
       return peers.some((p) => p.id === peerId);
     },
-    listPeers: (opts = {}) => brokerFetch("/list-peers", { scope: "machine", cwd: "", git_root: null, include_adhoc: true, ...opts }),
+    // opts go in the request body, so fetch options (a signal) need their own
+    // argument — a signal inside opts never reaches fetch.
+    listPeers: (opts = {}, fetchOpts = {}) =>
+      brokerFetch("/list-peers", { scope: "machine", cwd: "", git_root: null, include_adhoc: true, ...opts }, fetchOpts),
     sendMessage: (fromId, toId, text, { kind = null } = {}) =>
       brokerFetch("/send-message", { from_id: fromId, to_id: toId, text, kind }),
     // Long-poll: resolves with the peer's messages (take semantics), or empty at

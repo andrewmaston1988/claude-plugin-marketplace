@@ -25,11 +25,7 @@ async function startBroker(t, opts = {}) {
     });
     return { status: res.status, body: await res.json() };
   };
-  const armed = async (id) => {
-    const { body: peers } = await call("/list-peers", { scope: "machine", cwd: "x", git_root: null });
-    return peers.find((p) => p.id === id)?.armed;
-  };
-  return { broker, port, call, armed };
+  return { broker, port, call };
 }
 
 const REG = { pid: process.pid, cwd: "C:/work/a", git_root: "C:/work/a", tty: null, summary: "live session" };
@@ -452,7 +448,7 @@ test("a long-poll that runs to its window stays registered; a send near the end 
 });
 
 test("a client that disconnects mid-wait drops its waiter; a following send stays queued", async (t) => {
-  const { port, call, armed } = await startBroker(t);
+  const { port, call } = await startBroker(t);
   const { body: a } = await call("/register", { ...REG, pid: process.pid });
   const { body: b } = await call("/register", { ...REG, pid: process.ppid });
   const ac = new AbortController();
@@ -464,42 +460,23 @@ test("a client that disconnects mid-wait drops its waiter; a following send stay
   ac.abort();
   await pending;
   await sleep(50);
-  assert.equal(await armed(b.id), false, "a dropped waiter must not read as armed");
   await call("/send-message", { from_id: a.id, to_id: b.id, text: "still mine" });
   const { body: taken } = await call("/take-messages", { id: b.id });
   assert.deepEqual(taken.messages.map((m) => m.text), ["still mine"],
     "the dropped waiter must not have consumed the message");
 });
 
-test("armed is true while a wait is open, true inside the 5 s grace, false after it", async (t) => {
-  let now = 1_000_000;
-  const { call, armed } = await startBroker(t, { _now: () => new Date(now) });
-  const { body: a } = await call("/register", { ...REG, pid: process.pid });
+// Nothing reads an armed flag any more: the asyncRewake hook owns the waiter.
+test("/list-peers rows carry no armed field, even with a wait open", async (t) => {
+  const { call } = await startBroker(t);
   const { body: b } = await call("/register", { ...REG, pid: process.ppid });
-  const pending = call("/wait", { id: b.id, timeout_ms: 5000 });
-  await sleep(50);
-  assert.equal(await armed(b.id), true, "armed while the wait is open");
-  await call("/send-message", { from_id: a.id, to_id: b.id, text: "x" });
+  const pending = call("/wait", { id: b.id, timeout_ms: 200 });
+  await sleep(20);
+  const { body: peers } = await call("/list-peers", { scope: "machine", cwd: "x", git_root: null });
+  const row = peers.find((p) => p.id === b.id);
+  assert.ok(row, JSON.stringify(peers));
+  assert.equal("armed" in row, false, JSON.stringify(row));
   await pending;
-  assert.equal(await armed(b.id), true, "armed inside the 5 s grace after the window resolves");
-  now += 6000;
-  assert.equal(await armed(b.id), false, "unarmed past the grace");
-});
-
-// A2: the injected _now returns a Date, so `now + 5000` is string concatenation
-// and the comparison against epoch ms is never true — armed would be permanently
-// false and the Stop hook would nudge a session that is already waiting.
-test("armed against a Date-returning _now is a real boolean, true in the grace window (A2)", async (t) => {
-  const now = Date.parse("2026-09-17T12:00:00Z");
-  const { call, armed } = await startBroker(t, { _now: () => new Date(now) });
-  const { body: a } = await call("/register", { ...REG, pid: process.pid });
-  const { body: b } = await call("/register", { ...REG, pid: process.ppid });
-  const pending = call("/wait", { id: b.id, timeout_ms: 300 });
-  await call("/send-message", { from_id: a.id, to_id: b.id, text: "x" });
-  await pending;
-  const value = await armed(b.id);
-  assert.equal(typeof value, "boolean", "armed must be a boolean, not a coerced string compare");
-  assert.equal(value, true, "must be armed inside the grace window");
 });
 
 test("/register stores session_id and /list-peers exposes it", async (t) => {

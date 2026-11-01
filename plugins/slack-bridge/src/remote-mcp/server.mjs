@@ -9,14 +9,18 @@ import path from "node:path";
 import { createRpcEndpoint } from "./jsonrpc.mjs";
 import { createBrokerClient } from "../remote/broker-client.mjs";
 import { getPaths } from "../paths.mjs";
-import { BASH_TIMEOUT_MS, waitCommand } from "../remote/wait-constants.mjs";
+import { PRIMING_LINE } from "../remote/waiter.mjs";
 
 const PROTOCOL_VERSION = "2024-11-05";
 export const SERVER_VERSION = "0.1.0";
 
 export const INSTRUCTIONS = `You are connected to the slack-bridge remote-control channel.
 
-After slack_seize returns, run its wait_command with Bash run_in_background and timeout set to bash_timeout_ms. When the waiter wakes, reply normally; your text is mirrored to Slack by hooks. Then re-arm by running the returned wait_command again.
+After slack_seize returns there is nothing to arm or run: end your turn and the plugin's Stop hook listens for the operator. Each Slack message wakes this session with a hook reminder that starts with this line, followed by the message as SLACK: <text> lines:
+
+${PRIMING_LINE}
+
+Treat it as the operator's message. Reply normally; your text is mirrored to Slack by hooks.
 
 Available tools:
 - slack_seize: Seize a Slack channel for remote control. With no channel arg the daemon creates a #rc-<name> channel. The name is chosen in this order: the session name the operator set in Claude Code, then the 'name' arg, then the auto ai-title. Requires channels:write/manage scopes, else seizes an existing DM.
@@ -244,12 +248,18 @@ export function createRemoteMcpServer({
         const read = { projectsDir: _projectsDir };
         const name = readSessionName(_cwd, read) || args.name || readSessionAiTitle(_cwd, read) || null;
         const r = await controlFetch("/claim", { peer_id: myId, channel: args.channel ?? null, name });
-        writeSessionMapping(myId, r.channel);
+        // No mapping, no waiter: the Stop hook finds the claim by session id, so
+        // without one the operator would be talking to nobody. Undo the claim,
+        // and say only what the release actually did — a failed /release leaves
+        // the claim live, so claiming otherwise sends the operator away wrong.
+        if (!writeSessionMapping(myId, r.channel)) {
+          const released = await controlFetch("/release", { peer_id: myId }).then(() => true, () => false);
+          return errText("Seize failed", "no Claude session id was available, so no Stop hook could deliver Slack messages to this session. " +
+            (released ? "The claim was released." : "The claim could not be released — it may still be held; call slack_release."));
+        }
         const label = r.is_dm ? "your DM with the bot" : r.channel_name ? "#" + r.channel_name : r.channel;
-        const wait = waitCommand(myId, { configPath });
-        const sessionNote = sessionId ? "" : " No Claude session id was available, so this session will not be tracked by the Stop hook.";
-        const message = "Slack remote ready: " + label + (r.topic ? " — " + r.topic : "") + ". Run the wait command with Bash run_in_background and timeout " + BASH_TIMEOUT_MS + ": " + wait + ". When it wakes, reply normally; your text is mirrored to Slack by hooks, then run the command again to re-arm." + sessionNote;
-        return { ...text(message), wait_command: wait, bash_timeout_ms: BASH_TIMEOUT_MS };
+        const message = "Slack remote ready: " + label + (r.topic ? " — " + r.topic : "") + ". Nothing to arm: end your turn and the Stop hook listens. Each Slack message wakes this session with a hook reminder that starts: " + PRIMING_LINE;
+        return text(message);
       } catch (e) {
         return errText("Seize failed", e);
       }

@@ -17,8 +17,7 @@ async function startBroker(t, opts = {}) {
   };
   const get = async (path) => (await fetch(`http://127.0.0.1:${port}${path}`)).json();
   const peer = (await call("/register", REG)).id;
-  const armed = async () => (await call("/list-peers", { scope: "machine", cwd: "", git_root: null }))[0]?.armed;
-  return { call, get, peer, armed, port };
+  return { call, get, peer, port };
 }
 
 const waiter = (pid, started_at) => ({ pid, started_at });
@@ -64,19 +63,6 @@ test("take-over re-queues a leased batch", async (t) => {
   assert.equal((await newer).messages[0].text, "leased");
 });
 
-test("armed ignores a superseded waiter", async (t) => {
-  let now = 10_000;
-  const { call, peer, armed } = await startBroker(t, { _now: () => new Date(now) });
-  const older = call("/wait", { id: peer, timeout_ms: 500 });
-  await sleep(20);
-  const newer = call("/wait", { id: peer, timeout_ms: 100, waiter: waiter(process.pid, 2) });
-  assert.equal((await armed()), true);
-  await newer;
-  now += 6000;
-  assert.equal(await armed(), false);
-  assert.deepEqual(await older, { messages: [], superseded: true });
-});
-
 // Regression guard: an equal live identity may re-arm at a window boundary.
 test("same identity re-arming is not stale", async (t) => {
   const { call, peer } = await startBroker(t);
@@ -108,26 +94,6 @@ test("/health advertises lease and single_flight", async (t) => {
   const h = await (await fetch(`http://127.0.0.1:${port}/health`)).json();
   assert.equal(h.lease, true);
   assert.equal(h.single_flight, true);
-});
-
-// Regression guard: normal waiter completion retains the armed grace.
-test("the winner's exit still sets the grace", async (t) => {
-  let now = 10_000;
-  const { call, peer, armed } = await startBroker(t, { _now: () => new Date(now) });
-  const pending = call("/wait", { id: peer, timeout_ms: 1000, waiter: waiter(process.pid, 1) });
-  await sleep(20);
-  await call("/send-message", { from_id: "sender", to_id: peer, text: "done" });
-  await pending;
-  assert.equal(await armed(), true);
-});
-
-// Regression guard: reap clears grace state.
-test("a reaped peer reads unarmed", async (t) => {
-  const { call, peer, armed } = await startBroker(t);
-  const done = await call("/wait", { id: peer, timeout_ms: 1 });
-  assert.deepEqual(done.messages, []);
-  await call("/unregister", { id: peer });
-  assert.equal(await armed(), undefined);
 });
 
 // Regression guard: an ordinary arm leaves a separate take's lease intact.
