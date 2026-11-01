@@ -17,6 +17,21 @@ test("wait: the retry after a connection error keeps the caller's abort signal",
   assert.equal(signals[1], signal);
 });
 
+// listPeers' opts go in the request body, so a signal put there never reaches
+// fetch: it needs its own fetch-options argument.
+test("listPeers: the caller's fetch options reach fetch as the signal", async () => {
+  const calls = [];
+  const _fetch = async (url, opts = {}) => {
+    calls.push({ path: new URL(url).pathname, signal: opts.signal, body: JSON.parse(opts.body) });
+    return { ok: true, json: async () => [] };
+  };
+  const signal = AbortSignal.timeout(5000);
+  await createBrokerClient({ port: 1, _fetch }).listPeers({ scope: "machine" }, { signal });
+  assert.deepEqual(calls.map((c) => c.path), ["/list-peers"]);
+  assert.equal(calls[0].signal, signal);
+  assert.equal(calls[0].body.scope, "machine", "opts still go in the body");
+});
+
 // Item 10: wait and takeMessages ask for a lease and ack what they received, so a
 // response lost on the wire is redelivered instead of dropped.
 for (const [name, call] of [["wait", (c) => c.wait("p1", 55_000)], ["takeMessages", (c) => c.takeMessages("p1")]]) {

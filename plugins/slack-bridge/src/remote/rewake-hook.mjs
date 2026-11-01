@@ -18,6 +18,7 @@ export async function runRewakeHook({
   _loadConfig = loadConfig,
   _createClient = createBrokerClient,
   _runWaiter = runWaiter,
+  _signal = AbortSignal.timeout,
 }) {
   let input, session;
   // Absent file = no claim held: exit before any config load or broker call,
@@ -30,13 +31,21 @@ export async function runRewakeHook({
   }
   if (!session) return 0;
 
-  const config = _loadConfig({ configPath: session.configPath });
-  const client = _createClient({
-    port: config.remote?.brokerPort ?? 7898,
-    token: config.remote?.controlToken ?? null,
-    configPath: session.configPath,
-  });
-  await prepareBroker({ client });
+  // A load failure after the claim is found must wake the session: exiting
+  // silently would leave the operator's claim deaf until their next turn.
+  let client;
+  try {
+    const config = _loadConfig({ configPath: session.configPath });
+    client = _createClient({
+      port: config.remote?.brokerPort ?? 7898,
+      token: config.remote?.controlToken ?? null,
+      configPath: session.configPath,
+    });
+    await prepareBroker({ client });
+  } catch (e) {
+    await stderrOut(`WAIT FAILED: ${e?.message ?? e}\n`).catch(() => {});
+    return 2;
+  }
 
   // Nothing on the broker side ends a waiter whose claim is gone (/wait never
   // rejects a reaped peer), so it checks for itself. The file alone is not
@@ -47,7 +56,7 @@ export async function runRewakeHook({
     if (current?.peerId !== session.peerId) return false;
     let peers;
     try {
-      peers = await client.listPeers();
+      peers = await client.listPeers({}, { signal: _signal(5000) });
     } catch {
       return true;
     }

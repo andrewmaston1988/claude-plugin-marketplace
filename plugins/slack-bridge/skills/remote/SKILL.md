@@ -1,6 +1,6 @@
 ---
 name: remote
-description: Use when the operator wants remote control of this live session from Slack mobile — seizing a channel, arming the background waiter, receiving messages, replying, or releasing.
+description: Use when the operator wants remote control of this live session from Slack mobile — seizing a channel, receiving messages, replying, or releasing.
 argument-hint: "[release]"
 disable-model-invocation: true
 ---

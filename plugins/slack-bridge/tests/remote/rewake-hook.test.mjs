@@ -27,28 +27,51 @@ function setup(t, { claimed = true } = {}) {
   return { stateDir, configPath, sessionFile, claim };
 }
 
-function fakeClient({ peers = [PEER], fail = false } = {}) {
+function fakeClient({ peers = [PEER], fail = false, healthThrows = false } = {}) {
   const listOpts = [];
   return {
     listOpts,
-    health: async () => ({ status: "ok", lease: true, single_flight: true }),
+    health: async () => {
+      if (healthThrows) throw new Error("bridge down");
+      return { status: "ok", lease: true, single_flight: true };
+    },
     ensureBroker: async () => {},
-    async listPeers(opts) {
-      listOpts.push(opts);
+    async listPeers(opts, fetchOpts) {
+      listOpts.push({ opts, fetchOpts });
       if (fail) throw new Error("fetch failed");
       return peers.map((id) => ({ id }));
     },
   };
 }
 
-function run(env, { client = fakeClient(), raw, loads, creates, runner = async () => 0 } = {}) {
+function run(env, { client = fakeClient(), raw, loads, creates, runner = async () => 0, signal } = {}) {
   return runRewakeHook({
     raw: raw ?? JSON.stringify({ session_id: SID, hook_event_name: "Stop" }),
     stateDir: env.stateDir,
     _loadConfig: ({ configPath }) => { loads?.push(configPath); return { remote: { brokerPort: 1, controlToken: "tok" } }; },
     _createClient: (opts) => { creates?.push(opts); return client; },
     _runWaiter: runner,
+    _signal: signal,
   });
+}
+
+// Swaps the process streams for sinks, so a test can read what the hook wrote.
+function captureStreams() {
+  const origErr = Object.getOwnPropertyDescriptor(process, "stderr");
+  const origOut = Object.getOwnPropertyDescriptor(process, "stdout");
+  const sink = (log) => ({ write: (s, cb) => { log.push(String(s)); cb?.(); return true; }, once() {}, off() {} });
+  const errs = [];
+  const outs = [];
+  Object.defineProperty(process, "stderr", { value: sink(errs), configurable: true });
+  Object.defineProperty(process, "stdout", { value: sink(outs), configurable: true });
+  return {
+    errs,
+    outs,
+    restore: () => {
+      Object.defineProperty(process, "stderr", origErr);
+      Object.defineProperty(process, "stdout", origOut);
+    },
+  };
 }
 
 // Captures what runRewakeHook hands the waiter, so stillNeeded can be driven by hand.
@@ -91,21 +114,43 @@ test("claimed → runs the waiter for the claim's peer with the claim's config, 
 
 test("claimed → the waiter's text reaches stderr, not stdout", async (t) => {
   const env = setup(t);
-  const origErr = Object.getOwnPropertyDescriptor(process, "stderr");
-  const origOut = Object.getOwnPropertyDescriptor(process, "stdout");
-  const sink = (log) => ({ write: (s, cb) => { log.push(String(s)); cb?.(); return true; }, once() {}, off() {} });
-  const errs = [];
-  const outs = [];
-  Object.defineProperty(process, "stderr", { value: sink(errs), configurable: true });
-  Object.defineProperty(process, "stdout", { value: sink(outs), configurable: true });
+  const io = captureStreams();
   try {
     await run(env, { runner: async ({ out }) => { await out("SLACK: hi\n"); return 2; } });
   } finally {
-    Object.defineProperty(process, "stderr", origErr);
-    Object.defineProperty(process, "stdout", origOut);
+    io.restore();
   }
-  assert.deepEqual(errs, ["SLACK: hi\n"]);
-  assert.deepEqual(outs, []);
+  assert.deepEqual(io.errs, ["SLACK: hi\n"]);
+  assert.deepEqual(io.outs, []);
+});
+
+test("a load failure after the claim is found writes WAIT FAILED and wakes (2)", async (t) => {
+  const cases = [
+    ["config load", { _loadConfig: () => { throw new Error("bad config"); } }],
+    ["client build", { _createClient: () => { throw new Error("no port"); } }],
+    ["prepareBroker", { _createClient: () => fakeClient({ healthThrows: true }) }],
+  ];
+  for (const [label, overrides] of cases) {
+    const env = setup(t);
+    const io = captureStreams();
+    let ran = 0;
+    try {
+      const code = await runRewakeHook({
+        raw: JSON.stringify({ session_id: SID }),
+        stateDir: env.stateDir,
+        _loadConfig: () => ({ remote: { brokerPort: 1, controlToken: "tok" } }),
+        _createClient: () => fakeClient(),
+        _runWaiter: async () => { ran++; return 0; },
+        ...overrides,
+      });
+      assert.equal(code, 2, `${label}: a claimed session must wake, not fall silent`);
+    } finally {
+      io.restore();
+    }
+    assert.deepEqual(io.errs, [`WAIT FAILED: ${label === "prepareBroker" ? "bridge down" : label === "config load" ? "bad config" : "no port"}\n`], label);
+    assert.deepEqual(io.outs, [], label);
+    assert.equal(ran, 0, label);
+  }
 });
 
 test("stillNeeded is true while the file names this peer and the peer row is live", async (t) => {
@@ -113,6 +158,20 @@ test("stillNeeded is true while the file names this peer and the peer row is liv
   const { seen, runner } = capture();
   await run(env, { runner });
   assert.equal(await seen.stillNeeded(), true);
+});
+
+// A half-open socket on listPeers would hang the waiter into the silent hook
+// timeout, so the lookup carries a 5 s abort signal.
+test("stillNeeded gives listPeers a 5 s abort signal", async (t) => {
+  const env = setup(t);
+  const client = fakeClient();
+  const signal = { name: "timeout" };
+  const timeouts = [];
+  const { seen, runner } = capture();
+  await run(env, { runner, client, signal: (ms) => { timeouts.push(ms); return signal; } });
+  assert.equal(await seen.stillNeeded(), true);
+  assert.deepEqual(timeouts, [5000]);
+  assert.deepEqual(client.listOpts, [{ opts: {}, fetchOpts: { signal } }]);
 });
 
 test("stillNeeded is false once the session file is gone", async (t) => {
