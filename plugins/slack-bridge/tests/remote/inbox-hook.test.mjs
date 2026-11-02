@@ -9,7 +9,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { runInboxHook } from "../../src/remote/inbox-hook.mjs";
-import { formatWake } from "../../src/remote/waiter.mjs";
+import { PRIMING_LINE } from "../../src/remote/waiter.mjs";
 
 const SID = "sess-1";
 const PEER = "peer-a";
@@ -54,7 +54,10 @@ function run(env, { client = fakeClient(), raw = input(), out, connects = [] } =
 test("queued messages go out as PostToolBatch context, in the wake's own wording", async (t) => {
   const { written } = await run(setup(t));
   assert.deepEqual(JSON.parse(written.join("")), {
-    hookSpecificOutput: { hookEventName: "PostToolBatch", additionalContext: formatWake(MESSAGES) },
+    hookSpecificOutput: {
+      hookEventName: "PostToolBatch",
+      additionalContext: `${PRIMING_LINE}\nSLACK: stop that\nSLACK: and this\n`,
+    },
   });
 });
 
@@ -75,10 +78,11 @@ test("a failed write acks nothing and never throws", async (t) => {
   assert.ok(!client.log.includes("ack"), client.log.join());
 });
 
-test("nothing queued writes nothing", async (t) => {
-  const { written, client } = await run(setup(t), { client: fakeClient({ messages: [] }) });
+test("nothing queued writes nothing, and the entry still takes the slow exit", async (t) => {
+  const { touched, written, client } = await run(setup(t), { client: fakeClient({ messages: [] }) });
   assert.deepEqual(written, []);
   assert.ok(!client.log.includes("ack"), client.log.join());
+  assert.equal(touched, true);
 });
 
 test("an unclaimed session touches no broker, so the entry can exit at once", async (t) => {
@@ -96,6 +100,11 @@ test("a subagent's tool leaves the message for the main conversation", async (t)
   const { connects, written } = await run(setup(t), { raw: input({ agent_id: "agent-7", agent_type: "Explore" }) });
   assert.deepEqual(connects, []);
   assert.deepEqual(written, []);
+});
+
+test("a session started with --agent carries agent_type alone and still gets its messages", async (t) => {
+  const { written } = await run(setup(t), { raw: input({ agent_type: "reviewer" }) });
+  assert.equal(written.length, 1);
 });
 
 test("bad stdin or a dead broker writes nothing and never throws", async (t) => {
