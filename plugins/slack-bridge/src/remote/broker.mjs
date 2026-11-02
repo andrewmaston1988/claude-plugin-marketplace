@@ -26,7 +26,7 @@ const UNKNOWN_WAITER = Object.freeze({ pid: 0, started_at: 0 });
 const MAX_BODY_BYTES = 1_000_000;
 // Published on /health: a client must replace a broker that would downgrade one
 // of these to "text", because a detached broker outlives a plugin update.
-export const KINDS = Object.freeze(["status", "question", "prompt", "turn-end"]);
+export const KINDS = Object.freeze(["status", "question", "prompt", "turn-end", "read"]);
 const KIND_SET = new Set(KINDS);
 const normaliseKind = (kind) => (KIND_SET.has(kind) ? kind : "text");
 
@@ -249,11 +249,20 @@ export function createBroker({
       return { messages: takeMessagesFor(body.id, body.lease === true) };
     },
 
-    // Settles a leased take: the acked rows are gone for good.
+    // Settles a leased take: the acked rows are gone for good. Every consumer
+    // acks, so this is where the daemon learns its message reached the session.
     "/ack"(body) {
       const ids = new Set(Array.isArray(body.ids) ? body.ids : []);
-      state.messages = state.messages.filter((m) => !(m.to_id === body.id && ids.has(m.id)));
+      const isAcked = (m) => m.to_id === body.id && ids.has(m.id);
+      const fromDaemon = state.messages.filter((m) => isAcked(m) && RESERVED_PEER_IDS.has(m.from_id));
+      state.messages = state.messages.filter((m) => !isAcked(m));
+      const now = _now().toISOString();
+      const receipts = fromDaemon.map((m) => ({
+        id: nextMsgId++, from_id: body.id, to_id: m.from_id, text: "", kind: "read", sent_at: now,
+      }));
+      state.messages.push(...receipts);
       persist();
+      for (const receipt of receipts) wakeWaiter(receipt.to_id);
       return { ok: true };
     },
 

@@ -108,8 +108,8 @@ test("GET /health reports ok and a peer count", async (t) => {
   assert.equal(typeof body.peers, "number");
   assert.equal(body.lease, true, "clients replace a broker that does not advertise leases");
   assert.equal(body.single_flight, true);
-  assert.deepEqual(body.kinds, ["status", "question", "prompt", "turn-end"],
-    "clients replace a broker that would downgrade prompt/turn-end to text");
+  assert.deepEqual(body.kinds, ["status", "question", "prompt", "turn-end", "read"],
+    "clients replace a broker that would downgrade a kind to text");
 });
 
 test("POST /shutdown closes the broker gracefully", async (t) => {

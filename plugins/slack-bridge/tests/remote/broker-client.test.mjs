@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createBrokerClient } from "../../src/remote/broker-client.mjs";
 
-const KINDS = ["status", "question", "prompt", "turn-end"];
+const KINDS = ["status", "question", "prompt", "turn-end", "read"];
 
 test("wait: the retry after a connection error keeps the caller's abort signal", async () => {
   const signals = [];
