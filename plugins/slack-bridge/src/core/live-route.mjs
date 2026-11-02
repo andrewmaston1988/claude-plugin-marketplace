@@ -3,7 +3,7 @@ import { startHeartbeat } from "../heartbeat/loop.mjs";
 import { isConnectionError } from "../remote/broker-client.mjs";
 import { WAIT_WINDOW_MS } from "../remote/wait-constants.mjs";
 import { postResponse, postError, safeUpdate } from "./reply-post.mjs";
-import { addUnread, takeUnread, clearUnread, resetUnread, statusLine, showStatus } from "./route-status.mjs";
+import { addUnread, takeUnread, clearUnread, resetUnread, hasUnread, statusLine, showStatus } from "./route-status.mjs";
 
 // routeToLiveSession returns once the message is handed to the broker — the channel
 // queue is never held across the reply; the daemon reply loop resolves the window.
@@ -13,15 +13,15 @@ import { addUnread, takeUnread, clearUnread, resetUnread, statusLine, showStatus
 // lands in one window, in order.
 const QUIET_GAP_MS = 1_000;
 
-// A status with no window is a PostToolUse line that lost the race with the reply
-// or the turn-end that closed it. Late by that little means stale, not news.
+// A tool-start hook is async and can outlast its turn. Only a turn-end makes a
+// status late: mid-turn, one with no window is the next tool.
 const LATE_STATUS_MS = 5_000;
 
 const routeWindows = new Map();  // peer_id → open windows, oldest first
 // One placeholder-post in flight per peer: status messages arrive in parallel, and
 // two that both found no window must not post two blocks.
 const openingWindows = new Map();  // peer_id → in-flight openWorkingWindow promise
-const lastClosedAt = new Map();    // peer_id → ms its last window closed
+const lastClosedAt = new Map();    // peer_id → ms its turn last ended
 
 /** Test hook: drop window/status state between cases. */
 export function _resetRouteState() {
@@ -41,9 +41,9 @@ export function _resetRouteState() {
 /** Test hook: the close marks, so a case can age one. */
 export function _closedMarks() { return lastClosedAt; }
 
-// Every close marks the peer, so the 5 s late-status guard can drop a status
-// that lost the race. Prune on write: a mark older than that window is dead
-// weight, and one entry per peer would otherwise live as long as the daemon.
+// Marks the end of a peer's turn, for the 5 s late-status guard and the reopen.
+// Prune on write: a mark older than that window is dead weight, and one entry per
+// peer would otherwise live as long as the daemon.
 function markClosed(peerId) {
   const now = Date.now();
   lastClosedAt.set(peerId, now);
@@ -60,10 +60,10 @@ function removeWindow(window) {
   if (!windows.length) routeWindows.delete(window.peerId);
 }
 
-function openRouteWindow({ web, peerId, channel, threadTs, placeholderTs, startedAt, heartbeat, cmdEcho, config, log, terminal = false, lastStatus = null }) {
+function openRouteWindow({ web, peerId, channel, threadTs, placeholderTs, startedAt, heartbeat, startHeartbeat, cmdEcho, config, log, terminal = false, lastStatus = null }) {
   const window = {
-    web, peerId, channel, threadTs, placeholderTs, startedAt, heartbeat, cmdEcho, config, log, terminal, lastStatus,
-    chunks: [], deliveryWaiters: [], done: false, timeoutTimer: null, quietTimer: null,
+    web, peerId, channel, threadTs, placeholderTs, startedAt, heartbeat, startHeartbeat, cmdEcho, config, log, terminal, lastStatus,
+    chunks: [], moreComing: false, deliveryWaiters: [], done: false, timeoutTimer: null, quietTimer: null,
   };
   const windows = routeWindows.get(peerId) ?? [];
   windows.push(window);
@@ -101,13 +101,14 @@ function armTimeout(window) {
 async function finalizeWindow(window, { timeout = false, errorMessage = null, notice = null } = {}) {
   if (window.done) return false;
   window.done = true;
+  const finalisedAt = Date.now();
   clearTimeout(window.timeoutTimer);
   clearTimeout(window.quietTimer);
   removeWindow(window);
-  markClosed(window.peerId);
 
   const { web, channel, threadTs, placeholderTs, heartbeat, cmdEcho, config, log, chunks } = window;
   let delivered = false;
+  let replied = false;
   const deliveryOutcomes = [];
   try {
     await heartbeat?.stop();
@@ -141,6 +142,7 @@ async function finalizeWindow(window, { timeout = false, errorMessage = null, no
           deliveryOutcomes[i] = true;
         }
       }
+      replied = true;
     }
   } catch (e) {
     log.error("failed to post live-session reply", { channel, error: e.message });
@@ -150,7 +152,22 @@ async function finalizeWindow(window, { timeout = false, errorMessage = null, no
   } finally {
     for (const { resolve, chunkIndex } of window.deliveryWaiters.splice(0)) resolve(deliveryOutcomes[chunkIndex] === true);
   }
+  if (replied) await reopenUnderReply(window, finalisedAt);
   return delivered;
+}
+
+// A reply takes the block it lands in, so one goes back under it while the session
+// is still going. A queued message outlives the turn, so that block stays for the
+// answer; otherwise it is the turn's, and goes at turn-end.
+async function reopenUnderReply(window, finalisedAt) {
+  const { web, peerId, channel, threadTs, config, log, startHeartbeat: _startHeartbeat } = window;
+  if (routeWindows.get(peerId)?.length) return; // already a block at the bottom
+  const unread = hasUnread(peerId);
+  const turnEnded = lastClosedAt.get(peerId) >= finalisedAt;
+  if (!unread && (!window.moreComing || turnEnded)) return;
+  await openWorkingWindowOnce({
+    web, peerId, channel, threadTs, config, log, _startHeartbeat, terminal: !unread, from: window,
+  });
 }
 
 /**
@@ -159,8 +176,10 @@ async function finalizeWindow(window, { timeout = false, errorMessage = null, no
  * finalizeWindow would write text about a message nobody is going to answer.
  */
 async function closeWindows(peerId, { terminalOnly = false } = {}) {
+  markClosed(peerId);
   if (!terminalOnly) clearUnread(peerId);
   for (const w of [...(routeWindows.get(peerId) ?? [])]) {
+    w.moreComing = false;
     if (terminalOnly && !w.terminal) continue;
     // A turn-end races the quiet gap: the answer is already in this window and
     // its timer will post it. Deleting is for a block with nothing to say.
@@ -169,7 +188,6 @@ async function closeWindows(peerId, { terminalOnly = false } = {}) {
     clearTimeout(w.timeoutTimer);
     clearTimeout(w.quietTimer);
     removeWindow(w);
-    markClosed(peerId);
     for (const { resolve } of w.deliveryWaiters.splice(0)) resolve(false);
     try {
       await w.heartbeat?.stop();
@@ -210,7 +228,6 @@ async function abandonOlderWindows(target) {
     clearTimeout(w.timeoutTimer);
     clearTimeout(w.quietTimer);
     removeWindow(w);
-    markClosed(target.peerId);
     try {
       await w.heartbeat?.stop();
       await w.web.chatDelete({ channel: w.channel, ts: w.placeholderTs });
@@ -228,7 +245,7 @@ async function abandonOlderWindows(target) {
  */
 async function openWorkingWindow({
   web, peerId, channel, threadTs = null, config, log, cmdEcho = "", prompt = null,
-  _startHeartbeat = startHeartbeat, terminal = false,
+  _startHeartbeat = startHeartbeat, terminal = false, from = null,
 }) {
   let placeholderTs = null;
   try {
@@ -246,9 +263,9 @@ async function openWorkingWindow({
   }
 
   // A block taking over from an older one keeps its clock and tool line: the
-  // session has been working since then. A block holding a reply belongs to a
-  // turn that finished.
-  const previous = routeWindows.get(peerId)?.find((w) => !w.chunks.length);
+  // session has been working since then. A block holding a reply is only that
+  // when the reopen says so.
+  const previous = from ?? routeWindows.get(peerId)?.find((w) => !w.chunks.length);
   const startedAt = previous?.startedAt ?? Date.now();
 
   // The spawn path's heartbeat minus extensions (their snippet describes spawned
@@ -262,7 +279,7 @@ async function openWorkingWindow({
   }
 
   const window = openRouteWindow({
-    web, peerId, channel, threadTs, placeholderTs, startedAt, heartbeat, cmdEcho, config, log, terminal,
+    web, peerId, channel, threadTs, placeholderTs, startedAt, heartbeat, startHeartbeat: _startHeartbeat, cmdEcho, config, log, terminal,
     lastStatus: previous?.lastStatus ?? null,
   });
   if (statusLine(window)) showStatus(window);
@@ -318,7 +335,10 @@ async function handleBrokerMessage({ message, claims, web, config, log, _quietGa
   if (message?.kind === "read") {
     takeUnread(fromId);
     const window = targetWindow(fromId);
-    if (window) showStatus(window);
+    if (!window) return true;
+    // The session is on the message, so a reply already here is not its last word.
+    if (window.chunks.length) window.moreComing = true;
+    showStatus(window);
     return true;
   }
   // hasOwn-style lookup over the claims store: one claim per peer, so the entry
@@ -375,16 +395,16 @@ async function handleBrokerMessage({ message, claims, web, config, log, _quietGa
   const window = targetWindow(fromId);
   if (message.kind === "status") {
     if (!text) return false;
+    const closedAt = lastClosedAt.get(fromId);
+    const late = closedAt !== undefined && Date.now() - closedAt < LATE_STATUS_MS;
     if (window) {
       window.lastStatus = text;
+      if (window.chunks.length && !late) window.moreComing = true;
       showStatus(window);
       return true;
     }
-    // PostToolUse is async: a status can land after the reply or turn-end closed
-    // the window it belonged to. Posting it then leaves a stale block that a
-    // later reply can never resolve.
-    const closedAt = lastClosedAt.get(fromId);
-    if (closedAt !== undefined && Date.now() - closedAt < LATE_STATUS_MS) return true;
+    // Opening here would leave a block no turn-end is left to close.
+    if (late) return true;
     const opened = await openWorkingWindowOnce({
       web, peerId: fromId, channel, config, log, _startHeartbeat, terminal: true,
     });

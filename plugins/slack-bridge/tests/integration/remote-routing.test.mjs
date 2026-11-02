@@ -324,7 +324,7 @@ test("question → resolves the open window, and the next message opens its own 
   const s = setup(t, { claims: [["peerQ", "C-Q"]] });
   await slack(s, makePayload({ channel: "C-Q", text: "fix it", client_msg_id: "m-q-1" }));
   await waitFor(() => s.broker.sendCalls.length === 1);
-  s.broker.deliver("slack-bridge", { from_id: "peerQ", kind: "question", text: "Which branch should the fix land on?" });
+  s.broker.deliverAll("slack-bridge", [{ from_id: "peerQ", kind: "read" }, { from_id: "peerQ", kind: "question", text: "Which branch should the fix land on?" }]);
   await waitFor(() => hasUpdate(s.web, "Which branch"), 2000);
 
   await slack(s, makePayload({ channel: "C-Q", text: "followups", client_msg_id: "m-q-2" }));
@@ -442,14 +442,14 @@ test("a terminal window outlives replyTimeoutMs while a tool runs", async (t) =>
   assert.ok(!s.web.calls.some(([ty, p]) => ty === "delete" && p.ts === ts), "the placeholder was not torn down");
 });
 
-test("a status within 5s of a window closing opens nothing", async (t) => {
+test("a status within 5s of a turn-end opens nothing", async (t) => {
   const s = setup(t, { claims: [["peerH6", "C-H6"]], replyTimeoutMs: 60_000 });
   await slack(s, makePayload({ channel: "C-H6", text: "go", client_msg_id: "m-late-1" }));
   await waitFor(() => s.broker.sendCalls.length === 1);
-  s.broker.deliver("slack-bridge", { from_id: "peerH6", text: "answered" });
+  s.broker.deliverAll("slack-bridge", [{ from_id: "peerH6", kind: "read" }, { from_id: "peerH6", text: "answered" }]);
   await waitFor(() => hasUpdate(s.web, "answered"), 4000);
-
-  // PostToolUse is async: this status can land after the reply already closed the window.
+  s.broker.deliver("slack-bridge", { from_id: "peerH6", kind: "turn-end" });
+  await waitFor(() => _closedMarks().has("peerH6"), 3000);
   s.broker.deliver("slack-bridge", { from_id: "peerH6", kind: "status", text: "Edit: handler.mjs" });
   await delay(200);
 
@@ -478,8 +478,8 @@ test("a prune keeps a mark younger than the late-status window", async (t) => {
   const freshAt = Date.now() - 100;
   _closedMarks().set("peer-fresh", freshAt);
 
-  s.broker.deliver("slack-bridge", { from_id: "peerL3", kind: "status", text: "Bash: ls" });
-  await waitFor(() => s.hb.instances.length === 1, 3000);
+  s.broker.deliver("slack-bridge", { from_id: "peerL3", kind: "turn-end" });
+  await waitFor(() => _closedMarks().has("peerL3"), 3000);
 
   assert.equal(_closedMarks().get("peer-fresh"), freshAt, "a mark inside the window is kept — that is the guard");
 });
