@@ -21,6 +21,9 @@ const routeWindows = new Map();  // peer_id → open windows, oldest first
 // two that both found no window must not post two blocks.
 const openingWindows = new Map();  // peer_id → in-flight openWorkingWindow promise
 const lastClosedAt = new Map();    // peer_id → ms its last window closed
+// Routed messages the session has not taken yet. Per peer, not per window: a read
+// racing a window's close would otherwise be lost with the window.
+const unreadCounts = new Map();    // peer_id → count
 
 /** Test hook: drop window/status state between cases. */
 export function _resetRouteState() {
@@ -34,6 +37,7 @@ export function _resetRouteState() {
   routeWindows.clear();
   openingWindows.clear();
   lastClosedAt.clear();
+  unreadCounts.clear();
 }
 
 /** Test hook: the close marks, so a case can age one. */
@@ -50,6 +54,23 @@ function markClosed(peerId) {
   }
 }
 
+const NOT_READ = "Not read yet";
+
+function statusLine(window) {
+  const unread = unreadCounts.get(window.peerId) ? NOT_READ : "";
+  return [unread, window.lastStatus].filter(Boolean).join(" · ");
+}
+
+function showStatus(window) {
+  window.heartbeat?.setStatus?.(statusLine(window));
+}
+
+function takeUnread(peerId) {
+  const left = (unreadCounts.get(peerId) ?? 0) - 1;
+  if (left > 0) unreadCounts.set(peerId, left);
+  else unreadCounts.delete(peerId);
+}
+
 function removeWindow(window) {
   const windows = routeWindows.get(window.peerId);
   if (!windows) return;
@@ -58,9 +79,9 @@ function removeWindow(window) {
   if (!windows.length) routeWindows.delete(window.peerId);
 }
 
-function openRouteWindow({ web, peerId, channel, threadTs, placeholderTs, startedAt, heartbeat, cmdEcho, config, log, terminal = false }) {
+function openRouteWindow({ web, peerId, channel, threadTs, placeholderTs, startedAt, heartbeat, cmdEcho, config, log, terminal = false, lastStatus = null }) {
   const window = {
-    web, peerId, channel, threadTs, placeholderTs, startedAt, heartbeat, cmdEcho, config, log, terminal,
+    web, peerId, channel, threadTs, placeholderTs, startedAt, heartbeat, cmdEcho, config, log, terminal, lastStatus,
     chunks: [], deliveryWaiters: [], done: false, timeoutTimer: null, quietTimer: null,
   };
   const windows = routeWindows.get(peerId) ?? [];
@@ -157,6 +178,7 @@ async function finalizeWindow(window, { timeout = false, errorMessage = null, no
  * finalizeWindow would write text about a message nobody is going to answer.
  */
 async function closeWindows(peerId, { terminalOnly = false } = {}) {
+  if (!terminalOnly) unreadCounts.delete(peerId);
   for (const w of [...(routeWindows.get(peerId) ?? [])]) {
     if (terminalOnly && !w.terminal) continue;
     // A turn-end races the quiet gap: the answer is already in this window and
@@ -242,9 +264,11 @@ async function openWorkingWindow({
     return null;
   }
 
-  // A block taking over from an older one keeps its clock: the session has been
-  // working since then. A block holding a reply belongs to a turn that finished.
-  const startedAt = routeWindows.get(peerId)?.find((w) => !w.chunks.length)?.startedAt ?? Date.now();
+  // A block taking over from an older one keeps its clock and tool line: the
+  // session has been working since then. A block holding a reply belongs to a
+  // turn that finished.
+  const previous = routeWindows.get(peerId)?.find((w) => !w.chunks.length);
+  const startedAt = previous?.startedAt ?? Date.now();
 
   // The spawn path's heartbeat minus extensions (their snippet describes spawned
   // sessions) and minus the echo: the operator's message is already right above.
@@ -256,7 +280,12 @@ async function openWorkingWindow({
     heartbeat.setTool("working", { prompt: prompt.slice(0, 80) });
   }
 
-  return openRouteWindow({ web, peerId, channel, threadTs, placeholderTs, startedAt, heartbeat, cmdEcho, config, log, terminal });
+  const window = openRouteWindow({
+    web, peerId, channel, threadTs, placeholderTs, startedAt, heartbeat, cmdEcho, config, log, terminal,
+    lastStatus: previous?.lastStatus ?? null,
+  });
+  if (statusLine(window)) showStatus(window);
+  return window;
 }
 
 // Status messages are dispatched in parallel, so two can both find no window.
@@ -286,12 +315,15 @@ export async function routeToLiveSession({
   });
   if (!window) return;
   await abandonOlderWindows(window);
+  unreadCounts.set(claim.peer_id, (unreadCounts.get(claim.peer_id) ?? 0) + 1);
+  showStatus(window);
 
   try {
     const r = await broker.sendMessage("slack-bridge", claim.peer_id, text);
     if (r && r.ok === false) throw new Error(r.error ?? "send failed");
   } catch (e) {
     log.error("failed to route to live session", { channel, error: e.message });
+    takeUnread(claim.peer_id);
     await finalizeWindow(window, { timeout: true, errorMessage: `failed to route to live session: ${e.message}` });
   }
   // Return here: the queue is released and the next Slack message is its own turn.
@@ -301,6 +333,13 @@ export async function routeToLiveSession({
 // peer with no claim has nowhere to go and is dropped with a log.
 async function handleBrokerMessage({ message, claims, web, config, log, _quietGapMs = QUIET_GAP_MS, _startHeartbeat = startHeartbeat }) {
   const fromId = message?.from_id;
+  // Ahead of the claim lookup: unacked, a read would come back on every lease.
+  if (message?.kind === "read") {
+    takeUnread(fromId);
+    const window = targetWindow(fromId);
+    if (window) showStatus(window);
+    return true;
+  }
   // hasOwn-style lookup over the claims store: one claim per peer, so the entry
   // is the reply's destination channel.
   const entry = Object.entries(claims.all()).find(([, c]) => c?.peer_id === fromId);
@@ -356,7 +395,8 @@ async function handleBrokerMessage({ message, claims, web, config, log, _quietGa
   if (message.kind === "status") {
     if (!text) return false;
     if (window) {
-      window.heartbeat?.setStatus?.(text);
+      window.lastStatus = text;
+      showStatus(window);
       return true;
     }
     // PostToolUse is async: a status can land after the reply or turn-end closed
@@ -369,7 +409,8 @@ async function handleBrokerMessage({ message, claims, web, config, log, _quietGa
     });
     if (!opened) return false;
     if (opened.done) return true;
-    opened.heartbeat?.setStatus?.(text);
+    opened.lastStatus = text;
+    showStatus(opened);
     return true;
   }
 
