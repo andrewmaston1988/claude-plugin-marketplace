@@ -264,12 +264,12 @@ if (cmd === "rewake-hook") {
 }
 
 if (cmd === "stop-hook") {
-  // Stop + PostToolUse + PreToolUse(AskUserQuestion) hook entry (hooks.json). Always exits 0; a block
-  // decision is JSON on stdout. Unclaimed sessions return before any broker call.
+  // Stop + PostToolUse + PreToolUse hook entry (hooks.json). Always exits 0; a block decision is
+  // JSON on stdout. Unclaimed sessions return before any broker call.
   let raw = "";
   for await (const chunk of process.stdin) raw += chunk;
   const { runHook } = await import("../src/remote/stop-hook.mjs");
-  const decision = await runHook({ raw });
+  const decision = await runHook({ raw, toolStart: rest.includes("--tool-start") });
   if (decision) process.stdout.write(JSON.stringify(decision) + "\n");
   setTimeout(() => process.exit(0), 150);
   process.exitCode = 0;

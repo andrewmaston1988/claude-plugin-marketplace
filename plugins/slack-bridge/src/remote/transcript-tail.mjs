@@ -64,6 +64,11 @@ export function textAfter(entries, cursorUuid) {
   return { text: assistantText(withUuid.slice(idx + 1)), lastUuid };
 }
 
+export function hasToolUse(entries, id) {
+  return entries.some((e) => Array.isArray(e.message?.content)
+    && e.message.content.some((b) => b?.type === "tool_use" && b.id === id));
+}
+
 export function readCursor(file) {
   try { return JSON.parse(readFileSync(file, "utf8")); } catch { return null; }
 }

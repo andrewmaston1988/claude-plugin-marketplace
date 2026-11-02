@@ -1,6 +1,6 @@
-// Stop + PostToolUse + PreToolUse(AskUserQuestion) hook for a session holding a
-// Slack claim: mirrors the turn's assistant text to the channel and posts a tool
-// status line or the pending question. It never blocks a Stop: the waiter belongs
+// Stop + PostToolUse + PreToolUse hook for a session holding a Slack claim:
+// mirrors the turn's assistant text to the channel, and posts a status line as a
+// tool starts or the pending question. It never blocks a Stop: the waiter belongs
 // to the asyncRewake hook (rewake-hook.mjs), not the model. A question is denied
 // rather than opened as a terminal dialog, which nothing in Slack can answer. Any
 // error allows — a broken hook must never wedge a session.
@@ -9,7 +9,7 @@ import { join } from "node:path";
 import { getPaths } from "../paths.mjs";
 import { loadConfig } from "../config.mjs";
 import { createBrokerClient } from "./broker-client.mjs";
-import { readTranscriptFrom, textAfter, textOf, readCursor, writeCursor, tryLock } from "./transcript-tail.mjs";
+import { readTranscriptFrom, textAfter, textOf, hasToolUse, readCursor, writeCursor, tryLock } from "./transcript-tail.mjs";
 import { PRIMING_LINE } from "./waiter.mjs";
 
 const SESSION_ID_RE = /^[A-Za-z0-9_-]+$/;
@@ -23,6 +23,11 @@ const TAIL_CHARS = 256;
 const NEEDLE_CHARS = 64;
 const STOP_WAIT_MS = 3_000;
 const STOP_POLL_MS = 100;
+// As a tool starts, the entries before it may still be unflushed. The hook is
+// async, so waiting costs the tool nothing; another pass may already have taken
+// the entry, which only runs this to the bound.
+const TOOL_WAIT_MS = 2_000;
+const TOOL_POLL_MS = 250;
 
 export function shortArg(input) {
   if (!input || typeof input !== "object") return "";
@@ -46,7 +51,7 @@ export function readSessionFile(stateDir, sessionId) {
 // whole-file read locates the cursor by uuid.
 // Returns the tail of what has been mirrored, carried in the cursor, or null
 // when another invocation held the lock and this pass sent nothing.
-async function mirror({ stateDir, sessionId, transcriptPath, session, client }) {
+async function mirror({ stateDir, sessionId, transcriptPath, session, client, onRead }) {
   const cursorFile = join(stateDir, "mirror", `${sessionId}.json`);
   const release = tryLock(cursorFile + ".lock");
   if (!release) return null;
@@ -56,6 +61,7 @@ async function mirror({ stateDir, sessionId, transcriptPath, session, client }) 
     const fromUuid = resume?.uuid ?? null;
     const tail = fromUuid && Number.isInteger(resume.offset) ? readTranscriptFrom(transcriptPath, resume.offset) : null;
     const read = tail ?? readTranscriptFrom(transcriptPath, 0);
+    onRead?.(read.entries);
     const { text, lastUuid } = tail ? textOf(read.entries, fromUuid) : textAfter(read.entries, fromUuid);
     if (text) await client.sendMessage(session.peerId, "slack-bridge", text);
     const previous = typeof resume?.tail === "string" ? resume.tail : "";
@@ -86,7 +92,7 @@ function clearTail(cursorFile) {
 }
 
 // The terminal dialog can't be answered from Slack, but the operator must see
-// what it is asking — the PostToolUse line alone is a bare tool name.
+// what it is asking — a status line alone is a bare tool name.
 // Markdown, not mrkdwn: every sender runs it through mdToSlack, which also spaces the dash.
 export function formatQuestion(input) {
   const qs = Array.isArray(input?.questions) ? input.questions : [];
@@ -119,6 +125,7 @@ function isEchoedPrompt(prompt) {
 
 export async function runHook({
   raw,
+  toolStart,
   stateDir = getPaths().stateDir,
   _loadConfig = loadConfig,
   _createClient = createBrokerClient,
@@ -132,11 +139,15 @@ export async function runHook({
     return null;
   }
   const event = input?.hook_event_name;
-  const isQuestion = event === "PreToolUse" && input?.tool_name === "AskUserQuestion";
+  // Two PreToolUse entries: the synchronous one can deny a question, and the
+  // async one on every tool must leave that tool to it.
+  const isAsk = input?.tool_name === "AskUserQuestion";
+  const isQuestion = event === "PreToolUse" && !toolStart && isAsk;
+  const isToolStart = event === "PreToolUse" && toolStart && !isAsk;
   const isPrompt = event === "UserPromptSubmit";
-  if (event !== "Stop" && event !== "PostToolUse" && !isQuestion && !isPrompt) return null;
+  if (event !== "Stop" && event !== "PostToolUse" && !isQuestion && !isToolStart && !isPrompt) return null;
   // Absent file = no claim held: exit before any config load or broker call,
-  // which is what keeps PostToolUse cheap on unclaimed sessions.
+  // which is what keeps a tool call cheap on unclaimed sessions.
   try {
     session = readSessionFile(stateDir, input.session_id);
   } catch {
@@ -155,7 +166,9 @@ export async function runHook({
     // Mirror first, on every event and on every stop — a retried stop included,
     // which must not drop that turn's text. A mirror failure must not cost the
     // question deny or the status line.
-    const mirrorOnce = () => mirror({ stateDir, sessionId: input.session_id, transcriptPath: input.transcript_path, session, client });
+    let toolSeen = false;
+    const onRead = (entries) => { toolSeen ||= hasToolUse(entries, input.tool_use_id); };
+    const mirrorOnce = () => mirror({ stateDir, sessionId: input.session_id, transcriptPath: input.transcript_path, session, client, onRead });
     const stopStartedAt = event === "Stop" ? _now() : 0;
     let mirrored = null;
     try {
@@ -185,7 +198,19 @@ export async function runHook({
       return null;
     }
 
-    if (event === "PostToolUse") {
+    if (event === "PostToolUse") return null;
+
+    if (isToolStart) {
+      // Text first, then the status: the block under it must say what is running.
+      const startedAt = _now();
+      while (!toolSeen && _now() - startedAt < TOOL_WAIT_MS) {
+        await _sleep(TOOL_POLL_MS);
+        try {
+          await mirrorOnce();
+        } catch {
+          break; // a broken mirror must still reach the status
+        }
+      }
       const arg = shortArg(input.tool_input);
       await client.sendMessage(session.peerId, "slack-bridge", arg ? `${input.tool_name}: ${arg}` : String(input.tool_name), { kind: "status" });
       return null;
