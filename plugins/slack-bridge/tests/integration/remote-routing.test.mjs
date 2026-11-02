@@ -233,38 +233,34 @@ test("heartbeat stops before the reply lands (no heartbeat update after the repl
 
 const NO_REPLY_RE = /^No reply after \d+m\. Your message stays queued\.$/;
 
-test("at replyTimeoutMs the placeholder is NOT replaced — the status softens to 'Still working' and the heartbeat runs on", async (t) => {
+test("at replyTimeoutMs the block keeps ticking, with no error and no notice", async (t) => {
   const s = setup(t, { claims: [["peerC", "C3"]], replyTimeoutMs: 200 });
   const rc = makeRunClaude();
   await slack(s, makePayload({ channel: "C3", text: "hello", client_msg_id: "m-route-4" }), { runClaude: rc });
   const placeholderTs = placeholderTss(s.web)[0];
 
-  await waitFor(() => s.hb.instances[0].statuses.length === 1, 3000);
+  await delay(300);
 
-  assert.equal(
-    s.hb.instances[0].statuses[0],
-    "Still working. Your message is queued and arrives when the current turn ends.",
-    "the deadline becomes a status, not an error",
-  );
+  assert.deepEqual(s.hb.instances[0].statuses, [], "the deadline adds nothing to the block");
   assert.ok(
     !s.web.calls.some(([ty, p]) => ty === "update" && p.ts === placeholderTs && /didn't reply|_Error:|No reply after/.test(String(p.text ?? ""))),
     "the placeholder still holds the window — nothing replaced it with an error",
   );
-  assert.equal(s.hb.instances[0].stopped, false, "the heartbeat keeps running past the soft notice");
+  assert.equal(s.hb.instances[0].stopped, false, "the heartbeat keeps running past the deadline");
   assert.equal(rc.calls.length, 0, "must not spawn on a claimed+live channel");
 });
 
-test("a reply after the soft notice lands in the original placeholder", async (t) => {
-  const s = setup(t, { claims: [["peerCS", "C-soft"]], replyTimeoutMs: 200 });
-  await slack(s, makePayload({ channel: "C-soft", text: "hello", client_msg_id: "m-soft-reply" }));
+test("a reply after replyTimeoutMs lands in the original placeholder", async (t) => {
+  const s = setup(t, { claims: [["peerCS", "C-late"]], replyTimeoutMs: 200 });
+  await slack(s, makePayload({ channel: "C-late", text: "hello", client_msg_id: "m-late-reply" }));
   const placeholderTs = placeholderTss(s.web)[0];
-  await waitFor(() => s.hb.instances[0].statuses.length === 1, 3000);
+  await delay(300);
 
   s.broker.deliver("slack-bridge", { from_id: "peerCS", text: "the late answer" });
   await waitFor(() => hasUpdate(s.web, "the late answer"), 4000);
 
   const reply = s.web.calls.find(([ty, p]) => ty === "update" && p.text === "the late answer")[1];
-  assert.equal(reply.ts, placeholderTs, "the late reply keeps the placeholder the soft notice was showing in");
+  assert.equal(reply.ts, placeholderTs, "the late reply keeps the placeholder");
 });
 
 test("at the ceiling the window closes with the no-reply text and the claim is kept", async (t) => {
@@ -280,6 +276,36 @@ test("at the ceiling the window closes with the no-reply text and the claim is k
   assert.equal(close.attachments?.length, 0, "the ceiling closes the block rather than wrapping an error");
   assert.ok(s.claims.get("C-ceil"), "the claim survives the ceiling — a slow peer is not a dead one");
   assert.equal(s.hb.instances[0].stopped, true, "the heartbeat stops at the ceiling");
+});
+
+test("a new Slack message posts its block, then deletes the older empty block", async (t) => {
+  const s = setup(t, { claims: [["peerOB", "C-one"]], quietGapMs: 20 });
+  await slack(s, makePayload({ channel: "C-one", text: "first", client_msg_id: "m-one-1" }));
+  await slack(s, makePayload({ channel: "C-one", text: "second", client_msg_id: "m-one-2" }));
+  await waitFor(() => s.broker.sendCalls.length === 2);
+
+  const [older, newer] = placeholderTss(s.web);
+  assert.ok(
+    idxOf(s.web, ([ty, p]) => ty === "delete" && p.ts === older) > idxOf(s.web, ([ty, p]) => ty === "post" && p._ts === newer),
+    "the new block is up before the older one goes",
+  );
+  assert.equal(s.hb.instances[0].stopped, true, "the older block stops ticking");
+  assert.equal(s.hb.instances[1].stopped, false, "the newer block keeps ticking");
+
+  s.broker.deliver("slack-bridge", { from_id: "peerOB", text: "the answer" });
+  await waitFor(() => hasUpdate(s.web, "the answer"));
+  assert.equal(s.web.calls.find(([ty, p]) => ty === "update" && p.text === "the answer")[1].ts, newer);
+});
+
+test("a failed placeholder post leaves the older block open", async (t) => {
+  const s = setup(t, { claims: [["peerOF", "C-fail"]] });
+  await slack(s, makePayload({ channel: "C-fail", text: "first", client_msg_id: "m-fail-1" }));
+  s.web.chatPostMessage = async () => { throw new Error("slack down"); };
+  await slack(s, makePayload({ channel: "C-fail", text: "second", client_msg_id: "m-fail-2" }));
+  await delay(40);
+
+  assert.ok(!s.web.calls.some(([ty]) => ty === "delete"), "no block is deleted without a replacement");
+  assert.equal(s.hb.instances[0].stopped, false, "the older block keeps ticking");
 });
 
 test("send failure → error posted, heartbeat stopped, no window left open", async (t) => {
@@ -422,10 +448,8 @@ test("status while a window is open → shown above the placeholder's attachment
   assert.ok(!hasPost(s.web, "Bash:"), "no separate status message below the placeholder");
 });
 
-// Item 13: a session sitting on an AskUserQuestion dialog cannot reply, so a
-// message sent meanwhile must wait for it rather than time out.
-test("question → resolves the open window; messages sent while it is pending don't time out until the session moves", async (t) => {
-  const s = setup(t, { claims: [["peerQ", "C-Q"]], replyTimeoutMs: 200 });
+test("question → resolves the open window, and the next message opens its own block", async (t) => {
+  const s = setup(t, { claims: [["peerQ", "C-Q"]] });
   await slack(s, makePayload({ channel: "C-Q", text: "fix it", client_msg_id: "m-q-1" }));
   await waitFor(() => s.broker.sendCalls.length === 1);
   s.broker.deliver("slack-bridge", { from_id: "peerQ", kind: "question", text: "Which branch should the fix land on?" });
@@ -433,26 +457,8 @@ test("question → resolves the open window; messages sent while it is pending d
 
   await slack(s, makePayload({ channel: "C-Q", text: "followups", client_msg_id: "m-q-2" }));
   await waitFor(() => s.broker.sendCalls.length === 2);
-  await delay(600);
-  assert.equal(s.hb.instances[1].statuses.length, 0, "a held window gets no soft notice while the dialog is pending");
-
-  s.broker.deliver("slack-bridge", { from_id: "peerQ", kind: "status", text: "Bash: git switch" });
-  await waitFor(() => s.hb.instances[1].statuses.length === 1, 3000);
-});
-
-test("question pending and the session never moves → the held window goes straight to the ceiling, no soft notice", async (t) => {
-  const s = setup(t, { claims: [["peerD", "C-D"]], replyTimeoutMs: 80 });
-  await slack(s, makePayload({ channel: "C-D", text: "fix it", client_msg_id: "m-d-1" }));
-  await waitFor(() => s.broker.sendCalls.length === 1);
-  s.broker.deliver("slack-bridge", { from_id: "peerD", kind: "question", text: "Which branch?" });
-  await waitFor(() => hasUpdate(s.web, "Which branch"), 2000);
-
-  await slack(s, makePayload({ channel: "C-D", text: "followups", client_msg_id: "m-d-2" }));
-  await waitFor(() => s.broker.sendCalls.length === 2);
-  await delay(300);
-  assert.equal(s.hb.instances[1].statuses.length, 0, "a held window skips the soft notice and arms the ceiling directly");
-  await waitFor(() => s.web.calls.some(([ty, p]) => ty === "update" && NO_REPLY_RE.test(String(p.text ?? ""))), 4000);
-  assert.equal(s.hb.instances[1].stopped, true, "the held window's heartbeat stops at the ceiling");
+  assert.equal(s.hb.instances[1].stopped, false, "the follow-up has its own ticking block");
+  assert.ok(!s.web.calls.some(([ty]) => ty === "delete"), "the answered question is not deleted");
 });
 
 test("broker ECONNRESET mid-loop → the loop retries and delivers the next reply", async (t) => {
@@ -557,10 +563,10 @@ test("a terminal window outlives replyTimeoutMs while a tool runs", async (t) =>
   await waitFor(() => s.hb.instances.length === 1, 3000);
   const [ts] = placeholderTss(s.web);
 
-  await delay(400); // five soft windows' worth: replyTimeoutMs does not apply
+  await delay(400); // twice replyTimeoutMs
 
   assert.equal(s.hb.instances[0].stopped, false, "the block is still live");
-  assert.deepEqual(s.hb.instances[0].statuses, ["Bash: long build"], "the tool status and no soft notice");
+  assert.deepEqual(s.hb.instances[0].statuses, ["Bash: long build"], "the tool status and nothing else");
   assert.ok(!s.web.calls.some(([ty, p]) => ty === "delete" && p.ts === ts), "the placeholder was not torn down");
 });
 

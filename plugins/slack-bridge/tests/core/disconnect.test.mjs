@@ -87,7 +87,6 @@ test("a claim whose peer is absent gets one red block with the GUID, its windows
   assert.equal(text, "⚠️ Claude session `sess-1` is disconnected");
   assert.equal(claims.get(channel), null, "the claim is released");
   assert.equal(hb.instances[0].stopped, true, "the heartbeat is stopped");
-  assert.equal(hb.instances[0].statuses.length, 0, "no soft notice on the way out");
   assert.ok(
     web.calls.some(([t, p]) => t === "delete" && p.ts === hb.instances[0].ts),
     "the placeholder is deleted",

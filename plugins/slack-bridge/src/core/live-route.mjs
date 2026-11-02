@@ -17,9 +17,6 @@ const QUIET_GAP_MS = 1_000;
 const LATE_STATUS_MS = 5_000;
 
 const routeWindows = new Map();  // peer_id → open windows, oldest first
-// Peers sitting on an AskUserQuestion dialog: they can't reply until the operator
-// answers it, so windows opened meanwhile hold their timeout until the peer moves.
-const pendingQuestion = new Set();
 // One placeholder-post in flight per peer: status messages arrive in parallel, and
 // two that both found no window must not post two blocks.
 const openingWindows = new Map();  // peer_id → in-flight openWorkingWindow promise
@@ -35,7 +32,6 @@ export function _resetRouteState() {
     }
   }
   routeWindows.clear();
-  pendingQuestion.clear();
   openingWindows.clear();
   lastClosedAt.clear();
 }
@@ -71,56 +67,27 @@ function openRouteWindow({ web, peerId, channel, threadTs, placeholderTs, heartb
   windows.push(window);
   routeWindows.set(peerId, windows);
 
-  window.held = pendingQuestion.has(peerId);
   armTimeout(window);
   return window;
 }
 
-// A held window still gets a ceiling: a peer that dies on the dialog never moves.
-const HELD_CEILING_FACTOR = 12;
-
-// What the deadline becomes. It is not an error: the session is slow, and the
+// The ceiling is not an error: the session is slow, or stuck on a dialog, and the
 // message is still queued behind whatever it is doing.
-export const SOFT_TIMEOUT_TEXT = "Still working. Your message is queued and arrives when the current turn ends.";
+const CEILING_FACTOR = 12;
 
 export function noReplyText(ceilingMs) {
   return `No reply after ${Math.max(1, Math.round(ceilingMs / 60_000))}m. Your message stays queued.`;
 }
 
-// The soft deadline, then the ceiling behind it. A held or terminal window has no
-// message to time out, so it arms the ceiling directly.
 function armTimeout(window) {
-  const ms = window.config.remote?.replyTimeoutMs ?? 300_000;
-  if (window.terminal || window.held) {
-    armCeiling(window, HELD_CEILING_FACTOR * ms);
-    return;
-  }
-  window.timeoutTimer = setTimeout(() => {
-    window.heartbeat?.setStatus?.(SOFT_TIMEOUT_TEXT);
-    armCeiling(window, (HELD_CEILING_FACTOR - 1) * ms, HELD_CEILING_FACTOR * ms);
-  }, ms);
-  window.timeoutTimer.unref?.();
-}
-
-function armCeiling(window, remainingMs, totalMs = remainingMs) {
+  const ms = CEILING_FACTOR * (window.config.remote?.replyTimeoutMs ?? 300_000);
   window.timeoutTimer = setTimeout(() => {
     // A terminal window has no queued message to explain: it just goes, exactly
     // as it would at turn-end.
     if (window.terminal) { void closeWindows(window.peerId, { terminalOnly: true }); return; }
-    void finalizeWindow(window, { timeout: true, notice: noReplyText(totalMs) });
-  }, remainingMs);
+    void finalizeWindow(window, { timeout: true, notice: noReplyText(ms) });
+  }, ms);
   window.timeoutTimer.unref?.();
-}
-
-// Any later message means the dialog was answered: re-arm the windows it held.
-function releaseQuestion(peerId) {
-  if (!pendingQuestion.delete(peerId)) return;
-  for (const w of routeWindows.get(peerId) ?? []) {
-    if (w.done || w.chunks.length || !w.held) continue;
-    clearTimeout(w.timeoutTimer);
-    w.held = false;
-    armTimeout(w);
-  }
 }
 
 /**
@@ -229,10 +196,13 @@ function targetWindow(peerId) {
 }
 
 // One session turn answers everything queued, so placeholders older than the one
-// the reply lands in will never get their own answer — delete them.
+// the reply lands in will never get their own answer — delete them. A new Slack
+// message does the same, so the live block stays under the last message. A block
+// already holding a reply stays: its quiet gap posts it.
 async function abandonOlderWindows(target) {
   const windows = routeWindows.get(target.peerId) ?? [];
   for (const w of windows.slice(0, windows.indexOf(target))) {
+    if (w.chunks.length) continue;
     w.done = true;
     clearTimeout(w.timeoutTimer);
     clearTimeout(w.quietTimer);
@@ -304,8 +274,8 @@ function openWorkingWindowOnce(opts) {
 /**
  * Route a claimed channel's message to its live session: placeholder + heartbeat,
  * hand it to the broker, register the window, return. The reply loop resolves the
- * window when the session answers; the window's own timers soften the deadline and
- * then close it at the ceiling. The claim is retained either way — slow is not dead.
+ * window when the session answers; the window's own timer closes it at the ceiling.
+ * The claim is retained either way — slow is not dead.
  */
 export async function routeToLiveSession({
   web, channel, threadTs, text, claim, broker, config, log, cmdEcho,
@@ -315,6 +285,7 @@ export async function routeToLiveSession({
     web, peerId: claim.peer_id, channel, threadTs, config, log, cmdEcho, prompt: text, _startHeartbeat,
   });
   if (!window) return;
+  await abandonOlderWindows(window);
 
   try {
     const r = await broker.sendMessage("slack-bridge", claim.peer_id, text);
@@ -339,9 +310,6 @@ async function handleBrokerMessage({ message, claims, web, config, log, _quietGa
   }
   const [channel] = entry;
   const text = String(message?.text ?? "");
-
-  if (message.kind === "question") pendingQuestion.add(fromId);
-  else releaseQuestion(fromId);
 
   if (message.kind === "turn-end") {
     await closeWindows(fromId, { terminalOnly: true });
