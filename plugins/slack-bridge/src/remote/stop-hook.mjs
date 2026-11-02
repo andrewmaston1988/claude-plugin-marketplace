@@ -15,6 +15,14 @@ import { PRIMING_LINE } from "./waiter.mjs";
 const SESSION_ID_RE = /^[A-Za-z0-9_-]+$/;
 const ARG_MAX = 80;
 const ARG_KEYS = ["command", "file_path", "notebook_path", "pattern", "path", "url", "query", "skill", "description", "prompt"];
+// At Stop the CLI has not flushed the turn's last entry yet, so the hook polls
+// the mirror until the reply shows up. The cursor keeps the last TAIL_CHARS
+// characters it sent; a 64-character needle survives assistantText trimming and
+// joining, which a whole-message comparison would not.
+const TAIL_CHARS = 256;
+const NEEDLE_CHARS = 64;
+const STOP_WAIT_MS = 3_000;
+const STOP_POLL_MS = 100;
 
 export function shortArg(input) {
   if (!input || typeof input !== "object") return "";
@@ -36,10 +44,12 @@ export function readSessionFile(stateDir, sessionId) {
 // take the lock sends nothing: its text stays after the un-advanced cursor.
 // Without a usable offset (none yet, or the transcript was rewritten) one
 // whole-file read locates the cursor by uuid.
+// Returns the tail of what has been mirrored, carried in the cursor, or null
+// when another invocation held the lock and this pass sent nothing.
 async function mirror({ stateDir, sessionId, transcriptPath, session, client }) {
   const cursorFile = join(stateDir, "mirror", `${sessionId}.json`);
   const release = tryLock(cursorFile + ".lock");
-  if (!release) return;
+  if (!release) return null;
   try {
     const cursor = readCursor(cursorFile);
     const resume = cursor?.seizeMark === session.seizeMark ? cursor : null;
@@ -48,12 +58,24 @@ async function mirror({ stateDir, sessionId, transcriptPath, session, client }) 
     const read = tail ?? readTranscriptFrom(transcriptPath, 0);
     const { text, lastUuid } = tail ? textOf(read.entries, fromUuid) : textAfter(read.entries, fromUuid);
     if (text) await client.sendMessage(session.peerId, "slack-bridge", text);
-    if (lastUuid && (lastUuid !== fromUuid || read.end !== resume?.offset)) {
-      writeCursor(cursorFile, { uuid: lastUuid, seizeMark: session.seizeMark, offset: read.end });
+    const previous = typeof resume?.tail === "string" ? resume.tail : "";
+    const mirrored = (text ? previous + (previous ? "\n\n" : "") + text : previous).slice(-TAIL_CHARS);
+    if (lastUuid && (lastUuid !== fromUuid || read.end !== resume?.offset || resume?.tail !== mirrored)) {
+      writeCursor(cursorFile, { uuid: lastUuid, seizeMark: session.seizeMark, offset: read.end, tail: mirrored });
     }
+    return mirrored;
   } finally {
     release();
   }
+}
+
+// A new turn starts clean: an identical short reply next turn must not be
+// mistaken for the previous turn's text still sitting in the tail.
+function clearTail(cursorFile) {
+  const cursor = readCursor(cursorFile);
+  if (!cursor || !("tail" in cursor)) return;
+  delete cursor.tail;
+  writeCursor(cursorFile, cursor);
 }
 
 // The terminal dialog can't be answered from Slack, but the operator must see
@@ -93,6 +115,8 @@ export async function runHook({
   stateDir = getPaths().stateDir,
   _loadConfig = loadConfig,
   _createClient = createBrokerClient,
+  _sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+  _now = () => Date.now(),
 }) {
   let input, session;
   try {
@@ -124,8 +148,11 @@ export async function runHook({
     // Mirror first, on every event and on every stop — a retried stop included,
     // which must not drop that turn's text. A mirror failure must not cost the
     // question deny or the status line.
+    const mirrorOnce = () => mirror({ stateDir, sessionId: input.session_id, transcriptPath: input.transcript_path, session, client });
+    const stopStartedAt = event === "Stop" ? _now() : 0;
+    let mirrored = null;
     try {
-      await mirror({ stateDir, sessionId: input.session_id, transcriptPath: input.transcript_path, session, client });
+      mirrored = await mirrorOnce();
     } catch {}
 
     if (isQuestion) {
@@ -145,6 +172,9 @@ export async function runHook({
       if (prompt && !isEchoedPrompt(prompt)) {
         await client.sendMessage(session.peerId, "slack-bridge", prompt, { kind: "prompt" });
       }
+      // Wakes fire this too, so clear on every one: the tail must never outlive
+      // its turn.
+      clearTail(join(stateDir, "mirror", `${input.session_id}.json`));
       return null;
     }
 
@@ -154,8 +184,23 @@ export async function runHook({
       return null;
     }
 
-    // The turn is over: the daemon closes this peer's terminal block. The mirror
-    // goes first so its text is already in the window.
+    // The turn is over: the daemon closes this peer's terminal block. Wait for
+    // the turn's last transcript entry, which the CLI flushes after this hook
+    // starts, then close. Posting the field itself would double-post once the
+    // mirror catches up, so only the tail is compared. No field means no wait.
+    const last = typeof input.last_assistant_message === "string" ? input.last_assistant_message.trim() : "";
+    if (last) {
+      const needle = last.slice(-NEEDLE_CHARS);
+      while (mirrored === null || !mirrored.includes(needle)) {
+        if (_now() - stopStartedAt >= STOP_WAIT_MS) break;
+        await _sleep(STOP_POLL_MS);
+        try {
+          mirrored = await mirrorOnce();
+        } catch {
+          break; // a broken mirror must still reach turn-end
+        }
+      }
+    }
     await client.sendMessage(session.peerId, "slack-bridge", "", { kind: "turn-end" });
     return null;
   } catch {
