@@ -6,6 +6,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { handleMessage, startReplyLoop, _resetRouteState, _closedMarks } from "../../src/core/handler.mjs";
+import { closePeerWindows } from "../../src/core/live-route.mjs";
 import { createQueue } from "../../src/core/queue.mjs";
 import { createClaimsStore } from "../../src/remote/claims.mjs";
 
@@ -789,4 +790,34 @@ test("channel_join / channel_topic in a claimed channel → skipped: no broker s
   await slack(s, makePayload({ channel: "C-J", text: "an actual question", client_msg_id: "m-j-real" }), { runClaude: rc });
   await waitFor(() => s.broker.sendCalls.length === 1, 3000);
   assert.equal(s.broker.sendCalls[0].text, "an actual question");
+});
+
+test("closing a peer with a placeholder post in flight leaves no block", async (t) => {
+  const s = setup(t, { claims: [["peerA", "C1"]] });
+  let finishPost;
+  s.web.chatPostMessage = async (params) => {
+    return new Promise((resolve) => { finishPost = () => resolve({ ts: "ph-pending" }); });
+  };
+  s.broker.deliver("slack-bridge", { id: "status-pending", from_id: "peerA", kind: "status", text: "Working" });
+  await waitFor(() => finishPost);
+
+  let closed = false;
+  const closing = closePeerWindows("peerA").then(() => { closed = true; });
+  await delay(10);
+  const closedBeforePostFinished = closed;
+  finishPost();
+  await closing;
+  const deleted = s.web.calls.some(([kind, params]) => kind === "delete" && params.ts === "ph-pending");
+  assert.deepEqual({ closedBeforePostFinished, deleted }, { closedBeforePostFinished: false, deleted: true },
+    "close waits for the pending post, then deletes that placeholder before returning");
+});
+
+test("a status after the claim is released cannot open a block", async (t) => {
+  const s = setup(t, { claims: [["peerA", "C1"]] });
+  s.claims.release("peerA");
+  s.broker.deliver("slack-bridge", { id: "status-released", from_id: "peerA", kind: "status", text: "Working" });
+  await waitFor(() => s.log.entries.some((e) => e[0] === "warn" && e[1] === "reply dropped: no claim for peer")
+    || s.web.calls.some(([kind]) => kind === "post"));
+  assert.equal(s.web.calls.filter(([kind]) => kind === "post").length, 0,
+    "the broker handler drops status before reaching window creation when no claim exists");
 });
