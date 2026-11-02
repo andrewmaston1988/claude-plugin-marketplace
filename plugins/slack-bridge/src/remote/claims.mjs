@@ -110,7 +110,8 @@ export function createClaimsStore({ path, log }) {
     // Written before claim(), so a claim never exists without its record.
     recordHistory(channel, { session_id: sessionId = null, channel_name: channelName = null } = {}) {
       const data = loadHistory();
-      data[channel] = { session_id: sessionId, channel_name: channelName };
+      const prev = data[channel] ?? {};
+      data[channel] = { session_id: sessionId ?? prev.session_id ?? null, channel_name: channelName ?? prev.channel_name ?? null };
       const tmp = historyPath + ".tmp";
       mkdirSync(dirname(historyPath), { recursive: true });
       writeFileSync(tmp, JSON.stringify(data, null, 2), "utf8");

@@ -345,7 +345,7 @@ function memberWeb({ channels = [], lookupError = null } = {}) {
   web.usersConversations = async (p) => {
     web.calls.push(["usersConversations", p]);
     if (lookupError) throw lookupError;
-    return { ok: true, channels };
+    return { ok: true, channels: channels.filter((c) => !(p.exclude_archived && c.is_archived)) };
   };
   return web;
 }
@@ -382,6 +382,17 @@ test("name_taken with a held channel takes the next suffix and never claims the 
   assert.equal(r.body.ok, true, JSON.stringify(r.body));
   assert.equal(r.body.channel_name, "rc-demo-2", "the suffix is taken instead");
   assert.equal(claims.get("C-held").peer_id, "peerOther", "the held channel is untouched");
+});
+
+// users.conversations includes archived channels unless told otherwise, and
+// nothing can be posted to one.
+test("name_taken with an archived member channel takes the next suffix and never claims it", async (t) => {
+  const web = memberWeb({ channels: [{ id: "C-old", name: "rc-demo", is_member: true, is_archived: true }] });
+  const { call, claims } = await startControl(t, { web });
+  const r = await call("/claim", { peer_id: "peerA", name: "demo" });
+  assert.equal(r.body.ok, true, JSON.stringify(r.body));
+  assert.equal(r.body.channel_name, "rc-demo-2", "the suffix is taken instead");
+  assert.equal(claims.get("C-old"), null, "the archived channel is not claimed");
 });
 
 test("a lookup failure falls through to the suffix and the seize succeeds", async (t) => {

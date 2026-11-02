@@ -242,7 +242,7 @@ Restart any interactive session you want to control this way so it picks up the 
 - **Default (`createChannels: false`):** `/remote` seizes an **existing DM** with the bot. No new Slack scopes are required.
 - **Channel-create (`createChannels: true`):** add `channels:write` and `channels:manage` to the bot token, and `/remote` creates a dedicated `#rc-<context-slug>` channel instead.
 - **Seizing an existing channel:** the bot must already be a member (`/invite @<bot>`), or hold `channels:join` (in the shipped app manifest) so it can join the channel itself.
-- **Signing terminal prompts:** `chat:write.customize` is in the shipped manifest so a prompt typed at the terminal can post under `remote.operatorName`. An app installed before it was added must re-apply the manifest, or those posts arrive with a `⌨️` prefix instead: a post Slack rejects for its custom identity is retried once as the plain `⌨️` post. A prompt with no `remote.operatorName` set carries that prefix whether or not `remote.operatorIconUrl` is set.
+- **Signing terminal prompts:** `chat:write.customize` is in the shipped manifest so a prompt typed at the terminal can post under `remote.operatorName`. An app installed before it was added must add the scope and reinstall, because re-applying the whole manifest drops scopes it omits, such as `channels:manage`. Until then those posts arrive with a `⌨️` prefix instead: a post Slack rejects for its custom identity is retried once as the plain `⌨️` post. A prompt with no `remote.operatorName` set carries that prefix whether or not `remote.operatorIconUrl` is set.
 
 ### Using it from a live session
 

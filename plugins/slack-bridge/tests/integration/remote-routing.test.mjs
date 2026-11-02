@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { handleMessage, startReplyLoop, _resetRouteState, _closedMarks } from "../../src/core/handler.mjs";
+import { handleMessage, handleSlashCommand, startReplyLoop, _resetRouteState, _closedMarks } from "../../src/core/handler.mjs";
 import { closePeerWindows } from "../../src/core/live-route.mjs";
 import { createQueue } from "../../src/core/queue.mjs";
 import { createClaimsStore } from "../../src/remote/claims.mjs";
@@ -601,7 +601,7 @@ test("a close mark older than the late-status window is pruned on the next close
   assert.equal(_closedMarks().has("peer-ancient"), false, "the stale entry is evicted, not carried for the life of the daemon");
 });
 
-test("a status within 5s of a window closing opens nothing — the fresh mark survives a prune", async (t) => {
+test("a prune keeps a mark younger than the late-status window", async (t) => {
   const s = setup(t, { claims: [["peerL3", "C-L3"]], replyTimeoutMs: 60_000 });
   const freshAt = Date.now() - 100;
   _closedMarks().set("peer-fresh", freshAt);
@@ -816,6 +816,35 @@ test("closing a peer with a placeholder post in flight leaves no block", async (
   const deleted = s.web.calls.some(([kind, params]) => kind === "delete" && params.ts === "ph-pending");
   assert.deepEqual({ closedBeforePostFinished, deleted }, { closedBeforePostFinished: false, deleted: true },
     "close waits for the pending post, then deletes that placeholder before returning");
+});
+
+test("a turn-end with a placeholder post in flight leaves no block", async (t) => {
+  const s = setup(t, { claims: [["peerA", "C1"]] });
+  let finishPost;
+  s.web.chatPostMessage = async () =>
+    new Promise((resolve) => { finishPost = () => resolve({ ts: "ph-pending" }); });
+  s.broker.deliver("slack-bridge", { id: "status-pending", from_id: "peerA", kind: "status", text: "Working" });
+  await waitFor(() => finishPost);
+
+  s.broker.deliver("slack-bridge", { id: "end-pending", from_id: "peerA", kind: "turn-end", text: "" });
+  await delay(20);
+  finishPost();
+  await waitFor(() => s.web.calls.some(([kind, params]) => kind === "delete" && params.ts === "ph-pending"));
+});
+
+test("a slash command in an unclaimed once-seized #rc-* channel posts the red block and never spawns", async (t) => {
+  const s = setup(t, { claims: [] });
+  s.claims.recordHistory("C-rc", { session_id: "sess-gone", channel_name: "rc-demo" });
+  const rc = makeRunClaude();
+  await handleSlashCommand({
+    web: s.web, store: makeStore({ "C-rc": { model: "sonnet" } }), queue: s.queue, config: s.config, log: s.log,
+    payload: { command: "/anything", channel_id: "C-rc", text: "still there?" }, botUserId: "U123", extensions: null,
+    remote: { claims: s.claims, broker: s.broker }, _runClaude: rc.fn, _startHeartbeat: s.hb.start,
+  });
+  await delay(150);
+
+  assert.equal(rc.calls.length, 0, "an rc channel must never spawn");
+  assert.ok(posted(s.web, "is disconnected"), JSON.stringify(s.web.calls));
 });
 
 test("a status after the claim is released cannot open a block", async (t) => {

@@ -89,7 +89,7 @@ export function createControlServer({
     let cursor = null;
     do {
       const page = await web.usersConversations({
-        types: "public_channel", limit: 200, ...(cursor ? { cursor } : {}),
+        types: "public_channel", exclude_archived: true, limit: 200, ...(cursor ? { cursor } : {}),
       });
       for (const ch of page?.channels ?? []) {
         if (ch?.name === name && ch.id && claims.canClaim(peerId, ch.id).ok) return ch;

@@ -52,10 +52,10 @@ export async function markDisconnected({ claim, web, claims, log }) {
  * no reading at all, so the tick is skipped rather than disconnecting everyone.
  * Returns the peer-ids dropped.
  */
-export async function sweepClaims({ broker, claims, web, log }) {
+export async function sweepClaims({ broker, claims, web, log, _signal = AbortSignal.timeout }) {
   let peers;
   try {
-    peers = await broker.listPeers();
+    peers = await broker.listPeers({}, { signal: _signal(5000) });
   } catch (e) {
     log?.warn?.("disconnect sweep skipped: broker unreachable", { error: e.message });
     return [];

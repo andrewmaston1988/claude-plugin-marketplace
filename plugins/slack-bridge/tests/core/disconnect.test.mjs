@@ -115,6 +115,25 @@ test("a listPeers failure disconnects nothing — an unreachable broker is no re
   assert.equal(redBlocks(web).length, 0, "no false red alarm");
 });
 
+test("a listPeers that never answers is abandoned, and disconnects nothing", async () => {
+  const { claims, web, log, channel, peer } = await claimedWithWindow();
+  let signal;
+  const listPeers = async (_opts, fetchOpts) => {
+    signal = fetchOpts?.signal;
+    if (!signal) return [{ id: peer }];
+    return new Promise((_, reject) => signal.addEventListener("abort", () => reject(signal.reason)));
+  };
+
+  const disconnected = await sweepClaims({
+    broker: { listPeers }, claims, web, log, _signal: () => AbortSignal.timeout(10),
+  });
+
+  assert.ok(signal, "the read carries an abort signal");
+  assert.deepEqual(disconnected, []);
+  assert.ok(claims.get(channel), "the claim survives a broker that hangs");
+  assert.equal(redBlocks(web).length, 0, "no false red alarm");
+});
+
 test("a live peer is left alone", async () => {
   const { claims, web, log, channel, peer } = await claimedWithWindow();
 

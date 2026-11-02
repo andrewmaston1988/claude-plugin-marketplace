@@ -290,7 +290,7 @@ export function startBridge({ config, log, web, socket, store, queue, extensions
 
   socket.on("slash_command", ({ payload, ack }) => {
     ack();
-    handleSlashCommand({ web, store, queue, config, log, payload, botUserId, extensions })
+    handleSlashCommand({ web, store, queue, config, log, payload, botUserId, extensions, remote })
       .catch(e => log.error("slash command unhandled", { error: e.message }));
   });
 
@@ -309,7 +309,7 @@ export function startBridge({ config, log, web, socket, store, queue, extensions
   return { stopReplyLoop };
 }
 
-async function handleSlashCommand({ web, store, queue, config, log, payload, botUserId, extensions }) {
+export async function handleSlashCommand({ web, store, queue, config, log, payload, botUserId, extensions, remote, _runClaude, _startHeartbeat }) {
   const cmd = payload.command ?? "";
   const channel = payload.channel_id ?? payload.channel;
 
@@ -352,7 +352,7 @@ async function handleSlashCommand({ web, store, queue, config, log, payload, bot
         text: payload.text ?? cmd,
         client_msg_id: `slash-${Date.now()}`,
       };
-      await handleMessage({ web, store, queue, config, log, payload: fakePayload, botUserId, isFirstInSession: false, extensions });
+      await handleMessage({ web, store, queue, config, log, payload: fakePayload, botUserId, isFirstInSession: false, extensions, remote, _runClaude, _startHeartbeat });
     }
   }
 }

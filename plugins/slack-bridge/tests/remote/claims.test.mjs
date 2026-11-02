@@ -70,6 +70,18 @@ test("the history record is separate from the claim and outlives it", async () =
   assert.equal(store.history("C-never"), null);
 });
 
+// A seize with no session id claims and releases at once; the red block still
+// needs the last GUID that channel really had.
+test("a record with no session id keeps the last real one", () => {
+  const store = createClaimsStore({ path: tmpFile() });
+  store.recordHistory("C1", { session_id: "sess-abc", channel_name: "rc-demo" });
+  store.recordHistory("C1", { session_id: null, channel_name: "rc-demo" });
+  assert.deepEqual(store.history("C1"), { session_id: "sess-abc", channel_name: "rc-demo" });
+
+  store.recordHistory("C1", { session_id: "sess-new", channel_name: "rc-demo" });
+  assert.equal(store.history("C1").session_id, "sess-new", "a real id still replaces it");
+});
+
 test("state persists across a close + reload (atomic write)", async () => {
   const file = tmpFile();
   const a = createClaimsStore({ path: file });

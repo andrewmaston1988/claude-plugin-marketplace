@@ -177,14 +177,14 @@ async function closeWindows(peerId, { terminalOnly = false } = {}) {
   }
 }
 
-/** Close every window a peer has open — the daemon uses this when the peer dies. */
-export async function closePeerWindows(peerId) {
+/** Close a peer's windows, including a placeholder still posting. */
+export async function closePeerWindows(peerId, opts) {
   try {
     await openingWindows.get(peerId);
   } catch {
     // A failed placeholder open leaves no window to close.
   }
-  return closeWindows(peerId);
+  return closeWindows(peerId, opts);
 }
 
 // The window a reply or status belongs to: one already collecting a reply keeps
@@ -271,12 +271,8 @@ function openWorkingWindowOnce(opts) {
   return p;
 }
 
-/**
- * Route a claimed channel's message to its live session: placeholder + heartbeat,
- * hand it to the broker, register the window, return. The reply loop resolves the
- * window when the session answers; the window's own timer closes it at the ceiling.
- * The claim is retained either way — slow is not dead.
- */
+// Route a claimed channel's message to its live session. The window's own timer
+// closes it at the ceiling; the claim is retained either way — slow is not dead.
 export async function routeToLiveSession({
   web, channel, threadTs, text, claim, broker, config, log, cmdEcho,
   _startHeartbeat = startHeartbeat,
@@ -312,7 +308,7 @@ async function handleBrokerMessage({ message, claims, web, config, log, _quietGa
   const text = String(message?.text ?? "");
 
   if (message.kind === "turn-end") {
-    await closeWindows(fromId, { terminalOnly: true });
+    await closePeerWindows(fromId, { terminalOnly: true });
     return true;
   }
 

@@ -401,8 +401,7 @@ if (config.remote?.controlToken) {
     await broker.ensureBroker();
     await control.listen(config.remote.controlPort);
     log.info("remote-control ready", { brokerPort: config.remote.brokerPort, controlPort: config.remote.controlPort });
-    // Say a dead session is dead, within ~30s and without waiting for the operator
-    // to send a message first, then let the channel fall back to the spawn path.
+    // Say a dead session is dead within ~30s, without waiting for the operator to message.
     const sweepTimer = setInterval(() => {
       sweepClaims({ broker, claims, web, log })
         .then((dropped) => { if (dropped.length) log.info("disconnected dead remote claims", { dropped }); })
