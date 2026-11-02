@@ -3,6 +3,7 @@ import { startHeartbeat } from "../heartbeat/loop.mjs";
 import { isConnectionError } from "../remote/broker-client.mjs";
 import { WAIT_WINDOW_MS } from "../remote/wait-constants.mjs";
 import { postResponse, postError, safeUpdate } from "./reply-post.mjs";
+import { addUnread, takeUnread, clearUnread, resetUnread, statusLine, showStatus } from "./route-status.mjs";
 
 // routeToLiveSession returns once the message is handed to the broker — the channel
 // queue is never held across the reply; the daemon reply loop resolves the window.
@@ -21,9 +22,6 @@ const routeWindows = new Map();  // peer_id → open windows, oldest first
 // two that both found no window must not post two blocks.
 const openingWindows = new Map();  // peer_id → in-flight openWorkingWindow promise
 const lastClosedAt = new Map();    // peer_id → ms its last window closed
-// Routed messages the session has not taken yet. Per peer, not per window: a read
-// racing a window's close would otherwise be lost with the window.
-const unreadCounts = new Map();    // peer_id → count
 
 /** Test hook: drop window/status state between cases. */
 export function _resetRouteState() {
@@ -37,7 +35,7 @@ export function _resetRouteState() {
   routeWindows.clear();
   openingWindows.clear();
   lastClosedAt.clear();
-  unreadCounts.clear();
+  resetUnread();
 }
 
 /** Test hook: the close marks, so a case can age one. */
@@ -52,23 +50,6 @@ function markClosed(peerId) {
   for (const [id, at] of lastClosedAt) {
     if (now - at >= LATE_STATUS_MS) lastClosedAt.delete(id);
   }
-}
-
-const NOT_READ = "Not read yet";
-
-function statusLine(window) {
-  const unread = unreadCounts.get(window.peerId) ? NOT_READ : "";
-  return [unread, window.lastStatus].filter(Boolean).join(" · ");
-}
-
-function showStatus(window) {
-  window.heartbeat?.setStatus?.(statusLine(window));
-}
-
-function takeUnread(peerId) {
-  const left = (unreadCounts.get(peerId) ?? 0) - 1;
-  if (left > 0) unreadCounts.set(peerId, left);
-  else unreadCounts.delete(peerId);
 }
 
 function removeWindow(window) {
@@ -178,7 +159,7 @@ async function finalizeWindow(window, { timeout = false, errorMessage = null, no
  * finalizeWindow would write text about a message nobody is going to answer.
  */
 async function closeWindows(peerId, { terminalOnly = false } = {}) {
-  if (!terminalOnly) unreadCounts.delete(peerId);
+  if (!terminalOnly) clearUnread(peerId);
   for (const w of [...(routeWindows.get(peerId) ?? [])]) {
     if (terminalOnly && !w.terminal) continue;
     // A turn-end races the quiet gap: the answer is already in this window and
@@ -315,7 +296,7 @@ export async function routeToLiveSession({
   });
   if (!window) return;
   await abandonOlderWindows(window);
-  unreadCounts.set(claim.peer_id, (unreadCounts.get(claim.peer_id) ?? 0) + 1);
+  addUnread(claim.peer_id);
   showStatus(window);
 
   try {
