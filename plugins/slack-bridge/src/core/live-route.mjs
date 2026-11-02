@@ -58,9 +58,9 @@ function removeWindow(window) {
   if (!windows.length) routeWindows.delete(window.peerId);
 }
 
-function openRouteWindow({ web, peerId, channel, threadTs, placeholderTs, heartbeat, cmdEcho, config, log, terminal = false }) {
+function openRouteWindow({ web, peerId, channel, threadTs, placeholderTs, startedAt, heartbeat, cmdEcho, config, log, terminal = false }) {
   const window = {
-    web, peerId, channel, threadTs, placeholderTs, heartbeat, cmdEcho, config, log, terminal,
+    web, peerId, channel, threadTs, placeholderTs, startedAt, heartbeat, cmdEcho, config, log, terminal,
     chunks: [], deliveryWaiters: [], done: false, timeoutTimer: null, quietTimer: null,
   };
   const windows = routeWindows.get(peerId) ?? [];
@@ -242,17 +242,21 @@ async function openWorkingWindow({
     return null;
   }
 
+  // A block taking over from an older one keeps its clock: the session has been
+  // working since then. A block holding a reply belongs to a turn that finished.
+  const startedAt = routeWindows.get(peerId)?.find((w) => !w.chunks.length)?.startedAt ?? Date.now();
+
   // The spawn path's heartbeat minus extensions (their snippet describes spawned
   // sessions) and minus the echo: the operator's message is already right above.
   const heartbeat = _startHeartbeat({
-    web, channel, ts: placeholderTs, cmdEcho: "", log: log.child("heartbeat"),
+    startedAt, web, channel, ts: placeholderTs, cmdEcho: "", log: log.child("heartbeat"),
     extensions: null, sessionId: peerId, config,
   });
   if (prompt && config.slack?.verbMode === "haiku") {
     heartbeat.setTool("working", { prompt: prompt.slice(0, 80) });
   }
 
-  return openRouteWindow({ web, peerId, channel, threadTs, placeholderTs, heartbeat, cmdEcho, config, log, terminal });
+  return openRouteWindow({ web, peerId, channel, threadTs, placeholderTs, startedAt, heartbeat, cmdEcho, config, log, terminal });
 }
 
 // Status messages are dispatched in parallel, so two can both find no window.

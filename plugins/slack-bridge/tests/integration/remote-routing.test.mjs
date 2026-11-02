@@ -52,8 +52,8 @@ function makeRunClaude(result = "spawn-mode reply") {
 // web calls, so "heartbeat stopped before the reply landed" is an index compare.
 function makeHeartbeat(calls) {
   const instances = [];
-  function start({ channel, ts, cmdEcho, extensions }) {
-    const rec = { channel, ts, cmdEcho, extensions, tools: [], statuses: [], stopped: false, stopCalls: 0 };
+  function start({ startedAt, channel, ts, cmdEcho, extensions }) {
+    const rec = { startedAt, channel, ts, cmdEcho, extensions, tools: [], statuses: [], stopped: false, stopCalls: 0 };
     instances.push(rec);
     calls.push(["hb-start", rec]);
     return {
@@ -295,6 +295,33 @@ test("a new Slack message posts its block, then deletes the older empty block", 
   s.broker.deliver("slack-bridge", { from_id: "peerOB", text: "the answer" });
   await waitFor(() => hasUpdate(s.web, "the answer"));
   assert.equal(s.web.calls.find(([ty, p]) => ty === "update" && p.text === "the answer")[1].ts, newer);
+});
+
+test("a block replacing an older one keeps its clock", async (t) => {
+  const s = setup(t, { claims: [["peerCK", "C-clock"]] });
+  await slack(s, makePayload({ channel: "C-clock", text: "first", client_msg_id: "m-clock-1" }));
+  await waitFor(() => s.broker.sendCalls.length === 1);
+  await delay(20);
+  await slack(s, makePayload({ channel: "C-clock", text: "second", client_msg_id: "m-clock-2" }));
+  await waitFor(() => s.broker.sendCalls.length === 2);
+
+  const [older, newer] = s.hb.instances;
+  assert.equal(typeof older.startedAt, "number");
+  assert.equal(newer.startedAt, older.startedAt);
+});
+
+test("a block beside one holding a reply starts its own clock", async (t) => {
+  const s = setup(t, { claims: [["peerCR", "C-clock-reply"]], quietGapMs: 200 });
+  await slack(s, makePayload({ channel: "C-clock-reply", text: "first", client_msg_id: "m-clock-r1" }));
+  await waitFor(() => s.broker.sendCalls.length === 1);
+  s.broker.deliver("slack-bridge", { from_id: "peerCR", text: "the answer" });
+  await delay(40);
+  await slack(s, makePayload({ channel: "C-clock-reply", text: "second", client_msg_id: "m-clock-r2" }));
+  await waitFor(() => s.broker.sendCalls.length === 2);
+
+  const [older, newer] = s.hb.instances;
+  assert.equal(typeof older.startedAt, "number");
+  assert.ok(newer.startedAt > older.startedAt, "the turn that replied is over, so its clock stops with it");
 });
 
 test("a failed placeholder post leaves the older block open", async (t) => {

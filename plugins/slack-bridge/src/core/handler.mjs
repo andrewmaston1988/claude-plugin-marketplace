@@ -170,7 +170,7 @@ export async function handleMessage({ web, store, queue, config, log, payload, b
 
     // Start heartbeat
     heartbeat = startHeartbeat({
-      web, channel, ts: placeholderTs, cmdEcho, log: log.child("heartbeat"),
+      startedAt: Date.now(), web, channel, ts: placeholderTs, cmdEcho, log: log.child("heartbeat"),
       extensions, sessionId: existingSession ?? undefined, config,
     });
     // Haiku verb mode: seed one verb per message (batch output; no per-tool streaming).
