@@ -528,6 +528,17 @@ test("Stop: an identical reply in the next turn waits, because UserPromptSubmit 
   assert.deepEqual(second.sends.map((s) => s.kind), ["turn-end"]);
 });
 
+test("UserPromptSubmit leaves the cursor alone while another hook holds the lock", async (t) => {
+  const env = setup(t);
+  await prime(env);
+  env.append(textEntry("a1", "held answer"));
+  await hook(env, fakeClient(), { lastMessage: "held answer" });
+  fs.writeFileSync(env.cursorFile + ".lock", "");
+
+  await hook(env, fakeClient(), { event: "UserPromptSubmit", prompt: "next" });
+  assert.equal(readCursorFile(env).tail, "held answer", "a clear outside the lock can write an older cursor over a newer one");
+});
+
 test("Stop: no last_assistant_message, or an empty one, means one mirror pass and no wait", async (t) => {
   for (const lastMessage of [undefined, ""]) {
     const env = setup(t);

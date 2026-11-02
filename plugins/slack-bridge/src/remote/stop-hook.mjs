@@ -70,12 +70,19 @@ async function mirror({ stateDir, sessionId, transcriptPath, session, client }) 
 }
 
 // A new turn starts clean: an identical short reply next turn must not be
-// mistaken for the previous turn's text still sitting in the tail.
+// mistaken for the previous turn's text still sitting in the tail. Under the
+// mirror's lock: clearing beside a mirror can rewind the cursor and double-post.
 function clearTail(cursorFile) {
-  const cursor = readCursor(cursorFile);
-  if (!cursor || !("tail" in cursor)) return;
-  delete cursor.tail;
-  writeCursor(cursorFile, cursor);
+  const release = tryLock(cursorFile + ".lock");
+  if (!release) return;
+  try {
+    const cursor = readCursor(cursorFile);
+    if (!cursor || !("tail" in cursor)) return;
+    delete cursor.tail;
+    writeCursor(cursorFile, cursor);
+  } finally {
+    release();
+  }
 }
 
 // The terminal dialog can't be answered from Slack, but the operator must see
