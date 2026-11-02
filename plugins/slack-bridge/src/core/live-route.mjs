@@ -212,6 +212,11 @@ async function closeWindows(peerId, { terminalOnly = false } = {}) {
 
 /** Close every window a peer has open — the daemon uses this when the peer dies. */
 export async function closePeerWindows(peerId) {
+  try {
+    await openingWindows.get(peerId);
+  } catch {
+    // A failed placeholder open leaves no window to close.
+  }
   return closeWindows(peerId);
 }
 
@@ -395,6 +400,7 @@ async function handleBrokerMessage({ message, claims, web, config, log, _quietGa
       web, peerId: fromId, channel, config, log, _startHeartbeat, terminal: true,
     });
     if (!opened) return false;
+    if (opened.done) return true;
     opened.heartbeat?.setStatus?.(text);
     return true;
   }

@@ -1,6 +1,7 @@
 // Control endpoint — the token-guarded localhost HTTP surface the live session's
 // remote-mcp server calls. Routes: /claim, /release, /health.
 import http from "node:http";
+import { closePeerWindows } from "../core/live-route.mjs";
 
 const MAX_BODY_BYTES = 1_000_000;
 
@@ -173,6 +174,7 @@ export function createControlServer({
       if (!body.peer_id) return { ok: false, error: "peer_id required" };
       const held = Object.entries(claims.all()).find(([, c]) => c?.peer_id === body.peer_id);
       claims.release(body.peer_id);
+      await closePeerWindows(body.peer_id);
       if (held) {
         const [channel, claim] = held;
         const sessionId = claim.session_id ?? claims.history?.(channel)?.session_id ?? null;

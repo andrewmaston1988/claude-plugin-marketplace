@@ -8,6 +8,7 @@ import os from "node:os";
 import path from "node:path";
 import { createControlServer } from "../../src/remote/control.mjs";
 import { createClaimsStore } from "../../src/remote/claims.mjs";
+import { startReplyLoop } from "../../src/core/handler.mjs";
 
 function makeWeb() {
   const calls = [];
@@ -18,6 +19,8 @@ function makeWeb() {
     conversationsJoin: async (p) => { calls.push(["conversationsJoin", p]); return { ok: true, channel: { id: p.channel, name: "joined" } }; },
     conversationsSetTopic: async (p) => { calls.push(["conversationsSetTopic", p]); return { ok: true }; },
     chatPostMessage: async (p) => { calls.push(["chatPostMessage", p]); return { ok: true, ts: "ts1" }; },
+    chatUpdate: async (p) => { calls.push(["chatUpdate", p]); return { ok: true }; },
+    chatDelete: async (p) => { calls.push(["chatDelete", p]); return { ok: true }; },
   };
 }
 
@@ -396,4 +399,69 @@ test("a reused channel still gets its topic and operator invite", async (t) => {
   assert.equal(r.body.ok, true);
   assert.ok(web.calls.some(([c, p]) => c === "conversationsSetTopic" && p.channel === "C-old"), JSON.stringify(web.calls));
   assert.ok(web.calls.some(([c, p]) => c === "conversationsInvite" && p.channel === "C-old" && p.users === "U-operator"));
+});
+
+test("/release deletes an open block before posting the released line", async (t) => {
+  const { routeToLiveSession } = await import("../../src/core/live-route.mjs");
+  const web = makeWeb();
+  const claims = createClaimsStore({ path: path.join(fs.mkdtempSync(path.join(os.tmpdir(), "rel-window-")), "claims.json") });
+  await claims.claim("peerA", "C1", { sessionId: "sess-abc" });
+  const { call } = await startControl(t, { web, claims });
+  await routeToLiveSession({
+    web, channel: "C1", text: "hello", claim: { peer_id: "peerA" },
+    broker: { sendMessage: async () => ({ ok: true }) },
+    config: { slack: {}, remote: { replyTimeoutMs: 60_000 } },
+    log: { child: () => ({}) }, cmdEcho: "",
+    _startHeartbeat: () => ({ stop: async () => { web.calls.push(["heartbeatStop"]); } }),
+  });
+
+  const r = await call("/release", { peer_id: "peerA" });
+  assert.equal(r.body.ok, true);
+  const deleted = web.calls.findIndex(([name]) => name === "chatDelete");
+  const released = web.calls.findIndex(([name, p]) => name === "chatPostMessage"
+    && (p.attachments ?? []).some((a) => a.color === YELLOW));
+  assert.ok(deleted >= 0 && deleted < released, "release must delete the placeholder before its yellow line");
+});
+
+test("a window holding chunks survives /release and posts its reply into the placeholder", async (t) => {
+  const { routeToLiveSession } = await import("../../src/core/live-route.mjs");
+  const web = makeWeb();
+  const claims = createClaimsStore({ path: path.join(fs.mkdtempSync(path.join(os.tmpdir(), "rel-chunks-")), "claims.json") });
+  await claims.claim("peerA", "C1", { sessionId: "sess-abc" });
+  const { call } = await startControl(t, { web, claims });
+  let deliver;
+  const ack = async () => {};
+  const broker = {
+    sendMessage: async () => ({ ok: true }),
+    wait: async (_peerId, _timeoutMs, { signal } = {}) => new Promise((resolve) => {
+      const timer = setTimeout(() => resolve({ messages: [], ack }), 1000);
+      deliver = (messages) => { clearTimeout(timer); resolve({ messages, ack }); };
+      signal?.addEventListener("abort", () => { clearTimeout(timer); resolve({ messages: [], ack }); }, { once: true });
+    }),
+  };
+  const loop = startReplyLoop({
+    broker, claims, web, config: { slack: {}, remote: { replyTimeoutMs: 60_000 } },
+    log: { child: () => ({}), error: () => {}, warn: () => {} }, _quietGapMs: 300,
+    _startHeartbeat: () => ({ stop: async () => {} }),
+  });
+  t.after(() => loop.stop());
+  await routeToLiveSession({
+    web, channel: "C1", text: "hello", claim: { peer_id: "peerA" }, broker,
+    config: { slack: {}, remote: { replyTimeoutMs: 60_000 } },
+    log: { child: () => ({}), error: () => {} }, cmdEcho: "",
+    _startHeartbeat: () => ({ stop: async () => {} }),
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+  deliver([{ id: "reply-chunk", from_id: "peerA", text: "answer" }]);
+  await new Promise((resolve) => setTimeout(resolve, 5));
+  const released = await call("/release", { peer_id: "peerA" });
+  assert.equal(released.body.ok, true);
+  for (let i = 0; i < 100 && !web.calls.some(([name]) => name === "chatUpdate"); i++) {
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+  const reply = web.calls.find(([name]) => name === "chatUpdate");
+  const deleted = web.calls.some(([name, params]) => name === "chatDelete" && params.ts === "ts1");
+  assert.deepEqual({ reply: reply && { ts: reply[1].ts, text: reply[1].text }, deleted },
+    { reply: { ts: "ts1", text: "answer" }, deleted: false },
+    "the reply chunk survives /release in the original working placeholder");
 });
