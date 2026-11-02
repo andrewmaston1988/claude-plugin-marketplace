@@ -4,15 +4,14 @@
 // to the asyncRewake hook (rewake-hook.mjs), not the model. A question is denied
 // rather than opened as a terminal dialog, which nothing in Slack can answer. Any
 // error allows — a broken hook must never wedge a session.
-import { existsSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { getPaths } from "../paths.mjs";
 import { loadConfig } from "../config.mjs";
 import { createBrokerClient } from "./broker-client.mjs";
 import { readTranscriptFrom, textAfter, textOf, hasToolUse, readCursor, writeCursor, tryLock } from "./transcript-tail.mjs";
+import { brokerOptions, readSessionFile } from "./session-file.mjs";
 import { PRIMING_LINE } from "./waiter.mjs";
 
-const SESSION_ID_RE = /^[A-Za-z0-9_-]+$/;
 const ARG_MAX = 80;
 const ARG_KEYS = ["command", "file_path", "notebook_path", "pattern", "path", "url", "query", "skill", "description", "prompt"];
 // At Stop the CLI has not flushed the turn's last entry yet, so the hook polls
@@ -35,13 +34,6 @@ export function shortArg(input) {
   const raw = key ? input[key] : "";
   const flat = raw.replace(/\s+/g, " ").trim();
   return flat.length > ARG_MAX ? flat.slice(0, ARG_MAX - 1) + "…" : flat;
-}
-
-export function readSessionFile(stateDir, sessionId) {
-  if (typeof sessionId !== "string" || !SESSION_ID_RE.test(sessionId)) return null;
-  const file = join(stateDir, "remote-sessions", `${sessionId}.json`);
-  if (!existsSync(file)) return null;
-  return { ...JSON.parse(readFileSync(file, "utf8")), seizeMark: statSync(file).mtimeMs };
 }
 
 // The seize mark (remote-sessions file mtime) resets the cursor on a re-seize,
@@ -157,11 +149,7 @@ export async function runHook({
 
   try {
     const config = _loadConfig({ configPath: session.configPath });
-    const client = _createClient({
-      port: config.remote?.brokerPort ?? 7898,
-      token: config.remote?.controlToken ?? null,
-      configPath: session.configPath,
-    });
+    const client = _createClient(brokerOptions(session, config));
 
     // Mirror first, on every event and on every stop — a retried stop included,
     // which must not drop that turn's text. A mirror failure must not cost the

@@ -150,6 +150,8 @@ export function createBrokerClient({
     wait: (id, timeoutMs, { signal } = {}) =>
       leasedTake("/wait", { id, timeout_ms: timeoutMs, waiter: identity }, { signal }, { autoAck: false }),
     takeMessages: (id) => leasedTake("/take-messages", { id }),
+    // The caller acks once the messages are safely handed on, as the waiter does.
+    takeLeased: (id) => leasedTake("/take-messages", { id }, undefined, { autoAck: false }),
     register: (body) => brokerFetch("/register", body),
     heartbeat: (id) => brokerFetch("/heartbeat", { id }),
     unregister: (id) => brokerFetch("/unregister", { id }),

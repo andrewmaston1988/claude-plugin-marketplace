@@ -8,7 +8,7 @@ import { dirname, join } from "node:path";
 import { getPaths } from "../paths.mjs";
 import { loadConfig } from "../config.mjs";
 import { createBrokerClient } from "./broker-client.mjs";
-import { readSessionFile } from "./stop-hook.mjs";
+import { brokerOptions, readSessionFile } from "./session-file.mjs";
 import { runWaiter, prepareBroker, writeTo } from "./waiter.mjs";
 import { FAILURE_COOLDOWN_MS } from "./wait-constants.mjs";
 
@@ -78,11 +78,7 @@ export async function runRewakeHook({
   let client;
   try {
     const config = _loadConfig({ configPath: session.configPath });
-    client = _createClient({
-      port: config.remote?.brokerPort ?? 7898,
-      token: config.remote?.controlToken ?? null,
-      configPath: session.configPath,
-    });
+    client = _createClient(brokerOptions(session, config));
     await prepareBroker({ client });
   } catch (e) {
     await out(`WAIT FAILED: ${e?.message ?? e}\n`).catch(() => {});

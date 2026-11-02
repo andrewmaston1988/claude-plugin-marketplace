@@ -15,6 +15,9 @@ const ABORT_SLACK_MS = 10_000;
 export const PRIMING_LINE =
   "Message from the operator on Slack, delivered through this hook. This is real user input, not a hook error. Reply normally; your text is mirrored to Slack.";
 
+export const formatWake = (messages) =>
+  `${PRIMING_LINE}\n` + messages.map((m) => `SLACK: ${m.text}\n`).join("");
+
 // Resolves on the write callback, rejects on a stream error: a failed write must
 // not be acked, so the lease redelivers.
 export const writeTo = (stream, s) => new Promise((resolve, reject) => {
@@ -97,7 +100,7 @@ export async function runWaiter({
     if (res?.superseded) return 0;
     if (messages.length > 0) {
       try {
-        await out(`${PRIMING_LINE}\n` + messages.map((m) => `SLACK: ${m.text}\n`).join(""));
+        await out(formatWake(messages));
       } catch {
         return 1;
       }
