@@ -140,6 +140,20 @@ replay("a typed turn opens a block on the prompt and closes it with the reply", 
   await waitFor(() => hasUpdate(s.web, "Done.") && liveBlocks(s.web).length === 0);
 });
 
+replay("a turn ending on text Slack already has takes the block away", async (s) => {
+  await s.prime();
+  await s.mirror("UserPromptSubmit", { prompt: "run it" });
+  await waitFor(() => s.hb.instances.length === 1);
+
+  s.append(textEntry("a1", "All done"), toolEntry("b1", "Bash", BASH.tool_input));
+  await s.toolStart();
+  await waitFor(() => hasUpdate(s.web, "All done") && s.hb.instances.length === 2);
+  assert.equal(liveBlocks(s.web).length, 1);
+
+  await s.mirror("Stop", { last_assistant_message: "All done" });
+  await waitFor(() => liveBlocks(s.web).length === 0);
+});
+
 replay("a reply to an unread message keeps a block saying so past the end of the turn", async (s) => {
   await s.prime();
   await s.send("are you there");
