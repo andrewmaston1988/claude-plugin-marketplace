@@ -13,23 +13,21 @@ async function connect(session) {
   return createBrokerClient(brokerOptions(session, loadConfig({ configPath: session.configPath })));
 }
 
-// Returns whether it reached for the broker: only then has fetch loaded, which is
-// what the entry's delayed exit is for.
 export async function runInboxHook({ raw, stateDir = getPaths().stateDir, out = defaultOut, _connect = connect }) {
   let session;
   try {
     const input = JSON.parse(raw);
     // A subagent's context never reaches the conversation the operator is in.
-    if (input.agent_id) return false;
+    if (input.agent_id) return;
     session = readSessionFile(stateDir, input.session_id);
   } catch {
-    return false;
+    return;
   }
-  if (!session?.peerId) return false;
+  if (!session?.peerId) return;
   try {
     const client = await _connect(session);
     const res = await client.takeLeased(session.peerId);
-    if (!res.messages?.length) return true;
+    if (!res.messages?.length) return;
     const additionalContext = formatWake(res.messages);
     await out(JSON.stringify({ hookSpecificOutput: { hookEventName: "PostToolBatch", additionalContext } }) + "\n");
     // After the write, so a lost write redelivers. The ack is the read receipt.
@@ -37,5 +35,4 @@ export async function runInboxHook({ raw, stateDir = getPaths().stateDir, out = 
   } catch {
     // Unacked rows come back when the lease runs out.
   }
-  return true;
 }

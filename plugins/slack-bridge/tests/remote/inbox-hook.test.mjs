@@ -48,7 +48,7 @@ function run(env, { client = fakeClient(), raw = input(), out, connects = [] } =
     stateDir: env.stateDir,
     out: out ?? (async (s) => { client.log.push("out"); written.push(s); }),
     _connect: async (session) => { connects.push(session); return client; },
-  }).then((touched) => ({ touched, written, client, connects }));
+  }).then(() => ({ written, client, connects }));
 }
 
 test("queued messages go out as PostToolBatch context, in the wake's own wording", async (t) => {
@@ -78,22 +78,22 @@ test("a failed write acks nothing and never throws", async (t) => {
   assert.ok(!client.log.includes("ack"), client.log.join());
 });
 
-test("nothing queued writes nothing, and the entry still takes the slow exit", async (t) => {
-  const { touched, written, client } = await run(setup(t), { client: fakeClient({ messages: [] }) });
+test("nothing queued writes nothing and acks nothing", async (t) => {
+  const { written, client } = await run(setup(t), { client: fakeClient({ messages: [] }) });
   assert.deepEqual(written, []);
   assert.ok(!client.log.includes("ack"), client.log.join());
-  assert.equal(touched, true);
 });
 
-test("an unclaimed session touches no broker, so the entry can exit at once", async (t) => {
-  const { touched, connects } = await run(setup(t, { claimed: false }));
-  assert.equal(touched, false);
+test("an unclaimed session touches no broker", async (t) => {
+  const { connects } = await run(setup(t, { claimed: false }));
   assert.deepEqual(connects, []);
 });
 
-test("a claimed session reports the broker touched, so the entry takes the slow exit", async (t) => {
-  assert.equal((await run(setup(t))).touched, true);
-  assert.equal((await run(setup(t), { client: fakeClient({ takeThrows: true }) })).touched, true);
+// Sync, on every tool batch: a fixed exit delay holds the next model request for its
+// whole length, and the awaited write and ack leave the natural exit nothing to lose.
+test("the entry exits on its own, with no exit timer", () => {
+  const src = fs.readFileSync(entry, "utf8");
+  assert.doesNotMatch(src, /setTimeout|process\.exit/);
 });
 
 test("a subagent's tool leaves the message for the main conversation", async (t) => {

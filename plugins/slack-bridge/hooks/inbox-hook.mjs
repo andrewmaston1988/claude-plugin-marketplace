@@ -4,5 +4,6 @@ import { runInboxHook } from "../src/remote/inbox-hook.mjs";
 
 let raw = "";
 for await (const chunk of process.stdin) raw += chunk;
-const touched = await runInboxHook({ raw });
-if (touched) setTimeout(() => process.exit(0), 150);
+// No exit timer: it would hold every batch for its length. The write and the ack
+// are awaited, so the natural exit loses neither.
+await runInboxHook({ raw });
