@@ -46,7 +46,7 @@ That reminder **is the operator's message**, not an error. Act on it as you woul
 
 Notes:
 
-- A message sent while you are mid-turn arrives when the turn ends.
+- A message sent while you are mid-turn arrives after the running batch of tools, as context on the tool result, under the same priming line. It is the operator's message: act on it in this turn. In a turn with no more tools, or under a subagent, it arrives when the turn ends.
 - After about 1 h 55 m with no message, the waiter wakes you once with `Slack waiter expired after <h>h. Nothing to do; end your turn and it restarts.` Do exactly that: end the turn.
 - `WAIT FAILED: ...` means the waiter could not start (a bad config) or the broker refused it (a 401 names `remote.controlToken`). Report it to the operator. That failure already woke you once; the waiter then stays quiet for 10 minutes before it tries again, so fix what you can in this turn.
 - If you suspect a message went missing, `check_messages` still works — it takes anything queued for this session.
@@ -54,7 +54,7 @@ Notes:
 
 ## Replying
 
-Reply normally — just write your answer, as you would in any other turn. The plugin's `PostToolUse` and `Stop` hooks mirror the turn to the claimed channel: your narration posts as messages, and tool calls render as **one status line edited in place**, finalised when the turn stops. A claimed session asks in plain text rather than through `AskUserQuestion`: a `PreToolUse` hook mirrors the question and its options to the channel and then denies the tool, because the terminal dialog cannot be answered from Slack. Write the question with its options as normal text and end the turn.
+Reply normally — just write your answer, as you would in any other turn. The plugin's `PreToolUse`, `PostToolUse` and `Stop` hooks mirror the turn to the claimed channel: your narration posts as messages before each tool starts, and the running tool shows as **a status line in one live block**, under the last message, until the turn stops. A claimed session asks in plain text rather than through `AskUserQuestion`: a `PreToolUse` hook mirrors the question and its options to the channel and then denies the tool, because the terminal dialog cannot be answered from Slack. Write the question with its options as normal text and end the turn.
 
 Do **not** answer with a tool call. There is nothing to send by hand — the hooks already post your text, so a tool call per message wastes context and can post the same reply twice.
 

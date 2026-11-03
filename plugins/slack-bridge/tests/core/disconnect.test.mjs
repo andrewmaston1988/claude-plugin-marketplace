@@ -124,9 +124,14 @@ test("a listPeers that never answers is abandoned, and disconnects nothing", asy
     return new Promise((_, reject) => signal.addEventListener("abort", () => reject(signal.reason)));
   };
 
-  const disconnected = await sweepClaims({
-    broker: { listPeers }, claims, web, log, _signal: () => AbortSignal.timeout(10),
-  });
+  // AbortSignal.timeout is unref'd, and this fake holds no socket open: with nothing
+  // else keeping the loop alive, Node 22 ends the test before the abort fires.
+  const timedOut = () => {
+    const abort = new AbortController();
+    setTimeout(() => abort.abort(new Error("timed out")), 10);
+    return abort.signal;
+  };
+  const disconnected = await sweepClaims({ broker: { listPeers }, claims, web, log, _signal: timedOut });
 
   assert.ok(signal, "the read carries an abort signal");
   assert.deepEqual(disconnected, []);
