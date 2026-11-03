@@ -1,9 +1,6 @@
-// Stop + PostToolUse + PreToolUse hook for a session holding a Slack claim:
-// mirrors the turn's assistant text to the channel, and posts a status line as a
-// tool starts or the pending question. It never blocks a Stop: the waiter belongs
-// to the asyncRewake hook (rewake-hook.mjs), not the model. A question is denied
-// rather than opened as a terminal dialog, which nothing in Slack can answer. Any
-// error allows — a broken hook must never wedge a session.
+// The hook for a session holding a Slack claim: mirrors assistant text, posts a status
+// as a tool starts, and denies a question nothing in Slack could answer. It never
+// blocks a Stop, and any error allows: a broken hook must never wedge a session.
 import { join } from "node:path";
 import { getPaths } from "../paths.mjs";
 import { loadConfig } from "../config.mjs";
@@ -36,13 +33,9 @@ export function shortArg(input) {
   return flat.length > ARG_MAX ? flat.slice(0, ARG_MAX - 1) + "…" : flat;
 }
 
-// The seize mark (remote-sessions file mtime) resets the cursor on a re-seize,
-// so text written while unclaimed is never backfilled. A contender that can't
-// take the lock sends nothing: its text stays after the un-advanced cursor.
-// Without a usable offset (none yet, or the transcript was rewritten) one
-// whole-file read locates the cursor by uuid.
-// Returns the tail of what has been mirrored, carried in the cursor, or null
-// when another invocation held the lock and this pass sent nothing.
+// The seize mark resets the cursor on a re-seize, so text written while unclaimed is
+// never backfilled. A pass locked out sends nothing: its text stays after the cursor.
+// Returns the tail of what has been mirrored, or null when locked out.
 async function mirror({ stateDir, sessionId, transcriptPath, session, client, onRead }) {
   const cursorFile = join(stateDir, "mirror", `${sessionId}.json`);
   const release = tryLock(cursorFile + ".lock");

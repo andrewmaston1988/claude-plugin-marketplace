@@ -154,6 +154,22 @@ replay("a turn ending on text Slack already has takes the block away", async (s)
   await waitFor(() => liveBlocks(s.web).length === 0);
 });
 
+replay("a turn that read its message and wrote nothing into the block takes it away", async (s) => {
+  await s.prime();
+  await s.send("run the tests");
+  await waitFor(() => label(s) === "Not read yet");
+  await s.broker.takeMessages(s.peer);
+  await waitFor(() => label(s) === "");
+
+  s.append(toolEntry("b1", "Bash", BASH.tool_input));
+  await s.toolStart();
+  await waitFor(() => label(s) === "Bash: npm test");
+
+  await s.mirror("Stop");
+  await waitFor(() => liveBlocks(s.web).length === 0);
+  assert.ok(s.hb.instances.every((i) => i.stopped), "no clock is left ticking");
+});
+
 replay("a reply to an unread message keeps a block saying so past the end of the turn", async (s) => {
   await s.prime();
   await s.send("are you there");

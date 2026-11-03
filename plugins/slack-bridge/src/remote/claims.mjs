@@ -1,10 +1,6 @@
-// Claim store: maps a Slack channel id → the live-session peer-id that seized it.
-// Atomic JSON writes (session-store pattern: tmp + rename). A channel claimed by
-// peer A is rejected if peer B tries to claim it; the same peer re-claiming is
-// idempotent.
-//
-// Beside it sits the claim-history file: the session id and channel name of every
-// channel ever seized. It outlives the claim, because an `#rc-*` channel must not
+// Claim store: Slack channel id → the live-session peer that seized it. A second
+// peer's claim is rejected; the same peer re-claiming is idempotent.
+// The claim-history file beside it outlives each claim: an `#rc-*` channel must not
 // start spawning after release, and a dead session's red block needs its GUID.
 import { readFileSync, writeFileSync, renameSync, mkdirSync, existsSync } from "node:fs";
 import { dirname } from "node:path";

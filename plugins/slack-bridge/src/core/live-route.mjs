@@ -237,12 +237,8 @@ async function abandonOlderWindows(target) {
   }
 }
 
-/**
- * Post the grey `_Working…_` block and start its heartbeat, then register the
- * window. Shared by every turn shape that shows a block: a routed Slack message,
- * a typed prompt at the terminal, and a tool status with no window already open.
- * Returns null when the placeholder could not be posted.
- */
+// The grey `_Working…_` block and its heartbeat, for every turn shape that shows
+// one. Null when the placeholder could not be posted.
 async function openWorkingWindow({
   web, peerId, channel, threadTs = null, config, log, cmdEcho = "", prompt = null,
   _startHeartbeat = startHeartbeat, terminal = false, from = null,
@@ -308,13 +304,16 @@ export async function routeToLiveSession({
   web, channel, threadTs, text, claim, broker, config, log, cmdEcho,
   _startHeartbeat = startHeartbeat,
 }) {
+  // Ahead of the open: a turn-end during it must not take this message's block.
+  addUnread(claim.peer_id);
   const window = await openWorkingWindow({
     web, peerId: claim.peer_id, channel, threadTs, config, log, cmdEcho, prompt: text, _startHeartbeat,
   });
-  if (!window) return;
+  if (!window) {
+    takeUnread(claim.peer_id);
+    return;
+  }
   await abandonOlderWindows(window);
-  addUnread(claim.peer_id);
-  showStatus(window);
 
   try {
     const r = await broker.sendMessage("slack-bridge", claim.peer_id, text);
@@ -352,7 +351,8 @@ async function handleBrokerMessage({ message, claims, web, config, log, _quietGa
   const text = String(message?.text ?? "");
 
   if (message.kind === "turn-end") {
-    await closePeerWindows(fromId, { terminalOnly: true });
+    // An unread message outlives the turn; a read one had its turn.
+    await closePeerWindows(fromId, { terminalOnly: hasUnread(fromId) });
     return true;
   }
 
