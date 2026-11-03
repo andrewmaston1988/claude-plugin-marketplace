@@ -23,6 +23,19 @@ test("a routed message reads Not read yet until the session takes it", async (t)
   assert.equal(lastStatus(s), "", "the label clears, leaving the plain block");
 });
 
+test("a message whose block never posted is not counted unread", async (t) => {
+  const s = setup(t, { claims: [["peerA", "C1"]] });
+  const post = s.web.chatPostMessage;
+  s.web.chatPostMessage = async () => { throw new Error("slack down"); };
+  await send(s, "hello");
+  await waitFor(() => s.log.entries.some(([, msg]) => msg === "failed to post routed placeholder"));
+  s.web.chatPostMessage = post;
+
+  status(s, "s1", "Bash: npm test");
+  await waitFor(() => s.broker.acked.includes("s1"));
+  assert.equal(lastStatus(s), "Bash: npm test");
+});
+
 test("a tool status sits behind the label, and survives the read", async (t) => {
   const s = setup(t, { claims: [["peerA", "C1"]] });
   await send(s, "hello");
