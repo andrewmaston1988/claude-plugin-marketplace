@@ -116,7 +116,6 @@ export async function runHook({
   _createClient = createBrokerClient,
   _sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
   _now = () => Date.now(),
-  _spawnedAt = performance.timeOrigin,
 }) {
   let input, session;
   try {
@@ -168,6 +167,12 @@ export async function runHook({
     }
 
     if (isPrompt) {
+      // The last Stop's waiter is still open: a message it took now would wake the
+      // session after this turn, with its read receipt already sent. First, so a
+      // message sent during the turn goes to its tool batches and its Stop.
+      try {
+        await client.supersedeWaiter(session.peerId);
+      } catch {}
       const prompt = String(input.prompt ?? "").trim();
       // A wake is not the operator typing: skip it, and skip anything else that
       // came from Slack rather than the keyboard.
@@ -219,7 +224,7 @@ export async function runHook({
       await client.sendMessage(session.peerId, "slack-bridge", "", { kind: "turn-end" });
     } finally {
       // The waiter this Stop started holds its first take until this lands.
-      writeTurnEnd(stateDir, input.session_id, _spawnedAt);
+      writeTurnEnd(stateDir, input.session_id, _now());
     }
     return null;
   } catch {

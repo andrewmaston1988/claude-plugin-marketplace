@@ -258,18 +258,18 @@ test("the waiter starts only once this Stop's turn-end is sent", async (t) => {
   assert.equal(waitedFor, 150, "three 50 ms polls, then the waiter");
 });
 
-test("a turn-end the Stop already sent starts the waiter at once", async (t) => {
+test("a turn-end this Stop already sent starts the waiter at once", async (t) => {
   const env = setup(t);
-  markTurnEnd(env, STOP_AT - 400);
+  markTurnEnd(env, STOP_AT + 300);
   const c = clock();
   let waitedFor = null;
   await run(env, { now: c.now, sleep: c.sleep, spawnedAt: STOP_AT, runner: async () => { waitedFor = c.elapsed; return 0; } });
   assert.equal(waitedFor, 0);
 });
 
-test("an earlier Stop's turn-end does not count, and the hold gives up at its bound", async (t) => {
+test("a turn-end sent before this waiter started is an earlier Stop's, and the hold gives up at its bound", async (t) => {
   const env = setup(t);
-  markTurnEnd(env, STOP_AT - 30_000);
+  markTurnEnd(env, STOP_AT - 1);
   const c = clock();
   let waitedFor = null;
   await run(env, { now: c.now, sleep: c.sleep, spawnedAt: STOP_AT, runner: async () => { waitedFor = c.elapsed; return 0; } });

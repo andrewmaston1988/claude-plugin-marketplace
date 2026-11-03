@@ -15,13 +15,13 @@ import { FAILURE_COOLDOWN_MS, TURN_END_WAIT_MS } from "./wait-constants.mjs";
 // Both Stop hooks start together. Taken at once, a queued message's read receipt
 // beats this Stop's turn-end to the daemon, which counts it read by the ending turn
 // and takes away the block the woken turn needs. The marker outlives the Stop that
-// wrote it, so it counts only if that Stop started with this one.
-const SPAWN_SKEW_MS = 1_000;
+// wrote it; one written after this process started is this Stop's, because the
+// last Stop's hook had finished before this turn could end.
 const HOLD_POLL_MS = 50;
 
 async function holdForTurnEnd({ stateDir, sessionId, spawnedAt, _now, _sleep }) {
   const startedAt = _now();
-  while (readTurnEnd(stateDir, sessionId) < spawnedAt - SPAWN_SKEW_MS) {
+  while (readTurnEnd(stateDir, sessionId) < spawnedAt) {
     if (_now() - startedAt >= TURN_END_WAIT_MS) return;
     await _sleep(HOLD_POLL_MS);
   }

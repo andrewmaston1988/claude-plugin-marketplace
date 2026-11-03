@@ -12,15 +12,15 @@ export function readSessionFile(stateDir, sessionId) {
   return { ...JSON.parse(readFileSync(file, "utf8")), seizeMark: statSync(file).mtimeMs };
 }
 
-// When the last Stop to send its turn-end started. The two Stop hooks run in
-// parallel, and the waiter's read receipt must reach the daemon after the turn-end.
+// When the last Stop sent its turn-end. The two Stop hooks run in parallel, and
+// the waiter's read receipt must reach the daemon after the turn-end.
 const turnEndFile = (stateDir, sessionId) => join(stateDir, "remote-sessions", `${sessionId}.turn-end`);
 
 // In place, not tmp + rename: the waiter polls it, and on Windows a rename over a
 // file being read throws EPERM. A torn read parses as 0, which reads as "not yet".
-export function writeTurnEnd(stateDir, sessionId, stopStartedAt) {
+export function writeTurnEnd(stateDir, sessionId, sentAt) {
   try {
-    writeFileSync(turnEndFile(stateDir, sessionId), String(stopStartedAt));
+    writeFileSync(turnEndFile(stateDir, sessionId), String(sentAt));
   } catch {
     // The waiter's hold is bounded: a lost marker costs seconds, not the message.
   }

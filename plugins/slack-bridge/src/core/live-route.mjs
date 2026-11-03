@@ -3,6 +3,7 @@ import { startHeartbeat } from "../heartbeat/loop.mjs";
 import { isConnectionError } from "../remote/broker-client.mjs";
 import { WAIT_WINDOW_MS } from "../remote/wait-constants.mjs";
 import { postResponse, postError, safeUpdate } from "./reply-post.mjs";
+import { postTerminalPrompt } from "./prompt-post.mjs";
 import { addUnread, takeUnread, clearUnread, resetUnread, hasUnread, statusLine, showStatus } from "./route-status.mjs";
 
 // routeToLiveSession returns once the message is handed to the broker — the channel
@@ -84,9 +85,10 @@ export function noReplyText(ceilingMs) {
 function armTimeout(window) {
   const ms = CEILING_FACTOR * (window.config.remote?.replyTimeoutMs ?? 300_000);
   window.timeoutTimer = setTimeout(() => {
-    // A terminal window has no queued message to explain: it just goes, exactly
-    // as it would at turn-end.
-    if (window.terminal) { void closeWindows(window.peerId, { terminalOnly: true }); return; }
+    // A terminal window, or one whose message was read, has no queued message to
+    // explain: it just goes, exactly as it would at turn-end.
+    const unread = hasUnread(window.peerId);
+    if (window.terminal || !unread) { void closeWindows(window.peerId, { terminalOnly: unread }); return; }
     void finalizeWindow(window, { timeout: true, notice: noReplyText(ms) });
   }, ms);
   window.timeoutTimer.unref?.();
@@ -326,6 +328,9 @@ export async function routeToLiveSession({
   // Return here: the queue is released and the next Slack message is its own turn.
 }
 
+// One claim per peer, so its entry is the peer's channel.
+const claimChannel = (claims, peerId) => Object.entries(claims.all()).find(([, c]) => c?.peer_id === peerId)?.[0] ?? null;
+
 // One broker message from the daemon peer to its claim channel. A message from a
 // peer with no claim has nowhere to go and is dropped with a log.
 async function handleBrokerMessage({ message, claims, web, config, log, _quietGapMs = QUIET_GAP_MS, _startHeartbeat = startHeartbeat }) {
@@ -337,17 +342,14 @@ async function handleBrokerMessage({ message, claims, web, config, log, _quietGa
     if (!window) return true;
     // The session is on the message, so a reply already here is not its last word.
     if (window.chunks.length) window.moreComing = true;
-    showStatus(window);
+    for (const w of routeWindows.get(fromId)) showStatus(w);
     return true;
   }
-  // hasOwn-style lookup over the claims store: one claim per peer, so the entry
-  // is the reply's destination channel.
-  const entry = Object.entries(claims.all()).find(([, c]) => c?.peer_id === fromId);
-  if (!entry) {
+  const channel = claimChannel(claims, fromId);
+  if (!channel) {
     log.warn("reply dropped: no claim for peer", { peer_id: fromId });
-    return false;
+    return true; // acked: unacked, it would come back on every lease for a day
   }
-  const [channel] = entry;
   const text = String(message?.text ?? "");
 
   if (message.kind === "turn-end") {
@@ -357,33 +359,7 @@ async function handleBrokerMessage({ message, claims, web, config, log, _quietGa
   }
 
   if (message.kind === "prompt") {
-    if (!text) return false;
-    const converted = mdToSlack(text);
-    const name = config.remote?.operatorName ?? null;
-    const icon = config.remote?.operatorIconUrl ?? null;
-    // Only the name signs a post; an icon cannot. Without one, mark the text as
-    // typed elsewhere so it never reads as the bot talking to itself.
-    const plain = `⌨️ ${converted}`;
-    const postParams = { channel, text: name ? converted : plain };
-    if (name) postParams.username = name;
-    if (icon) postParams.icon_url = icon;
-    try {
-      await web.chatPostMessage(postParams);
-    } catch (e) {
-      if (!name && !icon) {
-        log.warn("failed to post terminal prompt", { channel, error: e.message });
-        return false;
-      }
-      // Slack rejects a custom identity without chat:write.customize. A prompt
-      // that never posts is retried on every lease, so fall back once.
-      log.warn("terminal prompt rejected with the custom identity — retrying plain", { channel, error: e.message });
-      try {
-        await web.chatPostMessage({ channel, text: plain });
-      } catch (e2) {
-        log.warn("failed to post terminal prompt", { channel, error: e2.message });
-        return false;
-      }
-    }
+    if (!text || !(await postTerminalPrompt({ web, channel, text, config, log }))) return false;
     if (!targetWindow(fromId)) {
       await openWorkingWindowOnce({
         web, peerId: fromId, channel, config, log, _startHeartbeat, terminal: true,

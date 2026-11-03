@@ -316,6 +316,22 @@ export function createBroker({
       });
     },
 
+    // Retires the peer's open waiter without taking anything, as a newer /wait
+    // would. A turn typed at the terminal runs with the last Stop's waiter still
+    // open; this leaves its messages to the tool batches and this turn's Stop.
+    "/supersede"(body) {
+      const id = body.id;
+      const identity = asIdentity(body.waiter);
+      if (identity === UNKNOWN_WAITER) return { ok: false, error: "supersede needs a waiter identity" };
+      const mark = waiterGen.get(id);
+      if (isStale(identity, mark) && markIsAlive(mark.pid)) return { ok: true, superseded: 0 };
+      waiterGen.set(id, identity);
+      const open = [...(waiters.get(id) ?? [])].filter((w) => !w.superseded);
+      if (open.length > 0) releaseLeased(id);
+      for (const w of open) w.supersede();
+      return { ok: true, superseded: open.length };
+    },
+
     "/unregister"(body) {
       if (RESERVED_PEER_IDS.has(body.id)) return { ok: false, error: `Peer ${body.id} is reserved` };
       reap(body.id);

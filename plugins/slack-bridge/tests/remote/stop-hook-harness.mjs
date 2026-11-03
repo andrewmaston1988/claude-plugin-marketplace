@@ -51,7 +51,7 @@ export function setup(t, { claimed = true, configPath } = {}) {
   return { dir, stateDir, transcript, configPath: cfg, append, cursorFile, cursor };
 }
 
-export function hook(env, client, { event = "Stop", active = false, tool, sleeps, sleep, now, loads, createOpts, raw, prompt, lastMessage, toolStart, spawnedAt } = {}) {
+export function hook(env, client, { event = "Stop", active = false, tool, sleeps, sleep, now, loads, createOpts, raw, prompt, lastMessage, toolStart } = {}) {
   const input = { session_id: SID, transcript_path: env.transcript, hook_event_name: event, stop_hook_active: active };
   if (tool) Object.assign(input, { tool_name: tool.name, tool_input: tool.input, tool_use_id: tool.id });
   if (prompt !== undefined) input.prompt = prompt;
@@ -64,7 +64,6 @@ export function hook(env, client, { event = "Stop", active = false, tool, sleeps
     _createClient: (opts) => { createOpts?.push(opts); return client; },
     _sleep: sleep ?? (async (ms) => { sleeps?.push(ms); }),
     _now: now,
-    _spawnedAt: spawnedAt,
   });
 }
 

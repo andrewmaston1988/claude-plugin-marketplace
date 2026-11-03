@@ -22,7 +22,7 @@ test("reply loop backs off on superseded before re-arming", async () => {
   assert.equal(waits, 1);
 });
 
-test("reply loop acks posted replies from a partially unclaimed batch", async () => {
+test("reply loop acks only what it handled from a partly failed batch", async () => {
   let ackedIds = null;
   let loop;
   let waits = 0;
@@ -31,7 +31,8 @@ test("reply loop acks posted replies from a partially unclaimed batch", async ()
     if (waits === 1) return {
       messages: [
         { id: "posted-id", from_id: "p1", text: "reply", kind: "text" },
-        { id: "unclaimed-id", from_id: "ghost", text: "orphan", kind: "text" },
+        // A status with no text is refused, so it stays leased for a retry.
+        { id: "refused-id", from_id: "p1", text: "", kind: "status" },
       ],
       ack: async (ids) => { ackedIds = ids; loop.stop(); },
     };

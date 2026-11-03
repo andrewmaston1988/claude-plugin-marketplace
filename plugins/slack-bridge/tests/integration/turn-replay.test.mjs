@@ -1,99 +1,13 @@
 // Integration: whole turns through the real hook entry points, a real broker and the
 // reply loop, with only Slack faked. The order the operator sees, and the one block
 // at the bottom, exist only across all three.
-import { test } from "node:test";
 import assert from "node:assert/strict";
-import fs from "node:fs";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
-import { startReplyLoop, _resetRouteState } from "../../src/core/handler.mjs";
-import { createQueue } from "../../src/core/queue.mjs";
-import { createBrokerClient } from "../../src/remote/broker-client.mjs";
-import { createClaimsStore } from "../../src/remote/claims.mjs";
 import { PRIMING_LINE } from "../../src/remote/waiter.mjs";
-import { REG, claimedSession, runEntry, startBroker } from "../remote/broker-harness.mjs";
 import { textEntry, toolEntry, userEntry } from "../remote/stop-hook-harness.mjs";
-import {
-  delay, hasUpdate, idxOf, makeHeartbeat, makeLog, makePayload, makeWeb, placeholderTss, posted, slack, tmpClaims, waitFor,
-} from "./route-harness.mjs";
+import { delay, hasUpdate, idxOf, posted, waitFor } from "./route-harness.mjs";
+import { BASH, LINT, QUIET, label, liveBlocks, replay } from "./live-session-harness.mjs";
 
-const SID = "sess-1";
-const QUIET = 100;
-const pluginFile = (rel) => fileURLToPath(new URL("../../" + rel, import.meta.url));
-const bin = pluginFile("bin/claude-slack.mjs");
-const inboxEntry = pluginFile("hooks/inbox-hook.mjs");
-const BASH = { tool_name: "Bash", tool_input: { command: "npm test" }, tool_use_id: "tb1" };
-const LINT = { tool_name: "Bash", tool_input: { command: "npm run lint" }, tool_use_id: "tb2" };
-// Slack ids are deduped across the process, so each send needs its own.
-let nextId = 0;
-
-// A block is live until a reply lands in it or it is deleted.
-const liveBlocks = (web) => placeholderTss(web)
-  .filter((ts) => !web.calls.some(([ty, p]) => (ty === "update" || ty === "delete") && p.ts === ts));
-const label = (s) => s.hb.instances.at(-1)?.statuses.at(-1);
 const replyIdx = (s, text) => idxOf(s.web, ([ty, p]) => ty === "update" && p.text?.includes(text));
-
-async function liveSession(t) {
-  _resetRouteState();
-  const { port, call } = await startBroker(t);
-  const peer = (await call("/register", REG)).body.id;
-  const env = claimedSession(t, { port, peer, sid: SID });
-  const transcript = path.join(env.LOCALAPPDATA, "t.jsonl");
-  fs.writeFileSync(transcript, "");
-
-  const claims = createClaimsStore({ path: tmpClaims() });
-  claims.claim(peer, "C1");
-  const web = makeWeb();
-  const hb = makeHeartbeat(web.calls);
-  const log = makeLog();
-  const config = { slack: {}, claude: { cwd: "/tmp", timeout: 1000 }, remote: { replyTimeoutMs: 60_000 } };
-  // Throws rather than respawns: a test must not leave a detached broker running.
-  const broker = createBrokerClient({ port, _spawn: () => { throw new Error("test tried to spawn a broker"); } });
-  const loop = startReplyLoop({ broker, claims, web, config, log, _quietGapMs: QUIET, _startHeartbeat: hb.start });
-
-  const hook = async (args, input) => {
-    const r = await runEntry(args, env, { session_id: SID, transcript_path: transcript, ...input });
-    assert.equal(r.status, 0, r.stderr);
-    return r;
-  };
-  const s = {
-    peer, broker, claims, web, hb, log, config, loop, queue: createQueue({ log: makeLog() }),
-    append: (...entries) => fs.appendFileSync(transcript, entries.map((e) => JSON.stringify(e) + "\n").join("")),
-    send: (text) => slack(s, makePayload({ channel: "C1", text, client_msg_id: `replay-${++nextId}` })),
-    mirror: (event, input = {}) => hook([bin, "stop-hook"], { hook_event_name: event, ...input }),
-    toolStart: (tool = BASH) => hook([bin, "stop-hook", "--tool-start"], { hook_event_name: "PreToolUse", ...tool }),
-    inbox: () => hook([inboxEntry], { hook_event_name: "PostToolBatch" }),
-    // Claude Code starts both Stop entries together; the turn's last entry flushes
-    // after them. Resolves with the waiter's run: exit 2 and its wake text.
-    stop: async ({ lastMessage, flush = [], flushAfterMs = 300 } = {}) => {
-      const input = { session_id: SID, transcript_path: transcript, hook_event_name: "Stop" };
-      if (lastMessage) input.last_assistant_message = lastMessage;
-      const waiter = runEntry([bin, "rewake-hook"], env, input);
-      const mirror = hook([bin, "stop-hook"], input);
-      await delay(flushAfterMs);
-      s.append(...flush);
-      await mirror;
-      return waiter;
-    },
-    // The first hook after a seize starts the mirror here and sends nothing.
-    prime: async () => {
-      s.append(userEntry("u0", "before the seize"), textEntry("a0", "BEFORE THE SEIZE"));
-      await s.mirror("PostToolUse");
-    },
-  };
-  return s;
-}
-
-const replay = (name, body) => test(name, async (t) => {
-  const s = await liveSession(t);
-  try {
-    await body(s);
-  } finally {
-    // Ahead of the broker's close: a /wait that outlives it would try to respawn it.
-    s.loop.stop();
-    await s.loop.done;
-  }
-});
 
 replay("a Slack turn lands in order, with one block at the bottom the whole way", async (s) => {
   await s.prime();
@@ -209,7 +123,7 @@ async function wokenTurnWorks(s, waiter) {
 
 replay("a turn ending on late text leaves the woken turn a block under its reply", async (s) => {
   await messageAfterLastBatch(s);
-  const waiter = await s.stop({ lastMessage: "Done with the first.", flush: [textEntry("a1", "Done with the first.")] });
+  const waiter = await (await s.stop({ lastMessage: "Done with the first.", flush: [textEntry("a1", "Done with the first.")] })).waiter;
   await waitFor(() => hasUpdate(s.web, "Done with the first."));
   await wokenTurnWorks(s, waiter);
   const live = liveBlocks(s.web)[0];
@@ -218,7 +132,7 @@ replay("a turn ending on late text leaves the woken turn a block under its reply
 
 replay("a turn ending with no text leaves the woken turn its message's block", async (s) => {
   await messageAfterLastBatch(s);
-  await wokenTurnWorks(s, await s.stop());
+  await wokenTurnWorks(s, await (await s.stop()).waiter);
 });
 
 replay("a reply to an unread message keeps a block saying so past the end of the turn", async (s) => {
