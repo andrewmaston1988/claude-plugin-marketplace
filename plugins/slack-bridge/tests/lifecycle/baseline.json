@@ -1,0 +1,194 @@
+{
+  "ref": "44a9640",
+  "cells": {
+    "slack wake · message mid-tool · ends stop": {
+      "seen": 1,
+      "when": "after the turn",
+      "block": 2,
+      "ticking": 0,
+      "reachable": true
+    },
+    "slack wake · message after the last batch · ends stop": {
+      "seen": 1,
+      "when": "after the turn",
+      "block": 2,
+      "ticking": 0,
+      "reachable": true
+    },
+    "slack wake · message none · ends stop": {
+      "seen": null,
+      "when": null,
+      "block": null,
+      "ticking": 1,
+      "reachable": true
+    },
+    "slack wake · message mid-tool · ends stop failure": {
+      "seen": 0,
+      "when": "never",
+      "block": null,
+      "ticking": 2,
+      "reachable": false
+    },
+    "slack wake · message after the last batch · ends stop failure": {
+      "seen": 0,
+      "when": "never",
+      "block": null,
+      "ticking": 2,
+      "reachable": false
+    },
+    "slack wake · message none · ends stop failure": {
+      "seen": null,
+      "when": null,
+      "block": null,
+      "ticking": 1,
+      "reachable": false
+    },
+    "slack wake · message mid-tool · ends interrupt": {
+      "seen": 0,
+      "when": "never",
+      "block": null,
+      "ticking": 2,
+      "reachable": false
+    },
+    "slack wake · message after the last batch · ends interrupt": {
+      "seen": 0,
+      "when": "never",
+      "block": null,
+      "ticking": 2,
+      "reachable": false
+    },
+    "slack wake · message none · ends interrupt": {
+      "seen": null,
+      "when": null,
+      "block": null,
+      "ticking": 1,
+      "reachable": false
+    },
+    "typed · message mid-tool · ends stop": {
+      "seen": 1,
+      "when": "after the turn",
+      "block": 1,
+      "ticking": 0,
+      "reachable": true
+    },
+    "typed · message after the last batch · ends stop": {
+      "seen": 1,
+      "when": "after the turn",
+      "block": 1,
+      "ticking": 0,
+      "reachable": true
+    },
+    "typed · message none · ends stop": {
+      "seen": null,
+      "when": null,
+      "block": null,
+      "ticking": 0,
+      "reachable": true
+    },
+    "typed · message mid-tool · ends stop failure": {
+      "seen": 1,
+      "when": "after the turn",
+      "block": 1,
+      "ticking": 1,
+      "reachable": true
+    },
+    "typed · message after the last batch · ends stop failure": {
+      "seen": 1,
+      "when": "after the turn",
+      "block": 1,
+      "ticking": 1,
+      "reachable": true
+    },
+    "typed · message none · ends stop failure": {
+      "seen": null,
+      "when": null,
+      "block": null,
+      "ticking": 0,
+      "reachable": true
+    },
+    "typed · message mid-tool · ends interrupt": {
+      "seen": 1,
+      "when": "after the turn",
+      "block": 1,
+      "ticking": 1,
+      "reachable": true
+    },
+    "typed · message after the last batch · ends interrupt": {
+      "seen": 1,
+      "when": "after the turn",
+      "block": 1,
+      "ticking": 1,
+      "reachable": true
+    },
+    "typed · message none · ends interrupt": {
+      "seen": null,
+      "when": null,
+      "block": null,
+      "ticking": 0,
+      "reachable": true
+    },
+    "stop continuation · message mid-tool · ends stop": {
+      "seen": 1,
+      "when": "after the turn",
+      "block": 0,
+      "ticking": 0,
+      "reachable": true
+    },
+    "stop continuation · message after the last batch · ends stop": {
+      "seen": 1,
+      "when": "after the turn",
+      "block": 0,
+      "ticking": 0,
+      "reachable": true
+    },
+    "stop continuation · message none · ends stop": {
+      "seen": null,
+      "when": null,
+      "block": null,
+      "ticking": 0,
+      "reachable": true
+    },
+    "stop continuation · message mid-tool · ends stop failure": {
+      "seen": 1,
+      "when": "after the turn",
+      "block": 0,
+      "ticking": 0,
+      "reachable": true
+    },
+    "stop continuation · message after the last batch · ends stop failure": {
+      "seen": 1,
+      "when": "after the turn",
+      "block": 0,
+      "ticking": 0,
+      "reachable": true
+    },
+    "stop continuation · message none · ends stop failure": {
+      "seen": null,
+      "when": null,
+      "block": null,
+      "ticking": 0,
+      "reachable": true
+    },
+    "stop continuation · message mid-tool · ends interrupt": {
+      "seen": 1,
+      "when": "after the turn",
+      "block": 0,
+      "ticking": 0,
+      "reachable": true
+    },
+    "stop continuation · message after the last batch · ends interrupt": {
+      "seen": 1,
+      "when": "after the turn",
+      "block": 0,
+      "ticking": 0,
+      "reachable": true
+    },
+    "stop continuation · message none · ends interrupt": {
+      "seen": null,
+      "when": null,
+      "block": null,
+      "ticking": 0,
+      "reachable": true
+    }
+  }
+}

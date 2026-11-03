@@ -93,12 +93,10 @@ async function liveSession(t) {
       await mirror;
       return { waiter };
     },
-    // Ends every waiter still open: a newer identity than any test spawn retires
-    // them. A kill backs it up, or a broken supersede would hang the run.
+    // Ends every waiter still open: one on /wait would outlive the test.
     retireWaiters: async () => {
-      await call("/supersede", { id: peer, waiter: { pid: process.pid, started_at: Date.now() + 1e9 } }).catch(() => {});
-      await Promise.race([Promise.all(waiters), delay(3_000)]);
       for (const w of waiters) w.child.kill();
+      await Promise.all(waiters);
     },
   };
   return s;

@@ -63,6 +63,19 @@ test("acking daemon messages queues one read row each back to the daemon", async
     [[peer.id, "read", ""], [peer.id, "read", ""]]);
 });
 
+// The daemon keeps a block up through the turn-end only for a waiter's read.
+test("a read row says whether a waiter or a take had the message", async (t) => {
+  const { call } = await startBroker(t);
+  const { body: peer } = await call("/register", { ...REG, pid: process.pid });
+  await call("/send-message", { from_id: "slack-bridge", to_id: peer.id, text: "waited" });
+  const { body: waited } = await call("/wait", { id: peer.id, timeout_ms: 1000, lease: true });
+  assert.equal(Object.hasOwn(waited.messages[0], "taken_via"), false);
+  await call("/ack", { id: peer.id, ids: waited.messages.map((m) => m.id) });
+  await call("/ack", { id: peer.id, ids: await deliver(call, peer.id, ["taken"]) });
+  const { body: receipts } = await call("/take-messages", { id: "slack-bridge" });
+  assert.deepEqual(receipts.messages.map((m) => m.via), ["wait", "take"]);
+});
+
 test("a repeated ack queues nothing more", async (t) => {
   const { call } = await startBroker(t);
   const { body: peer } = await call("/register", { ...REG, pid: process.pid });

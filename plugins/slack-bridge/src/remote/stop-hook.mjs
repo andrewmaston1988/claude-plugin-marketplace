@@ -130,7 +130,8 @@ export async function runHook({
   const isQuestion = event === "PreToolUse" && !toolStart && isAsk;
   const isToolStart = event === "PreToolUse" && toolStart && !isAsk;
   const isPrompt = event === "UserPromptSubmit";
-  if (event !== "Stop" && event !== "PostToolUse" && !isQuestion && !isToolStart && !isPrompt) return null;
+  const isStopFailure = event === "StopFailure";
+  if (event !== "Stop" && event !== "PostToolUse" && !isQuestion && !isToolStart && !isPrompt && !isStopFailure) return null;
   // Absent file = no claim held: exit before any config load or broker call,
   // which is what keeps a tool call cheap on unclaimed sessions.
   try {
@@ -167,12 +168,6 @@ export async function runHook({
     }
 
     if (isPrompt) {
-      // The last Stop's waiter is still open: a message it took now would wake the
-      // session after this turn, with its read receipt already sent. First, so a
-      // message sent during the turn goes to its tool batches and its Stop.
-      try {
-        await client.supersedeWaiter(session.peerId);
-      } catch {}
       const prompt = String(input.prompt ?? "").trim();
       // A wake is not the operator typing: skip it, and skip anything else that
       // came from Slack rather than the keyboard.
@@ -186,6 +181,13 @@ export async function runHook({
     }
 
     if (event === "PostToolUse") return null;
+
+    // An API error ends the turn with no Stop. Its message is the error, not a reply
+    // to wait for, and no waiter starts, so there is no marker to write.
+    if (isStopFailure) {
+      await client.sendMessage(session.peerId, "slack-bridge", "", { kind: "turn-end" });
+      return null;
+    }
 
     if (isToolStart) {
       // Text first, then the status: the block under it must say what is running.

@@ -149,8 +149,6 @@ export function createBrokerClient({
     // window wide, so a half-open socket becomes a retry instead of a hang.
     wait: (id, timeoutMs, { signal } = {}) =>
       leasedTake("/wait", { id, timeout_ms: timeoutMs, waiter: identity }, { signal }, { autoAck: false }),
-    // Retires the peer's open waiter, taking nothing.
-    supersedeWaiter: (id) => brokerFetch("/supersede", { id, waiter: identity }),
     takeMessages: (id) => leasedTake("/take-messages", { id }),
     // The caller acks once the messages are safely handed on, as the waiter does.
     takeLeased: (id) => leasedTake("/take-messages", { id }, undefined, { autoAck: false }),

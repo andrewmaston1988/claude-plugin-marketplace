@@ -2,12 +2,14 @@
 // the reply loop: who started the turn, when a Slack message lands in it, and how it
 // ends. Each cell checks the same things the operator sees: the message reaches the
 // session once, a block is up while the session works on it, and nothing ticks after.
+// Typed turns, and turns that end without a Stop, are in tests/lifecycle.
 import assert from "node:assert/strict";
 import { textEntry, toolEntry } from "../remote/stop-hook-harness.mjs";
 import { delay, waitFor } from "./route-harness.mjs";
 import { BASH, LINT, QUIET, label, liveBlocks, replay } from "./live-session-harness.mjs";
+import { _closedMarks } from "../../src/core/live-route.mjs";
 
-const ORIGINS = ["slack", "typed"];
+const ORIGINS = ["slack"];
 const TIMINGS = ["mid-tool", "during the reply", "never"];
 const ENDINGS = ["text", "no text"];
 
@@ -22,24 +24,20 @@ function endTurn(s, text) {
   return s.stop({ lastMessage: text, flush: [textEntry(`a-${text.length}-${Date.now()}`, text)] });
 }
 
-async function cell(s, { origin, timing, ending }) {
+async function cell(s, { timing, ending }) {
   const seen = [];
   await s.prime();
-  // An idle session: the last turn's Stop left its waiter open.
+  // An idle session: the last turn's Stop left its waiter open. The operator writes
+  // minutes later, so that turn-end no longer makes a status late.
   const { waiter: idle } = await endTurn(s, null);
+  await waitFor(() => _closedMarks().size > 0);
+  _closedMarks().clear();
 
-  if (origin === "slack") {
-    await s.send("go");
-    const wake = await settled(idle, 5_000);
-    assert.equal(wake?.status, 2, "the waiter wakes the session with the message");
-    seen.push(wake.stderr);
-    await s.mirror("UserPromptSubmit", { prompt: wake.stderr });
-  } else {
-    await s.mirror("UserPromptSubmit", { prompt: "run it" });
-    const left = await settled(idle, 3_000);
-    assert.equal(left?.status, 0, "a typed turn retires the last Stop's waiter");
-    seen.push(left.stderr);
-  }
+  await s.send("go");
+  const wake = await settled(idle, 5_000);
+  assert.equal(wake?.status, 2, "the waiter wakes the session with the message");
+  seen.push(wake.stderr);
+  await s.mirror("UserPromptSubmit", { prompt: wake.stderr });
 
   s.append(toolEntry("b1", "Bash", BASH.tool_input));
   await s.toolStart();
@@ -79,14 +77,14 @@ async function cell(s, { origin, timing, ending }) {
   await delay(QUIET * 3);
   assert.deepEqual(liveBlocks(s.web), [], "no block outlives the work");
   assert.ok(s.hb.instances.every((i) => i.stopped), "no clock is left ticking");
-  if (origin === "slack") assert.equal(count(seen, "SLACK: go"), 1, "the first message reaches the session once");
+  assert.equal(count(seen, "SLACK: go"), 1, "the first message reaches the session once");
   if (timing !== "never") assert.equal(count(seen, "SLACK: msg"), 1, "the message reaches the session once");
 }
 
 for (const origin of ORIGINS) {
   for (const timing of TIMINGS) {
     for (const ending of ENDINGS) {
-      replay(`a ${origin} turn, a message ${timing}, ending on ${ending}`, (s) => cell(s, { origin, timing, ending }));
+      replay(`a ${origin} turn, a message ${timing}, ending on ${ending}`, (s) => cell(s, { timing, ending }));
     }
   }
 }

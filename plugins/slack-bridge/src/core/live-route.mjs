@@ -23,6 +23,11 @@ const routeWindows = new Map();  // peer_id → open windows, oldest first
 // two that both found no window must not post two blocks.
 const openingWindows = new Map();  // peer_id → in-flight openWorkingWindow promise
 const lastClosedAt = new Map();    // peer_id → ms its turn last ended
+const turnRunning = new Set();     // peers with a prompt or status since their last turn-end
+// Peers whose Stop waiter read a message mid-turn: the session answers it in the
+// next turn, which is woken at once, so its statuses are not a dead turn's.
+const heldForNextTurn = new Set();
+const wokenTurnDue = new Set();     // held peers whose turn has ended, until the next turn-end
 
 /** Test hook: drop window/status state between cases. */
 export function _resetRouteState() {
@@ -36,6 +41,9 @@ export function _resetRouteState() {
   routeWindows.clear();
   openingWindows.clear();
   lastClosedAt.clear();
+  turnRunning.clear();
+  heldForNextTurn.clear();
+  wokenTurnDue.clear();
   resetUnread();
 }
 
@@ -179,7 +187,7 @@ async function reopenUnderReply(window, finalisedAt) {
  */
 async function closeWindows(peerId, { terminalOnly = false } = {}) {
   markClosed(peerId);
-  if (!terminalOnly) clearUnread(peerId);
+  if (!terminalOnly) { clearUnread(peerId); heldForNextTurn.delete(peerId); wokenTurnDue.delete(peerId); }
   for (const w of [...(routeWindows.get(peerId) ?? [])]) {
     w.moreComing = false;
     if (terminalOnly && !w.terminal) continue;
@@ -338,6 +346,7 @@ async function handleBrokerMessage({ message, claims, web, config, log, _quietGa
   // Ahead of the claim lookup: unacked, a read would come back on every lease.
   if (message?.kind === "read") {
     takeUnread(fromId);
+    if (message.via === "wait" && turnRunning.has(fromId)) heldForNextTurn.add(fromId);
     const window = targetWindow(fromId);
     if (!window) return true;
     // The session is on the message, so a reply already here is not its last word.
@@ -353,12 +362,17 @@ async function handleBrokerMessage({ message, claims, web, config, log, _quietGa
   const text = String(message?.text ?? "");
 
   if (message.kind === "turn-end") {
-    // An unread message outlives the turn; a read one had its turn.
-    await closePeerWindows(fromId, { terminalOnly: hasUnread(fromId) });
+    // An unread message outlives the turn, as does one held for the next; a read one had its turn.
+    turnRunning.delete(fromId);
+    wokenTurnDue.delete(fromId);
+    const held = heldForNextTurn.delete(fromId);
+    await closePeerWindows(fromId, { terminalOnly: hasUnread(fromId) || held });
+    if (held) wokenTurnDue.add(fromId);
     return true;
   }
 
   if (message.kind === "prompt") {
+    turnRunning.add(fromId);
     if (!text || !(await postTerminalPrompt({ web, channel, text, config, log }))) return false;
     if (!targetWindow(fromId)) {
       await openWorkingWindowOnce({
@@ -372,7 +386,8 @@ async function handleBrokerMessage({ message, claims, web, config, log, _quietGa
   if (message.kind === "status") {
     if (!text) return false;
     const closedAt = lastClosedAt.get(fromId);
-    const late = closedAt !== undefined && Date.now() - closedAt < LATE_STATUS_MS;
+    const late = closedAt !== undefined && Date.now() - closedAt < LATE_STATUS_MS && !wokenTurnDue.has(fromId);
+    if (!late) turnRunning.add(fromId);
     if (window) {
       window.lastStatus = text;
       if (window.chunks.length && !late) window.moreComing = true;
