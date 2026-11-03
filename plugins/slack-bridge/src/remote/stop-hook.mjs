@@ -6,8 +6,9 @@ import { getPaths } from "../paths.mjs";
 import { loadConfig } from "../config.mjs";
 import { createBrokerClient } from "./broker-client.mjs";
 import { readTranscriptFrom, textAfter, textOf, hasToolUse, readCursor, writeCursor, tryLock } from "./transcript-tail.mjs";
-import { brokerOptions, readSessionFile } from "./session-file.mjs";
+import { brokerOptions, readSessionFile, writeTurnEnd } from "./session-file.mjs";
 import { PRIMING_LINE } from "./waiter.mjs";
+import { STOP_WAIT_MS } from "./wait-constants.mjs";
 
 const ARG_MAX = 80;
 const ARG_KEYS = ["command", "file_path", "notebook_path", "pattern", "path", "url", "query", "skill", "description", "prompt"];
@@ -17,7 +18,6 @@ const ARG_KEYS = ["command", "file_path", "notebook_path", "pattern", "path", "u
 // joining, which a whole-message comparison would not.
 const TAIL_CHARS = 256;
 const NEEDLE_CHARS = 64;
-const STOP_WAIT_MS = 3_000;
 const STOP_POLL_MS = 100;
 // As a tool starts, the entries before it may still be unflushed. The hook is
 // async, so waiting costs the tool nothing; another pass may already have taken
@@ -116,6 +116,7 @@ export async function runHook({
   _createClient = createBrokerClient,
   _sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
   _now = () => Date.now(),
+  _spawnedAt = performance.timeOrigin,
 }) {
   let input, session;
   try {
@@ -214,7 +215,12 @@ export async function runHook({
         }
       }
     }
-    await client.sendMessage(session.peerId, "slack-bridge", "", { kind: "turn-end" });
+    try {
+      await client.sendMessage(session.peerId, "slack-bridge", "", { kind: "turn-end" });
+    } finally {
+      // The waiter this Stop started holds its first take until this lands.
+      writeTurnEnd(stateDir, input.session_id, _spawnedAt);
+    }
     return null;
   } catch {
     // Every other error allows, but a claimed session must never be left on an

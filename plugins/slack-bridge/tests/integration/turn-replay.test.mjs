@@ -23,6 +23,7 @@ const pluginFile = (rel) => fileURLToPath(new URL("../../" + rel, import.meta.ur
 const bin = pluginFile("bin/claude-slack.mjs");
 const inboxEntry = pluginFile("hooks/inbox-hook.mjs");
 const BASH = { tool_name: "Bash", tool_input: { command: "npm test" }, tool_use_id: "tb1" };
+const LINT = { tool_name: "Bash", tool_input: { command: "npm run lint" }, tool_use_id: "tb2" };
 // Slack ids are deduped across the process, so each send needs its own.
 let nextId = 0;
 
@@ -60,8 +61,20 @@ async function liveSession(t) {
     append: (...entries) => fs.appendFileSync(transcript, entries.map((e) => JSON.stringify(e) + "\n").join("")),
     send: (text) => slack(s, makePayload({ channel: "C1", text, client_msg_id: `replay-${++nextId}` })),
     mirror: (event, input = {}) => hook([bin, "stop-hook"], { hook_event_name: event, ...input }),
-    toolStart: () => hook([bin, "stop-hook", "--tool-start"], { hook_event_name: "PreToolUse", ...BASH }),
+    toolStart: (tool = BASH) => hook([bin, "stop-hook", "--tool-start"], { hook_event_name: "PreToolUse", ...tool }),
     inbox: () => hook([inboxEntry], { hook_event_name: "PostToolBatch" }),
+    // Claude Code starts both Stop entries together; the turn's last entry flushes
+    // after them. Resolves with the waiter's run: exit 2 and its wake text.
+    stop: async ({ lastMessage, flush = [], flushAfterMs = 300 } = {}) => {
+      const input = { session_id: SID, transcript_path: transcript, hook_event_name: "Stop" };
+      if (lastMessage) input.last_assistant_message = lastMessage;
+      const waiter = runEntry([bin, "rewake-hook"], env, input);
+      const mirror = hook([bin, "stop-hook"], input);
+      await delay(flushAfterMs);
+      s.append(...flush);
+      await mirror;
+      return waiter;
+    },
     // The first hook after a seize starts the mirror here and sends nothing.
     prime: async () => {
       s.append(userEntry("u0", "before the seize"), textEntry("a0", "BEFORE THE SEIZE"));
@@ -168,6 +181,44 @@ replay("a turn that read its message and wrote nothing into the block takes it a
   await s.mirror("Stop");
   await waitFor(() => liveBlocks(s.web).length === 0);
   assert.ok(s.hb.instances.every((i) => i.stopped), "no clock is left ticking");
+});
+
+// A message sent after the turn's last tool batch: the Stop's own waiter takes it
+// and wakes the next turn, which must still find a block to work in.
+async function messageAfterLastBatch(s) {
+  await s.prime();
+  await s.send("first");
+  await waitFor(() => label(s) === "Not read yet");
+  await s.broker.takeMessages(s.peer);
+  s.append(toolEntry("b1", "Bash", BASH.tool_input));
+  await s.toolStart();
+  await waitFor(() => label(s) === "Bash: npm test");
+  await s.send("second");
+  await waitFor(() => label(s) === "Not read yet · Bash: npm test");
+}
+
+// The woken turn's first tool: a status in the one block at the bottom.
+async function wokenTurnWorks(s, waiter) {
+  assert.equal(waiter.status, 2, waiter.stderr);
+  assert.match(waiter.stderr, /SLACK: second/);
+  s.append(userEntry("u2", "second"), toolEntry("b2", "Bash", LINT.tool_input));
+  await s.toolStart(LINT);
+  await waitFor(() => label(s) === "Bash: npm run lint");
+  assert.equal(liveBlocks(s.web).length, 1, "the woken turn works in a block");
+}
+
+replay("a turn ending on late text leaves the woken turn a block under its reply", async (s) => {
+  await messageAfterLastBatch(s);
+  const waiter = await s.stop({ lastMessage: "Done with the first.", flush: [textEntry("a1", "Done with the first.")] });
+  await waitFor(() => hasUpdate(s.web, "Done with the first."));
+  await wokenTurnWorks(s, waiter);
+  const live = liveBlocks(s.web)[0];
+  assert.ok(replyIdx(s, "Done with the first.") < idxOf(s.web, ([ty, p]) => ty === "post" && p._ts === live), "the block sits under the reply");
+});
+
+replay("a turn ending with no text leaves the woken turn its message's block", async (s) => {
+  await messageAfterLastBatch(s);
+  await wokenTurnWorks(s, await s.stop());
 });
 
 replay("a reply to an unread message keeps a block saying so past the end of the turn", async (s) => {

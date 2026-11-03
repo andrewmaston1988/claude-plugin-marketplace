@@ -99,6 +99,8 @@ test("rewake-hook exits with the waiter's code: a broker that 401s wakes the ses
   const sessions = path.join(stateDirFor(tmp), "remote-sessions");
   fs.mkdirSync(sessions, { recursive: true });
   fs.writeFileSync(path.join(sessions, "sess-1.json"), JSON.stringify({ peerId: "p1", configPath, channel: "C1" }));
+  // This Stop's turn-end is already sent, so the waiter starts at once.
+  fs.writeFileSync(path.join(sessions, "sess-1.turn-end"), String(Date.now()));
 
   const { code, stderr } = await runBin(["rewake-hook"], tmp, { input: JSON.stringify({ session_id: "sess-1", hook_event_name: "Stop" }) });
   assert.equal(code, 2, stderr);

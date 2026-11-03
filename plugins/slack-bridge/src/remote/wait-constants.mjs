@@ -17,6 +17,14 @@ export const WAIT_CAP_MS = 6_900_000;
 // abort slack (65 s), ensureBroker's retries (~6 s) and a full backoff (30 s).
 export const HOOK_TIMEOUT_MS = 7_200_000;
 
+// How long a Stop's mirror waits for the turn's last entry to flush before it
+// sends turn-end anyway.
+export const STOP_WAIT_MS = 3_000;
+
+// How long the waiter a Stop starts holds its first take for that Stop's
+// turn-end: the mirror's wait, plus node start and the send.
+export const TURN_END_WAIT_MS = STOP_WAIT_MS + 2_000;
+
 // After a WAIT FAILED wake the hook stays silent this long, so a deterministic
 // failure (a rotated token, a bad config) cannot burn a turn on every Stop.
 export const FAILURE_COOLDOWN_MS = 600_000;

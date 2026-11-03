@@ -54,7 +54,8 @@ function fakeClient({ peers = [PEER], fail = false, healthThrows = false } = {})
   };
 }
 
-function run(env, { client = fakeClient(), raw, loads, creates, runner = async () => 0, signal, now } = {}) {
+// spawnedAt 0 is a Stop whose turn-end is long sent: no hold, unless a test wants one.
+function run(env, { client = fakeClient(), raw, loads, creates, runner = async () => 0, signal, now, sleep, spawnedAt = 0 } = {}) {
   return runRewakeHook({
     raw: raw ?? JSON.stringify({ session_id: SID, hook_event_name: "Stop" }),
     stateDir: env.stateDir,
@@ -63,6 +64,8 @@ function run(env, { client = fakeClient(), raw, loads, creates, runner = async (
     _runWaiter: runner,
     _signal: signal,
     _now: now,
+    _sleep: sleep,
+    _spawnedAt: spawnedAt,
   });
 }
 
@@ -228,6 +231,49 @@ test("a load failure after the claim is found writes WAIT FAILED and wakes (2)",
     assert.equal(ran, 0, label);
     assert.ok(fs.existsSync(env.failureMarker), `${label}: a failure that wakes must leave a marker`);
   }
+});
+
+// --- the hold: this Stop's turn-end reaches the daemon before the waiter's read receipt ---
+
+const STOP_AT = 1_800_000_000_000;
+
+// A fake clock the hold's sleeps advance; onSleep runs after each one.
+function clock(onSleep = () => {}) {
+  let now = STOP_AT;
+  let sleeps = 0;
+  return {
+    now: () => now,
+    sleep: async (ms) => { now += ms; sleeps++; onSleep(sleeps); },
+    get elapsed() { return now - STOP_AT; },
+  };
+}
+
+const markTurnEnd = (env, at) => fs.writeFileSync(path.join(env.stateDir, "remote-sessions", `${SID}.turn-end`), String(at));
+
+test("the waiter starts only once this Stop's turn-end is sent", async (t) => {
+  const env = setup(t);
+  const c = clock((n) => { if (n === 3) markTurnEnd(env, STOP_AT + 20); });
+  let waitedFor = null;
+  await run(env, { now: c.now, sleep: c.sleep, spawnedAt: STOP_AT, runner: async () => { waitedFor = c.elapsed; return 0; } });
+  assert.equal(waitedFor, 150, "three 50 ms polls, then the waiter");
+});
+
+test("a turn-end the Stop already sent starts the waiter at once", async (t) => {
+  const env = setup(t);
+  markTurnEnd(env, STOP_AT - 400);
+  const c = clock();
+  let waitedFor = null;
+  await run(env, { now: c.now, sleep: c.sleep, spawnedAt: STOP_AT, runner: async () => { waitedFor = c.elapsed; return 0; } });
+  assert.equal(waitedFor, 0);
+});
+
+test("an earlier Stop's turn-end does not count, and the hold gives up at its bound", async (t) => {
+  const env = setup(t);
+  markTurnEnd(env, STOP_AT - 30_000);
+  const c = clock();
+  let waitedFor = null;
+  await run(env, { now: c.now, sleep: c.sleep, spawnedAt: STOP_AT, runner: async () => { waitedFor = c.elapsed; return 0; } });
+  assert.equal(waitedFor, 5_000, "the mirror's 3 s plus start and send");
 });
 
 test("stillNeeded is true while the file names this peer and the peer row is live", async (t) => {
