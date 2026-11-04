@@ -22,6 +22,8 @@ const routeWindows = new Map();  // peer_id → open windows, oldest first
 // two that both found no window must not post two blocks.
 const openingWindows = new Map();  // peer_id → in-flight openWorkingWindow promise
 const lastClosedAt = new Map();    // peer_id → ms its turn last ended
+// Off routeWindows while its reply posts, but a turn-end landing then still ends its turn.
+const postingReplies = new Set();
 
 /** Test hook: drop window/status state between cases. */
 export function _resetRouteState() {
@@ -33,6 +35,7 @@ export function _resetRouteState() {
   }
   routeWindows.clear();
   openingWindows.clear();
+  postingReplies.clear();
   lastClosedAt.clear();
   resetUnread();
 }
@@ -86,9 +89,9 @@ function openRouteWindow({ web, peerId, channel, threadTs, placeholderTs, starte
 async function finalizeWindow(window, { timeout = false, errorMessage = null } = {}) {
   if (window.done) return false;
   window.done = true;
-  const finalisedAt = Date.now();
   clearTimeout(window.quietTimer);
   removeWindow(window);
+  postingReplies.add(window);
 
   const { web, channel, threadTs, placeholderTs, heartbeat, cmdEcho, config, log, chunks } = window;
   let delivered = false;
@@ -130,22 +133,22 @@ async function finalizeWindow(window, { timeout = false, errorMessage = null } =
       await postError({ web, channel, placeholderTs: null, threadTs, message: `live session reply post failed: ${e.message}` });
     } catch {}
   } finally {
+    postingReplies.delete(window);
     for (const { resolve, chunkIndex } of window.deliveryWaiters.splice(0)) resolve(deliveryOutcomes[chunkIndex] === true);
   }
-  if (replied) await reopenUnderReply(window, finalisedAt);
+  if (replied) await reopenUnderReply(window);
   return delivered;
 }
 
 // A reply takes the block it lands in, so one goes back under it while the session
 // is still going. A queued message outlives the turn, so that block stays for the
 // answer; otherwise it is the turn's, and goes at turn-end.
-async function reopenUnderReply(window, finalisedAt) {
+async function reopenUnderReply(window) {
   const { web, peerId, channel, threadTs, config, log, startHeartbeat: _startHeartbeat } = window;
   // Already a block at the bottom, or no turn follows to fill one.
   if (window.final || routeWindows.get(peerId)?.length) return;
   const unread = hasUnread(peerId);
-  const turnEnded = lastClosedAt.get(peerId) >= finalisedAt;
-  if (!unread && (!window.moreComing || turnEnded)) return;
+  if (!unread && !window.moreComing) return;
   await openWorkingWindowOnce({
     web, peerId, channel, threadTs, config, log, _startHeartbeat, terminal: !unread, from: window,
   });
@@ -158,7 +161,8 @@ async function closeWindows(peerId, { terminalOnly = false, at, final = false, o
   markClosed(peerId, at);
   if (!terminalOnly && !final) clearUnread(peerId);
   const closing = [];
-  for (const w of only ? [only] : [...(routeWindows.get(peerId) ?? [])]) {
+  const posting = only ? [] : [...postingReplies].filter((w) => w.peerId === peerId);
+  for (const w of [...(only ? [only] : routeWindows.get(peerId) ?? []), ...posting]) {
     w.moreComing = false;
     w.final ||= final;
     if (w.done || (terminalOnly && !w.terminal)) continue;
@@ -349,8 +353,8 @@ async function handleBrokerMessage({ message, claims, web, config, log, _quietGa
     // Checked after the post: a turn-end landing during it leaves no turn to show.
     if (startedBeforeTurnEnd(fromId, message)) return true;
     // A typed prompt starts a turn, so the block goes under it: one left by an
-    // interrupted turn, with no reply in it, is over.
-    await closePeerWindows(fromId, { terminalOnly: true, at: message.hook_started_at });
+    // interrupted turn, with no reply in it, is over. An unread message keeps its own.
+    await closePeerWindows(fromId, { terminalOnly: hasUnread(fromId), at: message.hook_started_at });
     if (!targetWindow(fromId)) {
       await openWorkingWindowOnce({
         web, peerId: fromId, channel, config, log, _startHeartbeat, terminal: true,

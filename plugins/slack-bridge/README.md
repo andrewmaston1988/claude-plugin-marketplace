@@ -237,7 +237,7 @@ Run `claude-slack setup` and answer **yes** at the *Remote control* step. The wi
 
 The `remote-mcp` server is declared in the plugin manifest, so sessions with the plugin installed load it automatically. (The setup wizard can also register it user-scoped as a fallback for environments without plugin-declared MCP.)
 
-Restart any interactive session you want to control this way so it picks up the MCP server — and restart it again after a plugin update: a running session keeps the server it loaded at startup, and the cache directory name is the build.
+Restart any interactive session you want to control this way so it picks up the MCP server — and restart it again after a plugin update: a running session keeps the server it loaded at startup, and the cache directory name is the build. Restart the bridge (`/restart`) before the sessions: an older bridge misreads what the new hooks send.
 
 ### Slack scopes
 

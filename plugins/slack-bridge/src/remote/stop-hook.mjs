@@ -134,7 +134,8 @@ export async function runHook({
   const isToolStart = event === "PreToolUse" && toolStart && !isAsk;
   const isPrompt = event === "UserPromptSubmit";
   const isStopFailure = event === "StopFailure";
-  // Esc runs no hook: the idle prompt, about a minute later, is the first sign the turn is over.
+  // The idle prompt comes about a minute after any response, if nobody has typed. After
+  // Esc, which runs no hook, it is the first sign the turn is over.
   const isIdle = event === "Notification" && input?.notification_type === "idle_prompt";
   if (event !== "Stop" && event !== "PostToolUse" && !isQuestion && !isToolStart && !isPrompt && !isStopFailure && !isIdle) return null;
   // Absent file = no claim held: exit before any config load or broker call,

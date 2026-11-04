@@ -6,6 +6,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { setup, slack, makePayload, waitFor, delay, idxOf, placeholderTss } from "./route-harness.mjs";
 import { _closedMarks } from "../../src/core/handler.mjs";
+import { hasUnread } from "../../src/core/route-status.mjs";
 
 const ticking = (s) => s.hb.instances.filter((i) => !i.stopped);
 
@@ -70,6 +71,35 @@ test("a typed prompt after an interrupted turn ends that turn's block and opens 
   const prompt = idxOf(s.web, ([ty, p]) => ty === "post" && p.text?.includes("try again"));
   const block = idxOf(s.web, ([ty, p]) => ty === "post" && p._ts === placeholderTss(s.web)[1]);
   assert.ok(prompt >= 0 && prompt < block, "the new block sits under the prompt");
+});
+
+test("a typed prompt after an interrupted Slack turn ends its block once the message is read", async (t) => {
+  const s = setup(t, { claims: [["peerT2", "C-T2"]] });
+  await slack(s, makePayload({ channel: "C-T2", text: "go", client_msg_id: "m-t2" }));
+  await waitFor(() => s.broker.sendCalls.length === 1, 3000);
+  s.broker.deliver("slack-bridge", { id: "r1", from_id: "peerT2", kind: "read", text: "" });
+  await waitFor(() => s.broker.acked.includes("r1"), 3000);
+  s.broker.deliver("slack-bridge", { id: "s1", from_id: "peerT2", kind: "status", text: "Bash: npm test", hook_started_at: Date.now() });
+  await waitFor(() => s.broker.acked.includes("s1"), 3000);
+  const [old] = placeholderTss(s.web);
+  s.broker.deliver("slack-bridge", { id: "p1", from_id: "peerT2", kind: "prompt", text: "try again", hook_started_at: Date.now() });
+  await waitFor(() => placeholderTss(s.web).length === 2 && ticking(s).length === 1, 3000);
+  assert.ok(s.web.calls.some(([ty, p]) => ty === "delete" && p.ts === old), "the interrupted turn's block goes");
+  const prompt = idxOf(s.web, ([ty, p]) => ty === "post" && p.text?.includes("try again"));
+  const block = idxOf(s.web, ([ty, p]) => ty === "post" && p._ts === placeholderTss(s.web)[1]);
+  assert.ok(prompt >= 0 && prompt < block, "the new block sits under the prompt");
+});
+
+test("a typed prompt leaves the block of a message the session has yet to take", async (t) => {
+  const s = setup(t, { claims: [["peerT3", "C-T3"]] });
+  await slack(s, makePayload({ channel: "C-T3", text: "go", client_msg_id: "m-t3" }));
+  await waitFor(() => s.broker.sendCalls.length === 1, 3000);
+  s.broker.deliver("slack-bridge", { id: "p1", from_id: "peerT3", kind: "prompt", text: "meanwhile", hook_started_at: Date.now() });
+  await waitFor(() => s.broker.acked.includes("p1"), 3000);
+  await delay(50);
+  assert.equal(placeholderTss(s.web).length, 1, "no second block");
+  assert.equal(ticking(s).length, 1, "the message's block still waits for its answer");
+  assert.equal(hasUnread("peerT3"), true);
 });
 
 // One /wait batch is dispatched in parallel: the turn-end must end its turn before

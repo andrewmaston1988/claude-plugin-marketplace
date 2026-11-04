@@ -152,9 +152,11 @@ test("a turn-end during the reply's post reopens nothing", async (t) => {
   const s = claimed(t);
   await readMessage(s);
   const held = holdReplyPost(s);
+  // Stamped as the hooks stamp it: the Stop hook starts before the reply's gap ends.
+  const stopStartedAt = Date.now();
   deliver(s, text("t1", "the answer"), msg("s1", "status", "Bash: npm test"));
   await waitFor(() => held.entered);
-  deliver(s, msg("e1", "turn-end"));
+  deliver(s, { ...msg("e1", "turn-end"), hook_started_at: stopStartedAt });
   await waitFor(() => s.broker.acked.includes("e1"));
   held.release();
   await settled(s, "the answer");
@@ -165,13 +167,28 @@ test("an unread message reopens through a turn-end during the reply's post", asy
   const s = claimed(t);
   await unreadMessage(s);
   const held = holdReplyPost(s);
+  const stopStartedAt = Date.now();
   deliver(s, text("t1", "older answer"));
   await waitFor(() => held.entered);
-  deliver(s, msg("e1", "turn-end"));
+  deliver(s, { ...msg("e1", "turn-end"), hook_started_at: stopStartedAt });
   await waitFor(() => s.broker.acked.includes("e1"));
   held.release();
   await waitFor(() => s.hb.instances.length === 2);
   assert.equal(s.hb.instances[1].stopped, false, "the session has yet to take the message");
+});
+
+test("an API error during the reply's post reopens nothing, though its message is unread", async (t) => {
+  const s = claimed(t);
+  await unreadMessage(s);
+  const held = holdReplyPost(s);
+  const hookStartedAt = Date.now();
+  deliver(s, text("t1", "older answer"));
+  await waitFor(() => held.entered);
+  deliver(s, { ...msg("e1", "turn-end", "stop failure"), hook_started_at: hookStartedAt });
+  await waitFor(() => s.broker.acked.includes("e1"));
+  held.release();
+  await settled(s, "older answer");
+  assert.equal(s.hb.instances.length, 1);
 });
 
 test("a disconnect during the reply's post reopens nothing", async (t) => {
