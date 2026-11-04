@@ -120,7 +120,7 @@ export function makePayload({ channel, text = "", subtype, client_msg_id }) {
 
 // One routed/claimed channel with a live peer, a started reply loop, and the
 // injected heartbeat — everything a routing test needs. `t.after` stops the loop.
-export function setup(t, { replyTimeoutMs = 3000, claims: preClaims = [], alive: aliveOverride, quietGapMs = 1000, down = false, latencyMs } = {}) {
+export function setup(t, { claims: preClaims = [], alive: aliveOverride, quietGapMs = 1000, down = false, latencyMs } = {}) {
   _resetRouteState();
   const claims = createClaimsStore({ path: tmpClaims() });
   for (const [peer, channel] of preClaims) claims.claim(peer, channel);
@@ -130,7 +130,7 @@ export function setup(t, { replyTimeoutMs = 3000, claims: preClaims = [], alive:
   const web = makeWeb({ latencyMs });
   const hb = makeHeartbeat(web.calls);
   const log = makeLog();
-  const config = { slack: {}, claude: { cwd: "/tmp", timeout: 1000 }, remote: { replyTimeoutMs } };
+  const config = { slack: {}, claude: { cwd: "/tmp", timeout: 1000 }, remote: {} };
   const loop = startReplyLoop({ broker, claims, web, config, log, _sleep: async () => {}, _quietGapMs: quietGapMs, _startHeartbeat: hb.start });
   t.after(() => loop.stop());
   // ONE queue for the whole test, as the bridge has: it is the serialisation the

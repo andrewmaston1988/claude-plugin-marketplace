@@ -1,5 +1,5 @@
 // An API error ends a turn with StopFailure instead of Stop. Without a turn-end
-// the turn's block would tick on until the next turn or the ceiling.
+// the turn's block would tick on until the next turn.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
@@ -14,7 +14,7 @@ test("StopFailure mirrors the turn's text, then sends turn-end without waiting o
   const client = fakeClient();
   const sleeps = [];
   await hook(env, client, { event: "StopFailure", lastMessage: "API Error: overloaded", sleeps });
-  assert.deepEqual(client.sends.map((s) => [s.kind, s.text]), [["text", "halfway there"], ["turn-end", "The session stopped on an API error."]]);
+  assert.deepEqual(client.sends.map((s) => [s.kind, s.text]), [["text", "halfway there"], ["turn-end", "stop failure"]]);
   assert.deepEqual(sleeps, []);
 });
 

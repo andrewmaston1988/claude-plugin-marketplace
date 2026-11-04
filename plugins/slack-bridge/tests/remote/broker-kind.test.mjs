@@ -45,7 +45,7 @@ test("kind prompt and turn-end survive the broker unchanged", async (t) => {
   assert.deepEqual(waited.messages.map((m) => m.kind), ["prompt", "turn-end"]);
 });
 
-// A delivered operator message is what the block"s "Not read yet" waits on. The
+// A delivered operator message is what keeps its block past a Stop. The
 // ack is the one place all three consumers meet: waiter, check_messages, inbox hook.
 const deliver = async (call, peerId, texts) => {
   for (const text of texts) await call("/send-message", { from_id: "slack-bridge", to_id: peerId, text });

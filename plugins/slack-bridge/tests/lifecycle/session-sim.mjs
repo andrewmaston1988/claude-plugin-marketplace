@@ -71,7 +71,7 @@ export async function startSession(root) {
   const web = makeWeb();
   const hb = makeHeartbeat(web.calls);
   const log = makeLog();
-  const config = { slack: {}, claude: { cwd: dir, timeout: 1000 }, remote: { replyTimeoutMs: 60_000 } };
+  const config = { slack: {}, claude: { cwd: dir, timeout: 1000 }, remote: {} };
   const client = createBrokerClient({ port, _spawn: () => { throw new Error("sim tried to spawn a broker"); } });
   const loop = startReplyLoop({ broker: client, claims, web, config, log, _quietGapMs: QUIET_MS, _startHeartbeat: hb.start });
   const queue = createQueue({ log: makeLog() });

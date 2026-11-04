@@ -56,8 +56,7 @@ Defaults: `proxy.url` `http://localhost:11434`; `proxy.authToken` `"ollama"`. Cl
     "brokerPort": 7898,
     "controlPort": 7897,
     "createChannels": false,
-    "operatorUserId": "U0123ABC",
-    "replyTimeoutMs": 300000
+    "operatorUserId": "U0123ABC"
   }
 }
 ```
@@ -69,7 +68,6 @@ Defaults: `proxy.url` `http://localhost:11434`; `proxy.authToken` `"ollama"`. Cl
 | `remote.controlPort` | `7897` | Internal localhost control endpoint port. Localhost-only; the token is the auth boundary. |
 | `remote.createChannels` | `false` | `true` → `/remote` creates `#rc-<context-slug>` (requires `channels:write` + `channels:manage` on the bot token). `false` → DM-seize (no new scopes). |
 | `remote.operatorUserId` | `null` | The operator's Slack user id. With `createChannels` it is invited into each new `#rc-<context>` channel — without it the channel is created with only the bot in it. Without `createChannels` it selects which DM the DM-seize fallback seizes — unset, DM-seize **refuses** rather than guessing at a DM. The wizard asks for it. |
-| `remote.replyTimeoutMs` | `300000` | Sets the live block's ceiling: at 12× this it closes with `No reply after <n>m. Your message stays queued.` and the claim is retained — slow is not dead. Until then the block keeps ticking, and a late reply lands in it. |
 | `remote.operatorName` | `null` | How a prompt typed at the terminal is signed in the channel (`chat:write.customize`). Unset posts it with a `⌨️` prefix instead — with or without an icon — so it never reads as the bot talking to itself. If Slack rejects the custom identity, the post is retried once as the plain `⌨️` post, so a prompt is never left retrying. |
 | `remote.operatorIconUrl` | `null` | Avatar for those terminal-prompt posts, independent of the name. With no name set the post still carries the `⌨️` prefix. |
 | `remote.heartbeatIntervalMs` | `15000` | How often the session-side MCP server heartbeats its peer registration so the broker's liveness view stays current. |

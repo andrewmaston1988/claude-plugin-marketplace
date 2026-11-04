@@ -40,7 +40,7 @@ export async function markDisconnected({ claim, web, claims, log }) {
   const sessionId = claim.session_id ?? claims.history?.(channel)?.session_id ?? null;
   await postDisconnectNotice({ channel, sessionId, web, log });
 
-  // Not finalizeWindow: that writes "your message stays queued" into a channel
+  // Not finalizeWindow: with no reply to post, that writes an error into a channel
   // nobody is going to answer in.
   await closePeerWindows(peerId);
   log?.info?.("remote claim disconnected", { channel, peer_id: peerId, session_id: sessionId });

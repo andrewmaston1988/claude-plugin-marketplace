@@ -189,10 +189,9 @@ export async function runHook({
 
     // An API error ends the turn with no Stop: its message is the error, not a reply to
     // wait for. Neither it nor the idle prompt starts a waiter, so there is no marker to
-    // write, and the text tells the daemon why a queued message stays queued.
+    // write, and the text names why: the daemon then keeps no block for a queued message.
     if (isStopFailure || isIdle) {
-      const why = isIdle ? "The session is idle and not listening." : "The session stopped on an API error.";
-      await client.sendMessage(session.peerId, "slack-bridge", why, { kind: "turn-end", hookStartedAt });
+      await client.sendMessage(session.peerId, "slack-bridge", isIdle ? "idle" : "stop failure", { kind: "turn-end", hookStartedAt });
       return null;
     }
 

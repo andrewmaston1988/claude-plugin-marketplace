@@ -28,9 +28,6 @@ const DEFAULTS = {
     // with a keyboard mark instead, so it never reads as the bot talking to itself.
     operatorName: null,
     operatorIconUrl: null,
-    // Long enough for a session that has to wake, read the message and answer.
-    // A reply that lands after the window is still posted to the claimed channel.
-    replyTimeoutMs: 300_000,
     heartbeatIntervalMs: 15_000,
   },
 };

@@ -76,55 +76,6 @@ test("heartbeat stops before the reply lands (no heartbeat update after the repl
   assert.ok(stopIdx >= 0 && stopIdx < replyIdx, "stop() must land before the reply update, or a heartbeat tick clobbers it");
 });
 
-// ── Soft timeout and ceiling ─────────────────────────────────────────────────
-
-const NO_REPLY_RE = /^No reply after \d+m\. Your message stays queued\.$/;
-
-test("at replyTimeoutMs the block keeps ticking, with no error and no notice", async (t) => {
-  const s = setup(t, { claims: [["peerC", "C3"]], replyTimeoutMs: 200 });
-  const rc = makeRunClaude();
-  await slack(s, makePayload({ channel: "C3", text: "hello", client_msg_id: "m-route-4" }), { runClaude: rc });
-  const placeholderTs = placeholderTss(s.web)[0];
-
-  await delay(300);
-
-  assert.deepEqual(s.hb.instances[0].statuses, ["Not read yet"], "the deadline adds nothing to the block");
-  assert.ok(
-    !s.web.calls.some(([ty, p]) => ty === "update" && p.ts === placeholderTs && /didn't reply|_Error:|No reply after/.test(String(p.text ?? ""))),
-    "the placeholder still holds the window — nothing replaced it with an error",
-  );
-  assert.equal(s.hb.instances[0].stopped, false, "the heartbeat keeps running past the deadline");
-  assert.equal(rc.calls.length, 0, "must not spawn on a claimed+live channel");
-});
-
-test("a reply after replyTimeoutMs lands in the original placeholder", async (t) => {
-  const s = setup(t, { claims: [["peerCS", "C-late"]], replyTimeoutMs: 200 });
-  await slack(s, makePayload({ channel: "C-late", text: "hello", client_msg_id: "m-late-reply" }));
-  const placeholderTs = placeholderTss(s.web)[0];
-  await delay(300);
-
-  s.broker.deliver("slack-bridge", { from_id: "peerCS", text: "the late answer" });
-  await waitFor(() => hasUpdate(s.web, "the late answer"), 4000);
-
-  const reply = s.web.calls.find(([ty, p]) => ty === "update" && p.text === "the late answer")[1];
-  assert.equal(reply.ts, placeholderTs, "the late reply keeps the placeholder");
-});
-
-test("at the ceiling the window closes with the no-reply text and the claim is kept", async (t) => {
-  const s = setup(t, { claims: [["peerCC", "C-ceil"]], replyTimeoutMs: 200 });
-  await slack(s, makePayload({ channel: "C-ceil", text: "hello", client_msg_id: "m-ceil" }));
-
-  await waitFor(
-    () => s.web.calls.some(([ty, p]) => ty === "update" && NO_REPLY_RE.test(String(p.text ?? ""))),
-    6000,
-  );
-
-  const close = s.web.calls.find(([ty, p]) => ty === "update" && NO_REPLY_RE.test(String(p.text ?? "")))[1];
-  assert.equal(close.attachments?.length, 0, "the ceiling closes the block rather than wrapping an error");
-  assert.ok(s.claims.get("C-ceil"), "the claim survives the ceiling — a slow peer is not a dead one");
-  assert.equal(s.hb.instances[0].stopped, true, "the heartbeat stops at the ceiling");
-});
-
 test("a new Slack message posts its block, then deletes the older empty block", async (t) => {
   const s = setup(t, { claims: [["peerOB", "C-one"]], quietGapMs: 20 });
   await slack(s, makePayload({ channel: "C-one", text: "first", client_msg_id: "m-one-1" }));
@@ -260,7 +211,7 @@ test("reply from a peer with no claim → dropped and logged, the loop keeps run
 });
 
 test("two routed messages, no reply to the first → the second reaches the broker immediately", async (t) => {
-  const s = setup(t, { claims: [["peerN", "C-N"]], replyTimeoutMs: 60_000 });
+  const s = setup(t, { claims: [["peerN", "C-N"]] });
   await slack(s, makePayload({ channel: "C-N", text: "first", client_msg_id: "m-hold-1" }));
   await waitFor(() => s.broker.sendCalls.length === 1);
 
@@ -276,7 +227,7 @@ test("two routed messages, no reply to the first → the second reaches the brok
 // One session turn answers everything queued, so its reply belongs at the bottom
 // of the channel — under the newest message — not in a placeholder scrolled away.
 test("a reply resolves the NEWEST window; older unanswered placeholders are abandoned", async (t) => {
-  const s = setup(t, { claims: [["peerF", "C-F"]], replyTimeoutMs: 60_000 });
+  const s = setup(t, { claims: [["peerF", "C-F"]] });
   await slack(s, makePayload({ channel: "C-F", text: "first", client_msg_id: "m-new-1" }));
   await waitFor(() => s.broker.sendCalls.length === 1);
   await slack(s, makePayload({ channel: "C-F", text: "second", client_msg_id: "m-new-2" }));
@@ -293,7 +244,7 @@ test("a reply resolves the NEWEST window; older unanswered placeholders are aban
 });
 
 test("a window already collecting a reply keeps its chunks when a newer message arrives", async (t) => {
-  const s = setup(t, { claims: [["peerF", "C-F"]], replyTimeoutMs: 60_000 });
+  const s = setup(t, { claims: [["peerF", "C-F"]] });
   await slack(s, makePayload({ channel: "C-F", text: "first", client_msg_id: "m-col-1" }));
   await waitFor(() => s.broker.sendCalls.length === 1);
   s.broker.deliver("slack-bridge", { from_id: "peerF", text: "chunk one" });
@@ -311,12 +262,12 @@ test("a window already collecting a reply keeps its chunks when a newer message 
 });
 
 test("status while a window is open → shown above the placeholder's attachment, no separate line", async (t) => {
-  const s = setup(t, { claims: [["peerH", "C-H"]], replyTimeoutMs: 60_000 });
+  const s = setup(t, { claims: [["peerH", "C-H"]] });
   await slack(s, makePayload({ channel: "C-H", text: "go", client_msg_id: "m-st-1" }));
   await waitFor(() => s.broker.sendCalls.length === 1);
   s.broker.deliver("slack-bridge", { from_id: "peerH", kind: "status", text: "Bash: node --test" });
-  await waitFor(() => s.hb.instances[0].statuses.length === 2, 2000);
-  assert.deepEqual(s.hb.instances[0].statuses, ["Not read yet", "Not read yet · Bash: node --test"]);
+  await waitFor(() => s.hb.instances[0].statuses.length === 1, 2000);
+  assert.deepEqual(s.hb.instances[0].statuses, ["Bash: node --test"]);
   assert.ok(!hasPost(s.web, "Bash:"), "no separate status message below the placeholder");
 });
 
@@ -351,7 +302,7 @@ test("broker ECONNRESET mid-loop → the loop retries and delivers the next repl
 // ── Terminal turns: the same _Working…_ block as a Slack turn ────────────────
 
 test("a status with no open window opens the _Working…_ block and starts a heartbeat", async (t) => {
-  const s = setup(t, { claims: [["peerH", "C-H"]], replyTimeoutMs: 60_000 });
+  const s = setup(t, { claims: [["peerH", "C-H"]] });
   s.broker.deliver("slack-bridge", { from_id: "peerH", kind: "status", text: "Bash: node --test" });
 
   await waitFor(() => s.hb.instances.length === 1 && s.hb.instances[0].statuses.length === 1, 3000);
@@ -365,7 +316,7 @@ test("a status with no open window opens the _Working…_ block and starts a hea
 });
 
 test("two statuses dispatched together post one placeholder", async (t) => {
-  const s = setup(t, { claims: [["peerH2", "C-H2"]], replyTimeoutMs: 60_000 });
+  const s = setup(t, { claims: [["peerH2", "C-H2"]] });
   s.broker.deliverAll("slack-bridge", [
     { from_id: "peerH2", kind: "status", text: "Bash: node --test" },
     { from_id: "peerH2", kind: "status", text: "Read: handler.mjs" },
@@ -377,7 +328,7 @@ test("two statuses dispatched together post one placeholder", async (t) => {
 });
 
 test("a reply to a terminal window lands in its placeholder", async (t) => {
-  const s = setup(t, { claims: [["peerH3", "C-H3"]], replyTimeoutMs: 60_000 });
+  const s = setup(t, { claims: [["peerH3", "C-H3"]] });
   s.broker.deliver("slack-bridge", { from_id: "peerH3", kind: "status", text: "Bash: npm test" });
   await waitFor(() => s.hb.instances.length === 1, 3000);
   const [ts] = placeholderTss(s.web);
@@ -389,7 +340,7 @@ test("a reply to a terminal window lands in its placeholder", async (t) => {
 });
 
 test("kind:turn-end deletes a terminal window's placeholder and posts nothing", async (t) => {
-  const s = setup(t, { claims: [["peerH4", "C-H4"]], replyTimeoutMs: 60_000 });
+  const s = setup(t, { claims: [["peerH4", "C-H4"]] });
   s.broker.deliver("slack-bridge", { from_id: "peerH4", kind: "status", text: "Bash: ls" });
   await waitFor(() => s.hb.instances.length === 1, 3000);
   const [ts] = placeholderTss(s.web);
@@ -398,7 +349,7 @@ test("kind:turn-end deletes a terminal window's placeholder and posts nothing", 
   s.broker.deliver("slack-bridge", { from_id: "peerH4", kind: "turn-end" });
   await waitFor(() => s.web.calls.some(([ty, p]) => ty === "delete" && p.ts === ts), 3000);
 
-  assert.equal(s.hb.instances[0].stopped, true, "the ceiling/heartbeat is stopped");
+  assert.equal(s.hb.instances[0].stopped, true, "the heartbeat is stopped");
   assert.equal(
     s.web.calls.filter(([ty]) => ty === "post").length,
     postsBefore,
@@ -412,7 +363,7 @@ test("kind:turn-end deletes a terminal window's placeholder and posts nothing", 
 // them in one /wait batch. A turn-end that deletes the block the answer is
 // landing in loses the answer and never acks it.
 test("text then turn-end in one batch: the answer lands in the block, is not deleted, and both ack", async (t) => {
-  const s = setup(t, { claims: [["peerH4b", "C-H4b"]], replyTimeoutMs: 60_000 });
+  const s = setup(t, { claims: [["peerH4b", "C-H4b"]] });
   s.broker.deliver("slack-bridge", { from_id: "peerH4b", kind: "status", text: "Bash: ls" });
   await waitFor(() => s.hb.instances.length === 1, 3000);
   const [ts] = placeholderTss(s.web);
@@ -429,21 +380,8 @@ test("text then turn-end in one batch: the answer lands in the block, is not del
   await waitFor(() => s.broker.acked.includes(41) && s.broker.acked.includes(42), 3000);
 });
 
-test("a terminal window outlives replyTimeoutMs while a tool runs", async (t) => {
-  const s = setup(t, { claims: [["peerH5", "C-H5"]], replyTimeoutMs: 80 });
-  s.broker.deliver("slack-bridge", { from_id: "peerH5", kind: "status", text: "Bash: long build" });
-  await waitFor(() => s.hb.instances.length === 1, 3000);
-  const [ts] = placeholderTss(s.web);
-
-  await delay(400); // twice replyTimeoutMs
-
-  assert.equal(s.hb.instances[0].stopped, false, "the block is still live");
-  assert.deepEqual(s.hb.instances[0].statuses, ["Bash: long build"], "the tool status and nothing else");
-  assert.ok(!s.web.calls.some(([ty, p]) => ty === "delete" && p.ts === ts), "the placeholder was not torn down");
-});
-
 test("a status whose hook started before the turn-end opens nothing", async (t) => {
-  const s = setup(t, { claims: [["peerH6", "C-H6"]], replyTimeoutMs: 60_000 });
+  const s = setup(t, { claims: [["peerH6", "C-H6"]] });
   await slack(s, makePayload({ channel: "C-H6", text: "go", client_msg_id: "m-late-1" }));
   await waitFor(() => s.broker.sendCalls.length === 1);
   s.broker.deliverAll("slack-bridge", [{ from_id: "peerH6", kind: "read" }, { from_id: "peerH6", text: "answered" }]);
@@ -458,7 +396,7 @@ test("a status whose hook started before the turn-end opens nothing", async (t) 
 });
 
 test("a close mark older than the turn-end memory is pruned on the next close", async (t) => {
-  const s = setup(t, { claims: [["peerL1", "C-L1"], ["peerL2", "C-L2"]], replyTimeoutMs: 60_000 });
+  const s = setup(t, { claims: [["peerL1", "C-L1"], ["peerL2", "C-L2"]] });
   // Age a peer's mark as a long-running daemon would: one entry per peer id,
   // written on every close and otherwise never evicted. 60 s is how long a turn-end
   // is remembered, spelled out so the pin does not move with the constant.
@@ -474,7 +412,7 @@ test("a close mark older than the turn-end memory is pruned on the next close", 
 });
 
 test("a prune keeps a mark younger than the turn-end memory", async (t) => {
-  const s = setup(t, { claims: [["peerL3", "C-L3"]], replyTimeoutMs: 60_000 });
+  const s = setup(t, { claims: [["peerL3", "C-L3"]] });
   const freshAt = Date.now() - 100;
   _closedMarks().set("peer-fresh", freshAt);
 
@@ -487,7 +425,7 @@ test("a prune keeps a mark younger than the turn-end memory", async (t) => {
 // ── A prompt typed at the terminal is mirrored to Slack ─────────────────────
 
 test("kind:prompt posts under the operator's name and icon, and opens one terminal window", async (t) => {
-  const s = setup(t, { claims: [["peerP", "C-P"]], replyTimeoutMs: 60_000 });
+  const s = setup(t, { claims: [["peerP", "C-P"]] });
   s.config.remote.operatorName = "Andrew";
   s.config.remote.operatorIconUrl = "https://example.test/avatar.png";
   s.broker.deliver("slack-bridge", { from_id: "peerP", kind: "prompt", text: "typed at the terminal" });
@@ -501,7 +439,7 @@ test("kind:prompt posts under the operator's name and icon, and opens one termin
 });
 
 test("kind:prompt with no operator name posts a keyboard-marked message under the bot's name", async (t) => {
-  const s = setup(t, { claims: [["peerP2", "C-P2"]], replyTimeoutMs: 60_000 });
+  const s = setup(t, { claims: [["peerP2", "C-P2"]] });
   s.broker.deliver("slack-bridge", { from_id: "peerP2", kind: "prompt", text: "**hello** from the terminal" });
 
   await waitFor(() => hasPost(s.web, "hello"), 3000);
@@ -513,7 +451,7 @@ test("kind:prompt with no operator name posts a keyboard-marked message under th
 // The icon is independent of the name, so an icon-only config still has no name
 // to sign with: the ⌨️ marker is what says "typed elsewhere".
 test("kind:prompt with an icon but no operator name still carries the ⌨️ marker", async (t) => {
-  const s = setup(t, { claims: [["peerP5", "C-P5"]], replyTimeoutMs: 60_000 });
+  const s = setup(t, { claims: [["peerP5", "C-P5"]] });
   s.config.remote.operatorIconUrl = "https://example.test/avatar.png";
   s.broker.deliver("slack-bridge", { from_id: "peerP5", kind: "prompt", text: "**hi**" });
 
@@ -527,7 +465,7 @@ test("kind:prompt with an icon but no operator name still carries the ⌨️ mar
 // Slack rejects username/icon_url without chat:write.customize. A prompt stuck
 // failing there is never acked, so the broker redelivers it on every lease expiry.
 test("kind:prompt retries once as the plain ⌨️ post when the custom identity is rejected", async (t) => {
-  const s = setup(t, { claims: [["peerP6", "C-P6"]], replyTimeoutMs: 60_000 });
+  const s = setup(t, { claims: [["peerP6", "C-P6"]] });
   s.config.remote.operatorName = "Andrew";
   s.config.remote.operatorIconUrl = "https://example.test/avatar.png";
   const post = s.web.chatPostMessage;
@@ -548,7 +486,7 @@ test("kind:prompt retries once as the plain ⌨️ post when the custom identity
 });
 
 test("a mirrored terminal prompt coming back as a Slack event is ignored as a bot message", async (t) => {
-  const s = setup(t, { claims: [["peerP3", "C-P3"]], replyTimeoutMs: 60_000 });
+  const s = setup(t, { claims: [["peerP3", "C-P3"]] });
   const rc = makeRunClaude();
 
   // The loop's second half: our own custom-username post is delivered back as an

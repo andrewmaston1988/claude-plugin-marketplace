@@ -74,7 +74,7 @@ test("reply loop acks only the chunks posted before a later chunk fails", async 
   };
   await routeToLiveSession({
     web, channel: "C1", text: "request", claim: { peer_id: "chunk-peer" }, broker,
-    config: { remote: { replyTimeoutMs: 60_000 } }, log: { ...log, child: () => log },
+    config: { remote: {} }, log: { ...log, child: () => log },
     _startHeartbeat: () => ({ stop: async () => {} }),
   });
   loop = startReplyLoop({

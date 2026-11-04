@@ -1,6 +1,5 @@
-// What a live block says beside its clock: the tool line, behind `Not read yet`
-// while the session has not taken a routed message.
-const NOT_READ = "Not read yet";
+// What a live block says beside its clock: the tool line. Whether the session has
+// taken a routed message is only counted, for how long the block lives.
 
 // Per peer, not per window: a read racing a window's close would otherwise be
 // lost with the window.
@@ -23,8 +22,7 @@ export function resetUnread() { unreadCounts.clear(); }
 export function hasUnread(peerId) { return unreadCounts.has(peerId); }
 
 export function statusLine(window) {
-  const unread = hasUnread(window.peerId) ? NOT_READ : "";
-  return [unread, window.lastStatus].filter(Boolean).join(" · ");
+  return window.lastStatus ?? "";
 }
 
 export function showStatus(window) {

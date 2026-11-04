@@ -421,7 +421,7 @@ test("/release deletes an open block before posting the released line", async (t
   await routeToLiveSession({
     web, channel: "C1", text: "hello", claim: { peer_id: "peerA" },
     broker: { sendMessage: async () => ({ ok: true }) },
-    config: { slack: {}, remote: { replyTimeoutMs: 60_000 } },
+    config: { slack: {}, remote: {} },
     log: { child: () => ({}) }, cmdEcho: "",
     _startHeartbeat: () => ({ stop: async () => { web.calls.push(["heartbeatStop"]); } }),
   });
@@ -451,14 +451,14 @@ test("a window holding chunks survives /release and posts its reply into the pla
     }),
   };
   const loop = startReplyLoop({
-    broker, claims, web, config: { slack: {}, remote: { replyTimeoutMs: 60_000 } },
+    broker, claims, web, config: { slack: {}, remote: {} },
     log: { child: () => ({}), error: () => {}, warn: () => {} }, _quietGapMs: 300,
     _startHeartbeat: () => ({ stop: async () => {} }),
   });
   t.after(() => loop.stop());
   await routeToLiveSession({
     web, channel: "C1", text: "hello", claim: { peer_id: "peerA" }, broker,
-    config: { slack: {}, remote: { replyTimeoutMs: 60_000 } },
+    config: { slack: {}, remote: {} },
     log: { child: () => ({}), error: () => {} }, cmdEcho: "",
     _startHeartbeat: () => ({ stop: async () => {} }),
   });

@@ -6,7 +6,7 @@
 import assert from "node:assert/strict";
 import { textEntry, toolEntry } from "../remote/stop-hook-harness.mjs";
 import { delay, waitFor } from "./route-harness.mjs";
-import { BASH, LINT, QUIET, label, liveBlocks, replay } from "./live-session-harness.mjs";
+import { BASH, LINT, QUIET, label, liveBlocks, replay, unread } from "./live-session-harness.mjs";
 
 const ORIGINS = ["slack"];
 const TIMINGS = ["mid-tool", "during the reply", "never"];
@@ -41,16 +41,16 @@ async function cell(s, { timing, ending }) {
 
   if (timing === "mid-tool") {
     await s.send("msg");
-    await waitFor(() => label(s) === "Not read yet · Bash: npm test");
+    await waitFor(() => unread(s) && s.hb.instances.length === 2 && label(s) === "Bash: npm test");
     assert.equal(liveBlocks(s.web).length, 1, "one block, under the message");
     const batch = await s.inbox();
     seen.push(batch.stdout);
     assert.match(batch.stdout, /SLACK: msg/, "the message lands in this turn");
-    await waitFor(() => label(s) === "Bash: npm test");
+    await waitFor(() => !unread(s));
   }
   if (timing === "during the reply") {
     await s.send("msg");
-    await waitFor(() => label(s)?.startsWith("Not read yet"));
+    await waitFor(() => unread(s) && s.hb.instances.length === 2);
   }
 
   const { waiter: after } = await endTurn(s, ending === "text" ? "All done." : null);

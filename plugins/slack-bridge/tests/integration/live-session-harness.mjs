@@ -10,6 +10,7 @@ import { startReplyLoop, _resetRouteState } from "../../src/core/handler.mjs";
 import { createQueue } from "../../src/core/queue.mjs";
 import { createBrokerClient } from "../../src/remote/broker-client.mjs";
 import { createClaimsStore } from "../../src/remote/claims.mjs";
+import { hasUnread } from "../../src/core/route-status.mjs";
 import { REG, claimedSession, runEntry, startBroker } from "../remote/broker-harness.mjs";
 import { textEntry, userEntry } from "../remote/stop-hook-harness.mjs";
 import { delay, makeHeartbeat, makeLog, makePayload, makeWeb, placeholderTss, slack, tmpClaims } from "./route-harness.mjs";
@@ -28,6 +29,8 @@ let nextId = 0;
 export const liveBlocks = (web) => placeholderTss(web)
   .filter((ts) => !web.calls.some(([ty, p]) => (ty === "update" || ty === "delete") && p.ts === ts));
 export const label = (s) => s.hb.instances.at(-1)?.statuses.at(-1);
+// A routed message the session has not taken yet.
+export const unread = (s) => hasUnread(s.peer);
 
 // runEntry, keeping the child so a test can kill a waiter that never leaves.
 function spawnEntry(args, env, input) {
@@ -57,7 +60,7 @@ async function liveSession(t) {
   const web = makeWeb();
   const hb = makeHeartbeat(web.calls);
   const log = makeLog();
-  const config = { slack: {}, claude: { cwd: "/tmp", timeout: 1000 }, remote: { replyTimeoutMs: 60_000 } };
+  const config = { slack: {}, claude: { cwd: "/tmp", timeout: 1000 }, remote: {} };
   // Throws rather than respawns: a test must not leave a detached broker running.
   const broker = createBrokerClient({ port, _spawn: () => { throw new Error("test tried to spawn a broker"); } });
   const loop = startReplyLoop({ broker, claims, web, config, log, _quietGapMs: QUIET, _startHeartbeat: hb.start });

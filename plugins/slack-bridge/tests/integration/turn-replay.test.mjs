@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
 import { PRIMING_LINE } from "../../src/remote/waiter.mjs";
 import { textEntry, toolEntry, userEntry } from "../remote/stop-hook-harness.mjs";
 import { delay, hasUpdate, idxOf, posted, waitFor } from "./route-harness.mjs";
-import { BASH, LINT, QUIET, label, liveBlocks, replay } from "./live-session-harness.mjs";
+import { BASH, LINT, QUIET, label, liveBlocks, replay, unread } from "./live-session-harness.mjs";
 
 const replyIdx = (s, text) => idxOf(s.web, ([ty, p]) => ty === "update" && p.text?.includes(text));
 
@@ -14,11 +14,11 @@ replay("a Slack turn lands in order, with one block at the bottom the whole way"
   assert.deepEqual(s.web.calls, [], "text from before the seize stays out of Slack");
 
   await s.send("go");
-  await waitFor(() => label(s) === "Not read yet");
+  await waitFor(() => liveBlocks(s.web).length === 1 && unread(s));
 
-  // The waiter's take: the read receipt clears the label.
+  // The waiter's take: the read receipt clears the count.
   await s.broker.takeMessages(s.peer);
-  await waitFor(() => label(s) === "");
+  await waitFor(() => !unread(s));
 
   // Text goes out as the tool starts, and a block goes back under it with the clock.
   s.append(textEntry("a1", "Running the tests"), toolEntry("b1", "Bash", BASH.tool_input));
@@ -30,17 +30,17 @@ replay("a Slack turn lands in order, with one block at the bottom the whole way"
   const blockAfterReply = idxOf(s.web, ([ty, p]) => ty === "post" && p._ts === second.ts);
   assert.ok(replyIdx(s, "Running the tests") < blockAfterReply, "the block sits under the reply");
 
-  // A message during the tool waits behind a label, in a block under it.
+  // A message during the tool moves the block, clock and tool line, under it.
   await s.send("stop that");
-  await waitFor(() => label(s) === "Not read yet · Bash: npm test" && liveBlocks(s.web).length === 1);
+  await waitFor(() => unread(s) && s.hb.instances.length === 3 && label(s) === "Bash: npm test" && liveBlocks(s.web).length === 1);
   assert.deepEqual(liveBlocks(s.web), [s.hb.instances.at(-1).ts]);
 
-  // The tool batch ends: the session gets the message in this turn, and Slack hears.
+  // The tool batch ends: the session gets the message in this turn.
   const delivered = await s.inbox();
   assert.deepEqual(JSON.parse(delivered.stdout), {
     hookSpecificOutput: { hookEventName: "PostToolBatch", additionalContext: `${PRIMING_LINE}\nSLACK: stop that\n` },
   });
-  await waitFor(() => label(s) === "Bash: npm test");
+  await waitFor(() => !unread(s));
 
   // The final reply takes the last block, and nothing reopens under it.
   s.append(textEntry("a2", "Stopped."));
@@ -84,9 +84,9 @@ replay("a turn ending on text Slack already has takes the block away", async (s)
 replay("a turn that read its message and wrote nothing into the block takes it away", async (s) => {
   await s.prime();
   await s.send("run the tests");
-  await waitFor(() => label(s) === "Not read yet");
+  await waitFor(() => liveBlocks(s.web).length === 1 && unread(s));
   await s.broker.takeMessages(s.peer);
-  await waitFor(() => label(s) === "");
+  await waitFor(() => !unread(s));
 
   s.append(toolEntry("b1", "Bash", BASH.tool_input));
   await s.toolStart();
@@ -102,13 +102,13 @@ replay("a turn that read its message and wrote nothing into the block takes it a
 async function messageAfterLastBatch(s) {
   await s.prime();
   await s.send("first");
-  await waitFor(() => label(s) === "Not read yet");
+  await waitFor(() => liveBlocks(s.web).length === 1 && unread(s));
   await s.broker.takeMessages(s.peer);
   s.append(toolEntry("b1", "Bash", BASH.tool_input));
   await s.toolStart();
   await waitFor(() => label(s) === "Bash: npm test");
   await s.send("second");
-  await waitFor(() => label(s) === "Not read yet · Bash: npm test");
+  await waitFor(() => unread(s) && s.hb.instances.length === 2 && label(s) === "Bash: npm test");
 }
 
 // The woken turn's first tool: a status in the one block at the bottom.
@@ -135,17 +135,17 @@ replay("a turn ending with no text leaves the woken turn its message's block", a
   await wokenTurnWorks(s, await (await s.stop()).waiter);
 });
 
-replay("a reply to an unread message keeps a block saying so past the end of the turn", async (s) => {
+replay("a reply to an unread message keeps a block past the end of the turn", async (s) => {
   await s.prime();
   await s.send("are you there");
-  await waitFor(() => label(s) === "Not read yet");
+  await waitFor(() => liveBlocks(s.web).length === 1 && unread(s));
 
   s.append(textEntry("a1", "An older answer"), toolEntry("b1", "Bash", BASH.tool_input));
   await s.toolStart();
-  await waitFor(() => hasUpdate(s.web, "An older answer") && label(s) === "Not read yet · Bash: npm test");
+  await waitFor(() => hasUpdate(s.web, "An older answer") && s.hb.instances.length === 2 && label(s) === "Bash: npm test");
 
   await s.mirror("Stop");
   await delay(QUIET * 2);
   assert.deepEqual(liveBlocks(s.web), [s.hb.instances.at(-1).ts], "the message still waits for its answer");
-  assert.equal(label(s), "Not read yet · Bash: npm test");
+  assert.equal(s.hb.instances.at(-1).stopped, false, "its clock still runs");
 });

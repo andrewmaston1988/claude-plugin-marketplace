@@ -1,13 +1,13 @@
-// An API error and Esc start no waiter, so their turn-end says why: the daemon tells
-// the operator a queued message stays queued. A Stop's waiter takes it, so no reason.
+// An API error and Esc start no waiter, so their turn-end says why: the daemon then
+// ends every block, a queued message's too. A Stop's waiter takes it, so no reason.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { setup, prime, fakeClient, hook } from "./stop-hook-harness.mjs";
 
 for (const [name, opts, why] of [
   ["a Stop", {}, ""],
-  ["StopFailure", { event: "StopFailure", lastMessage: "API Error: overloaded" }, "The session stopped on an API error."],
-  ["the idle prompt", { event: "Notification", notificationType: "idle_prompt" }, "The session is idle and not listening."],
+  ["StopFailure", { event: "StopFailure", lastMessage: "API Error: overloaded" }, "stop failure"],
+  ["the idle prompt", { event: "Notification", notificationType: "idle_prompt" }, "idle"],
 ]) {
   test(`${name} ends the turn${why ? " and says why" : " with no reason"}`, async (t) => {
     const env = setup(t);

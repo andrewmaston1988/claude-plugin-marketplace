@@ -69,7 +69,7 @@ async function claimedWithWindow({ channel = "C1", peer = "peerA", name = "rc-de
   const broker = { sendMessage: async () => ({ ok: true }) };
   await routeToLiveSession({
     web, channel, threadTs: null, text: "hello", claim: claims.get(channel), broker,
-    config: { slack: {}, remote: { replyTimeoutMs: 60_000 } }, log, cmdEcho: "hello",
+    config: { slack: {}, remote: {} }, log, cmdEcho: "hello",
     _startHeartbeat: hb.start,
   });
   return { claims, web, hb, log, channel, peer };
@@ -92,7 +92,7 @@ test("a claim whose peer is absent gets one red block with the GUID, its windows
     "the placeholder is deleted",
   );
   assert.ok(
-    !web.calls.some(([t, p]) => t === "update" && /stays queued|No reply after/.test(String(p.text ?? ""))),
+    !web.calls.some(([t]) => t === "update"),
     "nothing is written into the dead session's placeholder",
   );
 });

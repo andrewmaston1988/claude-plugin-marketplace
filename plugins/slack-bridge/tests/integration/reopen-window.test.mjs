@@ -6,7 +6,7 @@ import { closePeerWindows } from "../../src/core/live-route.mjs";
 import { setup, slack, makePayload, waitFor, delay, hasUpdate, idxOf, placeholderTss } from "./route-harness.mjs";
 
 const QUIET = 60;
-const claimed = (t, opts = {}) => setup(t, { claims: [["peerA", "C1"]], replyTimeoutMs: 60_000, quietGapMs: QUIET, ...opts });
+const claimed = (t, opts = {}) => setup(t, { claims: [["peerA", "C1"]], quietGapMs: QUIET, ...opts });
 
 // Slack ids are deduped across the process, so each send needs its own.
 let nextId = 0;
@@ -73,21 +73,41 @@ test("a final reply reopens nothing", async (t) => {
   assert.equal(s.hb.instances.length, 1);
 });
 
-test("text landing while a message is unread reopens a block that says so", async (t) => {
+test("text landing while a message is unread reopens a block for its answer", async (t) => {
   const s = claimed(t);
   await unreadMessage(s);
   deliver(s, text("t1", "older answer"));
   await waitFor(() => s.hb.instances.length === 2);
-  assert.equal(lastStatus(s), "Not read yet");
 
   deliver(s, msg("e1", "turn-end"));
   await waitFor(() => s.broker.acked.includes("e1"));
   await delay(20);
-  assert.equal(s.hb.instances[1].stopped, false, "the message is still queued, so the block stays");
+  assert.equal(s.hb.instances[1].stopped, false, "the session has yet to take the message, so the block stays");
 
+  // Once read, the turn answering it ends the block.
   deliver(s, msg("r1", "read"));
   await waitFor(() => s.broker.acked.includes("r1"));
-  assert.equal(lastStatus(s), "");
+  deliver(s, msg("e2", "turn-end"));
+  await waitFor(() => s.hb.instances[1].stopped);
+});
+
+test("an API error ends a reopened block, though its message is unread", async (t) => {
+  const s = claimed(t);
+  await unreadMessage(s);
+  deliver(s, text("t1", "older answer"));
+  await waitFor(() => s.hb.instances.length === 2);
+
+  deliver(s, msg("e1", "turn-end", "stop failure"));
+  await waitFor(() => s.web.calls.some(([ty, p]) => ty === "delete" && p.ts === s.hb.instances[1].ts));
+  assert.ok(s.hb.instances.every((i) => i.stopped), "nothing will take the message, so nothing ticks");
+});
+
+test("a reply in its quiet gap at an API error reopens nothing, though its message is unread", async (t) => {
+  const s = claimed(t);
+  await unreadMessage(s);
+  deliver(s, text("t1", "older answer"), msg("e1", "turn-end", "stop failure"));
+  await settled(s, "older answer");
+  assert.equal(s.hb.instances.length, 1);
 });
 
 test("a read on a block holding text reopens it: the session is on the message", async (t) => {
@@ -151,7 +171,7 @@ test("an unread message reopens through a turn-end during the reply's post", asy
   await waitFor(() => s.broker.acked.includes("e1"));
   held.release();
   await waitFor(() => s.hb.instances.length === 2);
-  assert.equal(lastStatus(s), "Not read yet");
+  assert.equal(s.hb.instances[1].stopped, false, "the session has yet to take the message");
 });
 
 test("a disconnect during the reply's post reopens nothing", async (t) => {
@@ -175,13 +195,6 @@ test("a block already at the bottom stands in for the reopen", async (t) => {
   await waitFor(() => s.broker.sendCalls.length === 2);
   await settled(s, "the answer");
   assert.equal(s.hb.instances.length, 2);
-});
-
-test("the ceiling's notice reopens nothing, even with the message unread", async (t) => {
-  const s = claimed(t, { replyTimeoutMs: 5 });
-  await unreadMessage(s);
-  await settled(s, "stays queued");
-  assert.equal(s.hb.instances.length, 1);
 });
 
 test("a reply that failed to post reopens nothing", async (t) => {
