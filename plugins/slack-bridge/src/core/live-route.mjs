@@ -14,20 +14,14 @@ import { addUnread, takeUnread, clearUnread, resetUnread, hasUnread, statusLine,
 // lands in one window, in order.
 const QUIET_GAP_MS = 1_000;
 
-// A tool-start hook is async and can outlast its turn. Only a turn-end makes a
-// status late: mid-turn, one with no window is the next tool.
-const LATE_STATUS_MS = 5_000;
+// How long a turn-end is remembered: a tool-start hook sends within seconds of starting.
+const TURN_END_MEMORY_MS = 60_000;
 
 const routeWindows = new Map();  // peer_id → open windows, oldest first
 // One placeholder-post in flight per peer: status messages arrive in parallel, and
 // two that both found no window must not post two blocks.
 const openingWindows = new Map();  // peer_id → in-flight openWorkingWindow promise
 const lastClosedAt = new Map();    // peer_id → ms its turn last ended
-const turnRunning = new Set();     // peers with a prompt or status since their last turn-end
-// Peers whose Stop waiter read a message mid-turn: the session answers it in the
-// next turn, which is woken at once, so its statuses are not a dead turn's.
-const heldForNextTurn = new Set();
-const wokenTurnDue = new Set();     // held peers whose turn has ended, until the next turn-end
 
 /** Test hook: drop window/status state between cases. */
 export function _resetRouteState() {
@@ -41,24 +35,28 @@ export function _resetRouteState() {
   routeWindows.clear();
   openingWindows.clear();
   lastClosedAt.clear();
-  turnRunning.clear();
-  heldForNextTurn.clear();
-  wokenTurnDue.clear();
   resetUnread();
 }
 
 /** Test hook: the close marks, so a case can age one. */
 export function _closedMarks() { return lastClosedAt; }
 
-// Marks the end of a peer's turn, for the 5 s late-status guard and the reopen.
-// Prune on write: a mark older than that window is dead weight, and one entry per
-// peer would otherwise live as long as the daemon.
-function markClosed(peerId) {
+// Marks the end of a peer's turn, for the late-status check and the reopen. Prune on
+// write: one entry per peer would otherwise live as long as the daemon.
+function markClosed(peerId, at = Date.now()) {
+  lastClosedAt.set(peerId, at);
   const now = Date.now();
-  lastClosedAt.set(peerId, now);
-  for (const [id, at] of lastClosedAt) {
-    if (now - at >= LATE_STATUS_MS) lastClosedAt.delete(id);
+  for (const [id, mark] of lastClosedAt) {
+    if (now - mark >= TURN_END_MEMORY_MS) lastClosedAt.delete(id);
   }
+}
+
+// Async hooks can outlast their turn: one that started before the peer's last
+// turn-end belongs to the finished turn. A message from hooks too old to stamp it
+// is never late.
+function startedBeforeTurnEnd(peerId, message) {
+  const endedAt = lastClosedAt.get(peerId);
+  return endedAt !== undefined && Number.isFinite(message?.hook_started_at) && message.hook_started_at < endedAt;
 }
 
 function removeWindow(window) {
@@ -185,9 +183,9 @@ async function reopenUnderReply(window, finalisedAt) {
  * deleted. Used when the peer leaves (turn-end) or is gone (a disconnect), where
  * finalizeWindow would write text about a message nobody is going to answer.
  */
-async function closeWindows(peerId, { terminalOnly = false } = {}) {
-  markClosed(peerId);
-  if (!terminalOnly) { clearUnread(peerId); heldForNextTurn.delete(peerId); wokenTurnDue.delete(peerId); }
+async function closeWindows(peerId, { terminalOnly = false, at } = {}) {
+  markClosed(peerId, at);
+  if (!terminalOnly) clearUnread(peerId);
   for (const w of [...(routeWindows.get(peerId) ?? [])]) {
     w.moreComing = false;
     if (terminalOnly && !w.terminal) continue;
@@ -316,7 +314,10 @@ export async function routeToLiveSession({
 }) {
   // Ahead of the open: a turn-end during it must not take this message's block.
   addUnread(claim.peer_id);
-  const window = await openWorkingWindow({
+  // An open already in flight lands first, so abandonOlderWindows can take it; this
+  // one then registers as in flight, so a status arriving meanwhile waits for it.
+  while (openingWindows.has(claim.peer_id)) await openingWindows.get(claim.peer_id).catch(() => {});
+  const window = await openWorkingWindowOnce({
     web, peerId: claim.peer_id, channel, threadTs, config, log, cmdEcho, prompt: text, _startHeartbeat,
   });
   if (!window) {
@@ -328,6 +329,7 @@ export async function routeToLiveSession({
   try {
     const r = await broker.sendMessage("slack-bridge", claim.peer_id, text);
     if (r && r.ok === false) throw new Error(r.error ?? "send failed");
+    window.routedAt = Date.now();
   } catch (e) {
     log.error("failed to route to live session", { channel, error: e.message });
     takeUnread(claim.peer_id);
@@ -346,7 +348,6 @@ async function handleBrokerMessage({ message, claims, web, config, log, _quietGa
   // Ahead of the claim lookup: unacked, a read would come back on every lease.
   if (message?.kind === "read") {
     takeUnread(fromId);
-    if (message.via === "wait" && turnRunning.has(fromId)) heldForNextTurn.add(fromId);
     const window = targetWindow(fromId);
     if (!window) return true;
     // The session is on the message, so a reply already here is not its last word.
@@ -362,19 +363,22 @@ async function handleBrokerMessage({ message, claims, web, config, log, _quietGa
   const text = String(message?.text ?? "");
 
   if (message.kind === "turn-end") {
-    // An unread message outlives the turn, as does one held for the next; a read one had its turn.
-    turnRunning.delete(fromId);
-    wokenTurnDue.delete(fromId);
-    const held = heldForNextTurn.delete(fromId);
-    await closePeerWindows(fromId, { terminalOnly: hasUnread(fromId) || held });
-    if (held) wokenTurnDue.add(fromId);
+    // An unread message outlives the turn; a read one had its turn.
+    const at = Number.isFinite(message.hook_started_at) ? message.hook_started_at : undefined;
+    const unread = hasUnread(fromId);
+    await closePeerWindows(fromId, { terminalOnly: unread, at });
+    // A turn-end with a reason starts no waiter: a message still unread though queued
+    // before its hook started is not being taken, so its block stops and says so.
+    for (const w of unread && text ? [...(routeWindows.get(fromId) ?? [])] : []) {
+      if (!w.chunks.length && w.routedAt < (at ?? Date.now())) await finalizeWindow(w, { notice: `${text} Your message stays queued.` });
+    }
     return true;
   }
 
   if (message.kind === "prompt") {
-    turnRunning.add(fromId);
     if (!text || !(await postTerminalPrompt({ web, channel, text, config, log }))) return false;
-    if (!targetWindow(fromId)) {
+    // Checked after the post: a turn-end landing during it leaves no turn to show.
+    if (!targetWindow(fromId) && !startedBeforeTurnEnd(fromId, message)) {
       await openWorkingWindowOnce({
         web, peerId: fromId, channel, config, log, _startHeartbeat, terminal: true,
       });
@@ -385,9 +389,7 @@ async function handleBrokerMessage({ message, claims, web, config, log, _quietGa
   const window = targetWindow(fromId);
   if (message.kind === "status") {
     if (!text) return false;
-    const closedAt = lastClosedAt.get(fromId);
-    const late = closedAt !== undefined && Date.now() - closedAt < LATE_STATUS_MS && !wokenTurnDue.has(fromId);
-    if (!late) turnRunning.add(fromId);
+    const late = startedBeforeTurnEnd(fromId, message);
     if (window) {
       window.lastStatus = text;
       if (window.chunks.length && !late) window.moreComing = true;

@@ -442,27 +442,27 @@ test("a terminal window outlives replyTimeoutMs while a tool runs", async (t) =>
   assert.ok(!s.web.calls.some(([ty, p]) => ty === "delete" && p.ts === ts), "the placeholder was not torn down");
 });
 
-test("a status within 5s of a turn-end opens nothing", async (t) => {
+test("a status whose hook started before the turn-end opens nothing", async (t) => {
   const s = setup(t, { claims: [["peerH6", "C-H6"]], replyTimeoutMs: 60_000 });
   await slack(s, makePayload({ channel: "C-H6", text: "go", client_msg_id: "m-late-1" }));
   await waitFor(() => s.broker.sendCalls.length === 1);
   s.broker.deliverAll("slack-bridge", [{ from_id: "peerH6", kind: "read" }, { from_id: "peerH6", text: "answered" }]);
   await waitFor(() => hasUpdate(s.web, "answered"), 4000);
-  s.broker.deliver("slack-bridge", { from_id: "peerH6", kind: "turn-end" });
+  s.broker.deliver("slack-bridge", { from_id: "peerH6", kind: "turn-end", hook_started_at: Date.now() });
   await waitFor(() => _closedMarks().has("peerH6"), 3000);
-  s.broker.deliver("slack-bridge", { from_id: "peerH6", kind: "status", text: "Edit: handler.mjs" });
+  s.broker.deliver("slack-bridge", { from_id: "peerH6", kind: "status", text: "Edit: handler.mjs", hook_started_at: _closedMarks().get("peerH6") - 1 });
   await delay(200);
 
   assert.equal(placeholderTss(s.web).length, 1, "the late status opens no second block");
   assert.equal(s.hb.instances.length, 1, "and starts no heartbeat");
 });
 
-test("a close mark older than the late-status window is pruned on the next close", async (t) => {
+test("a close mark older than the turn-end memory is pruned on the next close", async (t) => {
   const s = setup(t, { claims: [["peerL1", "C-L1"], ["peerL2", "C-L2"]], replyTimeoutMs: 60_000 });
   // Age a peer's mark as a long-running daemon would: one entry per peer id,
-  // written on every close and otherwise never evicted. 5 s is the late-status
-  // window, spelled out so the pin does not move with the constant.
-  const staleAt = Date.now() - 5001;
+  // written on every close and otherwise never evicted. 60 s is how long a turn-end
+  // is remembered, spelled out so the pin does not move with the constant.
+  const staleAt = Date.now() - 60_001;
   _closedMarks().set("peer-ancient", staleAt);
 
   s.broker.deliver("slack-bridge", { from_id: "peerL2", kind: "status", text: "Bash: ls" });
@@ -473,7 +473,7 @@ test("a close mark older than the late-status window is pruned on the next close
   assert.equal(_closedMarks().has("peer-ancient"), false, "the stale entry is evicted, not carried for the life of the daemon");
 });
 
-test("a prune keeps a mark younger than the late-status window", async (t) => {
+test("a prune keeps a mark younger than the turn-end memory", async (t) => {
   const s = setup(t, { claims: [["peerL3", "C-L3"]], replyTimeoutMs: 60_000 });
   const freshAt = Date.now() - 100;
   _closedMarks().set("peer-fresh", freshAt);

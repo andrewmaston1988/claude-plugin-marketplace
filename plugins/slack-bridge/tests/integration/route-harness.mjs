@@ -29,16 +29,20 @@ export function makeStore(initial = {}) {
 }
 // Every placeholder gets its own ts so a test can tell which window a reply
 // resolved. `calls` is the single ordered log the heartbeat also writes to.
-export function makeWeb() {
+// `latencyMs(k)` delays the kth call and records it when it lands, as Slack does.
+export function makeWeb({ latencyMs = () => 0 } = {}) {
   const calls = [];
   let n = 0;
+  let k = 0;
+  // No await at all when there is no lag: an extra tick would reorder the other tests.
+  const lag = () => { const ms = latencyMs(k++); return ms ? delay(ms) : null; };
   return {
     calls,
     // `_ts` is the ts Slack returns for the new message — not part of the request,
     // but a test has to know which message a later chat.update targeted.
-    chatPostMessage: async (p) => { const ts = `ph-${++n}`; calls.push(["post", { ...p, _ts: ts }]); return { ts, ok: true }; },
-    chatUpdate: async (p) => { calls.push(["update", p]); return {}; },
-    chatDelete: async (p) => { calls.push(["delete", p]); return {}; },
+    chatPostMessage: async (p) => { const w = lag(); if (w) await w; const ts = `ph-${++n}`; calls.push(["post", { ...p, _ts: ts }]); return { ts, ok: true }; },
+    chatUpdate: async (p) => { const w = lag(); if (w) await w; calls.push(["update", p]); return {}; },
+    chatDelete: async (p) => { const w = lag(); if (w) await w; calls.push(["delete", p]); return {}; },
     authTest: async () => ({ user_id: "U123", team_id: "T1" }),
   };
 }
@@ -116,14 +120,14 @@ export function makePayload({ channel, text = "", subtype, client_msg_id }) {
 
 // One routed/claimed channel with a live peer, a started reply loop, and the
 // injected heartbeat — everything a routing test needs. `t.after` stops the loop.
-export function setup(t, { replyTimeoutMs = 3000, claims: preClaims = [], alive: aliveOverride, quietGapMs = 1000, down = false } = {}) {
+export function setup(t, { replyTimeoutMs = 3000, claims: preClaims = [], alive: aliveOverride, quietGapMs = 1000, down = false, latencyMs } = {}) {
   _resetRouteState();
   const claims = createClaimsStore({ path: tmpClaims() });
   for (const [peer, channel] of preClaims) claims.claim(peer, channel);
   // By default every claimed peer is live; a test passes `alive: []` to kill them.
   const alive = aliveOverride ?? preClaims.map(([peer]) => peer);
   const broker = makeFakeBroker({ alive: new Set(alive), down });
-  const web = makeWeb();
+  const web = makeWeb({ latencyMs });
   const hb = makeHeartbeat(web.calls);
   const log = makeLog();
   const config = { slack: {}, claude: { cwd: "/tmp", timeout: 1000 }, remote: { replyTimeoutMs } };

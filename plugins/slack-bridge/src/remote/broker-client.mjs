@@ -142,8 +142,8 @@ export function createBrokerClient({
     // argument — a signal inside opts never reaches fetch.
     listPeers: (opts = {}, fetchOpts = {}) =>
       brokerFetch("/list-peers", { scope: "machine", cwd: "", git_root: null, include_adhoc: true, ...opts }, fetchOpts),
-    sendMessage: (fromId, toId, text, { kind = null } = {}) =>
-      brokerFetch("/send-message", { from_id: fromId, to_id: toId, text, kind }),
+    sendMessage: (fromId, toId, text, { kind = null, hookStartedAt } = {}) =>
+      brokerFetch("/send-message", { from_id: fromId, to_id: toId, text, kind, hook_started_at: hookStartedAt }),
     // Long-poll: resolves with the peer's messages (take semantics), or empty at
     // the window. The caller owns the deadline — pass an AbortSignal.timeout one
     // window wide, so a half-open socket becomes a retry instead of a hang.

@@ -7,6 +7,7 @@ const WHEN_RANK = { "in-turn": 2, "after the turn": 1, never: 0 };
 const MEASURES = [
   ["the message reaches the session once", (b, base) => base.seen === 1 && b.seen !== 1],
   ["the message reaches the session as early", (b, base) => b.when !== null && WHEN_RANK[b.when] < WHEN_RANK[base.when]],
+  ["one block is up while the turn's first tool runs", (b, base) => base.first === 1 && b.first !== 1],
   ["one block is up while the session works on it", (b, base) => base.block === 1 && b.block !== 1],
   ["nothing ticks once the turn is over", (b, base) => base.ticking === 0 && b.ticking > 0],
   ["Slack still reaches the idle session", (b, base) => base.reachable && !b.reachable],

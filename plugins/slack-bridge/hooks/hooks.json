@@ -93,6 +93,17 @@
           }
         ]
       }
+    ],
+    "Notification": [
+      {
+        "matcher": "idle_prompt",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/bin/claude-slack.mjs\" stop-hook"
+          }
+        ]
+      }
     ]
   }
 }

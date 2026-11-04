@@ -63,17 +63,14 @@ test("acking daemon messages queues one read row each back to the daemon", async
     [[peer.id, "read", ""], [peer.id, "read", ""]]);
 });
 
-// The daemon keeps a block up through the turn-end only for a waiter's read.
-test("a read row says whether a waiter or a take had the message", async (t) => {
+// The daemon drops a status whose hook started before the turn-end, by this stamp.
+test("a message carries its hook's start time through the broker, and only a number", async (t) => {
   const { call } = await startBroker(t);
   const { body: peer } = await call("/register", { ...REG, pid: process.pid });
-  await call("/send-message", { from_id: "slack-bridge", to_id: peer.id, text: "waited" });
-  const { body: waited } = await call("/wait", { id: peer.id, timeout_ms: 1000, lease: true });
-  assert.equal(Object.hasOwn(waited.messages[0], "taken_via"), false);
-  await call("/ack", { id: peer.id, ids: waited.messages.map((m) => m.id) });
-  await call("/ack", { id: peer.id, ids: await deliver(call, peer.id, ["taken"]) });
-  const { body: receipts } = await call("/take-messages", { id: "slack-bridge" });
-  assert.deepEqual(receipts.messages.map((m) => m.via), ["wait", "take"]);
+  await call("/send-message", { from_id: peer.id, to_id: "slack-bridge", text: "Bash: ls", kind: "status", hook_started_at: 1234 });
+  await call("/send-message", { from_id: peer.id, to_id: "slack-bridge", text: "", kind: "turn-end", hook_started_at: "soon" });
+  const { body: waited } = await call("/wait", { id: "slack-bridge", timeout_ms: 1000 });
+  assert.deepEqual(waited.messages.map((m) => m.hook_started_at), [1234, undefined]);
 });
 
 test("a repeated ack queues nothing more", async (t) => {

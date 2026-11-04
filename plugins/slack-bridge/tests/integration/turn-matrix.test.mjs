@@ -7,7 +7,6 @@ import assert from "node:assert/strict";
 import { textEntry, toolEntry } from "../remote/stop-hook-harness.mjs";
 import { delay, waitFor } from "./route-harness.mjs";
 import { BASH, LINT, QUIET, label, liveBlocks, replay } from "./live-session-harness.mjs";
-import { _closedMarks } from "../../src/core/live-route.mjs";
 
 const ORIGINS = ["slack"];
 const TIMINGS = ["mid-tool", "during the reply", "never"];
@@ -27,11 +26,8 @@ function endTurn(s, text) {
 async function cell(s, { timing, ending }) {
   const seen = [];
   await s.prime();
-  // An idle session: the last turn's Stop left its waiter open. The operator writes
-  // minutes later, so that turn-end no longer makes a status late.
+  // An idle session: the last turn's Stop left its waiter open.
   const { waiter: idle } = await endTurn(s, null);
-  await waitFor(() => _closedMarks().size > 0);
-  _closedMarks().clear();
 
   await s.send("go");
   const wake = await settled(idle, 5_000);

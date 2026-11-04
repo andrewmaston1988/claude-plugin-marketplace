@@ -14,7 +14,7 @@ test("StopFailure mirrors the turn's text, then sends turn-end without waiting o
   const client = fakeClient();
   const sleeps = [];
   await hook(env, client, { event: "StopFailure", lastMessage: "API Error: overloaded", sleeps });
-  assert.deepEqual(client.sends.map((s) => [s.kind, s.text]), [["text", "halfway there"], ["turn-end", ""]]);
+  assert.deepEqual(client.sends.map((s) => [s.kind, s.text]), [["text", "halfway there"], ["turn-end", "The session stopped on an API error."]]);
   assert.deepEqual(sleeps, []);
 });
 

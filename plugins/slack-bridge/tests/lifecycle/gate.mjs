@@ -1,9 +1,8 @@
 #!/usr/bin/env node
-// The regression gate: plays every lifecycle cell on this checkout and on another
-// ref of this plugin, and fails on any cell where this checkout is worse. With
-// --write-baseline it saves the ref's outcomes for the CI test instead.
-//
-//   node plugins/slack-bridge/tests/lifecycle/gate.mjs [--against origin/master] [--write-baseline]
+// The regression gate: plays every lifecycle cell on this checkout and on another ref
+// of this plugin, and fails on any cell where this checkout is worse. --write-baseline
+// saves the ref's outcomes for the CI test instead.
+// Usage: node plugins/slack-bridge/tests/lifecycle/gate.mjs [--against origin/master] [--write-baseline]
 import { execSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";

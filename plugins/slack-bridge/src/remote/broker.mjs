@@ -111,13 +111,11 @@ export function createBroker({
   // A row inside its lease is invisible to every take until it expires or is acked.
   const isReady = (m, id) => m.to_id === id && !(m.leased_until > nowMs());
 
-  // `via` rides the lease to the read receipt: the daemon must know whether the
-  // session took a message inside its turn or a waiter took it for the next one.
-  function takeMessagesFor(id, lease, via) {
+  function takeMessagesFor(id, lease = false) {
     const mine = state.messages.filter((m) => isReady(m, id));
     if (lease && mine.length > 0) {
       const until = nowMs() + _leaseMs;
-      for (const m of mine) { m.leased_until = until; m.taken_via = via; }
+      for (const m of mine) m.leased_until = until;
       wakeAt(id, until);
     } else if (!lease) {
       state.messages = state.messages.filter((m) => !isReady(m, id));
@@ -125,7 +123,7 @@ export function createBroker({
     const peer = Object.hasOwn(state.peers, id) ? state.peers[id] : null;
     if (peer?.kind === "adhoc") peer.last_seen = _now().toISOString();
     persist();
-    return mine.map(({ leased_until, delivered, taken_via, ...m }) => ({ ...m, kind: normaliseKind(m.kind) }));
+    return mine.map(({ leased_until, delivered, ...m }) => ({ ...m, kind: normaliseKind(m.kind) }));
   }
 
   function releaseLeased(id) {
@@ -152,7 +150,7 @@ export function createBroker({
     if (!state.messages.some((m) => isReady(m, id))) return;
     const waiter = [...set].find((w) => !w.superseded);
     if (!waiter) return;
-    waiter.finish(takeMessagesFor(id, waiter.lease, "wait"));
+    waiter.finish(takeMessagesFor(id, waiter.lease));
   }
 
   const handlers = {
@@ -239,6 +237,8 @@ export function createBroker({
         id: nextMsgId++, from_id: from, to_id: body.to_id,
         text: String(body.text), kind: normaliseKind(body.kind),
         sent_at: now,
+        // When the sending hook started: the daemon tells a finished turn's hooks by it.
+        ...(Number.isFinite(body.hook_started_at) ? { hook_started_at: body.hook_started_at } : {}),
       });
       persist();
       wakeWaiter(body.to_id);
@@ -248,7 +248,7 @@ export function createBroker({
     // Consume path, driven by the check_messages tool. Returns everything held
     // for the peer and removes it.
     "/take-messages"(body) {
-      return { messages: takeMessagesFor(body.id, body.lease === true, "take") };
+      return { messages: takeMessagesFor(body.id, body.lease === true) };
     },
 
     // Settles a leased take: the acked rows are gone for good. Every consumer
@@ -261,7 +261,6 @@ export function createBroker({
       const now = _now().toISOString();
       const receipts = fromDaemon.map((m) => ({
         id: nextMsgId++, from_id: body.id, to_id: m.from_id, text: "", kind: "read", sent_at: now,
-        ...(m.taken_via ? { via: m.taken_via } : {}),
       }));
       state.messages.push(...receipts);
       persist();
@@ -286,7 +285,7 @@ export function createBroker({
         const open = [...(waiters.get(id) ?? [])].filter((w) => !w.superseded);
         if (open.length > 0) releaseLeased(id);
         for (const w of open) w.supersede();
-        const queued = takeMessagesFor(id, lease, "wait");
+        const queued = takeMessagesFor(id, lease);
         if (queued.length > 0) return { messages: queued };
       }
       return new Promise((resolve) => {

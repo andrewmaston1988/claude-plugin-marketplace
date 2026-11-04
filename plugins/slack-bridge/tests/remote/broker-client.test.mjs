@@ -4,6 +4,13 @@ import { createBrokerClient } from "../../src/remote/broker-client.mjs";
 
 const KINDS = ["status", "question", "prompt", "turn-end", "read"];
 
+test("sendMessage: the kind and the hook's start time reach the broker", async () => {
+  const bodies = [];
+  const _fetch = async (url, opts) => { bodies.push(JSON.parse(opts.body)); return { ok: true, json: async () => ({ ok: true }) }; };
+  await createBrokerClient({ port: 1, _fetch }).sendMessage("p1", "slack-bridge", "Bash: npm test", { kind: "status", hookStartedAt: 42 });
+  assert.deepEqual(bodies, [{ from_id: "p1", to_id: "slack-bridge", text: "Bash: npm test", kind: "status", hook_started_at: 42 }]);
+});
+
 test("wait: the retry after a connection error keeps the caller's abort signal", async () => {
   const signals = [];
   const _fetch = async (url, opts = {}) => {

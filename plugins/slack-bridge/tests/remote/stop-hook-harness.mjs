@@ -23,7 +23,7 @@ export function fakeClient({ sendDelay = null, fail = false } = {}) {
     async sendMessage(from, to, text, opts = {}) {
       if (fail) throw new Error("fetch failed");
       if (sendDelay) await sendDelay();
-      sends.push({ from, to, text, kind: opts.kind ?? "text" });
+      sends.push({ from, to, text, kind: opts.kind ?? "text", ...(opts.hookStartedAt ? { hookStartedAt: opts.hookStartedAt } : {}) });
       return { ok: true };
     },
   };
@@ -51,10 +51,11 @@ export function setup(t, { claimed = true, configPath } = {}) {
   return { dir, stateDir, transcript, configPath: cfg, append, cursorFile, cursor };
 }
 
-export function hook(env, client, { event = "Stop", active = false, tool, sleeps, sleep, now, loads, createOpts, raw, prompt, lastMessage, toolStart } = {}) {
+export function hook(env, client, { event = "Stop", active = false, tool, sleeps, sleep, now, loads, createOpts, raw, prompt, lastMessage, toolStart, notificationType } = {}) {
   const input = { session_id: SID, transcript_path: env.transcript, hook_event_name: event, stop_hook_active: active };
   if (tool) Object.assign(input, { tool_name: tool.name, tool_input: tool.input, tool_use_id: tool.id });
   if (prompt !== undefined) input.prompt = prompt;
+  if (notificationType !== undefined) input.notification_type = notificationType;
   if (lastMessage !== undefined) input.last_assistant_message = lastMessage;
   return runHook({
     raw: raw ?? JSON.stringify(input),

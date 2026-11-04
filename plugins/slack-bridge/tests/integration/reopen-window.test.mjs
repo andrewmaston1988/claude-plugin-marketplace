@@ -118,9 +118,11 @@ test("a status after the turn-end on a block still holding text reopens nothing"
   const s = claimed(t);
   await readMessage(s);
   deliver(s, text("t1", "the answer"));
-  deliver(s, msg("e1", "turn-end"));
+  // The status's async hook started in the finished turn, before its Stop hook.
+  const stopStartedAt = Date.now();
+  deliver(s, { ...msg("e1", "turn-end"), hook_started_at: stopStartedAt });
   await waitFor(() => s.broker.acked.includes("e1"));
-  deliver(s, msg("s1", "status", "Bash: npm test"));
+  deliver(s, { ...msg("s1", "status", "Bash: npm test"), hook_started_at: stopStartedAt - 1 });
   await waitFor(() => s.broker.acked.includes("s1"));
   await settled(s, "the answer");
   assert.equal(s.hb.instances.length, 1);

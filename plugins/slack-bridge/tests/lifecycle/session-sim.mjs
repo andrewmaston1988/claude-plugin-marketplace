@@ -10,6 +10,8 @@ import { pathToFileURL } from "node:url";
 import { makeHeartbeat, makeLog, makePayload, makeStore, makeWeb, placeholderTss, delay } from "../integration/route-harness.mjs";
 
 export const SID = "sess-1";
+// Slack answers at once, so a cell's outcome repeats; races that need a slow Slack
+// call are pinned with makeWeb's latency in the integration tests.
 const QUIET_MS = 100;
 
 // The daemon dedupes Slack message ids across the process, so ids never repeat.
@@ -20,7 +22,8 @@ const load = (root, rel) => import(pathToFileURL(path.join(root, rel)).href);
 // Shell-style split, enough for the commands hooks.json carries.
 const tokens = (command) => [...command.matchAll(/"([^"]*)"|(\S+)/g)].map((m) => m[1] ?? m[2]);
 
-// hooks.json matchers are regexes on the tool name; "*" or none matches every tool.
+// hooks.json matchers are regexes on the tool name, or a notification's type; "*" or
+// none matches every one.
 const matches = (matcher, toolName) => !matcher || matcher === "*" || new RegExp(`^(?:${matcher})$`).test(toolName ?? "");
 
 function run(args, env, input) {
@@ -74,6 +77,7 @@ export async function startSession(root) {
   const queue = createQueue({ log: makeLog() });
 
   const spawned = [];
+  const running = new Set(); // async hooks not yet exited, waiters aside
   const trace = [];        // every hook run: event, entry, exit, how long, stderr
   const wakes = [];        // stderr of every waiter that exited 2, in order
   const deliveries = [];   // every text the session was handed: { how, text }
@@ -85,7 +89,7 @@ export async function startSession(root) {
     const input = { session_id: SID, transcript_path: transcript, hook_event_name: event, ...extra };
     const sync = [];
     for (const group of hooks[event] ?? []) {
-      if (!matches(group.matcher, extra.tool_name)) continue;
+      if (!matches(group.matcher, extra.tool_name ?? extra.notification_type)) continue;
       for (const h of group.hooks ?? []) {
         const [cmd, ...rest] = tokens(h.command.replaceAll("${CLAUDE_PLUGIN_ROOT}", root));
         if (cmd !== "node") continue;
@@ -98,6 +102,9 @@ export async function startSession(root) {
           p.then((r) => { if (r.status === 2) { wakes.push(r.stderr); deliveries.push({ how: "wake", text: r.stderr }); } });
         } else if (!h.async) {
           sync.push(p);
+        } else {
+          running.add(p);
+          p.then(() => running.delete(p));
         }
       }
     }
@@ -121,6 +128,8 @@ export async function startSession(root) {
     liveBlocks: () => placeholderTss(web).filter((ts) => !web.calls.some(([ty, p]) => (ty === "update" || ty === "delete") && p.ts === ts)),
     ticking: () => hb.instances.filter((i) => !i.stopped).length,
     settle: () => delay(QUIET_MS * 4),
+    // Every async hook started so far has exited; the waiters are not counted.
+    hooksDone: () => Promise.all([...running]),
     stop: async () => {
       for (const p of spawned) p.child.kill();
       await Promise.all(spawned);

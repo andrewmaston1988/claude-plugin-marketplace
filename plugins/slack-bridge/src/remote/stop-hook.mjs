@@ -117,6 +117,9 @@ export async function runHook({
   _sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
   _now = () => Date.now(),
 }) {
+  // Wall clock, sent with the status, prompt and turn-end: the daemon drops a status
+  // whose hook started before the turn ended.
+  const hookStartedAt = Date.now();
   let input, session;
   try {
     input = JSON.parse(raw);
@@ -131,7 +134,9 @@ export async function runHook({
   const isToolStart = event === "PreToolUse" && toolStart && !isAsk;
   const isPrompt = event === "UserPromptSubmit";
   const isStopFailure = event === "StopFailure";
-  if (event !== "Stop" && event !== "PostToolUse" && !isQuestion && !isToolStart && !isPrompt && !isStopFailure) return null;
+  // Esc runs no hook: the idle prompt, about a minute later, is the first sign the turn is over.
+  const isIdle = event === "Notification" && input?.notification_type === "idle_prompt";
+  if (event !== "Stop" && event !== "PostToolUse" && !isQuestion && !isToolStart && !isPrompt && !isStopFailure && !isIdle) return null;
   // Absent file = no claim held: exit before any config load or broker call,
   // which is what keeps a tool call cheap on unclaimed sessions.
   try {
@@ -172,7 +177,7 @@ export async function runHook({
       // A wake is not the operator typing: skip it, and skip anything else that
       // came from Slack rather than the keyboard.
       if (prompt && !isEchoedPrompt(prompt)) {
-        await client.sendMessage(session.peerId, "slack-bridge", prompt, { kind: "prompt" });
+        await client.sendMessage(session.peerId, "slack-bridge", prompt, { kind: "prompt", hookStartedAt });
       }
       // Wakes fire this too, so clear on every one: the tail must never outlive
       // its turn.
@@ -182,10 +187,12 @@ export async function runHook({
 
     if (event === "PostToolUse") return null;
 
-    // An API error ends the turn with no Stop. Its message is the error, not a reply
-    // to wait for, and no waiter starts, so there is no marker to write.
-    if (isStopFailure) {
-      await client.sendMessage(session.peerId, "slack-bridge", "", { kind: "turn-end" });
+    // An API error ends the turn with no Stop: its message is the error, not a reply to
+    // wait for. Neither it nor the idle prompt starts a waiter, so there is no marker to
+    // write, and the text tells the daemon why a queued message stays queued.
+    if (isStopFailure || isIdle) {
+      const why = isIdle ? "The session is idle and not listening." : "The session stopped on an API error.";
+      await client.sendMessage(session.peerId, "slack-bridge", why, { kind: "turn-end", hookStartedAt });
       return null;
     }
 
@@ -201,7 +208,7 @@ export async function runHook({
         }
       }
       const arg = shortArg(input.tool_input);
-      await client.sendMessage(session.peerId, "slack-bridge", arg ? `${input.tool_name}: ${arg}` : String(input.tool_name), { kind: "status" });
+      await client.sendMessage(session.peerId, "slack-bridge", arg ? `${input.tool_name}: ${arg}` : String(input.tool_name), { kind: "status", hookStartedAt });
       return null;
     }
 
@@ -223,7 +230,7 @@ export async function runHook({
       }
     }
     try {
-      await client.sendMessage(session.peerId, "slack-bridge", "", { kind: "turn-end" });
+      await client.sendMessage(session.peerId, "slack-bridge", "", { kind: "turn-end", hookStartedAt });
     } finally {
       // The waiter this Stop started holds its first take until this lands.
       writeTurnEnd(stateDir, input.session_id, _now());

@@ -1,19 +1,9 @@
-// The turn lifecycle as the Claude Code hooks reference describes it, crossed with
-// when a Slack message lands. Each cell plays one turn through session-sim and
-// scores what the operator sees, so two builds can be compared cell by cell.
-//
-// From the hooks reference (code.claude.com/docs/en/hooks):
-// - Stop "Does not run if the stoppage occurred due to a user interrupt. API errors
-//   fire StopFailure instead."
-// - A blocked Stop continues the turn ("The conversation continues"), with
-//   stop_hook_active set, and no new prompt.
-// - UserPromptSubmit also fires on /loop and scheduled tasks, so for these hooks a
-//   scheduled turn is a typed one.
-// - Async hook output arrives "on the next conversation turn"; an asyncRewake exit 2
-//   "wakes Claude immediately even when the session is idle".
+// The turn lifecycle crossed with when a Slack message lands. Each cell plays one
+// turn through session-sim and scores what the operator sees, so builds compare.
 import { delay } from "../integration/route-harness.mjs";
 import { textEntry, toolEntry, userEntry } from "../remote/stop-hook-harness.mjs";
 
+// A scheduled or /loop turn fires UserPromptSubmit too, so it plays as "typed".
 export const STARTS = ["slack wake", "typed", "stop continuation"];
 export const ENDS = ["stop", "stop failure", "interrupt"];
 export const TIMINGS = ["mid-tool", "after the last batch", "none"];
@@ -38,7 +28,8 @@ async function tool(s, command) {
   const id = uid();
   const t = { tool_name: "Bash", tool_input: { command }, tool_use_id: "t" + id };
   await delay(MODEL_MS);
-  s.append(toolEntry(id, "Bash", t.tool_input));
+  // Sessions say what they are about to run, so text lands just before each status.
+  s.append(textEntry(uid(), `Running ${command}.`), toolEntry(id, "Bash", t.tool_input));
   await s.fire("PreToolUse", t);
   return t;
 }
@@ -48,12 +39,16 @@ async function toolDone(s, t) {
   await s.fire("PostToolBatch", { tool_calls: [{ ...t, tool_response: "ok" }] });
 }
 
-// The blocks up while the session works: given the async status hook time to land.
+// The blocks up while the session works, once its hooks have landed and any reply
+// has had its quiet gap: a block about to take its text is not a second block.
 async function blocksWhileWorking(s) {
-  await until(() => s.liveBlocks().length > 0, 1_500);
+  await s.hooksDone();
+  await s.settle();
   return s.liveBlocks().length;
 }
 
+// Hooks reference: Stop "does not run if the stoppage occurred due to a user
+// interrupt. API errors fire StopFailure instead."
 async function endTurn(s, end, text) {
   if (end === "interrupt") return;
   if (end === "stop failure") {
@@ -92,11 +87,14 @@ export async function runCell(s, { start, end, timing }) {
   if (start === "stop continuation") {
     const t = await tool(s, "npm run build");
     await toolDone(s, t);
-    // A sibling plugin's Stop hook blocks; every Stop entry of this plugin still ran.
+    // A sibling plugin's Stop hook blocks: every Stop entry of this plugin still ran,
+    // and the turn continues with stop_hook_active set and no new prompt.
     await endTurn(s, "stop", "Checking.");
   }
 
   const t = await tool(s, "npm test");
+  // The turn has just begun, often within seconds of the last turn-end: it still shows a block.
+  const first = await blocksWhileWorking(s);
   if (timing === "mid-tool") { await s.send("msg"); await delay(500); }
   await toolDone(s, t);
   if (timing === "after the last batch") { await s.send("msg"); await delay(500); }
@@ -109,12 +107,16 @@ export async function runCell(s, { start, end, timing }) {
   }
   await endTurn(s, end, "All done.");
 
-  // A wake taken during the turn is delivered once it has ended.
+  // A wake taken during the turn is delivered once it has ended: assumed, since the
+  // reference says only that an asyncRewake exit 2 "wakes Claude immediately even when the session is idle".
   if (timing !== "none" && block === null) {
     if (await until(() => has(s, "SLACK: msg").length > 0, 6_000)) {
       block = await wokenTurn(s, has(s, "SLACK: msg")[0].text);
     }
   }
+  // After Esc the first hook is the idle prompt, "about 60 seconds after Claude finishes
+  // responding": the sim sends it at once.
+  if (end === "interrupt") await s.fire("Notification", { notification_type: "idle_prompt", message: "Claude is waiting for your input" });
   await s.settle();
   const ticking = s.ticking();
 
@@ -125,7 +127,7 @@ export async function runCell(s, { start, end, timing }) {
   const when = timing === "none" ? null
     : has(s, "SLACK: msg").some((d) => d.how === "in-turn") ? "in-turn"
       : seen > 0 ? "after the turn" : "never";
-  return { seen, when, block, ticking, reachable };
+  return { seen, when, first, block, ticking, reachable };
 }
 
 export const CELLS = STARTS.flatMap((start) => ENDS.flatMap((end) => TIMINGS.map((timing) => ({ start, end, timing }))));
