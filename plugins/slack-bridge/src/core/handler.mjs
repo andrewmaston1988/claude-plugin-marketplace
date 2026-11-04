@@ -118,16 +118,12 @@ export async function handleMessage({ web, store, queue, config, log, payload, b
     // The broker-down exception (spawn modelless) does not reach an #rc-* channel.
     if (remoteChannel) {
       if (brokerDown) {
-        try {
-          await web.chatPostMessage({ channel, text: "Bridge can't reach the broker. Your message was not delivered." });
-        } catch (e) {
-          log.error("failed to post broker-down notice", { channel, error: e.message });
-        }
-      } else {
-        await postDisconnectNotice({
-          channel, sessionId: remote.claims.history?.(channel)?.session_id ?? null, web, log,
-        });
+        log.warn("message not routed: broker unreachable", { channel });
+        return;
       }
+      await postDisconnectNotice({
+        channel, sessionId: remote.claims.history?.(channel)?.session_id ?? null, web, log,
+      });
       log.info("message not routed: #rc-* channel with no live session", { channel });
       return;
     }

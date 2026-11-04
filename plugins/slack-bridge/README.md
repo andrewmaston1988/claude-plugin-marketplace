@@ -218,7 +218,7 @@ Each message gets one live block, and a new message replaces the block before it
 
 When the claiming session dies, the bridge says so rather than falling silent: within about 30 s it posts a red `⚠️ Claude session `<guid>` is disconnected` block and releases the claim. Red means gone — process death — and never means slow; a session that is alive but busy keeps its live block.
 
-An `#rc-*` channel that was once seized never spawns `claude -p`, so one channel never holds two transcripts. After a release or a disconnect, a message there gets the red block and nothing else — or `Bridge can't reach the broker. Your message was not delivered.` during a broker outage. A channel with no seize behind it behaves as it always has.
+An `#rc-*` channel that was once seized never spawns `claude -p`, so one channel never holds two transcripts. After a release or a disconnect, a message there gets the red block and nothing else. During a broker outage it is dropped, and nothing posts. A channel with no seize behind it behaves as it always has.
 
 Re-seizing reuses its channel: on `name_taken` the bridge looks for the `#rc-*` of that name, takes it when no other session holds it, and only then falls back to a `-2` suffix.
 

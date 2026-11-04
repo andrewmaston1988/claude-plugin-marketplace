@@ -565,7 +565,7 @@ test("a dead peer's #rc-* channel gets one red block and never spawns", async (t
   assert.equal(s.claims.get("C-rc3"), null, "the claim is released");
 });
 
-test("a broker outage in an #rc-* channel posts the broker message and never spawns", async (t) => {
+test("a broker outage in an #rc-* channel posts nothing and never spawns", async (t) => {
   const s = setup(t, { claims: [["peerC", "C-rc2"]], down: true });
   s.claims.recordHistory("C-rc2", { session_id: "sess-live", channel_name: "rc-live" });
   const rc = makeRunClaude();
@@ -573,7 +573,7 @@ test("a broker outage in an #rc-* channel posts the broker message and never spa
   await delay(150);
 
   assert.equal(rc.calls.length, 0, "the broker-down exception does not reach an rc channel");
-  assert.ok(posted(s.web, "Bridge can't reach the broker. Your message was not delivered."), JSON.stringify(s.web.calls));
+  assert.deepEqual(s.web.calls, [], "nothing posts while the broker is down");
   assert.ok(s.claims.get("C-rc2"), "a broker outage keeps the claim — slow is not dead");
 });
 
