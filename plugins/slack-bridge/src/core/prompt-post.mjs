@@ -17,7 +17,9 @@ export async function postTerminalPrompt({ web, channel, text, config, log }) {
     await web.chatPostMessage(postParams);
     return true;
   } catch (e) {
-    if (!name && !icon) {
+    // Only Slack's own refusal is retried: after a timeout the first post may have
+    // landed, and a second would show the prompt twice.
+    if ((!name && !icon) || !e.slackError) {
       log.warn("failed to post terminal prompt", { channel, error: e.message });
       return false;
     }

@@ -471,7 +471,7 @@ test("kind:prompt retries once as the plain ⌨️ post when the custom identity
   const post = s.web.chatPostMessage;
   let rejected = 0;
   s.web.chatPostMessage = async (p) => {
-    if (p.username) { rejected++; throw new Error("invalid_arguments"); }
+    if (p.username) { rejected++; throw Object.assign(new Error("invalid_arguments"), { slackError: "invalid_arguments" }); }
     return post(p);
   };
 

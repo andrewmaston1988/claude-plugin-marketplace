@@ -6,6 +6,7 @@ import http from "node:http";
 import fs from "node:fs";
 import { emptyState, loadState, saveState } from "./broker-store.mjs";
 import { WAIT_WINDOW_MS } from "./wait-constants.mjs";
+import { KINDS } from "./broker-kinds.mjs";
 
 const ID_CHARS = "abcdefghijklmnopqrstuvwxyz0123456789";
 // Ad-hoc sender ids arrive from outside the register flow — constrain them.
@@ -24,9 +25,6 @@ const LEASE_MS = 30_000;
 const UNKNOWN_WAITER = Object.freeze({ pid: 0, started_at: 0 });
 
 const MAX_BODY_BYTES = 1_000_000;
-// Published on /health: a client must replace a broker that would downgrade one
-// of these to "text", because a detached broker outlives a plugin update.
-export const KINDS = Object.freeze(["status", "question", "prompt", "turn-end", "read"]);
 const KIND_SET = new Set(KINDS);
 const normaliseKind = (kind) => (KIND_SET.has(kind) ? kind : "text");
 

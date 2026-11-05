@@ -60,7 +60,7 @@ Do **not** answer with a tool call. There is nothing to send by hand — the hoo
 
 ## Releasing
 
-When the operator is done, release the channel so the next Slack message falls back to a fresh `claude -p` spawn:
+When the operator is done, release the channel. It stays a remote channel: it never spawns `claude -p`, and a later message there gets the disconnected notice until a session seizes it again:
 
 ```
 slack_release

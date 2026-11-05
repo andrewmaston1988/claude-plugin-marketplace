@@ -175,7 +175,9 @@ export function createControlServer({
       const held = Object.entries(claims.all()).find(([, c]) => c?.peer_id === body.peer_id);
       claims.release(body.peer_id);
       await closePeerWindows(body.peer_id);
-      if (held) {
+      // A /claim landing during the close has already posted its seize line; a
+      // release line after it would read as the new session leaving.
+      if (held && !claims.get(held[0])) {
         const [channel, claim] = held;
         const sessionId = claim.session_id ?? claims.history?.(channel)?.session_id ?? null;
         if (sessionId) await postLine({ channel, color: RELEASED_COLOR, text: releasedText(sessionId), what: "release" });

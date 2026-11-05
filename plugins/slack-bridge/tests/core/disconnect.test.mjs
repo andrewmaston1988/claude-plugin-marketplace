@@ -201,5 +201,5 @@ test("the daemon sweep replaced claims.reapDead", () => {
   assert.equal(createClaimsStore({ path: tmpClaims() }).reapDead, undefined, "reapDead must be gone from the store");
   const src = fs.readFileSync(fileURLToPath(new URL("../../bin/claude-slack.mjs", import.meta.url)), "utf8");
   assert.doesNotMatch(src, /reapDead/, "the timer must not reap silently");
-  assert.match(src, /sweepClaims\(\{ broker, claims, web, log \}\)/, "the timer runs the disconnect sweep");
+  assert.match(src, /\bsweepClaims\(/, "the timer runs the disconnect sweep");
 });

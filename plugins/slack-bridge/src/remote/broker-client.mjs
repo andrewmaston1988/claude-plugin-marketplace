@@ -3,7 +3,7 @@
 // detached and retries — mirrors the claude-peers MCP server's ensureBroker.
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { KINDS } from "./broker.mjs";
+import { KINDS } from "./broker-kinds.mjs";
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const processIdentity = () => ({ pid: process.pid, started_at: Date.now() - Math.round(process.uptime() * 1000) });

@@ -18,9 +18,12 @@ for (const [name, opts, kind] of [
     await prime(env);
     env.append(toolEntry("a1", "Bash", BASH.input));
     const client = fakeClient();
-    const before = Date.now();
-    await hook(env, client, opts);
+    // Every reading is a second later than the last, so only the hook's first one
+    // matches: a stamp taken at send time would not.
+    let clock = 5_000;
+    const now = () => (clock += 1_000) - 1_000;
+    await hook(env, client, { ...opts, now });
     const sent = client.sends.find((s) => s.kind === kind);
-    assert.ok(sent.hookStartedAt >= before && sent.hookStartedAt <= Date.now(), JSON.stringify(sent));
+    assert.equal(sent.hookStartedAt, 5_000, JSON.stringify(sent));
   });
 }

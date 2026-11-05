@@ -3,7 +3,7 @@
 // of this plugin, and fails on any cell where this checkout is worse. --write-baseline
 // saves the ref's outcomes for the CI test instead.
 // Usage: node plugins/slack-bridge/tests/lifecycle/gate.mjs [--against origin/master] [--write-baseline]
-import { execSync } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -36,11 +36,15 @@ async function playAll(root) {
 
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "lifecycle-base-"));
 try {
-  execSync(`git archive --format=tar ${against} plugins/slack-bridge | tar -x -C "${tmp}"`, { cwd: repoRoot, stdio: ["ignore", "ignore", "inherit"] });
+  // argv, never a shell string: `against` comes from the command line.
+  const tar = path.join(tmp, "base.tar");
+  execFileSync("git", ["archive", "--format=tar", "-o", tar, against, "plugins/slack-bridge"], { cwd: repoRoot, stdio: ["ignore", "ignore", "inherit"] });
+  // Relative, from inside tmp: GNU tar reads a `C:` path as a remote host.
+  execFileSync("tar", ["-x", "-f", "base.tar"], { cwd: tmp, stdio: ["ignore", "ignore", "inherit"] });
   const base = await playAll(path.join(tmp, "plugins/slack-bridge"));
   if (args.includes("--write-baseline")) {
     const file = path.join(here, "baseline.json");
-    fs.writeFileSync(file, JSON.stringify({ ref: execSync(`git rev-parse --short ${against}`, { cwd: pluginRoot }).toString().trim(), cells: base }, null, 2) + "\n");
+    fs.writeFileSync(file, JSON.stringify({ ref: execFileSync("git", ["rev-parse", "--short", against], { cwd: pluginRoot }).toString().trim(), cells: base }, null, 2) + "\n");
     console.log(`baseline written: ${file}`);
     process.exit(0);
   }

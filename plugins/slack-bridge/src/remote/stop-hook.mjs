@@ -101,7 +101,7 @@ export async function runHook({
 }) {
   // Wall clock, sent with the status, prompt and turn-end: the daemon drops a status
   // whose hook started before the turn ended.
-  const hookStartedAt = Date.now();
+  const hookStartedAt = _now();
   let input, session;
   try {
     input = JSON.parse(raw);

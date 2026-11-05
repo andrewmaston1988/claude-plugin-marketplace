@@ -95,9 +95,9 @@ export async function handleMessage({ web, store, queue, config, log, payload, b
     const remoteChannel = remote?.claims ? isRemoteChannel(remote.claims, channel) : false;
     let brokerDown = false;
     if (claim && remote?.broker) {
-      // null = broker unreachable: keep the claim and serve THIS message via the
-      // spawn path — a transient outage costs per-message spawns, not the claim;
-      // routing resumes when the broker returns.
+      // null = broker unreachable: keep the claim, and routing resumes when the
+      // broker returns. Meanwhile an #rc-* channel drops the message; any other
+      // channel serves it via the spawn path.
       let alive = null;
       try { alive = await remote.broker.isAlive(claim.peer_id); } catch { /* fall back to spawn */ }
       if (alive === true) {

@@ -476,3 +476,38 @@ test("a window holding chunks survives /release and posts its reply into the pla
     { reply: { ts: "ts1", text: "answer" }, deleted: false },
     "the reply chunk survives /release in the original working placeholder");
 });
+
+test("the re-seize lookup walks every page of the bot's channels", async (t) => {
+  const web = memberWeb();
+  web.usersConversations = async (p) => {
+    web.calls.push(["usersConversations", p]);
+    return p.cursor === "c2"
+      ? { ok: true, channels: [{ id: "C-old", name: "rc-demo", is_member: true }] }
+      : { ok: true, channels: [{ id: "C-x", name: "general" }], response_metadata: { next_cursor: "c2" } };
+  };
+  const { call } = await startControl(t, { web });
+  const r = await call("/claim", { peer_id: "peerA", name: "demo" });
+  assert.equal(r.body.channel, "C-old", JSON.stringify(r.body));
+  assert.deepEqual(web.calls.filter(([c]) => c === "usersConversations").map(([, p]) => p.cursor ?? null), [null, "c2"]);
+});
+
+test("/release posts no released line when a new claim took the channel during the close", async (t) => {
+  const { routeToLiveSession } = await import("../../src/core/live-route.mjs");
+  const web = makeWeb();
+  const claims = createClaimsStore({ path: path.join(fs.mkdtempSync(path.join(os.tmpdir(), "rel-race-")), "claims.json") });
+  await claims.claim("peerA", "C1", { sessionId: "sess-abc" });
+  const { call } = await startControl(t, { web, claims });
+  await routeToLiveSession({
+    web, channel: "C1", text: "hello", claim: { peer_id: "peerA" },
+    broker: { sendMessage: async () => ({ ok: true }) },
+    config: { slack: {}, remote: {} },
+    log: { child: () => ({}) }, cmdEcho: "",
+    _startHeartbeat: () => ({ stop: async () => {} }),
+  });
+  const del = web.chatDelete;
+  web.chatDelete = async (p) => { claims.claim("peerB", "C1", { sessionId: "sess-new" }); return del(p); };
+
+  await call("/release", { peer_id: "peerA" });
+  assert.ok(web.calls.some(([c]) => c === "chatDelete"), "the close ran");
+  assert.ok(!lineOf(web, YELLOW), "the new session's channel gets no released line");
+});

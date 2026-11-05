@@ -15,5 +15,8 @@ const MEASURES = [
 
 export function regressions(outcome, base) {
   if (outcome.failed || outcome.error) return [`the cell did not run: ${outcome.failed ?? outcome.error}`];
+  if (base.failed || base.error) return [`the baseline cell did not run: ${base.failed ?? base.error}`];
+  const unknown = [outcome.when, base.when].find((w) => w !== null && !(w in WHEN_RANK));
+  if (unknown !== undefined) return [`unknown timing "${unknown}": rank it in WHEN_RANK`];
   return MEASURES.filter(([, worse]) => worse(outcome, base)).map(([name]) => name);
 }
