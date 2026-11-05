@@ -90,16 +90,80 @@ test("a typed prompt after an interrupted Slack turn ends its block once the mes
   assert.ok(prompt >= 0 && prompt < block, "the new block sits under the prompt");
 });
 
-test("a typed prompt leaves the block of a message the session has yet to take", async (t) => {
-  const s = setup(t, { claims: [["peerT3", "C-T3"]] });
+test("a typed prompt moves an unread message's block under itself", async (t) => {
+  const s = setup(t, { claims: [["peerT3", "C-T3"]], quietGapMs: 50 });
   await slack(s, makePayload({ channel: "C-T3", text: "go", client_msg_id: "m-t3" }));
   await waitFor(() => s.broker.sendCalls.length === 1, 3000);
+  const [old] = placeholderTss(s.web);
   s.broker.deliver("slack-bridge", { id: "p1", from_id: "peerT3", kind: "prompt", text: "meanwhile", hook_started_at: Date.now() });
   await waitFor(() => s.broker.acked.includes("p1"), 3000);
-  await delay(50);
-  assert.equal(placeholderTss(s.web).length, 1, "no second block");
-  assert.equal(ticking(s).length, 1, "the message's block still waits for its answer");
+  const [, block] = placeholderTss(s.web);
+  const prompt = idxOf(s.web, ([ty, p]) => ty === "post" && p.text?.includes("meanwhile"));
+  assert.ok(block && prompt < idxOf(s.web, ([ty, p]) => ty === "post" && p._ts === block), "the block sits under the prompt");
+  assert.ok(s.web.calls.some(([ty, p]) => ty === "delete" && p.ts === old), "one block, not two");
   assert.equal(hasUnread("peerT3"), true);
+  // A Stop leaves it: its waiter takes the message.
+  s.broker.deliver("slack-bridge", { id: "e1", from_id: "peerT3", kind: "turn-end", hook_started_at: Date.now() });
+  await waitFor(() => s.broker.acked.includes("e1"), 3000);
+  assert.equal(ticking(s).length, 1, "the unread message keeps the block");
+  s.broker.deliver("slack-bridge", { id: "x1", from_id: "peerT3", text: "the answer" });
+  await waitFor(() => s.web.calls.some(([ty, p]) => ty === "update" && p.text?.includes("the answer")), 3000);
+  assert.equal(s.web.calls.find(([ty, p]) => ty === "update" && p.text?.includes("the answer"))[1].ts, block, "the answer lands under the prompt");
+});
+
+test("a typed prompt after the interrupted turn's text opens its own block under the prompt", async (t) => {
+  const s = setup(t, { claims: [["peerA1", "C-A1"]] });
+  s.broker.deliver("slack-bridge", { id: "s1", from_id: "peerA1", kind: "status", text: "Bash: npm test", hook_started_at: Date.now() });
+  await waitFor(() => ticking(s).length === 1, 3000);
+  const [old] = placeholderTss(s.web);
+  // The prompt hook mirrors the text written since the last hook, then sends the prompt.
+  s.broker.deliver("slack-bridge", { id: "x1", from_id: "peerA1", text: "half an answer" });
+  s.broker.deliver("slack-bridge", { id: "p1", from_id: "peerA1", kind: "prompt", text: "try again", hook_started_at: Date.now() });
+  await waitFor(() => s.web.calls.some(([ty, p]) => ty === "update" && p.ts === old && p.text?.includes("half an answer")), 3000);
+  await delay(50);
+  const [, block] = placeholderTss(s.web);
+  const prompt = idxOf(s.web, ([ty, p]) => ty === "post" && p.text?.includes("try again"));
+  assert.ok(block && prompt < idxOf(s.web, ([ty, p]) => ty === "post" && p._ts === block), "the new turn's block sits under the prompt");
+  assert.equal(ticking(s).length, 1, "the new turn's block ticks");
+});
+
+// The prompt's close waits on Slack, and a short turn can end in that wait.
+test("a typed prompt whose turn ends while the old block clears opens nothing", async (t) => {
+  // Calls: 0 the interrupted turn's block, 1 the prompt, 2 the old block's delete, held.
+  const s = setup(t, { claims: [["peerD1", "C-D1"]], latencyMs: (k) => (k === 2 ? 300 : 0) });
+  s.broker.deliver("slack-bridge", { id: "s1", from_id: "peerD1", kind: "status", text: "Bash: npm test", hook_started_at: Date.now() });
+  await waitFor(() => ticking(s).length === 1, 3000);
+  const promptStartedAt = Date.now();
+  s.broker.deliver("slack-bridge", { id: "p1", from_id: "peerD1", kind: "prompt", text: "thanks", hook_started_at: promptStartedAt });
+  await waitFor(() => s.web.calls.some(([ty, p]) => ty === "post" && p.text?.includes("thanks")), 3000);
+  s.broker.deliver("slack-bridge", { id: "e1", from_id: "peerD1", kind: "turn-end", hook_started_at: promptStartedAt + 10 });
+  await waitFor(() => s.broker.acked.includes("p1") && s.broker.acked.includes("e1"), 3000);
+  await delay(100);
+  assert.deepEqual([placeholderTss(s.web).length, ticking(s).length], [1, 0], "no block for a turn that has ended");
+});
+
+test("a typed prompt whose turn ends while the old block is still posting opens nothing", async (t) => {
+  // Call 0, the interrupted turn's block, is still posting when the prompt closes it.
+  const s = setup(t, { claims: [["peerD2", "C-D2"]], latencyMs: (k) => (k === 0 ? 300 : 0) });
+  s.broker.deliver("slack-bridge", { id: "s1", from_id: "peerD2", kind: "status", text: "Bash: npm test", hook_started_at: Date.now() });
+  await delay(50);
+  const promptStartedAt = Date.now();
+  s.broker.deliver("slack-bridge", { id: "p1", from_id: "peerD2", kind: "prompt", text: "thanks", hook_started_at: promptStartedAt });
+  await waitFor(() => s.web.calls.some(([ty, p]) => ty === "post" && p.text?.includes("thanks")), 3000);
+  s.broker.deliver("slack-bridge", { id: "e1", from_id: "peerD2", kind: "turn-end", hook_started_at: promptStartedAt + 10 });
+  await waitFor(() => ["s1", "p1", "e1"].every((id) => s.broker.acked.includes(id)), 3000);
+  await delay(100);
+  assert.deepEqual([placeholderTss(s.web).length, ticking(s).length], [1, 0], "no block for a turn that has ended");
+});
+
+test("a turn-end with an older stamp leaves the newer mark", async (t) => {
+  const s = setup(t, { claims: [["peerM1", "C-M1"]] });
+  const later = Date.now();
+  s.broker.deliver("slack-bridge", { id: "e1", from_id: "peerM1", kind: "turn-end", hook_started_at: later });
+  await waitFor(() => s.broker.acked.includes("e1"), 3000);
+  s.broker.deliver("slack-bridge", { id: "e0", from_id: "peerM1", kind: "turn-end", hook_started_at: later - 500 });
+  await waitFor(() => s.broker.acked.includes("e0"), 3000);
+  assert.equal(_closedMarks().get("peerM1"), later);
 });
 
 // One /wait batch is dispatched in parallel: the turn-end must end its turn before

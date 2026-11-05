@@ -43,10 +43,11 @@ export function _resetRouteState() {
 /** Test hook: the close marks, so a case can age one. */
 export function _closedMarks() { return lastClosedAt; }
 
-// Marks the end of a peer's turn, for the late-status check and the reopen. Prune on
-// write: one entry per peer would otherwise live as long as the daemon.
+// Marks the end of a peer's turn, for the late-status check and the reopen. Never
+// backwards: hooks land out of order. Prune on write: one entry per peer would
+// otherwise live as long as the daemon.
 function markClosed(peerId, at = Date.now()) {
-  lastClosedAt.set(peerId, at);
+  lastClosedAt.set(peerId, Math.max(at, lastClosedAt.get(peerId) ?? at));
   const now = Date.now();
   for (const [id, mark] of lastClosedAt) {
     if (now - mark >= TURN_END_MEMORY_MS) lastClosedAt.delete(id);
@@ -81,12 +82,12 @@ function openRouteWindow({ web, peerId, channel, threadTs, placeholderTs, starte
 }
 
 /**
- * Close a window: stop the heartbeat, then post its reply (or the timeout /
- * send-failure error) into the placeholder. The heartbeat is stopped and joined
- * BEFORE the reply lands in every branch — the .py canon: a final tick's
+ * Close a window: stop the heartbeat, then post its reply (or the send-failure
+ * error) into the placeholder. The heartbeat is stopped and joined BEFORE the
+ * reply lands in every branch — the .py canon: a final tick's
  * chatUpdate(text:"") otherwise clobbers the reply body.
  */
-async function finalizeWindow(window, { timeout = false, errorMessage = null } = {}) {
+async function finalizeWindow(window, { errorMessage = null } = {}) {
   if (window.done) return false;
   window.done = true;
   clearTimeout(window.quietTimer);
@@ -99,11 +100,8 @@ async function finalizeWindow(window, { timeout = false, errorMessage = null } =
   const deliveryOutcomes = [];
   try {
     await heartbeat?.stop();
-    if (timeout || chunks.length === 0) {
-      await postError({
-        web, channel, placeholderTs, threadTs,
-        message: errorMessage ?? "live session didn't reply in time",
-      });
+    if (errorMessage) {
+      await postError({ web, channel, placeholderTs, threadTs, message: errorMessage });
       delivered = true;
     } else {
       for (let i = 0; i < chunks.length; i++) {
@@ -311,7 +309,7 @@ export async function routeToLiveSession({
   } catch (e) {
     log.error("failed to route to live session", { channel, error: e.message });
     takeUnread(claim.peer_id);
-    await finalizeWindow(window, { timeout: true, errorMessage: `failed to route to live session: ${e.message}` });
+    await finalizeWindow(window, { errorMessage: `failed to route to live session: ${e.message}` });
   }
   // Return here: the queue is released and the next Slack message is its own turn.
 }
@@ -350,16 +348,17 @@ async function handleBrokerMessage({ message, claims, web, config, log, _quietGa
 
   if (message.kind === "prompt") {
     if (!text || !(await postTerminalPrompt({ web, channel, text, config, log }))) return false;
-    // Checked after the post: a turn-end landing during it leaves no turn to show.
+    // Checked after each await: a turn-end landing during one leaves no turn to show.
     if (startedBeforeTurnEnd(fromId, message)) return true;
-    // A typed prompt starts a turn, so the block goes under it: one left by an
-    // interrupted turn, with no reply in it, is over. An unread message keeps its own.
+    // A typed prompt starts a turn, so its block goes under it. A block left by an
+    // interrupted turn, with no reply in it, is over; an unread message's block moves
+    // down, still not terminal; a reply in its quiet gap posts where it is.
     await closePeerWindows(fromId, { terminalOnly: hasUnread(fromId), at: message.hook_started_at });
-    if (!targetWindow(fromId)) {
-      await openWorkingWindowOnce({
-        web, peerId: fromId, channel, config, log, _startHeartbeat, terminal: true,
-      });
-    }
+    if (startedBeforeTurnEnd(fromId, message)) return true;
+    const opened = await openWorkingWindowOnce({
+      web, peerId: fromId, channel, config, log, _startHeartbeat, terminal: !hasUnread(fromId),
+    });
+    if (opened && !opened.done) await abandonOlderWindows(opened);
     return true;
   }
 
