@@ -14,7 +14,7 @@ function delay(ms) { return new Promise(r => setTimeout(r, ms)); }
 test("heartbeat — fires at interval and updates message", { timeout: HEARTBEAT_INTERVAL_MS * 4 }, async () => {
   const calls = [];
   const log = { warn: () => {} };
-  const hb = startHeartbeat({ web: makeWeb(calls), channel: "C1", ts: "12345", cmdEcho: "hello", log });
+  const hb = startHeartbeat({ startedAt: Date.now(), web: makeWeb(calls), channel: "C1", ts: "12345", cmdEcho: "hello", log });
   await delay(HEARTBEAT_INTERVAL_MS * 2 + 100);
   hb.stop();
   assert.ok(calls.length >= 2, `expected ≥2 calls, got ${calls.length}`);
@@ -25,10 +25,19 @@ test("heartbeat — fires at interval and updates message", { timeout: HEARTBEAT
   }
 });
 
+test("heartbeat — the timer counts from startedAt", { timeout: HEARTBEAT_INTERVAL_MS * 3 }, async () => {
+  const calls = [];
+  const log = { warn: () => {} };
+  const hb = startHeartbeat({ startedAt: Date.now() - 90_000, web: makeWeb(calls), channel: "C1", ts: "1", cmdEcho: "", log });
+  await delay(HEARTBEAT_INTERVAL_MS + 100);
+  hb.stop();
+  assert.match(calls[0].attachments[0].text, /_\(1m3\ds\)_$/);
+});
+
 test("heartbeat — empty cmdEcho renders verb and timer only", { timeout: HEARTBEAT_INTERVAL_MS * 3 }, async () => {
   const calls = [];
   const log = { warn: () => {} };
-  const hb = startHeartbeat({ web: makeWeb(calls), channel: "C1", ts: "1", cmdEcho: "", log });
+  const hb = startHeartbeat({ startedAt: Date.now(), web: makeWeb(calls), channel: "C1", ts: "1", cmdEcho: "", log });
   await delay(HEARTBEAT_INTERVAL_MS + 100);
   hb.stop();
   assert.match(calls[0].attachments[0].text, /^_\w+\.+_ _\(\d+s\)_$/);
@@ -37,7 +46,7 @@ test("heartbeat — empty cmdEcho renders verb and timer only", { timeout: HEART
 test("heartbeat — setStatus puts the text above the attachment on the next tick", { timeout: HEARTBEAT_INTERVAL_MS * 3 }, async () => {
   const calls = [];
   const log = { warn: () => {} };
-  const hb = startHeartbeat({ web: makeWeb(calls), channel: "C1", ts: "1", cmdEcho: "", log });
+  const hb = startHeartbeat({ startedAt: Date.now(), web: makeWeb(calls), channel: "C1", ts: "1", cmdEcho: "", log });
   hb.setStatus("Bash: node --test");
   await delay(HEARTBEAT_INTERVAL_MS + 100);
   hb.stop();
@@ -48,7 +57,7 @@ test("heartbeat — setStatus puts the text above the attachment on the next tic
 test("heartbeat — stop prevents further updates", { timeout: HEARTBEAT_INTERVAL_MS * 4 }, async () => {
   const calls = [];
   const log = { warn: () => {} };
-  const hb = startHeartbeat({ web: makeWeb(calls), channel: "C2", ts: "99", cmdEcho: "x", log });
+  const hb = startHeartbeat({ startedAt: Date.now(), web: makeWeb(calls), channel: "C2", ts: "99", cmdEcho: "x", log });
   await delay(HEARTBEAT_INTERVAL_MS + 100);
   hb.stop();
   const countAfterStop = calls.length;
@@ -59,7 +68,7 @@ test("heartbeat — stop prevents further updates", { timeout: HEARTBEAT_INTERVA
 test("heartbeat — cycles verb and color across ticks", { timeout: HEARTBEAT_INTERVAL_MS * 5 }, async () => {
   const calls = [];
   const log = { warn: () => {} };
-  const hb = startHeartbeat({ web: makeWeb(calls), channel: "C3", ts: "ts3", cmdEcho: "cmd", log });
+  const hb = startHeartbeat({ startedAt: Date.now(), web: makeWeb(calls), channel: "C3", ts: "ts3", cmdEcho: "cmd", log });
   await delay(HEARTBEAT_INTERVAL_MS * 3 + 100);
   hb.stop();
   const colors = new Set(calls.map(c => c.attachments?.[0]?.color));
@@ -97,7 +106,7 @@ test("heartbeat — stop() awaits the in-flight chatUpdate so it can't clobber t
     runHeartbeatAugment: async () => "snippet",
   };
   const log = { warn: () => {} };
-  const hb = startHeartbeat({ web, channel: "CR1", ts: "ts1", cmdEcho: "hi", log, extensions, sessionId: undefined, config: {} });
+  const hb = startHeartbeat({ startedAt: Date.now(), web, channel: "CR1", ts: "ts1", cmdEcho: "hi", log, extensions, sessionId: undefined, config: {} });
 
   // Wait for the first tick to actually call chatUpdate (it's now in flight, blocked).
   await tickChatUpdateSignal;
@@ -127,7 +136,7 @@ test("heartbeat — stop() during the pre-update await drops the tick (no chatUp
   const calls = [];
   const web = { chatUpdate: async p => { calls.push(p); return {}; } };
   const log = { warn: () => {} };
-  const hb = startHeartbeat({ web, channel: "CR2", ts: "ts2", cmdEcho: "x", log, extensions, sessionId: undefined, config: {} });
+  const hb = startHeartbeat({ startedAt: Date.now(), web, channel: "CR2", ts: "ts2", cmdEcho: "x", log, extensions, sessionId: undefined, config: {} });
 
   // Wait for the first tick to enter the runHeartbeatAugment await (past the
   // top-of-loop guard, but before chatUpdate).
@@ -151,7 +160,7 @@ test("heartbeat — stop() during the pre-update await drops the tick (no chatUp
 test("heartbeat — status text is valid Slack mrkdwn (no literal __, two balanced italic spans)", { timeout: HEARTBEAT_INTERVAL_MS * 3 }, async () => {
   const calls = [];
   const log = { warn: () => {} };
-  const hb = startHeartbeat({ web: makeWeb(calls), channel: "C5", ts: "ts5", cmdEcho: "do thing", log });
+  const hb = startHeartbeat({ startedAt: Date.now(), web: makeWeb(calls), channel: "C5", ts: "ts5", cmdEcho: "do thing", log });
   await delay(HEARTBEAT_INTERVAL_MS + 100);
   hb.stop();
   assert.ok(calls.length >= 1, "expected ≥1 heartbeat call");

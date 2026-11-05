@@ -6,6 +6,7 @@ import { spawn, execFile } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { createRpcEndpoint } from "./jsonrpc.mjs";
 import { createBrokerClient } from "../remote/broker-client.mjs";
 import { getPaths } from "../paths.mjs";
@@ -41,7 +42,7 @@ export const TOOLS = [
   },
   {
     name: "slack_release",
-    description: "Release the seized Slack channel. The next Slack message on it falls back to a fresh claude -p spawn.",
+    description: "Release the seized Slack channel. A released #rc-* channel stays remote: a message there gets the disconnected block, never a spawned session.",
     inputSchema: { type: "object", properties: {} },
   },
   {
@@ -214,6 +215,9 @@ export function createRemoteMcpServer({
     const reg = await broker.register({ pid: _pid, cwd: _cwd, git_root: myGitRoot, tty: null, summary: "slack-bridge remote", session_id: sessionId });
     myId = reg.id;
     log(`registered as peer ${myId}`);
+    // The cache directory name IS the build, and it is the only way to tell a
+    // stale install from a fresh one after an update.
+    log(`plugin directory ${fileURLToPath(new URL("../../", import.meta.url))}`);
   }
 
 
@@ -247,7 +251,7 @@ export function createRemoteMcpServer({
         // fragment. Never the cwd basename — a project-dir channel name means broke.
         const read = { projectsDir: _projectsDir };
         const name = readSessionName(_cwd, read) || args.name || readSessionAiTitle(_cwd, read) || null;
-        const r = await controlFetch("/claim", { peer_id: myId, channel: args.channel ?? null, name });
+        const r = await controlFetch("/claim", { peer_id: myId, channel: args.channel ?? null, name, session_id: sessionId });
         // No mapping, no waiter: the Stop hook finds the claim by session id, so
         // without one the operator would be talking to nobody. Undo the claim,
         // and say only what the release actually did — a failed /release leaves
@@ -269,7 +273,7 @@ export function createRemoteMcpServer({
       try {
         await controlFetch("/release", { peer_id: myId });
         deleteSessionMapping();
-        return text("Released the Slack channel. The next Slack message falls back to a fresh claude -p spawn.");
+        return text("Released the Slack channel. An #rc-* channel stays remote: a message there gets the disconnected block, never a spawned session.");
       } catch (e) {
         return errText("Release failed", e);
       }

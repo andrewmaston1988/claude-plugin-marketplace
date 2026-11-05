@@ -8,6 +8,7 @@ import os from "node:os";
 import path from "node:path";
 import { createControlServer } from "../../src/remote/control.mjs";
 import { createClaimsStore } from "../../src/remote/claims.mjs";
+import { startReplyLoop } from "../../src/core/handler.mjs";
 
 function makeWeb() {
   const calls = [];
@@ -18,6 +19,8 @@ function makeWeb() {
     conversationsJoin: async (p) => { calls.push(["conversationsJoin", p]); return { ok: true, channel: { id: p.channel, name: "joined" } }; },
     conversationsSetTopic: async (p) => { calls.push(["conversationsSetTopic", p]); return { ok: true }; },
     chatPostMessage: async (p) => { calls.push(["chatPostMessage", p]); return { ok: true, ts: "ts1" }; },
+    chatUpdate: async (p) => { calls.push(["chatUpdate", p]); return { ok: true }; },
+    chatDelete: async (p) => { calls.push(["chatDelete", p]); return { ok: true }; },
   };
 }
 
@@ -251,4 +254,260 @@ test("DM-seize refuses when the operator has no DM with the bot yet", async (t) 
   const r = await call("/claim", { peer_id: "peerA" });
   assert.equal(r.body.ok, false);
   assert.match(r.body.error, /no DM/);
+});
+
+// ── Seize and release lines, and the history record ─────────────────────────
+// Every state change is a Slack attachment carrying the session GUID, so the
+// channel history reads back as a timeline of what held it and when.
+
+const GREEN = "#2eb67d";
+const YELLOW = "#ecb22e";
+const lineOf = (web, kind) => web.calls.find(([c, p]) => c === "chatPostMessage"
+  && (p.attachments ?? []).some((a) => a.color === kind));
+
+test("/claim posts the green seized line with the session GUID", async (t) => {
+  const web = makeWeb();
+  const { call } = await startControl(t, { web });
+  const r = await call("/claim", { peer_id: "peerA", session_id: "sess-abc", name: "demo" });
+  assert.equal(r.body.ok, true, JSON.stringify(r.body));
+  const line = lineOf(web, GREEN);
+  assert.ok(line, `no green attachment: ${JSON.stringify(web.calls)}`);
+  assert.equal(line[1].channel, "C-new");
+  assert.equal(line[1].attachments[0].text, "▶️ Claude session `sess-abc` seized this channel");
+});
+
+test("/release posts the yellow released line with the session GUID", async (t) => {
+  const web = makeWeb();
+  const { call } = await startControl(t, { web });
+  await call("/claim", { peer_id: "peerA", session_id: "sess-abc" });
+  const r = await call("/release", { peer_id: "peerA" });
+  assert.equal(r.body.ok, true);
+  const line = lineOf(web, YELLOW);
+  assert.ok(line, `no yellow attachment: ${JSON.stringify(web.calls)}`);
+  assert.equal(line[1].channel, "C-new");
+  assert.equal(line[1].attachments[0].text, "⏸️ Claude session `sess-abc` released this channel");
+});
+
+test("/release with no live claim posts nothing", async (t) => {
+  const web = makeWeb();
+  const { call } = await startControl(t, { web });
+  const r = await call("/release", { peer_id: "peerX" });
+  assert.equal(r.body.ok, true);
+  assert.ok(!lineOf(web, YELLOW), "nothing to announce");
+});
+
+test("a failed seize line does not fail the claim", async (t) => {
+  const web = makeWeb();
+  web.chatPostMessage = async (p) => { web.calls.push(["chatPostMessage", p]); throw new Error("channel_not_found"); };
+  const logged = [];
+  const { call, claims } = await startControl(t, { web, log: (msg, extra) => logged.push([msg, extra]) });
+  const r = await call("/claim", { peer_id: "peerA", session_id: "sess-abc" });
+  assert.equal(r.body.ok, true, "the claim stands even when the line cannot be posted");
+  assert.equal(claims.get("C-new").peer_id, "peerA");
+  assert.ok(logged.some(([m]) => /seize line/i.test(m)), JSON.stringify(logged));
+});
+
+// The record outlives the claim and supplies the GUID for the red block, so it
+// must exist BEFORE the claim does — a claim without one is a channel that
+// silently loses its no-spawn rule.
+test("/claim writes the history record before the claim", async (t) => {
+  const store = createClaimsStore({ path: path.join(fs.mkdtempSync(path.join(os.tmpdir(), "ctrl-")), "claims.json") });
+  const seenAtClaim = [];
+  const wrapped = {
+    ...store,
+    claim(peerId, channel, opts) {
+      seenAtClaim.push(store.history(channel));
+      return store.claim(peerId, channel, opts);
+    },
+  };
+  const { call } = await startControl(t, { claims: wrapped });
+  const r = await call("/claim", { peer_id: "peerA", session_id: "sess-abc", name: "demo" });
+  assert.equal(r.body.ok, true);
+  assert.deepEqual(seenAtClaim, [{ session_id: "sess-abc", channel_name: "rc-demo" }]);
+});
+
+// ── Re-seize reuses the channel ─────────────────────────────────────────────
+
+function memberWeb({ channels = [], lookupError = null } = {}) {
+  let creates = 0;
+  const web = makeWeb();
+  const create = web.conversationsCreate;
+  web.conversationsCreate = async (p) => {
+    creates++;
+    if (creates === 1) {
+      const e = new Error(`name_taken: ${p.name}`);
+      e.slackError = "name_taken";
+      web.calls.push(["conversationsCreate", p]);
+      throw e;
+    }
+    return create(p);
+  };
+  web.usersConversations = async (p) => {
+    web.calls.push(["usersConversations", p]);
+    if (lookupError) throw lookupError;
+    return { ok: true, channels: channels.filter((c) => !(p.exclude_archived && c.is_archived)) };
+  };
+  return web;
+}
+
+test("name_taken with a claimable member channel reuses it: no suffix, one create call", async (t) => {
+  const web = memberWeb({ channels: [{ id: "C-old", name: "rc-demo", is_member: true }] });
+  const { call, claims } = await startControl(t, { web });
+  const r = await call("/claim", { peer_id: "peerA", name: "demo" });
+  assert.equal(r.body.ok, true, JSON.stringify(r.body));
+  assert.equal(r.body.channel, "C-old", "the existing channel is reused");
+  assert.equal(r.body.channel_name, "rc-demo", "and keeps its name");
+  assert.equal(web.calls.filter(([c]) => c === "conversationsCreate").length, 1, "no suffix create");
+  assert.equal(claims.get("C-old").peer_id, "peerA");
+});
+
+// conversations.create makes public channels, and the manifest grants
+// channels:read but no groups:read — asking for private_channel risks a
+// missing_scope that silently degrades every re-seize to a -2 suffix.
+test("the re-seize lookup asks only for public channels, which the manifest covers", async (t) => {
+  const web = memberWeb({ channels: [{ id: "C-old", name: "rc-demo", is_member: true }] });
+  const { call } = await startControl(t, { web });
+  await call("/claim", { peer_id: "peerA", name: "demo" });
+
+  const lookup = web.calls.find(([c]) => c === "usersConversations");
+  assert.equal(lookup[1].types, "public_channel");
+});
+
+test("name_taken with a held channel takes the next suffix and never claims the held one", async (t) => {
+  const web = memberWeb({ channels: [{ id: "C-held", name: "rc-demo", is_member: true }] });
+  const claims = createClaimsStore({ path: path.join(fs.mkdtempSync(path.join(os.tmpdir(), "ctrl-")), "claims.json") });
+  claims.claim("peerOther", "C-held", { channelName: "rc-demo" });
+  const { call } = await startControl(t, { web, claims });
+  const r = await call("/claim", { peer_id: "peerA", name: "demo" });
+  assert.equal(r.body.ok, true, JSON.stringify(r.body));
+  assert.equal(r.body.channel_name, "rc-demo-2", "the suffix is taken instead");
+  assert.equal(claims.get("C-held").peer_id, "peerOther", "the held channel is untouched");
+});
+
+// users.conversations includes archived channels unless told otherwise, and
+// nothing can be posted to one.
+test("name_taken with an archived member channel takes the next suffix and never claims it", async (t) => {
+  const web = memberWeb({ channels: [{ id: "C-old", name: "rc-demo", is_member: true, is_archived: true }] });
+  const { call, claims } = await startControl(t, { web });
+  const r = await call("/claim", { peer_id: "peerA", name: "demo" });
+  assert.equal(r.body.ok, true, JSON.stringify(r.body));
+  assert.equal(r.body.channel_name, "rc-demo-2", "the suffix is taken instead");
+  assert.equal(claims.get("C-old"), null, "the archived channel is not claimed");
+});
+
+test("a lookup failure falls through to the suffix and the seize succeeds", async (t) => {
+  const web = memberWeb({ lookupError: Object.assign(new Error("missing_scope"), { slackError: "missing_scope" }) });
+  const { call } = await startControl(t, { web });
+  const r = await call("/claim", { peer_id: "peerA", name: "demo" });
+  assert.equal(r.body.ok, true, JSON.stringify(r.body));
+  assert.equal(r.body.channel_name, "rc-demo-2");
+});
+
+test("a reused channel still gets its topic and operator invite", async (t) => {
+  const web = memberWeb({ channels: [{ id: "C-old", name: "rc-demo", is_member: true }] });
+  const { call } = await startControl(t, { web, operatorUserId: "U-operator" });
+  const r = await call("/claim", { peer_id: "peerA", name: "demo" });
+  assert.equal(r.body.ok, true);
+  assert.ok(web.calls.some(([c, p]) => c === "conversationsSetTopic" && p.channel === "C-old"), JSON.stringify(web.calls));
+  assert.ok(web.calls.some(([c, p]) => c === "conversationsInvite" && p.channel === "C-old" && p.users === "U-operator"));
+});
+
+test("/release deletes an open block before posting the released line", async (t) => {
+  const { routeToLiveSession } = await import("../../src/core/live-route.mjs");
+  const web = makeWeb();
+  const claims = createClaimsStore({ path: path.join(fs.mkdtempSync(path.join(os.tmpdir(), "rel-window-")), "claims.json") });
+  await claims.claim("peerA", "C1", { sessionId: "sess-abc" });
+  const { call } = await startControl(t, { web, claims });
+  await routeToLiveSession({
+    web, channel: "C1", text: "hello", claim: { peer_id: "peerA" },
+    broker: { sendMessage: async () => ({ ok: true }) },
+    config: { slack: {}, remote: {} },
+    log: { child: () => ({}) }, cmdEcho: "",
+    _startHeartbeat: () => ({ stop: async () => { web.calls.push(["heartbeatStop"]); } }),
+  });
+
+  const r = await call("/release", { peer_id: "peerA" });
+  assert.equal(r.body.ok, true);
+  const deleted = web.calls.findIndex(([name]) => name === "chatDelete");
+  const released = web.calls.findIndex(([name, p]) => name === "chatPostMessage"
+    && (p.attachments ?? []).some((a) => a.color === YELLOW));
+  assert.ok(deleted >= 0 && deleted < released, "release must delete the placeholder before its yellow line");
+});
+
+test("a window holding chunks survives /release and posts its reply into the placeholder", async (t) => {
+  const { routeToLiveSession } = await import("../../src/core/live-route.mjs");
+  const web = makeWeb();
+  const claims = createClaimsStore({ path: path.join(fs.mkdtempSync(path.join(os.tmpdir(), "rel-chunks-")), "claims.json") });
+  await claims.claim("peerA", "C1", { sessionId: "sess-abc" });
+  const { call } = await startControl(t, { web, claims });
+  let deliver;
+  const ack = async () => {};
+  const broker = {
+    sendMessage: async () => ({ ok: true }),
+    wait: async (_peerId, _timeoutMs, { signal } = {}) => new Promise((resolve) => {
+      const timer = setTimeout(() => resolve({ messages: [], ack }), 1000);
+      deliver = (messages) => { clearTimeout(timer); resolve({ messages, ack }); };
+      signal?.addEventListener("abort", () => { clearTimeout(timer); resolve({ messages: [], ack }); }, { once: true });
+    }),
+  };
+  const loop = startReplyLoop({
+    broker, claims, web, config: { slack: {}, remote: {} },
+    log: { child: () => ({}), error: () => {}, warn: () => {} }, _quietGapMs: 300,
+    _startHeartbeat: () => ({ stop: async () => {} }),
+  });
+  t.after(() => loop.stop());
+  await routeToLiveSession({
+    web, channel: "C1", text: "hello", claim: { peer_id: "peerA" }, broker,
+    config: { slack: {}, remote: {} },
+    log: { child: () => ({}), error: () => {} }, cmdEcho: "",
+    _startHeartbeat: () => ({ stop: async () => {} }),
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+  deliver([{ id: "reply-chunk", from_id: "peerA", text: "answer" }]);
+  await new Promise((resolve) => setTimeout(resolve, 5));
+  const released = await call("/release", { peer_id: "peerA" });
+  assert.equal(released.body.ok, true);
+  for (let i = 0; i < 100 && !web.calls.some(([name]) => name === "chatUpdate"); i++) {
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+  const reply = web.calls.find(([name]) => name === "chatUpdate");
+  const deleted = web.calls.some(([name, params]) => name === "chatDelete" && params.ts === "ts1");
+  assert.deepEqual({ reply: reply && { ts: reply[1].ts, text: reply[1].text }, deleted },
+    { reply: { ts: "ts1", text: "answer" }, deleted: false },
+    "the reply chunk survives /release in the original working placeholder");
+});
+
+test("the re-seize lookup walks every page of the bot's channels", async (t) => {
+  const web = memberWeb();
+  web.usersConversations = async (p) => {
+    web.calls.push(["usersConversations", p]);
+    return p.cursor === "c2"
+      ? { ok: true, channels: [{ id: "C-old", name: "rc-demo", is_member: true }] }
+      : { ok: true, channels: [{ id: "C-x", name: "general" }], response_metadata: { next_cursor: "c2" } };
+  };
+  const { call } = await startControl(t, { web });
+  const r = await call("/claim", { peer_id: "peerA", name: "demo" });
+  assert.equal(r.body.channel, "C-old", JSON.stringify(r.body));
+  assert.deepEqual(web.calls.filter(([c]) => c === "usersConversations").map(([, p]) => p.cursor ?? null), [null, "c2"]);
+});
+
+test("/release posts no released line when a new claim took the channel during the close", async (t) => {
+  const { routeToLiveSession } = await import("../../src/core/live-route.mjs");
+  const web = makeWeb();
+  const claims = createClaimsStore({ path: path.join(fs.mkdtempSync(path.join(os.tmpdir(), "rel-race-")), "claims.json") });
+  await claims.claim("peerA", "C1", { sessionId: "sess-abc" });
+  const { call } = await startControl(t, { web, claims });
+  await routeToLiveSession({
+    web, channel: "C1", text: "hello", claim: { peer_id: "peerA" },
+    broker: { sendMessage: async () => ({ ok: true }) },
+    config: { slack: {}, remote: {} },
+    log: { child: () => ({}) }, cmdEcho: "",
+    _startHeartbeat: () => ({ stop: async () => {} }),
+  });
+  const del = web.chatDelete;
+  web.chatDelete = async (p) => { claims.claim("peerB", "C1", { sessionId: "sess-new" }); return del(p); };
+
+  await call("/release", { peer_id: "peerA" });
+  assert.ok(web.calls.some(([c]) => c === "chatDelete"), "the close ran");
+  assert.ok(!lineOf(web, YELLOW), "the new session's channel gets no released line");
 });

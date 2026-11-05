@@ -2,10 +2,21 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createBrokerClient } from "../../src/remote/broker-client.mjs";
 
+const KINDS = ["status", "question", "prompt", "turn-end", "read"];
+
+test("sendMessage: the kind and the hook's start time reach the broker", async () => {
+  const bodies = [];
+  const _fetch = async (url, opts) => { bodies.push(JSON.parse(opts.body)); return { ok: true, json: async () => ({ ok: true }) }; };
+  await createBrokerClient({ port: 1, _fetch }).sendMessage("p1", "slack-bridge", "Bash: npm test", { kind: "status", hookStartedAt: 42 });
+  assert.deepEqual(bodies, [{ from_id: "p1", to_id: "slack-bridge", text: "Bash: npm test", kind: "status", hook_started_at: 42 }]);
+});
+
 test("wait: the retry after a connection error keeps the caller's abort signal", async () => {
   const signals = [];
   const _fetch = async (url, opts = {}) => {
-    if (url.endsWith("/health")) return { ok: true, json: async () => ({ status: "ok", lease: true, single_flight: true }) };
+    if (url.endsWith("/health")) {
+      return { ok: true, json: async () => ({ status: "ok", lease: true, single_flight: true, kinds: KINDS }) };
+    }
     signals.push(opts.signal);
     if (signals.length === 1) throw new TypeError("fetch failed");
     return { ok: true, json: async () => [] };
@@ -103,7 +114,9 @@ test("ensureBroker: replaces a running lease-only broker", async () => {
     if (path === "/shutdown") { up = false; return { ok: true, json: async () => ({}) }; }
     if (path === "/health") {
       if (!up) throw new TypeError("fetch failed");
-      return { ok: true, json: async () => (spawned ? { status: "ok", lease: true, single_flight: true } : { status: "ok", lease: true }) };
+      return { ok: true, json: async () => (spawned
+        ? { status: "ok", lease: true, single_flight: true, kinds: KINDS }
+        : { status: "ok", lease: true }) };
     }
     throw new Error(`unexpected ${path}`);
   };
@@ -121,15 +134,58 @@ test("ensureBroker: a pre-lease broker that refuses /shutdown is an error, not a
     throw new Error(`unexpected ${path}`);
   };
   const client = createBrokerClient({ port: 1, _fetch, _spawn: () => ({ unref() {} }), _sleep: async () => {} });
-  await assert.rejects(client.ensureBroker(), /predates single-flight waits/);
+  await assert.rejects(client.ensureBroker(), /lacks required capabilities/);
 });
 
-test("ensureBroker: keeps a running broker that advertises leases", async () => {
+test("ensureBroker: keeps a running broker that advertises leases and the wire kinds", async () => {
   let spawned = 0;
   const _fetch = async (url) => {
-    if (url.endsWith("/health")) return { ok: true, json: async () => ({ status: "ok", lease: true, single_flight: true }) };
+    if (url.endsWith("/health")) {
+      return { ok: true, json: async () => ({ status: "ok", lease: true, single_flight: true, kinds: KINDS }) };
+    }
     throw new Error(`unexpected ${url}`);
   };
   await createBrokerClient({ port: 1, _fetch, _spawn: () => { spawned++; return { unref() {} }; } }).ensureBroker();
   assert.equal(spawned, 0);
+});
+
+// A detached broker outlives a plugin update, and an old one downgrades an
+// unknown kind to "text": a terminal prompt posts as Claude's reply and turn-end
+// never closes the block. Health has to name the kinds for capable() to refuse it.
+test("ensureBroker: restarts a running broker that does not advertise the wire kinds", async () => {
+  const calls = [];
+  let up = true;
+  let spawned = 0;
+  const _fetch = async (url) => {
+    const path = new URL(url).pathname;
+    calls.push(path);
+    if (path === "/shutdown") { up = false; return { ok: true, json: async () => ({}) }; }
+    if (path === "/health") {
+      if (!up) throw new TypeError("fetch failed");
+      return { ok: true, json: async () => (spawned
+        ? { status: "ok", lease: true, single_flight: true, kinds: KINDS }
+        : { status: "ok", lease: true, single_flight: true }) };
+    }
+    throw new Error(`unexpected ${path}`);
+  };
+  await createBrokerClient({ port: 1, _fetch, _spawn: () => { spawned++; up = true; return { unref() {} }; } }).ensureBroker();
+  assert.ok(calls.includes("/shutdown"), "an old-shape broker is asked to shut down");
+  assert.equal(spawned, 1, "and replaced with one that speaks the current wire");
+});
+
+// A broker that advertises only some of the kinds is just as dangerous.
+test("ensureBroker: a partial kind list is not capable", async () => {
+  let spawned = 0;
+  const _fetch = async (url) => {
+    const path = new URL(url).pathname;
+    if (path === "/shutdown") return { ok: true, json: async () => ({}) };
+    if (path === "/health") {
+      return { ok: true, json: async () => (spawned
+        ? { status: "ok", lease: true, single_flight: true, kinds: KINDS }
+        : { status: "ok", lease: true, single_flight: true, kinds: ["status", "question"] }) };
+    }
+    throw new Error(`unexpected ${path}`);
+  };
+  await createBrokerClient({ port: 1, _fetch, _spawn: () => { spawned++; return { unref() {} }; }, _sleep: async () => {} }).ensureBroker();
+  assert.equal(spawned, 1);
 });

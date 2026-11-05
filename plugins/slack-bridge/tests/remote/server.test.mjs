@@ -316,3 +316,34 @@ test("brokerFetch sends the Bearer header — requests against a token-guarded b
   const peers = await server._brokerFetch("/list-peers", { scope: "machine", cwd: "x", git_root: null });
   assert.ok(Array.isArray(peers), "a token-guarded broker must accept the server's credentialed fetch");
 });
+
+// --- the claim carries the session, and the install is identifiable ---
+
+test("slack_seize sends the parent session id, so the claim can name it", async (t) => {
+  const claims = [];
+  const { server } = await serverWithBroker(t, { sessionId: "session-xyz", claims });
+  await server._onRequest("tools/call", { name: "slack_seize", arguments: {} });
+  assert.equal(claims[0].session_id, "session-xyz", JSON.stringify(claims));
+});
+
+test("startup logs the plugin directory, so a stale install is visible", async (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "slack-remote-log-"));
+  const broker = createBroker({ stateFile: path.join(root, "state.json") });
+  t.after(() => broker.close());
+  const port = await broker.listen(0);
+  const lines = [];
+  const server = createRemoteMcpServer({
+    config: { remote: { brokerPort: port, controlPort: 0, controlToken: "t", heartbeatIntervalMs: 60_000 } },
+    input: new PassThrough(), output: new PassThrough(),
+    _getPaths: () => ({ stateDir: path.join(root, "state") }),
+    _readSession: () => ({ sessionId: "s1" }), _projectsDir: tmpProjectsDir(),
+    log: (msg) => lines.push(String(msg)),
+  });
+  await server.start();
+  t.after(() => server.shutdown());
+  const line = lines.find((l) => l.startsWith("plugin directory "));
+  assert.ok(line, JSON.stringify(lines));
+  const dir = line.slice("plugin directory ".length);
+  assert.ok(path.isAbsolute(dir), line);
+  assert.equal(path.basename(dir.replace(/[\\/]+$/, "")), "slack-bridge", `${line} names the plugin root, not src/`);
+});

@@ -22,6 +22,27 @@
             "async": false
           }
         ]
+      },
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/bin/claude-slack.mjs\" stop-hook --tool-start",
+            "async": true
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/bin/claude-slack.mjs\" stop-hook",
+            "async": true
+          }
+        ]
       }
     ],
     "PostToolUse": [
@@ -32,6 +53,17 @@
             "type": "command",
             "command": "node \"${CLAUDE_PLUGIN_ROOT}/bin/claude-slack.mjs\" stop-hook",
             "async": true
+          }
+        ]
+      }
+    ],
+    "PostToolBatch": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/inbox-hook.mjs\"",
+            "timeout": 10
           }
         ]
       }
@@ -48,6 +80,27 @@
             "command": "node \"${CLAUDE_PLUGIN_ROOT}/bin/claude-slack.mjs\" rewake-hook",
             "asyncRewake": true,
             "timeout": 7200
+          }
+        ]
+      }
+    ],
+    "StopFailure": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/bin/claude-slack.mjs\" stop-hook"
+          }
+        ]
+      }
+    ],
+    "Notification": [
+      {
+        "matcher": "idle_prompt",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/bin/claude-slack.mjs\" stop-hook"
           }
         ]
       }

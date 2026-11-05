@@ -46,16 +46,40 @@ test("release clears the claim for that peer", async () => {
   assert.equal(store.get("C1"), null);
 });
 
-test("reapDead drops claims whose peer is not alive; keeps live ones", async () => {
+test("claim stores the session id, and it survives a reload", async () => {
+  const file = tmpFile();
+  const store = createClaimsStore({ path: file });
+  await store.claim("peerA", "C1", { channelName: "rc-demo", sessionId: "sess-abc" });
+  const reloaded = createClaimsStore({ path: file }).get("C1");
+  assert.equal(reloaded.session_id, "sess-abc");
+  assert.equal(reloaded.channel_name, "rc-demo");
+});
+
+// The claim dies with the peer; the record must not, or a once-seized #rc-*
+// channel would start spawning claude -p sessions after a release.
+test("the history record is separate from the claim and outlives it", async () => {
+  const file = tmpFile();
+  const store = createClaimsStore({ path: file });
+  store.recordHistory("C1", { session_id: "sess-abc", channel_name: "rc-demo" });
+  await store.claim("peerA", "C1", { channelName: "rc-demo", sessionId: "sess-abc" });
+  await store.release("peerA");
+
+  assert.equal(store.get("C1"), null, "the claim is gone");
+  assert.deepEqual(createClaimsStore({ path: file }).history("C1"), { session_id: "sess-abc", channel_name: "rc-demo" },
+    "and the record is still there after a reload");
+  assert.equal(store.history("C-never"), null);
+});
+
+// A seize with no session id claims and releases at once; the red block still
+// needs the last GUID that channel really had.
+test("a record with no session id keeps the last real one", () => {
   const store = createClaimsStore({ path: tmpFile() });
-  await store.claim("peerA", "C1");
-  await store.claim("peerB", "C2");
-  const alive = new Set(["peerA"]);
-  const broker = { isAlive: async (id) => alive.has(id) };
-  const reaped = await store.reapDead(broker);
-  assert.deepEqual(reaped.sort(), ["peerB"]);
-  assert.equal(store.get("C1").peer_id, "peerA");
-  assert.equal(store.get("C2"), null);
+  store.recordHistory("C1", { session_id: "sess-abc", channel_name: "rc-demo" });
+  store.recordHistory("C1", { session_id: null, channel_name: "rc-demo" });
+  assert.deepEqual(store.history("C1"), { session_id: "sess-abc", channel_name: "rc-demo" });
+
+  store.recordHistory("C1", { session_id: "sess-new", channel_name: "rc-demo" });
+  assert.equal(store.history("C1").session_id, "sess-new", "a real id still replaces it");
 });
 
 test("state persists across a close + reload (atomic write)", async () => {

@@ -1,8 +1,16 @@
 // Control endpoint — the token-guarded localhost HTTP surface the live session's
 // remote-mcp server calls. Routes: /claim, /release, /health.
 import http from "node:http";
+import { closePeerWindows } from "../core/live-route.mjs";
 
 const MAX_BODY_BYTES = 1_000_000;
+
+// Every state change is an attachment, so the channel history reads back as a
+// timeline of what held it and when.
+const SEIZED_COLOR = "#2eb67d";
+const RELEASED_COLOR = "#ecb22e";
+const seizedText = (sessionId) => `▶️ Claude session \`${sessionId}\` seized this channel`;
+const releasedText = (sessionId) => `⏸️ Claude session \`${sessionId}\` released this channel`;
 
 function shortName(peerId) {
   return String(peerId).slice(0, 4).toLowerCase();
@@ -40,6 +48,57 @@ export function createControlServer({
     }
   }
 
+  // A failure here is logged and swallowed: the claim it describes is already
+  // made, and a channel that cannot take a message must not fail the seize.
+  async function postLine({ channel, color, text, what }) {
+    try {
+      await web.chatPostMessage({ channel, text: "", attachments: [{ color, text, mrkdwn_in: ["text"] }] });
+    } catch (e) {
+      log(`failed to post the ${what} line`, { channel, error: e.message });
+    }
+  }
+
+  // Topic and invite, shared by a created channel and a reused one.
+  async function describeChannel(id, peerId) {
+    let topic = null;
+    try {
+      topic = `live session ${peerId}`;
+      await web.conversationsSetTopic({ channel: id, topic });
+    } catch (e) { topic = null; log("setTopic failed (needs channels:manage scope)", { error: e.message }); }
+    if (operatorUserId) {
+      try {
+        await web.conversationsInvite({ channel: id, users: operatorUserId });
+      } catch (e) {
+        if (e?.slackError !== "already_in_channel") {
+          log("operator invite failed", { error: e.message, channel: id, user: operatorUserId });
+        }
+      }
+    } else {
+      log("operator invite skipped: no remote.operatorUserId", { channel: id });
+    }
+    return topic;
+  }
+
+  // A re-seize must not fork a second #rc-demo: on name_taken, find the channel
+  // of exactly that name. users.conversations lists the bot's own channels, so
+  // membership is implied; canClaim is the real test — a channel another peer
+  // holds is never taken over. Public only: conversations.create makes public
+  // channels, and the manifest holds channels:read but no groups:read.
+  async function findReusableChannel(peerId, name) {
+    if (typeof web.usersConversations !== "function") return null;
+    let cursor = null;
+    do {
+      const page = await web.usersConversations({
+        types: "public_channel", exclude_archived: true, limit: 200, ...(cursor ? { cursor } : {}),
+      });
+      for (const ch of page?.channels ?? []) {
+        if (ch?.name === name && ch.id && claims.canClaim(peerId, ch.id).ok) return ch;
+      }
+      cursor = page?.response_metadata?.next_cursor || null;
+    } while (cursor);
+    return null;
+  }
+
   // `name` labels the created channel: #rc-<slug> (e.g. #rc-long-night). The rc-
   // prefix namespaces remote-control channels apart from real project channels.
   // Falls back to the peer-id fragment when no usable name is provided.
@@ -57,34 +116,21 @@ export function createControlServer({
           created = await web.conversationsCreate({ name: chanName });
           break;
         } catch (e) {
-          if (e?.slackError === "name_taken" || /name_taken/i.test(e?.message ?? "")) {
-            chanName = `${base}-${attempt + 2}`;
-            continue;
+          if (e?.slackError !== "name_taken" && !/name_taken/i.test(e?.message ?? "")) throw e;
+          let existing = null;
+          try {
+            existing = await findReusableChannel(peerId, chanName);
+          } catch (err) {
+            log("channel lookup failed — falling through to a new suffix", { error: err.message, name: chanName });
           }
-          throw e;
+          if (existing) { created = { channel: existing }; break; }
+          chanName = `${base}-${attempt + 2}`;
         }
       }
       const channelId = created?.channel?.id;
       if (!channelId) throw new Error("channel creation failed after retries — provide a channel or try again");
       const channelName = created?.channel?.name ?? chanName;
-      let topic = null;
-      if (channelId) {
-        try {
-          await web.conversationsSetTopic({ channel: channelId, topic: `live session ${peerId}` });
-          topic = `live session ${peerId}`;
-        } catch (e) { log("setTopic failed (needs channels:manage scope)", { error: e.message }); }
-      }
-      if (operatorUserId) {
-        try {
-          await web.conversationsInvite({ channel: channelId, users: operatorUserId });
-        } catch (e) {
-          if (e?.slackError !== "already_in_channel") {
-            log("operator invite failed", { error: e.message, channel: channelId, user: operatorUserId });
-          }
-        }
-      } else {
-        log("operator invite skipped: no remote.operatorUserId", { channel: channelId });
-      }
+      const topic = await describeChannel(channelId, peerId);
       return { id: channelId, name: channelName, topic, is_dm: false };
     }
     // DM-seize fallback (no channel-creation scopes): the operator's own DM
@@ -115,13 +161,27 @@ export function createControlServer({
       const pre = claims.canClaim(body.peer_id, body.channel ?? null);
       if (!pre.ok) return pre;
       const { id, name, topic, is_dm } = await claimChannel(body.peer_id, body.channel, body.name);
-      const r = claims.claim(body.peer_id, id, { channelName: name });
+      const sessionId = body.session_id ?? null;
+      // Before the claim: the record outlives it, and an #rc-* channel that lost
+      // its record would start spawning after release.
+      claims.recordHistory(id, { session_id: sessionId, channel_name: name });
+      const r = claims.claim(body.peer_id, id, { channelName: name, sessionId });
       if (!r.ok) return r;
+      if (sessionId) await postLine({ channel: id, color: SEIZED_COLOR, text: seizedText(sessionId), what: "seize" });
       return { ok: true, channel: id, channel_name: name, topic, is_dm: !!is_dm };
     },
     "/release": async (body) => {
       if (!body.peer_id) return { ok: false, error: "peer_id required" };
+      const held = Object.entries(claims.all()).find(([, c]) => c?.peer_id === body.peer_id);
       claims.release(body.peer_id);
+      await closePeerWindows(body.peer_id);
+      // A /claim landing during the close has already posted its seize line; a
+      // release line after it would read as the new session leaving.
+      if (held && !claims.get(held[0])) {
+        const [channel, claim] = held;
+        const sessionId = claim.session_id ?? claims.history?.(channel)?.session_id ?? null;
+        if (sessionId) await postLine({ channel, color: RELEASED_COLOR, text: releasedText(sessionId), what: "release" });
+      }
       return { ok: true };
     },
   };

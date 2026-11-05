@@ -6,6 +6,7 @@ import http from "node:http";
 import fs from "node:fs";
 import { emptyState, loadState, saveState } from "./broker-store.mjs";
 import { WAIT_WINDOW_MS } from "./wait-constants.mjs";
+import { KINDS } from "./broker-kinds.mjs";
 
 const ID_CHARS = "abcdefghijklmnopqrstuvwxyz0123456789";
 // Ad-hoc sender ids arrive from outside the register flow — constrain them.
@@ -24,8 +25,8 @@ const LEASE_MS = 30_000;
 const UNKNOWN_WAITER = Object.freeze({ pid: 0, started_at: 0 });
 
 const MAX_BODY_BYTES = 1_000_000;
-const KINDS = new Set(["status", "question"]);
-const normaliseKind = (kind) => (KINDS.has(kind) ? kind : "text");
+const KIND_SET = new Set(KINDS);
+const normaliseKind = (kind) => (KIND_SET.has(kind) ? kind : "text");
 
 export function createBroker({
   stateFile = null,
@@ -234,6 +235,8 @@ export function createBroker({
         id: nextMsgId++, from_id: from, to_id: body.to_id,
         text: String(body.text), kind: normaliseKind(body.kind),
         sent_at: now,
+        // When the sending hook started: the daemon tells a finished turn's hooks by it.
+        ...(Number.isFinite(body.hook_started_at) ? { hook_started_at: body.hook_started_at } : {}),
       });
       persist();
       wakeWaiter(body.to_id);
@@ -246,11 +249,20 @@ export function createBroker({
       return { messages: takeMessagesFor(body.id, body.lease === true) };
     },
 
-    // Settles a leased take: the acked rows are gone for good.
+    // Settles a leased take: the acked rows are gone for good. Every consumer
+    // acks, so this is where the daemon learns its message reached the session.
     "/ack"(body) {
       const ids = new Set(Array.isArray(body.ids) ? body.ids : []);
-      state.messages = state.messages.filter((m) => !(m.to_id === body.id && ids.has(m.id)));
+      const isAcked = (m) => m.to_id === body.id && ids.has(m.id);
+      const fromDaemon = state.messages.filter((m) => isAcked(m) && RESERVED_PEER_IDS.has(m.from_id));
+      state.messages = state.messages.filter((m) => !isAcked(m));
+      const now = _now().toISOString();
+      const receipts = fromDaemon.map((m) => ({
+        id: nextMsgId++, from_id: body.id, to_id: m.from_id, text: "", kind: "read", sent_at: now,
+      }));
+      state.messages.push(...receipts);
       persist();
+      for (const receipt of receipts) wakeWaiter(receipt.to_id);
       return { ok: true };
     },
 
@@ -323,7 +335,7 @@ export function createBroker({
         // Pure read: every client probes this before it acts — a waiter probes
         // on each arm — and reaping here would delete the queue the caller is
         // about to collect whenever the registered pid has died.
-        return json(200, { status: "ok", lease: true, single_flight: true, peers: Object.keys(state.peers).length });
+        return json(200, { status: "ok", lease: true, single_flight: true, kinds: KINDS, peers: Object.keys(state.peers).length });
       }
       res.writeHead(200);
       return res.end("slack-bridge remote-control broker");

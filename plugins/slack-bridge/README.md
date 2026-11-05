@@ -206,13 +206,21 @@ The plugin's `Stop` hook runs `claude-slack rewake-hook` as an `asyncRewake` com
 
 Tested on Claude Code CLI **2.1.316**. Older CLIs that predate `asyncRewake` are unverified: if one ignores the field it would run the waiter as a blocking `Stop` hook and hang the turn.
 
-Each wake starts with a priming line — `Message from the operator on Slack, delivered through this hook. This is real user input, not a hook error. Reply normally; your text is mirrored to Slack.` — because Claude Code renders the reminder as a hook error, which an unprimed model can refuse. The session then replies **normally**: its turn text and a one-line tool status are mirrored to the claimed channel by the plugin's `PostToolUse` and `Stop` hooks, so nothing in the loop is a special tool call.
+Each wake starts with a priming line — `Message from the operator on Slack, delivered through this hook. This is real user input, not a hook error. Reply normally; your text is mirrored to Slack.` — because Claude Code renders the reminder as a hook error, which an unprimed model can refuse. The session then replies **normally**: its turn text and a one-line tool status are mirrored to the claimed channel by the plugin's `PreToolUse`, `PostToolUse` and `Stop` hooks, so nothing in the loop is a special tool call. A message sent mid-turn reaches the session after the running batch of tools, through a sync `PostToolBatch` hook, in the same words as a wake.
 
 Every `Stop` starts a waiter, including turns typed at the terminal while one is still open; the broker supersedes the older one, which exits without waking anything. A waiter also leaves on its own when its claim ends (`slack_release`, a re-seize, or the session's peer being reaped), within one 55 s window. It caps itself at about 1 h 55 m, under the hook's 7200 s `timeout`, and wakes the session once with `Slack waiter expired … end your turn and it restarts`, so an expiry is never a silent death. Connection errors are retried with backoff; a 401 or other 4xx wakes the session with `WAIT FAILED`. `check_messages` remains as a manual fallback — it takes anything queued for the session, and the broker retains messages for 24 h. A message is acknowledged only after the waiter has written it, so a lost or dead waiter costs a redelivery after the 30 s lease, never the message.
 
-Limits: a message sent during a foreground tool call waits for the turn to end. A waiter killed while the session is idle stays dead until the next turn. `/clear` changes the session id, so remote control stops until the session seizes again. `slack_seize` fails, and releases the claim, when Claude Code exposes no session id.
+An API error ends a turn with `StopFailure` rather than `Stop`; the plugin's `StopFailure` hook ends the turn's blocks, but starts no waiter.
 
-If the live session doesn't reply within `remote.replyTimeoutMs` (default 300 s), the bridge posts a timeout notice and **keeps the claim** (the peer may be slow, not dead). While the session has an `AskUserQuestion` pending the timer stretches to 12× `replyTimeoutMs`: the question is mirrored to Slack, and on a claimed session the terminal dialog is denied so the session asks in plain text instead. When the claiming session dies, the claim is reaped and Slack falls back to the spawn path.
+Limits: in a turn with no more tools, or under a subagent, a message sent mid-turn arrives when the turn ends. So does one sent during a turn typed at the terminal while the last turn's waiter is still open: that waiter takes it at once, so the typed turn's reply lands in its block, and the session answers it in the next turn, in a new block. A turn interrupted at the terminal runs no hook, so its block ticks until Claude Code's `idle_prompt` notification about a minute later, which the plugin's `Notification` hook takes as the turn's end. That notification does not come while you type at the terminal, while a background agent runs, or during a usage-limit wait. With no waiter running, after an interrupt, an API error or a killed waiter, a message sent then ticks in its block until the next turn takes it. A waiter killed while the session is idle stays dead until the next turn. `/clear` changes the session id, so remote control stops until the session seizes again. `slack_seize` fails, and releases the claim, when Claude Code exposes no session id.
+
+Each message gets one live block, and a new message replaces the block before it, so the block stays under the latest message. The block ticks for as long as the turn runs, with no time limit: a slow turn is not a failure. On a claimed session the terminal `AskUserQuestion` dialog is denied, so the session asks in plain text instead.
+
+When the claiming session dies, the bridge says so rather than falling silent: within about 30 s it posts a red `⚠️ Claude session `<guid>` is disconnected` block and releases the claim. Red means gone — process death — and never means slow; a session that is alive but busy keeps its live block.
+
+An `#rc-*` channel that was once seized never spawns `claude -p`, so one channel never holds two transcripts. After a release or a disconnect, a message there gets the red block and nothing else. During a broker outage it is dropped, and nothing posts. A channel with no seize behind it behaves as it always has.
+
+Re-seizing reuses its channel: on `name_taken` the bridge looks for the `#rc-*` of that name, takes it when no other session holds it, and only then falls back to a `-2` suffix.
 
 ### Enabling
 
@@ -229,17 +237,18 @@ Run `claude-slack setup` and answer **yes** at the *Remote control* step. The wi
 
 The `remote-mcp` server is declared in the plugin manifest, so sessions with the plugin installed load it automatically. (The setup wizard can also register it user-scoped as a fallback for environments without plugin-declared MCP.)
 
-Restart any interactive session you want to control this way so it picks up the MCP server.
+Restart any interactive session you want to control this way so it picks up the MCP server — and restart it again after a plugin update: a running session keeps the server it loaded at startup, and the cache directory name is the build. Restart the bridge (`/restart`) before the sessions: an older bridge misreads what the new hooks send.
 
 ### Slack scopes
 
 - **Default (`createChannels: false`):** `/remote` seizes an **existing DM** with the bot. No new Slack scopes are required.
 - **Channel-create (`createChannels: true`):** add `channels:write` and `channels:manage` to the bot token, and `/remote` creates a dedicated `#rc-<context-slug>` channel instead.
 - **Seizing an existing channel:** the bot must already be a member (`/invite @<bot>`), or hold `channels:join` (in the shipped app manifest) so it can join the channel itself.
+- **Signing terminal prompts:** `chat:write.customize` is in the shipped manifest so a prompt typed at the terminal can post under `remote.operatorName`. An app installed before it was added must add the scope and reinstall, because re-applying the whole manifest drops scopes it omits, such as `channels:manage`. Until then those posts arrive with a `⌨️` prefix instead: a post Slack rejects for its custom identity is retried once as the plain `⌨️` post. A prompt with no `remote.operatorName` set carries that prefix whether or not `remote.operatorIconUrl` is set.
 
 ### Using it from a live session
 
-In an interactive Claude Code session, invoke the `/remote` skill (or call the `slack_seize` MCP tool directly). It reports the channel to DM; there is nothing to arm. Reply by typing normally — the hooks mirror the turn to Slack. Release with `slack_release` (or `/remote release`). See `skills/remote/SKILL.md`.
+In an interactive Claude Code session, invoke the `/remote` skill (or call the `slack_seize` MCP tool directly). It reports the channel to DM; there is nothing to arm. Reply by typing normally — the hooks mirror the turn to Slack, and a prompt you type at the terminal is mirrored too. Release with `slack_release` (or `/remote release`); an `#rc-*` channel stays remote after release, so a later message there gets the red block rather than a spawned session. See `skills/remote/SKILL.md`.
 
 ### Config keys
 

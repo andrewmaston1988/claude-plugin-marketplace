@@ -1,11 +1,10 @@
 import { FALLBACK_VERBS, HEARTBEAT_COLORS, HEARTBEAT_INTERVAL_MS } from "./constants.mjs";
 import { fetchHaikuVerb } from "./haiku-verb.mjs";
 
-export function startHeartbeat({ web, channel, ts, cmdEcho, log, extensions, sessionId, config }) {
+export function startHeartbeat({ startedAt, web, channel, ts, cmdEcho, log, extensions, sessionId, config }) {
   let tick = 0;
   let stopped = false;
   let inflight = null;  // the current tick's chatUpdate promise, so stop() can join it
-  const startTime = Date.now();
   const verbMode = config?.slack?.verbMode ?? "static";
   const verbModel = config?.slack?.verbModel ?? "claude-haiku-4-5";
 
@@ -18,7 +17,7 @@ export function startHeartbeat({ web, channel, ts, cmdEcho, log, extensions, ses
   const timer = setInterval(async () => {
     if (stopped) return;
     tick++;
-    const elapsedSec = Math.round((Date.now() - startTime) / 1000);
+    const elapsedSec = Math.round((Date.now() - startedAt) / 1000);
     const elapsedStr = elapsedSec < 60
       ? `${elapsedSec}s`
       : `${Math.floor(elapsedSec / 60)}m${elapsedSec % 60}s`;

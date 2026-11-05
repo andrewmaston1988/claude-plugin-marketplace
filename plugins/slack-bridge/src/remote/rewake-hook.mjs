@@ -8,9 +8,24 @@ import { dirname, join } from "node:path";
 import { getPaths } from "../paths.mjs";
 import { loadConfig } from "../config.mjs";
 import { createBrokerClient } from "./broker-client.mjs";
-import { readSessionFile } from "./stop-hook.mjs";
+import { brokerOptions, readSessionFile, readTurnEnd } from "./session-file.mjs";
 import { runWaiter, prepareBroker, writeTo } from "./waiter.mjs";
-import { FAILURE_COOLDOWN_MS } from "./wait-constants.mjs";
+import { FAILURE_COOLDOWN_MS, TURN_END_WAIT_MS } from "./wait-constants.mjs";
+
+// Both Stop hooks start together. Taken at once, a queued message's read receipt
+// beats this Stop's turn-end to the daemon, which counts it read by the ending turn
+// and takes away the block the woken turn needs. The marker outlives the Stop that
+// wrote it; one written after this process started is this Stop's, because the
+// last Stop's hook had finished before this turn could end.
+const HOLD_POLL_MS = 50;
+
+async function holdForTurnEnd({ stateDir, sessionId, spawnedAt, _now, _sleep }) {
+  const startedAt = _now();
+  while (readTurnEnd(stateDir, sessionId) < spawnedAt) {
+    if (_now() - startedAt >= TURN_END_WAIT_MS) return;
+    await _sleep(HOLD_POLL_MS);
+  }
+}
 
 // asyncRewake hands stderr to the model; stdout goes nowhere it can read.
 const stderrOut = (s) => writeTo(process.stderr, s);
@@ -49,6 +64,8 @@ export async function runRewakeHook({
   _runWaiter = runWaiter,
   _signal = AbortSignal.timeout,
   _now = () => Date.now(),
+  _sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+  _spawnedAt = performance.timeOrigin,
 }) {
   let input, session;
   // Absent file = no claim held: exit before any config load or broker call,
@@ -78,11 +95,7 @@ export async function runRewakeHook({
   let client;
   try {
     const config = _loadConfig({ configPath: session.configPath });
-    client = _createClient({
-      port: config.remote?.brokerPort ?? 7898,
-      token: config.remote?.controlToken ?? null,
-      configPath: session.configPath,
-    });
+    client = _createClient(brokerOptions(session, config));
     await prepareBroker({ client });
   } catch (e) {
     await out(`WAIT FAILED: ${e?.message ?? e}\n`).catch(() => {});
@@ -106,6 +119,7 @@ export async function runRewakeHook({
     return peers.some((p) => p.id === session.peerId);
   };
 
+  await holdForTurnEnd({ stateDir, sessionId: input.session_id, spawnedAt: _spawnedAt, _now, _sleep });
   const code = await _runWaiter({ peerId: session.peerId, client, stillNeeded, out });
   if (failed) writeFailureMarker(stateDir, input.session_id);
   return code;

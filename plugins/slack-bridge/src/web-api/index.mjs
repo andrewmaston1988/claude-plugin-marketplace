@@ -74,6 +74,8 @@ export function createWebClient({ token, log }) {
     conversationsInfo: (params) => call("conversations.info", params, { form: true }),
     conversationsSetTopic: (params) => call("conversations.setTopic", params),
     conversationsList: (params) => call("conversations.list", params),
+    // Re-seize: the bot's own channels, to find a #rc-* it is already in.
+    usersConversations: (params) => call("users.conversations", params),
 
     appsConnectionsOpen: () =>
       fetch(`${SLACK_API}/apps.connections.open`, {

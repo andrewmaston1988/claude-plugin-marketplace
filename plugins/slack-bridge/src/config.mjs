@@ -24,9 +24,10 @@ const DEFAULTS = {
     controlToken: null,
     createChannels: false,
     operatorUserId: null,
-    // Long enough for a session that has to wake, read the message and answer.
-    // A reply that lands after the window is still posted to the claimed channel.
-    replyTimeoutMs: 300_000,
+    // How a prompt typed at the terminal is signed in the channel. Unset posts
+    // with a keyboard mark instead, so it never reads as the bot talking to itself.
+    operatorName: null,
+    operatorIconUrl: null,
     heartbeatIntervalMs: 15_000,
   },
 };

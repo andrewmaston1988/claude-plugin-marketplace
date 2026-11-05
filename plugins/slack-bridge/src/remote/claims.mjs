@@ -1,31 +1,49 @@
-// Claim store: maps a Slack channel id → the live-session peer-id that seized it.
-// Atomic JSON writes (session-store pattern: tmp + rename). A channel claimed by
-// peer A is rejected if peer B tries to claim it; the same peer re-claiming is
-// idempotent. reapDead drops claims whose peer-id fails broker liveness.
+// Claim store: Slack channel id → the live-session peer that seized it. A second
+// peer's claim is rejected; the same peer re-claiming is idempotent.
+// The claim-history file beside it outlives each claim: an `#rc-*` channel must not
+// start spawning after release, and a dead session's red block needs its GUID.
 import { readFileSync, writeFileSync, renameSync, mkdirSync, existsSync } from "node:fs";
 import { dirname } from "node:path";
 
+function writeJson(file, data) {
+  const tmp = file + ".tmp";
+  mkdirSync(dirname(file), { recursive: true });
+  writeFileSync(tmp, JSON.stringify(data, null, 2), "utf8");
+  renameSync(tmp, file);
+}
+
 export function createClaimsStore({ path, log }) {
   let cache = null;
+  let historyCache = null;
+  const historyPath = path.endsWith(".json")
+    ? path.slice(0, -".json".length) + "-history.json"
+    : path + "-history.json";
+
+  function readJson(file, what) {
+    if (!existsSync(file)) return {};
+    try {
+      const data = JSON.parse(readFileSync(file, "utf8"));
+      return data && typeof data === "object" && !Array.isArray(data) ? data : {};
+    } catch (e) {
+      log?.warn(`${what} corrupt, starting fresh`, { path: file, error: e.message });
+      return {};
+    }
+  }
 
   function load() {
     if (cache !== null) return cache;
-    if (!existsSync(path)) { cache = {}; return cache; }
-    try {
-      cache = JSON.parse(readFileSync(path, "utf8"));
-      if (!cache || typeof cache !== "object" || Array.isArray(cache)) cache = {};
-    } catch (e) {
-      log?.warn("claims store corrupt, starting fresh", { path, error: e.message });
-      cache = {};
-    }
+    cache = readJson(path, "claims store");
     return cache;
   }
 
+  function loadHistory() {
+    if (historyCache !== null) return historyCache;
+    historyCache = readJson(historyPath, "claim history");
+    return historyCache;
+  }
+
   function persist(data) {
-    const tmp = path + ".tmp";
-    mkdirSync(dirname(path), { recursive: true });
-    writeFileSync(tmp, JSON.stringify(data, null, 2), "utf8");
-    renameSync(tmp, path);
+    writeJson(path, data);
     cache = data;
   }
 
@@ -53,7 +71,7 @@ export function createClaimsStore({ path, log }) {
   return {
     canClaim,
 
-    claim(peerId, channel, { channelName } = {}) {
+    claim(peerId, channel, { channelName, sessionId } = {}) {
       const pre = canClaim(peerId, channel);
       if (!pre.ok) return pre;
       const data = load();
@@ -63,6 +81,7 @@ export function createClaimsStore({ path, log }) {
         peer_id: peerId,
         channel,
         channel_name: channelName ?? existing?.channel_name ?? null,
+        session_id: sessionId ?? existing?.session_id ?? null,
         claimed_at: existing?.claimed_at ?? now,
         last_seen: now,
       };
@@ -88,23 +107,21 @@ export function createClaimsStore({ path, log }) {
       return { ...load() };
     },
 
-    // broker: { isAlive(peerId): Promise<bool> }. Returns the reaped peer-ids.
-    async reapDead(broker) {
-      const data = load();
-      const reaped = [];
-      for (const ch of Object.keys(data)) {
-        const claim = data[ch];
-        let alive = true;
-        try { alive = await broker.isAlive(claim.peer_id); } catch { alive = false; }
-        if (!alive) {
-          reaped.push(claim.peer_id);
-          delete data[ch];
-        }
-      }
-      persist(data);
-      return reaped;
+    // Written before claim(), so a claim never exists without its record.
+    recordHistory(channel, { session_id: sessionId = null, channel_name: channelName = null } = {}) {
+      const data = loadHistory();
+      const prev = data[channel] ?? {};
+      data[channel] = { session_id: sessionId ?? prev.session_id ?? null, channel_name: channelName ?? prev.channel_name ?? null };
+      writeJson(historyPath, data);
+      historyCache = data;
+      return { ok: true };
     },
 
-    close() { cache = null; },
+    history(channel) {
+      const data = loadHistory();
+      return Object.hasOwn(data, channel) ? data[channel] : null;
+    },
+
+    close() { cache = null; historyCache = null; },
   };
 }

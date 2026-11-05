@@ -3,9 +3,10 @@ import { readSession, channelModel, writeSession, clearSession, setChannelModel 
 import { startHeartbeat } from "../heartbeat/loop.mjs";
 import { fetchHistory } from "../history-bootstrap/index.mjs";
 import { safeUpdate, postResponse, postError } from "./reply-post.mjs";
-import { routeToLiveSession, startReplyLoop, _resetRouteState } from "./live-route.mjs";
+import { routeToLiveSession, startReplyLoop, _resetRouteState, _closedMarks } from "./live-route.mjs";
+import { markDisconnected, isRemoteChannel, postDisconnectNotice } from "./disconnect.mjs";
 
-export { safeUpdate, postResponse, postError, routeToLiveSession, startReplyLoop, _resetRouteState };
+export { safeUpdate, postResponse, postError, routeToLiveSession, startReplyLoop, _resetRouteState, _closedMarks };
 
 const DEDUP_SIZE = 64;
 const MODEL_NAME = /^[A-Za-z0-9][A-Za-z0-9._:-]*$/;
@@ -86,17 +87,19 @@ export async function handleMessage({ web, store, queue, config, log, payload, b
   queue.enqueue(channel, async () => {
     // --- remote-control routing branch ---
     // If this channel has been claimed by a live interactive session, route the
-    // message to it via the internal broker instead of spawning `claude -p`. A
-    // dead/missing claiming peer falls through to the spawn path (after reaping
-    // the stale claim) so Slack is never silent.
+    // message to it via the internal broker instead of spawning `claude -p`.
     const claim = remote?.claims?.get(channel) ?? null;
+    // An #rc-* channel that was once seized never spawns: two transcripts in one
+    // channel are unreadable. The record outlives the claim, which is why the
+    // check is not "is it claimed".
+    const remoteChannel = remote?.claims ? isRemoteChannel(remote.claims, channel) : false;
     let brokerDown = false;
     if (claim && remote?.broker) {
-      // null = broker unreachable: keep the claim and serve THIS message via the
-      // spawn path — a transient outage costs per-message spawns, not the claim;
-      // routing resumes when the broker returns.
+      // null = broker unreachable: keep the claim, and routing resumes when the
+      // broker returns. Meanwhile an #rc-* channel drops the message; any other
+      // channel serves it via the spawn path.
       let alive = null;
-      try { alive = await remote.broker.isAlive(claim.peer_id); } catch { /* fall through */ }
+      try { alive = await remote.broker.isAlive(claim.peer_id); } catch { /* fall back to spawn */ }
       if (alive === true) {
         await routeToLiveSession({
           web, channel, threadTs, text, claim, broker: remote.broker, config, log,
@@ -105,10 +108,24 @@ export async function handleMessage({ web, store, queue, config, log, payload, b
         return;
       }
       if (alive === false) {
-        try { await remote.claims.release(claim.peer_id); } catch { /* reaped below */ }
-        log.info("remote-control claim reaped (peer dead), falling back to spawn", { channel, peer_id: claim.peer_id });
+        await markDisconnected({ claim, web, claims: remote.claims, log });
+        if (remoteChannel) return;
+        log.info("remote-control claim disconnected (peer dead), falling back to spawn", { channel, peer_id: claim.peer_id });
       }
       brokerDown = alive === null;
+    }
+
+    // The broker-down exception (spawn modelless) does not reach an #rc-* channel.
+    if (remoteChannel) {
+      if (brokerDown) {
+        log.warn("message not routed: broker unreachable", { channel });
+        return;
+      }
+      await postDisconnectNotice({
+        channel, sessionId: remote.claims.history?.(channel)?.session_id ?? null, web, log,
+      });
+      log.info("message not routed: #rc-* channel with no live session", { channel });
+      return;
     }
 
     // No model, no spawn: /model must pick one first. Exception: a claimed channel whose
@@ -149,7 +166,7 @@ export async function handleMessage({ web, store, queue, config, log, payload, b
 
     // Start heartbeat
     heartbeat = startHeartbeat({
-      web, channel, ts: placeholderTs, cmdEcho, log: log.child("heartbeat"),
+      startedAt: Date.now(), web, channel, ts: placeholderTs, cmdEcho, log: log.child("heartbeat"),
       extensions, sessionId: existingSession ?? undefined, config,
     });
     // Haiku verb mode: seed one verb per message (batch output; no per-tool streaming).
@@ -269,7 +286,7 @@ export function startBridge({ config, log, web, socket, store, queue, extensions
 
   socket.on("slash_command", ({ payload, ack }) => {
     ack();
-    handleSlashCommand({ web, store, queue, config, log, payload, botUserId, extensions })
+    handleSlashCommand({ web, store, queue, config, log, payload, botUserId, extensions, remote })
       .catch(e => log.error("slash command unhandled", { error: e.message }));
   });
 
@@ -288,7 +305,7 @@ export function startBridge({ config, log, web, socket, store, queue, extensions
   return { stopReplyLoop };
 }
 
-async function handleSlashCommand({ web, store, queue, config, log, payload, botUserId, extensions }) {
+export async function handleSlashCommand({ web, store, queue, config, log, payload, botUserId, extensions, remote, _runClaude, _startHeartbeat }) {
   const cmd = payload.command ?? "";
   const channel = payload.channel_id ?? payload.channel;
 
@@ -331,7 +348,7 @@ async function handleSlashCommand({ web, store, queue, config, log, payload, bot
         text: payload.text ?? cmd,
         client_msg_id: `slash-${Date.now()}`,
       };
-      await handleMessage({ web, store, queue, config, log, payload: fakePayload, botUserId, isFirstInSession: false, extensions });
+      await handleMessage({ web, store, queue, config, log, payload: fakePayload, botUserId, isFirstInSession: false, extensions, remote, _runClaude, _startHeartbeat });
     }
   }
 }
