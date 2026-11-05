@@ -1,7 +1,6 @@
 // Shared harness for the broker test files: a real broker on an ephemeral port
 // and the HTTP helpers the tests drive it with. Fake-free — the broker is the
 // unit under test; nothing here touches the network beyond 127.0.0.1.
-import { spawn } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -43,17 +42,4 @@ export function claimedSession(t, { port, peer, sid }) {
   return { LOCALAPPDATA: dir, XDG_STATE_HOME: dir, HOME: dir, USERPROFILE: dir };
 }
 
-// Async only: the broker runs in this process, so a sync spawn would block the
-// port the entry dials.
-export function runEntry(args, env, input) {
-  return new Promise((resolve, reject) => {
-    const child = spawn(process.execPath, args, { env: { ...process.env, ...env }, stdio: ["pipe", "pipe", "pipe"] });
-    let stdout = "";
-    let stderr = "";
-    child.stdout.on("data", (d) => { stdout += d; });
-    child.stderr.on("data", (d) => { stderr += d; });
-    child.on("error", reject);
-    child.on("close", (status) => resolve({ status, stdout, stderr }));
-    child.stdin.end(JSON.stringify(input));
-  });
-}
+export { runEntry } from "../run-entry.mjs";

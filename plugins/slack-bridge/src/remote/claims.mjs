@@ -5,6 +5,13 @@
 import { readFileSync, writeFileSync, renameSync, mkdirSync, existsSync } from "node:fs";
 import { dirname } from "node:path";
 
+function writeJson(file, data) {
+  const tmp = file + ".tmp";
+  mkdirSync(dirname(file), { recursive: true });
+  writeFileSync(tmp, JSON.stringify(data, null, 2), "utf8");
+  renameSync(tmp, file);
+}
+
 export function createClaimsStore({ path, log }) {
   let cache = null;
   let historyCache = null;
@@ -36,10 +43,7 @@ export function createClaimsStore({ path, log }) {
   }
 
   function persist(data) {
-    const tmp = path + ".tmp";
-    mkdirSync(dirname(path), { recursive: true });
-    writeFileSync(tmp, JSON.stringify(data, null, 2), "utf8");
-    renameSync(tmp, path);
+    writeJson(path, data);
     cache = data;
   }
 
@@ -108,10 +112,7 @@ export function createClaimsStore({ path, log }) {
       const data = loadHistory();
       const prev = data[channel] ?? {};
       data[channel] = { session_id: sessionId ?? prev.session_id ?? null, channel_name: channelName ?? prev.channel_name ?? null };
-      const tmp = historyPath + ".tmp";
-      mkdirSync(dirname(historyPath), { recursive: true });
-      writeFileSync(tmp, JSON.stringify(data, null, 2), "utf8");
-      renameSync(tmp, historyPath);
+      writeJson(historyPath, data);
       historyCache = data;
       return { ok: true };
     },

@@ -5,9 +5,9 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { spawn } from "node:child_process";
 import { pathToFileURL } from "node:url";
-import { makeHeartbeat, makeLog, makePayload, makeStore, makeWeb, placeholderTss, delay } from "../integration/route-harness.mjs";
+import { runEntry } from "../run-entry.mjs";
+import { makeHeartbeat, makeLog, makePayload, makeStore, makeWeb, liveBlocks, delay } from "../integration/route-harness.mjs";
 
 export const SID = "sess-1";
 // Slack answers at once, so a cell's outcome repeats; races that need a slow Slack
@@ -25,20 +25,6 @@ const tokens = (command) => [...command.matchAll(/"([^"]*)"|(\S+)/g)].map((m) =>
 // hooks.json matchers are regexes on the tool name, or a notification's type; "*" or
 // none matches every one.
 const matches = (matcher, toolName) => !matcher || matcher === "*" || new RegExp(`^(?:${matcher})$`).test(toolName ?? "");
-
-function run(args, env, input) {
-  const child = spawn(process.execPath, args, { env: { ...process.env, ...env }, stdio: ["pipe", "pipe", "pipe"] });
-  let stdout = "";
-  let stderr = "";
-  child.stdout.on("data", (d) => { stdout += d; });
-  child.stderr.on("data", (d) => { stderr += d; });
-  const done = new Promise((resolve) => {
-    child.on("error", (e) => resolve({ status: -1, stdout, stderr: String(e) }));
-    child.on("close", (status) => resolve({ status, stdout, stderr }));
-  });
-  child.stdin.end(JSON.stringify(input));
-  return Object.assign(done, { child });
-}
 
 export async function startSession(root) {
   const { createBroker } = await load(root, "src/remote/broker.mjs");
@@ -93,7 +79,7 @@ export async function startSession(root) {
       for (const h of group.hooks ?? []) {
         const [cmd, ...rest] = tokens(h.command.replaceAll("${CLAUDE_PLUGIN_ROOT}", root));
         if (cmd !== "node") continue;
-        const p = run(rest, env, input);
+        const p = runEntry(rest, env, input);
         spawned.push(p);
         const entry = { at: Date.now(), event, args: rest.slice(1).join(" ") };
         trace.push(entry);
@@ -124,8 +110,7 @@ export async function startSession(root) {
       payload: makePayload({ channel: "C1", text, client_msg_id: `sim-${++nextMsg}` }), botUserId: "U123", isFirstInSession: true,
       remote: { claims, broker: client }, _startHeartbeat: hb.start,
     }),
-    // A block is live until a reply lands in it or it is deleted.
-    liveBlocks: () => placeholderTss(web).filter((ts) => !web.calls.some(([ty, p]) => (ty === "update" || ty === "delete") && p.ts === ts)),
+    liveBlocks: () => liveBlocks(web),
     ticking: () => hb.instances.filter((i) => !i.stopped).length,
     settle: () => delay(QUIET_MS * 4),
     // Every async hook started so far has exited; the waiters are not counted.

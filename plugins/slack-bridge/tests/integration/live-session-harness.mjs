@@ -2,7 +2,6 @@
 // reply loop, with only Slack faked. Shared by the whole-turn replays and the matrix.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -13,7 +12,7 @@ import { createClaimsStore } from "../../src/remote/claims.mjs";
 import { hasUnread } from "../../src/core/route-status.mjs";
 import { REG, claimedSession, runEntry, startBroker } from "../remote/broker-harness.mjs";
 import { textEntry, userEntry } from "../remote/stop-hook-harness.mjs";
-import { delay, makeHeartbeat, makeLog, makePayload, makeWeb, placeholderTss, slack, tmpClaims } from "./route-harness.mjs";
+import { delay, liveBlocks, makeHeartbeat, makeLog, makePayload, makeWeb, slack, tmpClaims } from "./route-harness.mjs";
 
 export const SID = "sess-1";
 export const QUIET = 100;
@@ -25,27 +24,10 @@ export const LINT = { tool_name: "Bash", tool_input: { command: "npm run lint" }
 // Slack ids are deduped across the process, so each send needs its own.
 let nextId = 0;
 
-// A block is live until a reply lands in it or it is deleted.
-export const liveBlocks = (web) => placeholderTss(web)
-  .filter((ts) => !web.calls.some(([ty, p]) => (ty === "update" || ty === "delete") && p.ts === ts));
+export { liveBlocks };
 export const label = (s) => s.hb.instances.at(-1)?.statuses.at(-1);
 // A routed message the session has not taken yet.
 export const unread = (s) => hasUnread(s.peer);
-
-// runEntry, keeping the child so a test can kill a waiter that never leaves.
-function spawnEntry(args, env, input) {
-  const child = spawn(process.execPath, args, { env: { ...process.env, ...env }, stdio: ["pipe", "pipe", "pipe"] });
-  let stdout = "";
-  let stderr = "";
-  child.stdout.on("data", (d) => { stdout += d; });
-  child.stderr.on("data", (d) => { stderr += d; });
-  const done = new Promise((resolve, reject) => {
-    child.on("error", reject);
-    child.on("close", (status) => resolve({ status, stdout, stderr }));
-  });
-  child.stdin.end(JSON.stringify(input));
-  return Object.assign(done, { child });
-}
 
 async function liveSession(t) {
   _resetRouteState();
@@ -88,7 +70,7 @@ async function liveSession(t) {
     stop: async ({ lastMessage, flush = [], flushAfterMs = 300 } = {}) => {
       const input = { session_id: SID, transcript_path: transcript, hook_event_name: "Stop" };
       if (lastMessage) input.last_assistant_message = lastMessage;
-      const waiter = spawnEntry([bin, "rewake-hook"], env, input);
+      const waiter = runEntry([bin, "rewake-hook"], env, input);
       waiters.push(waiter);
       const mirror = hook([bin, "stop-hook"], input);
       await delay(flushAfterMs);

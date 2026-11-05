@@ -159,3 +159,6 @@ export const hasUpdate = (web, needle) => web.calls.some(([t, p]) => t === "upda
 export const idxOf = (web, pred) => web.calls.findIndex(pred);
 export const placeholderTss = (web) =>
   web.calls.filter(([ty, p]) => ty === "post" && p.attachments?.[0]?.color === "#808080").map(([, p]) => p._ts);
+// A block is live until a reply lands in it or it is deleted.
+export const liveBlocks = (web) => placeholderTss(web)
+  .filter((ts) => !web.calls.some(([ty, p]) => (ty === "update" || ty === "delete") && p.ts === ts));
