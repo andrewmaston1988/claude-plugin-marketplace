@@ -33,6 +33,7 @@ export const textEntry = (uuid, text) => ({ type: "assistant", uuid, message: { 
 export const toolEntry = (uuid, name, input) => ({ type: "assistant", uuid, message: { role: "assistant", content: [{ type: "tool_use", id: "t" + uuid, name, input }] } });
 export const thinkEntry = (uuid) => ({ type: "assistant", uuid, message: { role: "assistant", content: [{ type: "thinking", thinking: "SECRET THOUGHT" }] } });
 export const userEntry = (uuid, text) => ({ type: "user", uuid, message: { role: "user", content: text } });
+export const resultEntry = (uuid, toolUseId) => ({ type: "user", uuid, message: { role: "user", content: [{ type: "tool_result", tool_use_id: toolUseId, content: "ok" }] } });
 
 export function setup(t, { claimed = true, configPath } = {}) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "stophook-"));

@@ -7,7 +7,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { runHook, shortArg, formatQuestion } from "../../src/remote/stop-hook.mjs";
-import { SID, PEER, fakeClient, textEntry, toolEntry, thinkEntry, userEntry, setup, hook, prime, textSends } from "./stop-hook-harness.mjs";
+import { SID, PEER, fakeClient, textEntry, toolEntry, thinkEntry, userEntry, resultEntry, setup, hook, prime, textSends } from "./stop-hook-harness.mjs";
 import { mdToSlack } from "../../src/markdown/index.mjs";
 import { createBrokerClient } from "../../src/remote/broker-client.mjs";
 import { PRIMING_LINE } from "../../src/remote/waiter.mjs";
@@ -422,52 +422,81 @@ test("Stop: at the 3s bound turn-end still goes, and the next hook sends the tex
   env.append(textEntry("a1", "never flushed in time"));
   await hook(env, client, { lastMessage: "never flushed in time", now: clock.now, sleep: clock.sleep });
   assert.deepEqual(textSends(client).map((s) => s.text), ["never flushed in time"], "the field is never posted directly");
-  assert.equal(clock.sleeps.length, 30, "the next hook found the tail at once, no further wait");
+  assert.equal(clock.sleeps.length, 30, "the next hook found the reply at once, no further wait");
 });
 
-test("Stop: a reply an earlier hook already mirrored costs no wait, and a pass with no new text keeps the tail", async (t) => {
+test("Stop: a reply an earlier hook already mirrored costs no wait, and a pass with no new text keeps the reply", async (t) => {
   const env = setup(t);
   await prime(env);
-  env.append(textEntry("a1", "already mirrored answer"));
+  env.append(userEntry("u1", "question"), textEntry("a1", "already mirrored answer"));
   await hook(env, fakeClient(), { event: "PostToolUse", tool: { name: "Bash", input: { command: "ls" } } });
-  assert.equal(readCursorFile(env).tail, "already mirrored answer");
+  assert.equal(readCursorFile(env).reply, "already mirrored answer");
 
   const clock = fakeClock();
   const client = fakeClient();
   await hook(env, client, { lastMessage: "already mirrored answer", now: clock.now, sleep: clock.sleep });
-  assert.deepEqual(clock.sleeps, [], "the tail already carries the reply");
+  assert.deepEqual(clock.sleeps, [], "the cursor already carries the reply");
   assert.deepEqual(client.sends.map((s) => s.kind), ["turn-end"]);
-  assert.equal(readCursorFile(env).tail, "already mirrored answer", "a pass with no new text keeps the tail");
+  assert.equal(readCursorFile(env).reply, "already mirrored answer", "a pass with no new text keeps the reply");
 });
 
-test("Stop: an identical reply in the next turn waits, because UserPromptSubmit clears the tail", async (t) => {
+test("Stop: narration before a tool that ends in the reply's words is not the reply", async (t) => {
+  const env = setup(t);
+  await prime(env);
+  env.append(textEntry("a1", "checking the handler; it returns OK"), toolEntry("a2", "Bash", { command: "ls" }), resultEntry("u1", "ta2"));
+  await hook(env, fakeClient(), { event: "PostToolUse", tool: { name: "Bash", input: { command: "ls" } } });
+
+  const clock = fakeClock();
+  const client = fakeClient();
+  await hook(env, client, {
+    lastMessage: "OK",
+    now: clock.now,
+    sleep: async (ms) => {
+      clock.sleeps.push(ms);
+      clock.t += ms;
+      if (clock.sleeps.length === 1) env.append(textEntry("a3", "OK"));
+    },
+  });
+  assert.deepEqual(client.sends.map((s) => s.kind), ["text", "turn-end"], JSON.stringify(client.sends));
+  assert.equal(client.sends[0].text, "OK");
+  assert.deepEqual(clock.sleeps, [100], "the wait ends on the reply itself");
+});
+
+test("Stop: an identical reply in the next turn waits, because the prompt's entry starts a new reply", async (t) => {
   const env = setup(t);
   await prime(env);
   env.append(textEntry("a1", "same answer"));
   const first = fakeClient();
   await hook(env, first, { lastMessage: "same answer" });
   assert.deepEqual(textSends(first).map((s) => s.text), ["same answer"]);
-  assert.equal(readCursorFile(env).tail, "same answer");
 
+  env.append(userEntry("u1", "do it again"));
   await hook(env, fakeClient(), { event: "UserPromptSubmit", prompt: "do it again" });
-  assert.equal(readCursorFile(env).tail, undefined, "the prompt clears the tail");
+  assert.equal(readCursorFile(env).reply, "", "the prompt's entry starts the reply over");
 
   const clock = fakeClock();
   const second = fakeClient();
   await hook(env, second, { lastMessage: "same answer", now: clock.now, sleep: clock.sleep });
-  assert.equal(clock.sleeps.length, 30, "without the clear this would have returned at once");
+  assert.equal(clock.sleeps.length, 30, "without the reset this would have returned at once");
   assert.deepEqual(second.sends.map((s) => s.kind), ["turn-end"]);
 });
 
-test("UserPromptSubmit leaves the cursor alone while another hook holds the lock", async (t) => {
+test("Stop: the same reply next turn waits for its own text, even when the prompt's hook was locked out", async (t) => {
   const env = setup(t);
   await prime(env);
   env.append(textEntry("a1", "held answer"));
   await hook(env, fakeClient(), { lastMessage: "held answer" });
-  fs.writeFileSync(env.cursorFile + ".lock", "");
-
+  env.append(userEntry("u1", "next"));
+  const lock = env.cursorFile + ".lock";
+  fs.writeFileSync(lock, "");
   await hook(env, fakeClient(), { event: "UserPromptSubmit", prompt: "next" });
-  assert.equal(readCursorFile(env).tail, "held answer", "a clear outside the lock can write an older cursor over a newer one");
+  fs.unlinkSync(lock);
+
+  const clock = fakeClock();
+  const client = fakeClient();
+  await hook(env, client, { lastMessage: "held answer", now: clock.now, sleep: clock.sleep });
+  assert.equal(clock.sleeps.length, 30, "the prompt's entry, not its hook, starts the next reply");
+  assert.deepEqual(client.sends.map((s) => s.kind), ["turn-end"]);
 });
 
 test("Stop: no last_assistant_message, or an empty one, means one mirror pass and no wait", async (t) => {

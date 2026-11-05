@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { getPaths } from "../paths.mjs";
 import { loadConfig } from "../config.mjs";
 import { createBrokerClient } from "./broker-client.mjs";
-import { readTranscriptFrom, textAfter, textOf, hasToolUse, readCursor, writeCursor, tryLock } from "./transcript-tail.mjs";
+import { readTranscriptFrom, textAfter, textOf, replyAfter, hasToolUse, readCursor, writeCursor, tryLock } from "./transcript-tail.mjs";
 import { brokerOptions, readSessionFile, writeTurnEnd } from "./session-file.mjs";
 import { PRIMING_LINE } from "./waiter.mjs";
 import { STOP_WAIT_MS } from "./wait-constants.mjs";
@@ -13,10 +13,9 @@ import { STOP_WAIT_MS } from "./wait-constants.mjs";
 const ARG_MAX = 80;
 const ARG_KEYS = ["command", "file_path", "notebook_path", "pattern", "path", "url", "query", "skill", "description", "prompt"];
 // At Stop the CLI has not flushed the turn's last entry yet, so the hook polls
-// the mirror until the reply shows up. The cursor keeps the last TAIL_CHARS
-// characters it sent; a 64-character needle survives assistantText trimming and
-// joining, which a whole-message comparison would not.
-const TAIL_CHARS = 256;
+// the mirror until the reply shows up. The cursor keeps the reply's last
+// NEEDLE_CHARS characters; a 64-character needle survives assistantText trimming
+// and joining, which a whole-message comparison would not.
 const NEEDLE_CHARS = 64;
 const STOP_POLL_MS = 100;
 // As a tool starts, the entries before it may still be unflushed. The hook is
@@ -35,7 +34,7 @@ export function shortArg(input) {
 
 // The seize mark resets the cursor on a re-seize, so text written while unclaimed is
 // never backfilled. A pass locked out sends nothing: its text stays after the cursor.
-// Returns the tail of what has been mirrored, or null when locked out.
+// Returns the end of the turn's reply so far, or null when locked out.
 async function mirror({ stateDir, sessionId, transcriptPath, session, client, onRead }) {
   const cursorFile = join(stateDir, "mirror", `${sessionId}.json`);
   const release = tryLock(cursorFile + ".lock");
@@ -49,28 +48,11 @@ async function mirror({ stateDir, sessionId, transcriptPath, session, client, on
     onRead?.(read.entries);
     const { text, lastUuid } = tail ? textOf(read.entries, fromUuid) : textAfter(read.entries, fromUuid);
     if (text) await client.sendMessage(session.peerId, "slack-bridge", text);
-    const previous = typeof resume?.tail === "string" ? resume.tail : "";
-    const mirrored = (text ? previous + (previous ? "\n\n" : "") + text : previous).slice(-TAIL_CHARS);
-    if (lastUuid && (lastUuid !== fromUuid || read.end !== resume?.offset || resume?.tail !== mirrored)) {
-      writeCursor(cursorFile, { uuid: lastUuid, seizeMark: session.seizeMark, offset: read.end, tail: mirrored });
+    const reply = replyAfter(read.entries, typeof resume?.reply === "string" ? resume.reply : "").slice(-NEEDLE_CHARS);
+    if (lastUuid && (lastUuid !== fromUuid || read.end !== resume?.offset)) {
+      writeCursor(cursorFile, { uuid: lastUuid, seizeMark: session.seizeMark, offset: read.end, reply });
     }
-    return mirrored;
-  } finally {
-    release();
-  }
-}
-
-// A new turn starts clean: an identical short reply next turn must not be
-// mistaken for the previous turn's text still sitting in the tail. Under the
-// mirror's lock: clearing beside a mirror can rewind the cursor and double-post.
-function clearTail(cursorFile) {
-  const release = tryLock(cursorFile + ".lock");
-  if (!release) return;
-  try {
-    const cursor = readCursor(cursorFile);
-    if (!cursor || !("tail" in cursor)) return;
-    delete cursor.tail;
-    writeCursor(cursorFile, cursor);
+    return reply;
   } finally {
     release();
   }
@@ -158,9 +140,9 @@ export async function runHook({
     const onRead = (entries) => { toolSeen ||= hasToolUse(entries, input.tool_use_id); };
     const mirrorOnce = () => mirror({ stateDir, sessionId: input.session_id, transcriptPath: input.transcript_path, session, client, onRead });
     const stopStartedAt = event === "Stop" ? _now() : 0;
-    let mirrored = null;
+    let reply = null;
     try {
-      mirrored = await mirrorOnce();
+      reply = await mirrorOnce();
     } catch {}
 
     if (isQuestion) {
@@ -180,9 +162,6 @@ export async function runHook({
       if (prompt && !isEchoedPrompt(prompt)) {
         await client.sendMessage(session.peerId, "slack-bridge", prompt, { kind: "prompt", hookStartedAt });
       }
-      // Wakes fire this too, so clear on every one: the tail must never outlive
-      // its turn.
-      clearTail(join(stateDir, "mirror", `${input.session_id}.json`));
       return null;
     }
 
@@ -215,15 +194,15 @@ export async function runHook({
     // The turn is over: the daemon closes this peer's terminal block. Wait for
     // the turn's last transcript entry, which the CLI flushes after this hook
     // starts, then close. Posting the field itself would double-post once the
-    // mirror catches up, so only the tail is compared. No field means no wait.
+    // mirror catches up, so only the mirrored reply is compared. No field means no wait.
     const last = typeof input.last_assistant_message === "string" ? input.last_assistant_message.trim() : "";
     if (last) {
       const needle = last.slice(-NEEDLE_CHARS);
-      while (mirrored === null || !mirrored.includes(needle)) {
+      while (reply === null || !reply.endsWith(needle)) {
         if (_now() - stopStartedAt >= STOP_WAIT_MS) break;
         await _sleep(STOP_POLL_MS);
         try {
-          mirrored = await mirrorOnce();
+          reply = await mirrorOnce();
         } catch {
           break; // a broken mirror must still reach turn-end
         }

@@ -64,6 +64,17 @@ export function textAfter(entries, cursorUuid) {
   return { text: assistantText(withUuid.slice(idx + 1)), lastUuid };
 }
 
+// The reply so far: assistant text since the newest user entry (a prompt or a tool
+// result), continuing `previous` when `entries` holds none. Narration before a tool
+// can end in the reply's own words, so position decides, not content.
+export function replyAfter(entries, previous) {
+  const own = entries.filter((e) => !e.isSidechain);
+  const start = own.findLastIndex((e) => e.type === "user");
+  const text = assistantText(own.slice(start + 1));
+  if (start !== -1) return text;
+  return previous && text ? `${previous}\n\n${text}` : previous || text;
+}
+
 export function hasToolUse(entries, id) {
   return entries.some((e) => Array.isArray(e.message?.content)
     && e.message.content.some((b) => b?.type === "tool_use" && b.id === id));
