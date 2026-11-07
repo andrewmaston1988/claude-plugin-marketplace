@@ -688,6 +688,12 @@ The root is valid for ten years and is **never rotated automatically**: rotating
 would silently untrust every phone. To rotate it, delete `~/.swarm/tls/`, restart the
 daemon, and install the new root on each phone again.
 
+The root is **name-constrained**: it can only vouch for `.local` names, `localhost` and
+private or CGNAT IPv4 addresses (`10/8`, `172.16/12`, `192.168/16`, `100.64/10`, `127/8`),
+and it cannot sign intermediate CAs (`pathlen:0`). A leaked `ca.key` therefore cannot
+impersonate a public site on any device that trusts it. The flip side: the dashboard
+validates only at those names, so a public IP or DNS name is left out of the certificate.
+
 `swarm serve doctor` reports `tls` (the leaf certificate is valid and covers the
 names the launcher prints) and `tls-host-trust` (this machine trusts the root) when
 https is on. `tls-host-trust` is `unknown` off Windows, and an `unknown` never fails the

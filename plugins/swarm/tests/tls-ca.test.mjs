@@ -50,13 +50,39 @@ function assertV3(pem, label) {
   assert.deepEqual([...inner], [0x02, 0x01, 0x02], `${label}: version INTEGER is 2 (v3)`);
 }
 
+// The extnValue bytes and critical flag of one extension, by its DER-encoded OID.
+function extension(pem, oidHex) {
+  const der = pemToDer(pem);
+  const tbs = tlv(der, tlv(der, 0).start);
+  let off = tbs.start;
+  while (off < tbs.end) {
+    const field = tlv(der, off);
+    if (field.tag === 0xa3) {
+      const exts = tlv(der, field.start);
+      for (let e = exts.start; e < exts.end;) {
+        const ext = tlv(der, e);
+        const id = tlv(der, ext.start);
+        let next = tlv(der, id.end);
+        let critical = false;
+        if (next.tag === 0x01) { critical = der[next.start] === 0xff; next = tlv(der, next.end); }
+        if (der.subarray(id.start, id.end).toString("hex") === oidHex) {
+          return { critical, value: der.subarray(next.start, next.end).toString("hex") };
+        }
+        e = ext.end;
+      }
+    }
+    off = field.end;
+  }
+  return null;
+}
+
 function get(opts) {
   return new Promise((resolve) => {
     const req = https.get({ ...opts, rejectUnauthorized: true }, (res) => {
       res.resume();
       resolve({ status: res.statusCode });
     });
-    req.on("error", (e) => resolve({ error: e.code || e.message }));
+    req.on("error", (e) => resolve({ error: e.code || e.message, message: e.message }));
   });
 }
 
@@ -76,14 +102,64 @@ test("row 1: the CA is self-signed, has ca:true, its key matches, and both CA an
   } finally { rmSync(home, { recursive: true, force: true }); }
 });
 
-test("row 2: the leaf covers the host, localhost, 127.0.0.1 and every LAN IPv4, and nothing outside the set", () => {
+test("row 1b: the CA is pathlen:0 and name-constrained to local names and private IPs; O names the publisher", () => {
   const home = tmpHome();
   try {
     const t = ensureTls({ home, names: NAMES, now: NOW });
+    const bc = extension(t.caCertPem, "551d13");
+    assert.equal(bc.critical, true, "basicConstraints is critical");
+    assert.equal(bc.value, "30060101ff020100", "basicConstraints is CA:TRUE, pathlen:0");
+    const nc = extension(t.caCertPem, "551d1e");
+    assert.ok(nc, "the CA carries nameConstraints");
+    assert.equal(nc.critical, true, "nameConstraints is critical");
+    // permittedSubtrees [0]: dNSName local, localhost; iPAddress 10/8, 172.16/12, 192.168/16, 100.64/10, 127/8
+    const hex = (s) => Buffer.from(s).toString("hex");
+    const subtree = (gn) => `30${(gn.length / 2).toString(16).padStart(2, "0")}${gn}`;
+    const dns = (s) => subtree(`82${s.length.toString(16).padStart(2, "0")}${hex(s)}`);
+    const ip = (addr, mask) => subtree(`8708${Buffer.from([...addr, ...mask]).toString("hex")}`);
+    const subtrees = [
+      dns("local"), dns("localhost"),
+      ip([10, 0, 0, 0], [255, 0, 0, 0]), ip([172, 16, 0, 0], [255, 240, 0, 0]), ip([192, 168, 0, 0], [255, 255, 0, 0]),
+      ip([100, 64, 0, 0], [255, 192, 0, 0]), ip([127, 0, 0, 0], [255, 0, 0, 0]),
+    ].join("");
+    const permitted = `a0${(subtrees.length / 2).toString(16).padStart(2, "0")}${subtrees}`;
+    assert.equal(nc.value, `30${(permitted.length / 2).toString(16).padStart(2, "0")}${permitted}`, "exact permitted subtrees");
+    assert.match(new X509Certificate(t.caCertPem).subject, /O=swarm \(andrewmaston1988\)/);
+    assert.match(new X509Certificate(t.cert).subject, /O=swarm \(andrewmaston1988\)/);
+  } finally { rmSync(home, { recursive: true, force: true }); }
+});
+
+test("row 1c: a leaf naming a public host is refused by a real handshake, even with the CA trusted", async () => {
+  const home = tmpHome();
+  let server;
+  try {
+    // _permits lets the probe smuggle a public name past the SAN filter, so the
+    // CA's own constraints are the only thing left to refuse it.
+    const t = ensureTls({ home, names: ["example.com", "8.8.8.8"], now: NOW, _permits: () => true });
+    assert.ok(new X509Certificate(t.cert).checkHost("example.com"), "the probe leaf really names example.com");
+    server = https.createServer({ key: t.key, cert: t.cert }, (req, res) => { res.writeHead(200); res.end(); });
+    await new Promise((r) => server.listen(0, "127.0.0.1", r));
+    const r = await get({ host: "127.0.0.1", port: server.address().port, path: "/", ca: t.caCertPem });
+    assert.equal(r.status, undefined, `the handshake must fail, got ${JSON.stringify(r)}`);
+    // Node surfaces OpenSSL's X509_V_ERR_PERMITTED_VIOLATION as code UNSPECIFIED; the message names it.
+    assert.match(String(r.message), /permitted subtree violation/, `refused for the name constraint, got ${JSON.stringify(r)}`);
+  } finally {
+    if (server) await new Promise((r) => server.close(r));
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("row 2: the leaf covers the host, localhost, 127.0.0.1 and every LAN IPv4, and nothing outside the set", () => {
+  const home = tmpHome();
+  try {
+    const t = ensureTls({ home, names: [...NAMES, "8.8.8.8"], now: NOW });
     const leaf = new X509Certificate(t.cert);
-    for (const host of ["desktop-x.local", "desktop-x", "localhost"]) {
+    for (const host of ["desktop-x.local", "localhost"]) {
       assert.ok(leaf.checkHost(host), `checkHost("${host}") matches`);
     }
+    assert.equal(leaf.checkHost("desktop-x"), undefined, "the bare hostname is not a SAN: no name constraint can cover it");
+    assert.equal(leaf.checkIP("8.8.8.8"), undefined, "a public IP is dropped from the SAN, not left to break the chain");
+    assert.equal(leafCovers(leaf, [...NAMES, "8.8.8.8"]), true, "a dropped public name does not force a re-issue every start");
     for (const ip of ["127.0.0.1", ...LAN]) {
       assert.ok(leaf.checkIP(ip), `checkIP("${ip}") matches`);
     }

@@ -84,9 +84,10 @@ const OID_EXT_KEY_USAGE = "2.5.29.37";
 const OID_SAN = "2.5.29.17";
 const OID_SKI = "2.5.29.14";
 const OID_AKI = "2.5.29.35";
+const OID_NAME_CONSTRAINTS = "2.5.29.30";
 const OID_SERVER_AUTH = "1.3.6.1.5.5.7.3.1";
 
-const distinguishedName = (cn) => seq(set(seq(oid(OID_CN), utf8(cn))), set(seq(oid(OID_O), utf8("swarm"))));
+const distinguishedName = (cn) => seq(set(seq(oid(OID_CN), utf8(cn))), set(seq(oid(OID_O), utf8("swarm (andrewmaston1988)"))));
 
 // { tag, start (content offset), length, end } for one TLV.
 function readTlv(buf, offset) {
@@ -112,8 +113,29 @@ function keyId(spkiDer) {
 
 const extension = (id, critical, value) => seq(oid(id), ...(critical ? [bool(true)] : []), octet(value));
 
+// The only names the root may ever vouch for. A stolen ca.key cannot fake a
+// public site: Chrome, Windows and OpenSSL refuse any leaf outside these.
+const PERMITTED_DNS = ["local", "localhost"];
+const PERMITTED_IPV4 = [[[10, 0, 0, 0], 8], [[172, 16, 0, 0], 12], [[192, 168, 0, 0], 16], [[100, 64, 0, 0], 10], [[127, 0, 0, 0], 8]];
+
+const maskOf = (bits) => [0, 1, 2, 3].map((i) => (0xff << (8 - Math.min(8, Math.max(0, bits - 8 * i)))) & 0xff);
+
+function permitted(name) {
+  if (isIPv4(name)) {
+    const ip = name.split(".").map(Number);
+    return PERMITTED_IPV4.some(([net, bits]) => maskOf(bits).every((m, i) => (ip[i] & m) === net[i]));
+  }
+  return PERMITTED_DNS.some((d) => name === d || name.endsWith(`.${d}`));
+}
+
+const nameConstraints = () => seq(ctx(0, true, Buffer.concat([
+  ...PERMITTED_DNS.map((d) => seq(der(0x82, Buffer.from(d, "ascii")))),
+  ...PERMITTED_IPV4.map(([net, bits]) => seq(der(0x87, Buffer.from([...net, ...maskOf(bits)])))),
+])));
+
 const caExtensions = (ski) => seq(
-  extension(OID_BASIC_CONSTRAINTS, true, seq(bool(true))),
+  extension(OID_BASIC_CONSTRAINTS, true, seq(bool(true), int(0))),
+  extension(OID_NAME_CONSTRAINTS, true, nameConstraints()),
   // bit 5 keyCertSign + bit 6 cRLSign
   extension(OID_KEY_USAGE, true, bitString(Buffer.from([0x06]), 1)),
   extension(OID_SKI, false, octet(ski)),
@@ -159,19 +181,16 @@ function newSerial() {
 
 const isIPv4 = (s) => /^\d{1,3}(\.\d{1,3}){3}$/.test(s) && s.split(".").every((p) => Number(p) <= 255);
 
-// The SAN must cover everything the launcher prints, plus the loopback names
-// a PC browser uses and the bare hostname (without .local) mDNS also resolves.
-function expandNames(names) {
+// The SAN covers everything the launcher prints plus the loopback names a PC
+// browser uses — minus any name outside the CA's constraints (a public IP),
+// which would otherwise make the whole leaf invalid rather than just that name.
+function expandNames(names, permits = permitted) {
   const out = [];
   const add = (n) => {
     const v = String(n).toLowerCase();
-    if (v && !out.includes(v)) out.push(v);
+    if (v && permits(v) && !out.includes(v)) out.push(v);
   };
-  for (const n of names) {
-    add(n);
-    const local = /^([^.]+)\.local$/.exec(String(n).toLowerCase());
-    if (local) add(local[1]);
-  }
+  for (const n of names) add(n);
   add("localhost");
   add("127.0.0.1");
   return out;
@@ -231,7 +250,7 @@ function createCa(dir, at, generate) {
   return { certPem, keyPem, cert: new X509Certificate(certPem), key: privateKey, spki };
 }
 
-function loadLeaf(dir, ca, names, at) {
+function loadLeaf(dir, ca, names, at, permits) {
   try {
     const certPem = readFileSync(join(dir, "server.crt"), "utf8");
     const keyPem = readFileSync(join(dir, "server.key"), "utf8");
@@ -241,17 +260,17 @@ function loadLeaf(dir, ca, names, at) {
     const usable = cert.checkPrivateKey(key)
       && cert.verify(ca.cert.publicKey)
       && notAfter - at > RENEW_BEFORE_DAYS * DAY
-      && leafCovers(cert, names);
+      && leafCovers(cert, names, permits);
     return usable ? { certPem, keyPem, cert, notAfter } : null;
   } catch {
     return null;
   }
 }
 
-function issueLeaf(ca, names, at, generate) {
+function issueLeaf(ca, names, at, generate, permits) {
   const { privateKey, publicKey } = generate("ec", { namedCurve: "P-256" });
   const spki = publicKey.export({ type: "spki", format: "der" });
-  const sans = expandNames(names);
+  const sans = expandNames(names, permits);
   const derBytes = buildCertificate({
     subject: distinguishedName(`${bareHost(names)} swarm dashboard`),
     issuer: distinguishedName("swarm dashboard CA"),
@@ -275,7 +294,7 @@ function issueLeaf(ca, names, at, generate) {
 // Load or create ~/.swarm/tls/{ca,server}.{key,crt}; re-issue the leaf whenever
 // it is missing, near expiry, missing a name, or chained to another CA.
 // `now` may be a timestamp or a function returning one (cmd-serve passes Date.now).
-export function ensureTls({ home, names, now = Date.now, _generateKeyPair = generateKeyPairSync, _renameSync = renameSync }) {
+export function ensureTls({ home, names, now = Date.now, _generateKeyPair = generateKeyPairSync, _renameSync = renameSync, _permits = permitted }) {
   const at = asTime(now);
   const dir = join(home, "tls");
   mkdirSync(dir, { recursive: true });
@@ -288,10 +307,10 @@ export function ensureTls({ home, names, now = Date.now, _generateKeyPair = gene
     writeAtomic(join(dir, "ca.crt"), ca.certPem, 0o644, _renameSync);
   }
 
-  let leaf = loadLeaf(dir, ca, names, at);
+  let leaf = loadLeaf(dir, ca, names, at, _permits);
   const leafIssued = !leaf;
   if (!leaf) {
-    leaf = issueLeaf(ca, names, at, _generateKeyPair);
+    leaf = issueLeaf(ca, names, at, _generateKeyPair, _permits);
     writeAtomic(join(dir, "server.key"), leaf.keyPem, 0o600, _renameSync);
     writeAtomic(join(dir, "server.crt"), leaf.certPem, 0o644, _renameSync);
   }
@@ -307,9 +326,9 @@ export function ensureTls({ home, names, now = Date.now, _generateKeyPair = gene
 }
 
 // Does this certificate's SAN cover every name the dashboard answers to?
-export function leafCovers(cert, names) {
+export function leafCovers(cert, names, permits = permitted) {
   const x509 = typeof cert === "string" ? new X509Certificate(cert) : cert;
-  return expandNames(names).every((n) => isIPv4(n) ? Boolean(x509.checkIP(n)) : Boolean(x509.checkHost(n)));
+  return expandNames(names, permits).every((n) => isIPv4(n) ? Boolean(x509.checkIP(n)) : Boolean(x509.checkHost(n)));
 }
 
 // Doctor's TLS row. `unknown` when a CA exists but no leaf has been issued yet;
