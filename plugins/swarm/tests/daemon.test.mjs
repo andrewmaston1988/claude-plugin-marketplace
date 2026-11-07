@@ -8,7 +8,7 @@ import { spawnSync, spawn } from "node:child_process";
 import {
   writePid, readPid, clearPid, isAlive, urlLines, firewallHint, installAutostart, uninstallAutostart, launcherPath,
   pidPath, resolveInstalled, isStale, blocksStart, bindFailureRecordAction, waitForDaemon, statusReport, doctorChecks, doctorExit, ensureShim,
-  waitForExit, restartPlan, drainAndClose,
+  waitForExit, restartPlan, drainAndClose, lanNames, hostTrustHint, hostTrustCheck,
 } from "../src/serve/daemon.mjs";
 import { createLogger } from "../src/serve/log.mjs";
 
@@ -163,7 +163,7 @@ test("doctor: all checks pass → exit 0; dead pid → named failure; cache-path
     installAutostart({ startupDir: dir, nodePath: "C:\\node\\node.exe", enginePath: "C:\\Users\\a\\.swarm\\serve.mjs",
       engineArgs: ["scripts/swarm.mjs", "serve", "--daemon"] });
     const good = { record: { pid: 4321, port: 7331, version: "v1", listening: true }, alive: true,
-      installed: { version: "v1" }, port: 7331, startupDir: dir, shimPath: "C:\\Users\\a\\.swarm\\serve.mjs",
+      installed: { version: "v1" }, port: 7331, scheme: "http", startupDir: dir, shimPath: "C:\\Users\\a\\.swarm\\serve.mjs",
       _probePort: async () => ({ reachable: true }),
       _firewall: async () => ({ error: "access denied — elevation required" }) }; // firewall unreadable
     const pass = await doctorChecks(good);
@@ -192,6 +192,87 @@ test("doctor: all checks pass → exit 0; dead pid → named failure; cache-path
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
+// Row 10: the TLS rows. Absent entirely when https is off — a check nobody
+// performed must not print as a pass — and when https is on they come from the
+// daemon's own certStatus. Unknown never fails the run.
+test("doctor: tls rows — absent when https is off; pass for a fresh leaf, fail for a missing or expired one; unknown host trust never fails", async () => {
+  const home = tmpHome();
+  try {
+    const NOW = Date.UTC(2026, 0, 15, 12, 0, 0);
+    const names = ["desktop-x.local", "192.168.1.20"];
+    const { ensureTls, certStatus } = await import("../src/serve/tls-ca.mjs");
+    const base = {
+      record: { pid: 4321, port: 7331, version: "v1", listening: true }, alive: true,
+      installed: { version: "v1" }, port: 7331, startupDir: null, shimPath: "/s",
+      _probePort: async () => ({ reachable: true }), _firewall: async () => ({ found: true }),
+    };
+    const tlsStatus = (now) => () => certStatus({ home, names, now });
+    const hostUnknown = async () => ({ status: "unknown", detail: "not verifiable on this platform" });
+
+    const off = await doctorChecks({ ...base, scheme: "http" });
+    assert.equal(off.find((c) => c.name === "tls"), undefined, "no tls row when https is off");
+    assert.equal(off.find((c) => c.name === "tls-host-trust"), undefined, "no host-trust row either");
+
+    const missing = await doctorChecks({ ...base, scheme: "https", _tlsStatus: tlsStatus(NOW), _hostTrust: hostUnknown });
+    assert.equal(missing.find((c) => c.name === "tls").status, "fail", "no CA yet → fail");
+    assert.equal(doctorExit(missing), 1);
+
+    ensureTls({ home, names, now: NOW });
+    const fresh = await doctorChecks({ ...base, scheme: "https", _tlsStatus: tlsStatus(NOW), _hostTrust: hostUnknown });
+    assert.equal(fresh.find((c) => c.name === "tls").status, "pass", "a fresh leaf covering the current names passes");
+    assert.match(fresh.find((c) => c.name === "tls").detail, /valid \d+ days/);
+    assert.equal(fresh.find((c) => c.name === "tls-host-trust").status, "unknown");
+    assert.equal(doctorExit(fresh), 0, "unknown host trust never fails the run");
+
+    const expired = await doctorChecks({ ...base, scheme: "https", _tlsStatus: tlsStatus(Date.UTC(2028, 0, 15)), _hostTrust: hostUnknown });
+    assert.equal(expired.find((c) => c.name === "tls").status, "fail", "an expired leaf is a fail");
+    assert.match(expired.find((c) => c.name === "tls").detail, /expired/);
+    assert.equal(doctorExit(expired), 1);
+  } finally { rmSync(home, { recursive: true, force: true }); }
+});
+
+test("hostTrustHint: a per-platform user-store install command, printed and never run", () => {
+  assert.equal(
+    hostTrustHint("win32", "C:\\Users\\a\\.swarm\\tls\\ca.crt"),
+    'certutil -addstore -user Root "C:\\Users\\a\\.swarm\\tls\\ca.crt"',
+    "Windows: current-user Root store, no elevation",
+  );
+  assert.match(hostTrustHint("darwin", "/Users/a/.swarm/tls/ca.crt"),
+    /^security add-trusted-cert -r trustRoot -k ~\/Library\/Keychains\/login\.keychain-db "\/Users\/a\/\.swarm\/tls\/ca\.crt"$/);
+  assert.match(hostTrustHint("linux", "/home/a/.swarm/tls/ca.crt"), /ca-certificates|trust store|trusted root/i);
+});
+
+test("hostTrustCheck: unknown off Windows; on Windows it reads the CA's serial and verifies it in the user Root store", async () => {
+  const home = tmpHome();
+  try {
+    const { ensureTls } = await import("../src/serve/tls-ca.mjs");
+    const { caCertPem } = ensureTls({ home, names: ["desktop-x.local"], now: Date.UTC(2026, 0, 15) });
+    const caPath = join(home, "tls", "ca.crt");
+    const { X509Certificate } = await import("node:crypto");
+    const serial = new X509Certificate(caCertPem).serialNumber;
+
+    const offWin = await hostTrustCheck({ platform: "linux", caPath });
+    assert.equal(offWin.status, "unknown", "never run certutil on a platform that has none");
+    assert.match(offWin.detail, /not verifiable/i);
+
+    const calls = [];
+    const pass = await hostTrustCheck({
+      platform: "win32", caPath,
+      _exec: async (file, args) => { calls.push([file, ...args]); return { stdout: "" }; },
+    });
+    assert.equal(pass.status, "pass");
+    assert.equal(calls[0][0], "certutil");
+    assert.deepEqual(calls[0].slice(1), ["-user", "-verifystore", "Root", serial], "reads the user's own store, by serial");
+
+    const fail = await hostTrustCheck({
+      platform: "win32", caPath,
+      _exec: async () => { throw new Error("CertUtil: -verifystore command FAILED"); },
+    });
+    assert.equal(fail.status, "fail");
+    assert.match(fail.detail, /certutil -addstore -user Root/);
+  } finally { rmSync(home, { recursive: true, force: true }); }
+});
+
 test("isAlive: uses signal 0, false on throw or no pid", () => {
   assert.equal(isAlive(null), false);
   assert.equal(isAlive(12, () => {}), true);
@@ -199,13 +280,30 @@ test("isAlive: uses signal 0, false on throw or no pid", () => {
 });
 
 test("urlLines: .local hostname first, then every non-internal IPv4; firewall hint names the port", () => {
-  const lines = urlLines(7331, { host: "DESKTOP-X", ifaces: {
+  const ifaces = {
     lo: [{ family: "IPv4", address: "127.0.0.1", internal: true }],
     eth: [{ family: "IPv4", address: "192.168.1.20", internal: false }, { family: "IPv6", address: "fe80::1", internal: false }],
     wifi: [{ family: "IPv4", address: "10.0.0.5", internal: false }],
-  } });
+  };
+  const lines = urlLines(7331, { scheme: "http", host: "DESKTOP-X", ifaces });
   assert.deepEqual(lines, ["http://desktop-x.local:7331/", "http://192.168.1.20:7331/", "http://10.0.0.5:7331/"]);
   assert.match(firewallHint(7331), /localport=7331/);
+});
+
+// Row 9: a launcher that prints http:// for an https daemon is the bug the
+// operator flagged ("the swarm launcher does some work"). Every line carries
+// the scheme, and lanNames is the single interface walk both urlLines and
+// cmd-serve's ensureTls names come from.
+test("urlLines: the scheme prefixes every line; lanNames is the one name source", () => {
+  const ifaces = {
+    lo: [{ family: "IPv4", address: "127.0.0.1", internal: true }],
+    eth: [{ family: "IPv4", address: "192.168.1.20", internal: false }],
+    wifi: [{ family: "IPv4", address: "10.0.0.5", internal: false }],
+  };
+  const https = urlLines(7331, { scheme: "https", host: "DESKTOP-X", ifaces });
+  assert.deepEqual(https, ["https://desktop-x.local:7331/", "https://192.168.1.20:7331/", "https://10.0.0.5:7331/"]);
+  assert.ok(https.every((l) => l.startsWith("https://")), "every line, not just the first");
+  assert.deepEqual(lanNames({ host: "DESKTOP-X", ifaces }), ["desktop-x.local", "192.168.1.20", "10.0.0.5"]);
 });
 
 test("ensureShim: copies the resolver to the stable path so every launch goes through it", () => {

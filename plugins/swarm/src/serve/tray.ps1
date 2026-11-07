@@ -56,6 +56,12 @@ $script:tray.Visible = $true
 $script:disabled = [bool]$Disabled
 $script:ConfigFile = if ($SwarmHome) { Join-Path $SwarmHome 'config.json' } else { '' }
 
+# The scheme Open uses. Read from the pid record the 2s poll already fetches, not
+# from config and not from a spawn argument: config is only what the NEXT start
+# will serve, and the one-tray guard means a spawn-time value would freeze at the
+# scheme the first daemon happened to use. Absent record or absent key → http.
+$script:Scheme = 'http'
+
 # The daemon renders the same mark the web manifest uses; load via MemoryStream
 # so no file handle is held — the next daemon start rewrites the PNG.
 $iconOk = $false
@@ -91,7 +97,7 @@ $menu.Items.Add('-') | Out-Null
 $script:itemOpen = New-Object System.Windows.Forms.ToolStripMenuItem
 $script:itemOpen.Text = 'Open dashboard'
 $script:itemOpen.add_Click({
-  Start-Process -FilePath ('http://localhost:{0}/' -f $script:Port)
+  Start-Process -FilePath ('{0}://localhost:{1}/' -f $script:Scheme, $script:Port)
 })
 $menu.Items.Add($script:itemOpen) | Out-Null
 
@@ -189,6 +195,9 @@ $timer.add_Tick({
     # NB: do not name this $pid — that is a read-only automatic variable.
     $daemonPid = 0
     $daemonVersion = ''
+    # Reset before the read so an absent record (a deliberate `serve stop`, or a
+    # daemon that predates the record format) opens http, never a stale https.
+    $script:Scheme = 'http'
     $lines = Get-Content $script:PidFile -ErrorAction SilentlyContinue
     if ($lines) {
       $raw = ($lines -join ' ').Trim()
@@ -198,6 +207,7 @@ $timer.add_Tick({
         $rec = $raw | ConvertFrom-Json
         if ($null -ne $rec -and $rec.pid) { $daemonPid = [int]$rec.pid }
         if ($null -ne $rec -and $rec.version) { $daemonVersion = [string]$rec.version }
+        if ($null -ne $rec -and $rec.scheme) { $script:Scheme = [string]$rec.scheme }
       }
     }
     $alive = $false

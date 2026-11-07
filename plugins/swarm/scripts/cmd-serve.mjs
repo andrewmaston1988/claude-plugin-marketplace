@@ -10,13 +10,18 @@ import { dim, out, err } from "../src/ui.mjs";
 // serve — the LAN dashboard. Foreground by default; --daemon forks a detached
 // copy and records its pid (written by the parent, per the plugin daemon rule).
 export async function cmdServe(rest, { readProviderUsage }) {
-  const { writePid, readPid, clearPid, isAlive, urlLines, firewallHint, installAutostart, uninstallAutostart, defaultStartupDir,
+  const { writePid, readPid, clearPid, isAlive, urlLines, lanNames, firewallHint, hostTrustHint, installAutostart, uninstallAutostart, defaultStartupDir,
     resolveInstalled, isStale, blocksStart, bindFailureRecordAction, waitForDaemon, statusReport, registryPath, ensureShim, probePort, waitForExit, restartPlan, drainAndClose, spawnLoggedDaemon } = await import("../src/serve/daemon.mjs");
   const { launchTray } = await import("../src/serve/tray.mjs");
   const { runDoctor } = await import("../src/serve/doctor.mjs");
   const home = swarmHome();
   const cfg = getConfig();
   const port = cfg.dashboard?.port ?? 7331;
+  // What a start will serve. It must NOT be used to describe a live daemon: that
+  // is the pid record's job, so toggling dashboard.https without a restart cannot
+  // make status or the launcher name a scheme nothing is listening on.
+  const cfgScheme = cfg.dashboard?.https ? "https" : "http";
+  const caPath = join(home, "tls", "ca.crt");
   // The CLI entry point beside this file, never this file — a respawned daemon
   // has to come up through the dispatcher, which is the only module with a main().
   const enginePath = fileURLToPath(new URL("./swarm.mjs", import.meta.url));
@@ -39,7 +44,7 @@ export async function cmdServe(rest, { readProviderUsage }) {
   if (verb === "status") {
     const rec = readPid(home);
     const alive = isAlive(rec?.pid);
-    const rep = statusReport({ record: rec, alive, installed, port, urls: alive ? urlLines(port) : [], startupDir: defaultStartupDir(), shimPath });
+    const rep = statusReport({ record: rec, alive, installed, port, urls: alive ? urlLines(rec.port ?? port, { scheme: rec.scheme ?? "http" }) : [], startupDir: defaultStartupDir(), shimPath });
     for (const line of rep.lines) out(line);
     exitSoon(rep.exit); return rep.exit;
   }
@@ -97,7 +102,7 @@ export async function cmdServe(rest, { readProviderUsage }) {
   // circuit exists for `start` only.
   if (verb !== "restart" && blocksStart(running, installed, process.pid, aliveRunning)) {
     out(`dashboard: already running (pid ${running.pid})`);
-    for (const u of urlLines(port)) out(`  ${u}`);
+    for (const u of urlLines(running.port ?? port, { scheme: running.scheme ?? "http" })) out(`  ${u}`);
     exitSoon(0); return 0;
   }
   if (takeover) out(`dashboard: taking over from stale pid ${running.pid} (running ${running.version} → installed ${installed?.version})`);
@@ -114,7 +119,13 @@ export async function cmdServe(rest, { readProviderUsage }) {
     // rotated event log.
     const started = spawnLoggedDaemon([process.execPath, enginePath, "serve"], home);
     if (!started.ok) return { ok: false, reason: `could not spawn the daemon: ${started.reason}` };
-    if (!takeover) writePid(home, { pid: started.pid, port, installPath: installed?.installPath ?? null, version: installed?.version ?? null, startedMs: Date.now() });
+    if (!takeover) writePid(home, { pid: started.pid, port, scheme: cfgScheme, installPath: installed?.installPath ?? null, version: installed?.version ?? null, startedMs: Date.now() });
+    // The one step that makes a phone trust the dashboard at all. Printed by every
+    // detached start (--daemon, restart, tray-Restart), not just the first.
+    if (cfgScheme === "https") {
+      out(`dashboard: install the CA on this PC and each phone from ${urlLines(port, { scheme: cfgScheme })[0]}swarm-ca.crt`);
+      out(dim(`  trust it once: ${hostTrustHint(process.platform, caPath)}`));
+    }
     const t = await launchTray({ home, port, shimPath, tray: cfg.dashboard?.tray !== false });
     if (!t.ok) err(`dashboard: ${t.reason}`);
     return { ok: true, pid: started.pid, logPath: started.logPath };
@@ -148,15 +159,23 @@ export async function cmdServe(rest, { readProviderUsage }) {
     const w = await waitForDaemon({ read: () => readPid(home), isAlive, excludePid: null, deadlineMs: 15000 });
     if (!w.ok) { err(`dashboard: restart failed — ${w.reason}`); exitSoon(1); return 1; }
     out(`dashboard: restarted pid ${w.record.pid} (version ${w.record.version ?? "unknown"})`);
-    for (const u of urlLines(port)) out(`  ${u}`);
+    for (const u of urlLines(w.record.port ?? port, { scheme: w.record.scheme ?? "http" })) out(`  ${u}`);
     exitSoon(0); return 0;
   }
 
   if (rest.includes("--daemon")) {
     const started = await startDetached();
     if (!started.ok) { err(`dashboard: ${started.reason}`); exitSoon(1); return 1; }
-    out(`dashboard: started pid ${started.pid} (events: ${join(home, "dashboard.log")}, stdio: ${started.logPath})`);
-    for (const u of urlLines(port)) out(`  ${u}`);
+    // Wait for the child to listen, exactly as restart does. Without it a child
+    // that dies in ensureTls still printed "started pid N" and looked like success.
+    // The parent's pre-fork record names the child, so any other pid is the child.
+    const w = await waitForDaemon({ read: () => readPid(home), isAlive, excludePid: process.pid, failOnCleared: true, deadlineMs: 15000 });
+    if (!w.ok) {
+      err(`dashboard: start failed — ${w.reason} (events: ${join(home, "dashboard.log")})`);
+      exitSoon(1); return 1;
+    }
+    out(`dashboard: started pid ${w.record.pid} (events: ${join(home, "dashboard.log")}, stdio: ${started.logPath})`);
+    for (const u of urlLines(w.record.port ?? port, { scheme: w.record.scheme ?? cfgScheme })) out(`  ${u}`);
     out(dim(`firewall (once, elevated): ${firewallHint(port)}`));
     exitSoon(0); return 0;
   }
@@ -184,7 +203,23 @@ export async function cmdServe(rest, { readProviderUsage }) {
   if (process.env.NODE_TEST_CONTEXT && process.env.SWARM_SERVE_TEST_CRASH === "before-listen") {
     process.nextTick(() => { throw new Error("SWARM_SERVE_TEST_CRASH=before-listen"); });
   }
-  const server = createServer({ home, cfg, log: (m) => err(`dashboard: ${m}`), _readProviderUsage: readProviderUsage });
+  // Certificates before the server exists. A TLS failure is logged explicitly and
+  // fails the start: cmdServe is awaited inside main's try/catch, so a throw prints
+  // and never reaches the registered crash handlers above.
+  let tls = null;
+  if (cfgScheme === "https") {
+    const { ensureTls } = await import("../src/serve/tls-ca.mjs");
+    try {
+      tls = ensureTls({ home, names: lanNames(), now: Date.now });
+      dlog("tls", { caCreated: tls.caCreated, leafIssued: tls.leafIssued, leafNotAfter: tls.leafNotAfter });
+    } catch (e) {
+      dlog("tls-error", { msg: String(e?.message ?? e), stack: e?.stack });
+      const cur = readPid(home);
+      if (cur?.pid === process.pid) clearPid(home);
+      throw e;
+    }
+  }
+  const server = createServer({ home, cfg, log: (m) => err(`dashboard: ${m}`), _readProviderUsage: readProviderUsage, tls });
   const bind = cfg.dashboard?.bind ?? "0.0.0.0";
   // SSE streams never "finish", so they cannot count as in-flight for the
   // handover drain — they are ended outright at handover and the browser
@@ -204,7 +239,7 @@ export async function cmdServe(rest, { readProviderUsage }) {
     server.once("error", onErr);
     server.listen(port, bind, () => { server.removeListener("error", onErr); resolve(); });
   });
-  const record = { pid: process.pid, port, installPath: installed?.installPath ?? null, version: installed?.version ?? null, startedMs: Date.now() };
+  const record = { pid: process.pid, port, scheme: cfgScheme, installPath: installed?.installPath ?? null, version: installed?.version ?? null, startedMs: Date.now() };
   const prevRecord = readPid(home); // a live stale daemon we are taking over from, if any
   writePid(home, record); // before listen, per the daemon lifecycle rule; handed back below if listen fails
   try {
@@ -222,7 +257,7 @@ export async function cmdServe(rest, { readProviderUsage }) {
     setTimeout(() => { throw new Error("SWARM_SERVE_TEST_CRASH=after-listen"); }, 20);
   }
   out(`dashboard: serving ~/.swarm/runs on port ${port}`);
-  for (const u of urlLines(port)) out(`  ${u}`);
+  for (const u of urlLines(port, { scheme: cfgScheme })) out(`  ${u}`);
   out(dim(`firewall (once, elevated): ${firewallHint(port)}`));
 
   // Handover plumbing for the update watcher: release the port for the

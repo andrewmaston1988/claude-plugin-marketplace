@@ -5,6 +5,7 @@
 import { readFileSync, writeFileSync, renameSync, unlinkSync, existsSync, mkdirSync, copyFileSync, openSync, closeSync } from "node:fs";
 import { join } from "node:path";
 import { hostname, networkInterfaces } from "node:os";
+import { X509Certificate } from "node:crypto";
 import { connect } from "node:net";
 import { execFile, spawn } from "node:child_process";
 import { promisify } from "node:util";
@@ -134,14 +135,21 @@ export async function waitForDaemon({
   }
 }
 
-// What to print at start: the mDNS name phones resolve, every LAN IPv4, and the
-// one-time elevated firewall rule — printed, never run.
-export function urlLines(port, { host = hostname(), ifaces = networkInterfaces() } = {}) {
-  const lines = [`http://${host.toLowerCase()}.local:${port}/`];
+// The names the launcher prints and the leaf certificate must cover: the mDNS
+// name phones resolve, then every non-internal IPv4. One walk, two consumers —
+// ensureTls takes these names as its SAN list.
+export function lanNames({ host = hostname(), ifaces = networkInterfaces() } = {}) {
+  const names = [`${host.toLowerCase()}.local`];
   for (const list of Object.values(ifaces)) {
-    for (const i of list || []) if (i.family === "IPv4" && !i.internal) lines.push(`http://${i.address}:${port}/`);
+    for (const i of list || []) if (i.family === "IPv4" && !i.internal) names.push(i.address);
   }
-  return lines;
+  return names;
+}
+
+// What to print at start. `scheme` is required: a launcher that prints http://
+// for an https daemon sends the operator to a URL nothing is listening on.
+export function urlLines(port, { scheme, host = hostname(), ifaces = networkInterfaces() } = {}) {
+  return lanNames({ host, ifaces }).map((n) => `${scheme}://${n}:${port}/`);
 }
 export const firewallHint = (port) =>
   `netsh advfirewall firewall add rule name="swarm dashboard" dir=in action=allow protocol=TCP localport=${port}`;
@@ -162,7 +170,7 @@ export function launcherState({ startupDir, shimPath }) {
 // `serve status` — three states, three prints: not running / running current /
 // running a version the registry has moved off. Stale still exits 0 (the daemon
 // IS serving); `serve doctor` is the verb that fails on it.
-export function statusReport({ record, alive, installed, port, urls = [], startupDir = null, shimPath }) {
+export function statusReport({ record, alive, installed, port, urls, startupDir = null, shimPath }) {
   if (!alive || !record?.pid) return { state: "not-running", exit: 1, lines: ["dashboard: not running"] };
   const lines = [`dashboard: running (pid ${record.pid}, port ${record.port ?? port}, started ${fmtTime(record.startedMs)})`];
   const runningV = record.version ?? null;
@@ -175,7 +183,11 @@ export function statusReport({ record, alive, installed, port, urls = [], startu
   }
   const l = launcherState({ startupDir, shimPath });
   lines.push(`  autostart: ${l.state === "ok" ? `installed → ${l.detail}` : l.detail}`);
-  for (const u of urls) lines.push(`  ${u}`);
+  // A live daemon is described by its own record, never by config: toggling
+  // dashboard.https without a restart must not print a scheme the listener is not
+  // serving. A record written before scheme existed reads as http.
+  const liveUrls = urls ?? urlLines(record.port ?? port, { scheme: record.scheme ?? "http" });
+  for (const u of liveUrls) lines.push(`  ${u}`);
   return { state: runningV && installedV && runningV !== installedV ? "stale" : "running", exit: 0, lines };
 }
 
@@ -206,6 +218,31 @@ export async function readFirewallRule(ruleName = "swarm dashboard") {
   }
 }
 
+// The root install command, per platform. Printed, never run: trusting a root is a
+// security decision the operator makes on their own machine.
+export function hostTrustHint(platform, caPath) {
+  if (platform === "win32") return `certutil -addstore -user Root "${caPath}"`;
+  if (platform === "darwin") return `security add-trusted-cert -r trustRoot -k ~/Library/Keychains/login.keychain-db "${caPath}"`;
+  return `copy ${caPath} to /usr/local/share/ca-certificates/ and run update-ca-certificates (or your distro's trust store)`;
+}
+
+// Does THIS machine trust the root? Only Windows can answer without inspecting a
+// store we do not own, so everywhere else is unknown — and unknown never fails the
+// run. Reads the CA's serial rather than its filename: a rotated root has a new one.
+export async function hostTrustCheck({ platform = process.platform, caPath, _exec = execFileAsync, _readFile = readFileSync }) {
+  const hint = hostTrustHint(platform, caPath);
+  if (platform !== "win32") return { status: "unknown", detail: `not verifiable on ${platform} — trust it once: ${hint}` };
+  let serial;
+  try { serial = new X509Certificate(_readFile(caPath, "utf8")).serialNumber; }
+  catch { return { status: "unknown", detail: `no CA at ${caPath} — start the dashboard with dashboard.https, then: ${hint}` }; }
+  try {
+    await _exec("certutil", ["-user", "-verifystore", "Root", serial], { timeout: 8000, windowsHide: true });
+    return { status: "pass", detail: "the root is trusted for this user" };
+  } catch {
+    return { status: "fail", detail: `the root is not in this user's Root store — run: ${hint}` };
+  }
+}
+
 // A provider's probe result as a doctor row. `probed` is the whole reason the flag
 // exists: a provider with no preflight to run has not passed anything, and printing
 // it as a pass claims a check nobody performed.
@@ -216,7 +253,7 @@ export function providerCheck({ id, ok, detail, probed }) {
   return { name, status: "fail", detail: detail || "preflight failed" };
 }
 
-export async function doctorChecks({ record, alive, installed, port, bind = "0.0.0.0", startupDir, shimPath, providers = [], config = {}, _probePort = probePort, _firewall = readFirewallRule, _probeProvider }) {
+export async function doctorChecks({ record, alive, installed, port, scheme, bind = "0.0.0.0", startupDir, shimPath, providers = [], config = {}, _probePort = probePort, _firewall = readFirewallRule, _probeProvider, _tlsStatus = () => ({ status: "unknown", detail: "TLS status not available" }), _hostTrust = async () => ({ status: "unknown", detail: "host trust not checked" }) }) {
   const checks = [];
   const p = await _probePort(port, bind);
   checks.push({ name: "port", status: p.reachable ? "pass" : "fail", detail: p.reachable ? `reachable on ${port}` : `nothing listening on ${port}` });
@@ -233,6 +270,15 @@ export async function doctorChecks({ record, alive, installed, port, bind = "0.0
   else if (!installedV) checks.push({ name: "version", status: "unknown", detail: "registry unreadable" });
   else if (runningV === installedV) checks.push({ name: "version", status: "pass", detail: runningV });
   else checks.push({ name: "version", status: "fail", detail: `running ${runningV}, installed ${installedV} — serve restart applies it` });
+
+  // TLS rows exist only when https is on. A check nobody performed must not print
+  // as a pass: with https off there is no certificate and no root to trust.
+  if (scheme === "https") {
+    const t = await _tlsStatus();
+    checks.push({ name: "tls", status: t.status, detail: t.detail });
+    const h = await _hostTrust();
+    checks.push({ name: "tls-host-trust", status: h.status, detail: h.detail });
+  }
 
   const fw = await _firewall();
   if (fw.error) checks.push({ name: "firewall", status: "unknown", detail: `cannot read the rule (${fw.error}) — elevated netsh may be required` });
