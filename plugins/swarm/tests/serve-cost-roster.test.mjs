@@ -19,7 +19,7 @@ const noopEstate = {
 };
 
 async function getPerf(home) {
-  const server = createServer({
+  const server = createServer({ tls: null,
     home,
     cfg: { quietWarnSecs: 60, grading: { enabled: true }, dashboard: { port: 0, bind: "127.0.0.1", token: null } },
     _watch: () => ({ close() {} }),

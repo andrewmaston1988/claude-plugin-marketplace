@@ -54,7 +54,7 @@ test("/api/runs/<p>/<r>/report serves report.html as written, never through mdTo
   // A marker mdToHtml would mangle: a bare `#` inside the body is a markdown h1.
   const body = "<html><body><p># not a heading</p></body></html>";
   const { home } = runHome({ "report.html": body });
-  const srv = createServer({ home, cfg: CFG, _estate: { current: async () => ({ version: "v", rows: [] }), onSnapshot() {}, refresh() {}, close() {}, reopen() {} } });
+  const srv = createServer({ tls: null, home, cfg: CFG, _estate: { current: async () => ({ version: "v", rows: [] }), onSnapshot() {}, refresh() {}, close() {}, reopen() {} } });
   await new Promise((r) => srv.listen(0, "127.0.0.1", r));
   const port = srv.address().port;
   try {
@@ -67,7 +67,7 @@ test("/api/runs/<p>/<r>/report serves report.html as written, never through mdTo
 
 test("/api/runs/<p>/<r>/report is 404 when the run rendered no report.html", async () => {
   const { home } = runHome({ "digest.md": "# digest" });
-  const srv = createServer({ home, cfg: CFG, _estate: { current: async () => ({ version: "v", rows: [] }), onSnapshot() {}, refresh() {}, close() {}, reopen() {} } });
+  const srv = createServer({ tls: null, home, cfg: CFG, _estate: { current: async () => ({ version: "v", rows: [] }), onSnapshot() {}, refresh() {}, close() {}, reopen() {} } });
   await new Promise((r) => srv.listen(0, "127.0.0.1", r));
   const port = srv.address().port;
   try {

@@ -56,7 +56,7 @@ const distSeg = (px, py, [ax, ay], [bx, by]) => {
   return Math.hypot(px - (ax + t * dx), py - (ay + t * dy));
 };
 
-export function renderIconPng(size) {
+export function renderIconPng(size, { maskable }) {
   const { nodes, lanes, radius } = mark(size);
   const SS = 3;
   const px = Buffer.alloc(size * size * 4);
@@ -64,7 +64,7 @@ export function renderIconPng(size) {
     // rounded-square background
     const rx = Math.max(0, Math.abs(x - size / 2) - (size / 2 - radius));
     const ry = Math.max(0, Math.abs(y - size / 2) - (size / 2 - radius));
-    if (Math.hypot(rx, ry) > radius) return null;
+    if (!maskable && Math.hypot(rx, ry) > radius) return null;
     const ux = x / size, uy = y / size;
     for (const n of nodes) if (Math.hypot(ux - n.x, uy - n.y) <= n.r) return n.c;
     for (const l of lanes) for (const seg of l.segs) if (distSeg(ux, uy, seg[0], seg[1]) <= l.w / 2) return l.c;
@@ -94,8 +94,9 @@ export function renderIconPng(size) {
 }
 
 export const ICON_SIZES = [180, 192, 512];
+export const MASKABLE_SIZES = [192, 512];
 
 // The Windows tray's size — reuses the same mark rather than shipping a second
 // asset. Written to ~/.swarm/dashboard-icon.png by `serve --daemon` for tray.ps1.
 export const TRAY_ICON_SIZE = 32;
-export const renderTrayIconPng = () => renderIconPng(TRAY_ICON_SIZE);
+export const renderTrayIconPng = () => renderIconPng(TRAY_ICON_SIZE, { maskable: false });

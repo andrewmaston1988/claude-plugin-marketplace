@@ -155,7 +155,7 @@ test("a fourth provider crosses discovery, usage, manifest, scheduler, persisten
     ok(page.includes("providerTokens") && page.includes("identityName"), "page consumes provider identity and token projections");
 
     const estate = { current: () => Promise.resolve(snapshot), refresh() {}, onSnapshot() {}, close() {} };
-    const server = createServer({
+    const server = createServer({ tls: null,
       home,
       cfg: { ...cfg, grading: { enabled: true }, dashboard: { port: 0, bind: "127.0.0.1", token: null } },
       _estate: estate,
