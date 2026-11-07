@@ -650,13 +650,48 @@ a run is live.
 ```bash
 swarm serve --daemon            # start in the background; prints the URL to open
 swarm serve status | stop | restart
-swarm serve doctor              # checks port, pid, autostart, version, firewall
+swarm serve doctor              # checks port, pid, autostart, version, firewall, tls
 swarm serve install-autostart   # start it with Windows
 ```
 
 Settings live under `dashboard` in `~/.swarm/config.json` (port, bind address, access
 token, refresh timings) — `/swarm:swarm setup` walks them; `dashboard.enabled: false`
 turns it off.
+
+### https — for the phone app
+
+`dashboard.https: true` serves the dashboard over TLS on the same port, from a CA swarm
+generates itself under `~/.swarm/tls/`. It is off by default: turning it on changes the
+scheme, so the old `http://` bookmarks and home-screen icons stop working.
+
+What it buys is the reason to want it. Chrome only mints a standalone dashboard app (a
+WebAPK) for a secure origin, and Google's minting server rewrites that app's scope to
+`https://<host>:<port>/` — a plain-`http` start URL falls outside the scope, so every
+launch opens in a browser tab instead of the app. Brave and other Chromium builds cannot
+mint one at all. Over https, Chrome installs the dashboard as an app.
+
+**The CA has to be installed once per phone, and once on this PC.** Swarm prints both
+steps when it starts the daemon; neither is ever done for you.
+
+- **On the phone** — open `https://<host>.local:<port>/swarm-ca.crt` on the phone and
+  install the downloaded certificate as a CA credential. Until it is installed the
+  browser shows a certificate warning and Chrome will not mint the app.
+- **On this PC** — the daemon prints the host-trust command for the platform it is on
+  (Windows: `certutil -addstore -user Root <ca.crt>`, no elevation needed; macOS:
+  `security add-trusted-cert -r trustRoot -k ~/Library/Keychains/login.keychain-db
+  <ca.crt>`). It adds swarm's root to the machine's own trust store, so the browser
+  here stops warning too. On iOS the installed profile is not enough on its own — the
+  certificate also has to be given full trust under **Settings → General → About →
+  Certificate Trust Settings**, or the browser warns regardless.
+
+The root is valid for ten years and is **never rotated automatically**: rotating it
+would silently untrust every phone. To rotate it, delete `~/.swarm/tls/`, restart the
+daemon, and install the new root on each phone again.
+
+`swarm serve doctor` reports `tls` (the leaf certificate is valid and covers the
+names the launcher prints) and `tls-host-trust` (this machine trusts the root) when
+https is on. `tls-host-trust` is `unknown` off Windows, and an `unknown` never fails the
+run.
 
 ## Status bar — the fleet bar
 

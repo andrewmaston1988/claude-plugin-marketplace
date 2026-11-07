@@ -195,7 +195,7 @@ reminder on an armed machine.
 ### Stage 4 — the phone dashboard (`dashboard.*`)
 
 A LAN web page over every run: live rosters, the run graph, leaf output, digests, and (when
-grading is on) the model score tables. Three decisions, asked together as one question with
+grading is on) the model score tables. Four decisions, asked together as one question with
 combined options if the operator is brisk, or one each if not:
 - `enabled` — **this answer is an action, not an edit**: run `swarm serve enable` or
   `swarm serve disable`. One write path, shared with the tray, so the file is never touched by
@@ -210,6 +210,16 @@ combined options if the operator is brisk, or one each if not:
 - `bind` — `0.0.0.0` is reachable on the LAN and Tailscale; `127.0.0.1` is this machine only.
 - `token` — when set, every request needs `?t=<token>`; bookmark the URL with it. Offer to
   generate one; never invent one silently.
+- `https` — **off** (the shipped default) serves plain `http`. **On** serves TLS from a CA
+  swarm generates itself, and that is what makes the dashboard installable on a phone:
+  Chrome only mints a standalone app (a WebAPK) for a secure origin, and Google's minting
+  server rewrites the app's scope to `https://<host>:<port>/`, so a plain-`http` start URL
+  falls outside it and every launch opens in a browser tab instead of the app. **What it
+  costs**: the URL scheme changes, so existing `http://` bookmarks and home-screen icons
+  stop working and have to be re-added, and **every phone has to install the CA once**
+  before the browser trusts the certificate. Say both sides before asking — an operator who
+  only hears "https" hears "free". On a yes, write `dashboard.https: true` and expect the
+  CA step below.
 `port` is advanced (Stage 8).
 
 Running it: `swarm serve --daemon` (or `serve` to stay in the foreground), and
@@ -227,10 +237,30 @@ For "back at login", **run the install and verify it — don't print the command
 2. Verify: read the launcher back and confirm its command names the shim, not a
    `plugins\cache` path. A launcher written before this shim existed is pinned to an old
    build and keeps starting it silently; re-running `install-autostart` repoints it.
-3. Smoke test: `swarm serve doctor` — five ✓/✗/⚠ lines (port reachable, pid
-   alive, autostart launcher, version current, firewall rule). Read them to the operator;
-   a ✗ names its own fix, and ⚠ (the firewall rule is unreadable without elevation) is
-   not a failure.
+3. Smoke test: `swarm serve doctor` — one ✓/✗/⚠ line per check: `port` (reachable),
+   `pid` (alive), `autostart` (launcher), `version` (current), `firewall` (rule), one
+   line per configured provider, and — when `dashboard.https` is on — `tls` (the leaf
+   certificate is valid) and `tls-host-trust` (this machine trusts the root). Read them
+   to the operator; a ✗ names its own fix, and ⚠ (the firewall rule is unreadable without
+   elevation) is not a failure.
+
+**With `dashboard.https: true`, the CA has to be installed twice — once per phone, once
+on this PC.** Swarm prints both steps when it starts the daemon; relay them, and do not
+skip the phone one:
+- **On the phone** — open `https://<host>.local:<port>/swarm-ca.crt` on the phone and
+  install the downloaded certificate as a CA credential. Until it is installed the browser
+  shows a certificate warning and Chrome will not mint the standalone app.
+- **On this PC** — the daemon prints the host-trust command for the platform it is on
+  (on Windows: `certutil -addstore -user Root <ca.crt>`, no elevation needed; on macOS:
+  `security add-trusted-cert -r trustRoot -k ~/Library/Keychains/login.keychain-db
+  <ca.crt>`). Swarm prints it, never runs it. Say what it does before handing it over:
+  it adds swarm's root to the machine's own trust store, so this browser stops warning.
+  `swarm serve doctor` then reports `tls-host-trust: pass` on Windows; off Windows that
+  row is `unknown`, which never fails the run.
+
+The CA lives in `~/.swarm/tls/` and is **never rotated automatically** — rotating it would
+silently untrust every phone. To rotate it, delete `~/.swarm/tls/` and restart the daemon,
+then install the new root on each phone again.
 
 ### Stage 5 — the status bar (settings.json `statusLine`)
 
@@ -349,6 +379,7 @@ from the appendix. If no, close.
 | `quietWarnSecs` | `60` | A running leaf that has emitted no event (no tool call, no token update) for this long gets `⚠ quiet Ns` in the roster, the statusline and the dashboard. The stall signal — token counts are not. Raise it for models that think in long silent turns. |
 | `dashboard.enabled` / `bind` / `token` | `true` / `0.0.0.0` / `null` | Stage 4. |
 | `dashboard.port` | `7331` | Listen port; also the firewall rule's port. |
+| `dashboard.https` | `false` | Stage 4. Serves TLS on that same port from a CA swarm generates under `~/.swarm/tls/`. On buys a phone app (Chrome mints a standalone one only for a secure origin); on costs the old `http://` bookmarks and every phone's one-time CA install. |
 | `dashboard.livenessPollMs` | `10000` | How often the server re-checks which runs are live and tells connected browsers. Two things produce no filesystem event and are only ever caught by this clock: a run finishing (its `summary.json` lands in a path nothing watches) and an engine dying. It also rebuilds file watchers, so one that silently stops delivering recovers instead of leaving the page deaf until a manual refresh. Ticks only while a dashboard is actually open — nothing runs with no client connected. Lower it for a snappier list at the cost of more directory scans. |
 | `dashboard.finishedPerProject` | `10` | How many finished runs each displayed project keeps on the runs list, newest first. A repo and its worktree keys are one group — the cap is per displayed project, not per run directory — and a truncated section header reads `N of M finished`. A `Show all N` row at the foot of an expanded stack fetches that project in full when you want the rest. |
 | `dashboard.autoRestartOnUpdate` | `true` | A running daemon hands the port to a shim-started replacement when the installed version moves; `false` reports the mismatch instead — `status` and `doctor` show the running version as stale, `serve restart` applies it by hand. |
