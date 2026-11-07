@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, readdirSync, readFileSync, statSync, existsSync, copyFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, rmSync, readdirSync, readFileSync, statSync, existsSync, copyFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { X509Certificate, createPrivateKey } from "node:crypto";
@@ -143,6 +143,31 @@ test("row 1c: a leaf naming a public host is refused by a real handshake, even w
     assert.equal(r.status, undefined, `the handshake must fail, got ${JSON.stringify(r)}`);
     // Node surfaces OpenSSL's X509_V_ERR_PERMITTED_VIOLATION as code UNSPECIFIED; the message names it.
     assert.match(String(r.message), /permitted subtree violation/, `refused for the name constraint, got ${JSON.stringify(r)}`);
+  } finally {
+    if (server) await new Promise((r) => server.close(r));
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("row 1d: a leaf re-issued under a retained CA with a different subject still chains to it", async () => {
+  // The fixture CA was issued by an earlier build (O=swarm, no constraints). The
+  // leaf's issuer must be copied from the CA it is signed by, never rebuilt from
+  // today's name format, or every upgrade breaks the chain at the next re-issue.
+  const home = tmpHome();
+  let server;
+  try {
+    const dir = tlsDir(home);
+    mkdirSync(dir, { recursive: true });
+    copyFileSync(new URL("./fixtures/tls-legacy-ca.crt", import.meta.url), join(dir, "ca.crt"));
+    copyFileSync(new URL("./fixtures/tls-legacy-ca.key", import.meta.url), join(dir, "ca.key"));
+    const t = ensureTls({ home, names: NAMES, now: NOW });
+    assert.equal(t.caCreated, false, "the retained CA is reused, not replaced");
+    const ca = new X509Certificate(t.caCertPem);
+    assert.equal(new X509Certificate(t.cert).checkIssued(ca), true, "leaf issuer matches the retained CA's subject");
+    server = https.createServer({ key: t.key, cert: t.cert }, (req, res) => { res.writeHead(200); res.end(); });
+    await new Promise((r) => server.listen(0, "127.0.0.1", r));
+    const r = await get({ host: "127.0.0.1", port: server.address().port, path: "/", ca: t.caCertPem });
+    assert.equal(r.status, 200, `a trusted handshake succeeds, got ${JSON.stringify(r)}`);
   } finally {
     if (server) await new Promise((r) => server.close(r));
     rmSync(home, { recursive: true, force: true });

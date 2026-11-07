@@ -98,6 +98,16 @@ function readTlv(buf, offset) {
   return { tag, start, length: len, end: start + len };
 }
 
+// The subject Name of a DER certificate, verbatim. A leaf's issuer must be
+// byte-identical to its CA's subject, whatever name format built that CA.
+function subjectDer(certDer) {
+  const tbs = readTlv(certDer, readTlv(certDer, 0).start);
+  let off = tbs.start;
+  if (certDer[off] === 0xa0) off = readTlv(certDer, off).end; // version
+  for (let i = 0; i < 4; i++) off = readTlv(certDer, off).end; // serial, signature, issuer, validity
+  return certDer.subarray(off, readTlv(certDer, off).end);
+}
+
 // RFC 5280 method 1: SHA-1 over the subjectPublicKey BIT STRING contents.
 function keyId(spkiDer) {
   const spki = readTlv(spkiDer, 0);
@@ -269,7 +279,7 @@ function issueLeaf(ca, names, at, generate, permits) {
   const sans = expandNames(names, permits);
   const derBytes = buildCertificate({
     subject: distinguishedName(`${bareHost(names)} swarm dashboard`),
-    issuer: distinguishedName("swarm dashboard CA"),
+    issuer: subjectDer(ca.cert.raw),
     spki,
     signingKey: ca.key,
     serial: newSerial(),
