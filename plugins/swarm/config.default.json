@@ -60,6 +60,7 @@
   "dashboard": {
     "enabled": true,
     "port": 7331,
+    "https": false,
     "bind": "0.0.0.0",
     "token": null,
     "livenessPollMs": 10000,

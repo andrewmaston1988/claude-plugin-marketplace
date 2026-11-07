@@ -2,6 +2,7 @@
 // segment is validated and re-resolved under the runs root, so a request can
 // never name a file outside it. Zero deps — node:http only.
 import http from "node:http";
+import https from "node:https";
 import { Worker } from "node:worker_threads";
 import { readFileSync, readdirSync, existsSync, statSync, watch as fsWatch } from "node:fs";
 import { join, resolve, sep } from "node:path";
@@ -15,7 +16,7 @@ import { rateCardStorePath, rateCards, refreshStaleRateCards } from "../rate-car
 import { modelRoster, refreshRoster } from "../roster.mjs";
 import { defaultProviderRegistry } from "../default-providers.mjs";
 import { mdToHtml } from "../md_to_html.mjs";
-import { renderIconPng, ICON_SIZES } from "./icon.mjs";
+import { renderIconPng, ICON_SIZES, MASKABLE_SIZES } from "./icon.mjs";
 import { coverage, reliability, leaders, rankCells } from "./perf-views.mjs";
 import { costView } from "../cost-view.mjs";
 import { projectGrouping } from "./grouping.mjs";
@@ -62,7 +63,7 @@ function decodeSegments(pathname) {
 
 // PNGs rendered once per process; iOS and Android both want raster icons.
 const icons = new Map();
-const iconPng = (size) => { if (!icons.has(size)) icons.set(size, renderIconPng(size)); return icons.get(size); };
+const iconPng = (size, maskable) => { const key = `${size}:${maskable}`; if (!icons.has(key)) icons.set(key, renderIconPng(size, { maskable })); return icons.get(key); };
 
 const MANIFEST = {
   name: "swarm",
@@ -72,10 +73,13 @@ const MANIFEST = {
   launch_handler: { client_mode: "navigate-existing" },
   background_color: "#101219",
   theme_color: "#101219",
-  icons: ICON_SIZES.map((s) => ({ src: `/icon-${s}.png`, sizes: `${s}x${s}`, type: "image/png", purpose: "any" })),
+  icons: [
+    ...ICON_SIZES.map((s) => ({ src: `/icon-${s}.png`, sizes: `${s}x${s}`, type: "image/png", purpose: "any" })),
+    ...MASKABLE_SIZES.map((s) => ({ src: `/icon-maskable-${s}.png`, sizes: `${s}x${s}`, type: "image/png", purpose: "maskable" })),
+  ],
 };
 
-export function createServer({ home, cfg, now = Date.now, log = () => {}, _watch = fsWatch, _heartbeatMs = 5000, _debounceMs = 250, _pollMs, _projectKeys = projectKeys, _estate, _Worker = Worker, _setTimeout = setTimeout, _firstWaitMs = 5000, _readProviderUsage, _refreshPrices = refreshStaleRateCards, _modelRoster = modelRoster, _refreshRoster = refreshRoster }) {
+export function createServer({ home, cfg, tls, now = Date.now, log = () => {}, _watch = fsWatch, _heartbeatMs = 5000, _debounceMs = 250, _pollMs, _projectKeys = projectKeys, _estate, _Worker = Worker, _setTimeout = setTimeout, _firstWaitMs = 5000, _readProviderUsage, _refreshPrices = refreshStaleRateCards, _modelRoster = modelRoster, _refreshRoster = refreshRoster }) {
   const runsRoot = resolve(join(home, "runs"));
   const dash = cfg.dashboard || {};
   // Shared by Cost, Performance and the per-run cost text.
@@ -347,6 +351,7 @@ export function createServer({ home, cfg, now = Date.now, log = () => {}, _watch
 
   const handle = async (req, res) => {
     const url = new URL(req.url, "http://x");
+    if (tls && req.method === "GET" && url.pathname === "/swarm-ca.crt") return send(res, 200, tls.caCertPem, "application/x-x509-ca-cert");
     if (dash.token && url.searchParams.get("t") !== dash.token) return send(res, 401, { error: "token" });
     if (req.method !== "GET") return send(res, 405, { error: "GET only" });
     const p = url.pathname;
@@ -356,12 +361,13 @@ export function createServer({ home, cfg, now = Date.now, log = () => {}, _watch
       return send(res, 200, pageHtml(), "text/html; charset=utf-8");
     }
     if (p === "/manifest.webmanifest") return send(res, 200, MANIFEST, "application/manifest+json");
-    const icon = /^\/icon-(\d+)\.png$/.exec(p);
+    const icon = /^\/icon-(maskable-)?(\d+)\.png$/.exec(p);
     if (icon) {
-      const size = Number(icon[1]);
-      if (!ICON_SIZES.includes(size)) return notFound(res);
+      const maskable = Boolean(icon[1]);
+      const size = Number(icon[2]);
+      if (!(maskable ? MASKABLE_SIZES : ICON_SIZES).includes(size)) return notFound(res);
       res.writeHead(200, { "content-type": "image/png", "cache-control": "public, max-age=86400" });
-      return res.end(iconPng(size));
+      return res.end(iconPng(size, maskable));
     }
     if (p === "/events") {
       res.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-store", connection: "keep-alive" });
@@ -457,9 +463,10 @@ export function createServer({ home, cfg, now = Date.now, log = () => {}, _watch
     return notFound(res);
   };
 
-  const server = http.createServer((req, res) => {
+  const onReq = (req, res) => {
     handle(req, res).catch((e) => { log(`${req.url}: ${e.message}`); try { send(res, 500, { error: "internal" }); } catch {} });
-  });
+  };
+  const server = tls ? https.createServer({ key: tls.key, cert: tls.cert }, onReq) : http.createServer(onReq);
   server.on("close", () => { stopHub(); estate.close(); });
   // A handover retake re-listens on this server after `close` — re-arm the estate.
   server.on("listening", () => estate.reopen?.());

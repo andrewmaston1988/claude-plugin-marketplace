@@ -23,7 +23,7 @@ test("pageHtml: an asset holding a closing </script> is refused, not inlined", (
 test("token: the served page arrives with components.js inlined, no marker left", async () => {
   const home = mkdtempSync(join(tmpdir(), "swarm-page-assets-"));
   mkdirSync(join(home, "runs"), { recursive: true });
-  const server = createServer({
+  const server = createServer({ tls: null,
     home,
     cfg: { quietWarnSecs: 60, dashboard: { port: 0, bind: "127.0.0.1", token: "s3cret" } },
     _watch: () => ({ close() {} }),

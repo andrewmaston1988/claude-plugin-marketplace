@@ -74,7 +74,7 @@ async function getPerf({ models = [["deepseek-v4-flash:cloud", 8], ["deepseek-v4
   const rows = models.flatMap(([model, s], i) => Array.from({ length: 5 }, (_, n) => row(`leaf${i}-${n}`, model, s)));
   writeFileSync(join(home, "model-scores.jsonl"), rows.join("\n") + "\n", "utf8");
   const cfg = { dashboard: { port: 0, bind: "127.0.0.1", token: null }, grading: { enabled: true } };
-  const server = createServer({ home, cfg, _estate: estate, _watch: () => ({ close() {} }), _heartbeatMs: 60_000, _pollMs: 60_000 });
+  const server = createServer({ tls: null, home, cfg, _estate: estate, _watch: () => ({ close() {} }), _heartbeatMs: 60_000, _pollMs: 60_000 });
   await new Promise((r) => server.listen(0, "127.0.0.1", r));
   try {
     return await new Promise((resolve, reject) => http.get({ host: "127.0.0.1", port: server.address().port, path: `/api/perf${query}` }, (res) => {

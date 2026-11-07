@@ -5,7 +5,9 @@
 // Apart from daemon.mjs so that module stays out of the provider graph (config,
 // quota, network) — it is the plumbing every serve verb and the daemon itself
 // import, and none of them runs a probe.
-import { doctorChecks, doctorExit, defaultStartupDir, readPid, isAlive } from "./daemon.mjs";
+import { join } from "node:path";
+import { doctorChecks, doctorExit, defaultStartupDir, readPid, isAlive, lanNames, hostTrustCheck } from "./daemon.mjs";
+import { certStatus } from "./tls-ca.mjs";
 import { defaultProviderRegistry } from "../default-providers.mjs";
 import { enabledProviderIds, probeProvider } from "../providers.mjs";
 
@@ -16,7 +18,12 @@ export async function runDoctor({ home, installed, port, cfg, shimPath, out, sta
   const registry = defaultProviderRegistry();
   const checks = await doctorChecks({
     record: rec, alive: isAlive(rec?.pid), installed, port,
+    // The live record is the truth about a running daemon; config decides only
+    // what the NEXT start will serve. An old record has no scheme → http.
+    scheme: rec?.scheme ?? "http",
     bind: cfg.dashboard?.bind ?? "0.0.0.0", startupDir, shimPath,
+    _tlsStatus: () => certStatus({ home, names: lanNames(), now: Date.now }),
+    _hostTrust: () => hostTrustCheck({ platform: process.platform, caPath: join(home, "tls", "ca.crt") }),
     // Switched ON only: a provider that is on and cannot dispatch is the thing worth
     // reporting, and one that is off is not making a claim anyone needs checked.
     providers: enabledProviderIds(cfg, registry),

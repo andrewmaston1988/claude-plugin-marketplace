@@ -15,7 +15,7 @@ test("/api/usage answers from the injected live reader", async () => {
   const home = mkdtempSync(join(tmpdir(), "swarm-usage-"));
   const calls = [];
   const cfg = { dashboard: { port: 0, bind: "127.0.0.1", token: null } };
-  const server = createServer({ home, cfg, _estate: estate, _watch: () => ({ close() {} }), _heartbeatMs: 60_000, _pollMs: 60_000,
+  const server = createServer({ tls: null, home, cfg, _estate: estate, _watch: () => ({ close() {} }), _heartbeatMs: 60_000, _pollMs: 60_000,
     _readProviderUsage: async (c, opts) => { calls.push(opts); return { usages: [{ provider: "ollama", limits: [] }], errors: {} }; } });
   await new Promise((r) => server.listen(0, "127.0.0.1", r));
   try {

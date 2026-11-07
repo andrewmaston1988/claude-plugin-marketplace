@@ -277,7 +277,7 @@ async function main() {
   const rows = [LIVE, LIVE_2, ...FINISHED];
   const estate = { current: () => Promise.resolve({ version: 1, rows }), refresh() {}, onSnapshot() {}, close() {} };
   const cfg = { dashboard: { port: 0, bind: "127.0.0.1", token: null }, grading: true };
-  const server = createServer({ home, cfg, _estate: estate, _watch: () => ({ close() {} }), _heartbeatMs: 60_000, _pollMs: 60_000 });
+  const server = createServer({ tls: null, home, cfg, _estate: estate, _watch: () => ({ close() {} }), _heartbeatMs: 60_000, _pollMs: 60_000 });
   await new Promise((r) => server.listen(0, "127.0.0.1", r));
   ORIGIN = `http://127.0.0.1:${server.address().port}`;
 

@@ -31,7 +31,7 @@ test("serve: Cost refreshes prices once with its home-bound path while a refresh
   const calls = [];
   let finishRefresh;
   const refreshPending = new Promise((resolve) => { finishRefresh = resolve; });
-  const server = createServer({
+  const server = createServer({ tls: null,
     home,
     cfg: { quietWarnSecs: 60, grading: { enabled: false }, dashboard: { port: 0, bind: "127.0.0.1", token: null } },
     log: () => {},
@@ -68,7 +68,7 @@ test("serve: Cost fires a roster refresh once while one is in flight, bound to i
   let finishRefresh;
   const refreshPending = new Promise((resolve) => { finishRefresh = resolve; });
   const cfg = { quietWarnSecs: 60, grading: { enabled: false }, dashboard: { port: 0, bind: "127.0.0.1", token: null } };
-  const server = createServer({
+  const server = createServer({ tls: null,
     home,
     cfg,
     log: () => {},
@@ -100,7 +100,7 @@ test("serve: the Cost roster is whatever the reader returns, read through the ho
   mkdirSync(join(home, "runs"), { recursive: true });
   const seen = [];
   const priced = [];
-  const server = createServer({
+  const server = createServer({ tls: null,
     home,
     cfg: { quietWarnSecs: 60, grading: { enabled: false }, providers: { codex: { enabled: true } }, dashboard: { port: 0, bind: "127.0.0.1", token: null } },
     log: () => {},

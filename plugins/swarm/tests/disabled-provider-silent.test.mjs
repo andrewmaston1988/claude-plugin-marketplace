@@ -154,7 +154,7 @@ const estate = { current: () => Promise.resolve({ version: 0, runs: [] }), refre
 
 async function getCost(cfg, refreshLog) {
   const home = mkdtempSync(join(tmpdir(), "swarm-silent-srv-"));
-  const server = createServer({
+  const server = createServer({ tls: null,
     home, cfg: { dashboard: { port: 0, bind: "127.0.0.1", token: null }, ...cfg }, _estate: estate,
     _watch: () => ({ close() {} }), _heartbeatMs: 60_000, _pollMs: 60_000,
     // The dashboard's own refresh, its network swapped for the recorder.
