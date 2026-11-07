@@ -108,9 +108,8 @@ test("row 10a: a record written before scheme existed reads as http", () => {
   }
 });
 
-// Row 10b: the child fails before it ever listens. Without the wait, the parent
-// printed "started pid N" and looked like success — the operator then had a
-// dashboard that was not there and a log nobody had read.
+// A start reports success only once the child is confirmed listening; a child
+// that fails first must exit non-zero and leave its reason in dashboard.log.
 test("row 10b: --daemon with an unreadable ~/.swarm/tls exits non-zero, prints no 'started', and logs tls-error", async () => {
   const dir = tmp();
   const port = await freePort();
@@ -128,6 +127,30 @@ test("row 10b: --daemon with an unreadable ~/.swarm/tls exits non-zero, prints n
     assert.ok(err.msg || err.stack, "the failure carries its message/stack");
   } finally {
     rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+  }
+});
+
+// A takeover leaves the old daemon's record in place until the child writes its
+// own, so the old pid — alive and listening — must never count as the new start.
+test("row 10b: --daemon taking over a stale daemon fails when the replacement dies before listening", async () => {
+  const dir = tmp();
+  const port = await freePort();
+  const home = seedHome(dir, { port, https: true });
+  writeFileSync(join(home, "tls"), "not a directory", "utf8");
+  const registry = join(dir, "installed_plugins.json");
+  writeFileSync(registry, JSON.stringify({ plugins: { "swarm@andrewmaston1988-claude-plugins": [{ scope: "user", installPath: dir, version: "v2" }] } }), "utf8");
+  const idle = idleProcess();
+  try {
+    writeRecord(home, { pid: idle.pid, port, scheme: "http", listening: true, version: "v1", startedMs: Date.now() });
+    const r = runCli(["serve", "--daemon"], { cwd: dir, env: { ...env(home), SWARM_PLUGIN_REGISTRY: registry } });
+    assert.match(r.stdout, /taking over from stale pid/, `the stale record must make this a takeover:\n${r.stdout}${r.stderr}`);
+    assert.notEqual(r.status, 0, `a failed replacement must exit non-zero:\n${r.stdout}${r.stderr}`);
+    assert.ok(!r.stdout.includes(`started pid ${idle.pid}`), `the old daemon is not the new start:\n${r.stdout}`);
+  } finally {
+    // The failed replacement can still hold its stdio log for a moment; a cleanup
+    // error must never replace the assertion that actually failed.
+    await new Promise((r) => { idle.once("exit", r); idle.kill(); });
+    try { rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 }); } catch {}
   }
 });
 

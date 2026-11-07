@@ -22,6 +22,13 @@ export async function cmdServe(rest, { readProviderUsage }) {
   // make status or the launcher name a scheme nothing is listening on.
   const cfgScheme = cfg.dashboard?.https ? "https" : "http";
   const caPath = join(home, "tls", "ca.crt");
+  // The one step that makes a phone trust the dashboard at all, printed by every
+  // https start — foreground, --daemon, restart and tray-Restart alike.
+  const printTlsHints = () => {
+    if (cfgScheme !== "https") return;
+    out(`dashboard: install the CA on this PC and each phone from ${urlLines(port, { scheme: cfgScheme })[0]}swarm-ca.crt`);
+    out(dim(`  trust it once: ${hostTrustHint(process.platform, caPath)}`));
+  };
   // The CLI entry point beside this file, never this file — a respawned daemon
   // has to come up through the dispatcher, which is the only module with a main().
   const enginePath = fileURLToPath(new URL("./swarm.mjs", import.meta.url));
@@ -120,12 +127,7 @@ export async function cmdServe(rest, { readProviderUsage }) {
     const started = spawnLoggedDaemon([process.execPath, enginePath, "serve"], home);
     if (!started.ok) return { ok: false, reason: `could not spawn the daemon: ${started.reason}` };
     if (!takeover) writePid(home, { pid: started.pid, port, scheme: cfgScheme, installPath: installed?.installPath ?? null, version: installed?.version ?? null, startedMs: Date.now() });
-    // The one step that makes a phone trust the dashboard at all. Printed by every
-    // detached start (--daemon, restart, tray-Restart), not just the first.
-    if (cfgScheme === "https") {
-      out(`dashboard: install the CA on this PC and each phone from ${urlLines(port, { scheme: cfgScheme })[0]}swarm-ca.crt`);
-      out(dim(`  trust it once: ${hostTrustHint(process.platform, caPath)}`));
-    }
+    printTlsHints();
     const t = await launchTray({ home, port, shimPath, tray: cfg.dashboard?.tray !== false });
     if (!t.ok) err(`dashboard: ${t.reason}`);
     return { ok: true, pid: started.pid, logPath: started.logPath };
@@ -166,10 +168,13 @@ export async function cmdServe(rest, { readProviderUsage }) {
   if (rest.includes("--daemon")) {
     const started = await startDetached();
     if (!started.ok) { err(`dashboard: ${started.reason}`); exitSoon(1); return 1; }
-    // Wait for the child to listen, exactly as restart does. Without it a child
-    // that dies in ensureTls still printed "started pid N" and looked like success.
-    // The parent's pre-fork record names the child, so any other pid is the child.
-    const w = await waitForDaemon({ read: () => readPid(home), isAlive, excludePid: process.pid, failOnCleared: true, deadlineMs: 15000 });
+    // Wait for the child itself to listen. On a takeover the record still names
+    // the old, live daemon until the child writes its own, so that pid is excluded
+    // and a revert to it is the child giving up.
+    const w = await waitForDaemon({
+      read: () => readPid(home), isAlive, childPid: started.pid,
+      excludePid: takeover ? running.pid : null, revertIsFailure: takeover, failOnCleared: true, deadlineMs: 15000,
+    });
     if (!w.ok) {
       err(`dashboard: start failed — ${w.reason} (events: ${join(home, "dashboard.log")})`);
       exitSoon(1); return 1;
@@ -258,6 +263,7 @@ export async function cmdServe(rest, { readProviderUsage }) {
   }
   out(`dashboard: serving ~/.swarm/runs on port ${port}`);
   for (const u of urlLines(port, { scheme: cfgScheme })) out(`  ${u}`);
+  printTlsHints();
   out(dim(`firewall (once, elevated): ${firewallHint(port)}`));
 
   // Handover plumbing for the update watcher: release the port for the

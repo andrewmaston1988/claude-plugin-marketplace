@@ -1,10 +1,5 @@
-// Swarm's own local CA and dashboard leaf certificate, with zero npm
-// dependencies. Node can generate keys, sign and parse X.509 but has no API to
-// CREATE a certificate, so TBSCertificate is hand-encoded here.
-//
-// Every certificate is explicitly v3: DER omits the version field for v1,
-// extensions are illegal in v1, and BoringSSL (Chrome/Android) rejects a
-// v1-with-extensions cert that OpenSSL would happily accept.
+// Swarm's local CA and dashboard leaf. Node can sign and parse X.509 but not
+// create it, so TBSCertificate is hand-encoded (zero npm deps).
 import { createHash, createPrivateKey, generateKeyPairSync, randomBytes, sign, X509Certificate } from "node:crypto";
 import { chmodSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -154,7 +149,8 @@ const leafExtensions = (ski, aki, sans) => seq(
 function buildCertificate({ subject, issuer, spki, signingKey, serial, notBefore, notAfter, extensions }) {
   const algorithm = seq(oid(OID_ECDSA_SHA256));
   const tbs = seq(
-    ctx(0, true, int(2)), // [0] EXPLICIT version v3
+    // v3 explicitly: BoringSSL (Chrome) rejects the v1-with-extensions OpenSSL accepts.
+    ctx(0, true, int(2)),
     int(serial),
     algorithm,
     issuer,

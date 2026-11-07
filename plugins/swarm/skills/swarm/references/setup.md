@@ -208,7 +208,7 @@ combined options if the operator is brisk, or one each if not:
   With it off, `swarm serve` starts no server — and the tray still appears, in its
   `(Disabled)` state, as the way back on.
 - `bind` — `0.0.0.0` is reachable on the LAN and Tailscale; `127.0.0.1` is this machine only.
-- `token` — when set, every request needs `?t=<token>`; bookmark the URL with it. Offer to
+- `token` — when set, every request needs `?t=<token>` (except `/swarm-ca.crt` under https, which a phone must fetch before it trusts anything); bookmark the URL with it. Offer to
   generate one; never invent one silently.
 - `https` — **off** (the shipped default) serves plain `http`. **On** serves TLS from a CA
   swarm generates itself, and that is what makes the dashboard installable on a phone:
@@ -218,8 +218,9 @@ combined options if the operator is brisk, or one each if not:
   costs**: the URL scheme changes, so existing `http://` bookmarks and home-screen icons
   stop working and have to be re-added, and **every phone has to install the CA once**
   before the browser trusts the certificate. Say both sides before asking — an operator who
-  only hears "https" hears "free". On a yes, write `dashboard.https: true` and expect the
-  CA step below.
+  only hears "https" hears "free". On a yes, write `dashboard.https: true`, run `swarm serve restart` (a running daemon
+  keeps its old scheme until restarted), confirm the printed URLs are `https://`, and
+  expect the CA step below.
 `port` is advanced (Stage 8).
 
 Running it: `swarm serve --daemon` (or `serve` to stay in the foreground), and
@@ -239,7 +240,7 @@ For "back at login", **run the install and verify it — don't print the command
    build and keeps starting it silently; re-running `install-autostart` repoints it.
 3. Smoke test: `swarm serve doctor` — one ✓/✗/⚠ line per check: `port` (reachable),
    `pid` (alive), `autostart` (launcher), `version` (current), `firewall` (rule), one
-   line per configured provider, and — when `dashboard.https` is on — `tls` (the leaf
+   line per configured provider, and — when the running daemon serves https (its pid record, not config) — `tls` (the leaf
    certificate is valid) and `tls-host-trust` (this machine trusts the root). Read them
    to the operator; a ✗ names its own fix, and ⚠ (the firewall rule is unreadable without
    elevation) is not a failure.

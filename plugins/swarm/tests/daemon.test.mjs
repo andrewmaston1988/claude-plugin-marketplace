@@ -290,10 +290,8 @@ test("urlLines: .local hostname first, then every non-internal IPv4; firewall hi
   assert.match(firewallHint(7331), /localport=7331/);
 });
 
-// Row 9: a launcher that prints http:// for an https daemon is the bug the
-// operator flagged ("the swarm launcher does some work"). Every line carries
-// the scheme, and lanNames is the single interface walk both urlLines and
-// cmd-serve's ensureTls names come from.
+// Every printed URL carries the daemon's scheme, and lanNames is the single
+// interface walk both urlLines and the certificate's names come from.
 test("urlLines: the scheme prefixes every line; lanNames is the one name source", () => {
   const ifaces = {
     lo: [{ family: "IPv4", address: "127.0.0.1", internal: true }],

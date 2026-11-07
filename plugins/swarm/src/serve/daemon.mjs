@@ -111,8 +111,10 @@ export function bindFailureRecordAction({ current, prevRecord, ownPid, alive }) 
 // handover must catch fast: the record clearing (the replacement's own
 // bind-failure path when it had no rival to restore) and the record reverting to
 // excludePid (the replacement restored a live old record and gave up).
+// `childPid` is the spawned replacement: if it dies, nothing it wrote can still
+// arrive, so the wait fails at once instead of timing out.
 export async function waitForDaemon({
-  read, isAlive: alive, excludePid = null,
+  read, isAlive: alive, excludePid = null, childPid = null,
   failOnCleared = false, revertIsFailure = false,
   deadlineMs = 15000, pollMs = 250,
   sleep = (ms) => new Promise((r) => setTimeout(r, ms)), now = Date.now,
@@ -121,6 +123,7 @@ export async function waitForDaemon({
   let sawOther = false;
   for (;;) {
     const r = read();
+    if (childPid && !alive(childPid) && r?.pid !== childPid) return { ok: false, reason: `pid ${childPid} died before listening` };
     if (!r || !r.pid) {
       if (failOnCleared && sawOther) return { ok: false, reason: "the pid record was cleared — the replacement failed to start" };
     } else if (r.pid !== excludePid) {
