@@ -40,10 +40,6 @@ export function connect(target, {
     const listeners = new Map();
     let nextId = 1;
 
-    const url = async () => (typeof target === "number"
-      ? (await pageTarget(target, { _fetch, _sleep })).webSocketDebuggerUrl
-      : target);
-
     const open = (wsUrl) => {
       const ws = new _WebSocket(wsUrl);
       ws.addEventListener("message", (event) => {
@@ -103,7 +99,7 @@ export function connect(target, {
     };
 
     if (typeof target === "number") {
-      url().then(open, reject);
+      pageTarget(target, { _fetch, _sleep }).then((found) => open(found.webSocketDebuggerUrl), reject);
     } else {
       open(target);
     }
