@@ -62,6 +62,16 @@ Neither layer stops a **GET that has a side effect**. So point the probe at a fi
 never at a live service. `--allow-writes` turns both layers off for one run: use it only on a page you own and
 can reset.
 
+### Flags worth knowing
+
+- `--viewport phone,desktop` — `capture` runs both built-ins when you name none. `phone` is 390×844 with touch,
+  `desktop` 1280×900.
+- `--out <dir>` — write the run somewhere you can find later. The default is a timestamped folder under the OS
+  temp dir: right for a one-off, wrong for anything you will refer to again.
+- `--include-background` — add the page behind an open `aria-modal` dialog to `observation.txt`.
+- `--var k=v` — fills `{name}` placeholders in the config's auth cookie commands. A value containing a path
+  separator or a shell metacharacter is rejected, and the error names the variable, never the value.
+
 ## Reading the outputs
 
 **`measure.json`** — the numbers. One array per `measure` selector, one `{x, y, width, height}` entry per
@@ -160,6 +170,8 @@ Every example names its URL and its selectors. A scenario whose target is vague 
 ```
 /ui-probe capture detail-sheet --viewport phone,desktop
 ```
+
+A screen may also carry `steps` — IR steps that run before the capture, for a page you have to click into.
 
 The digest comes back per viewport, one line per `measure` selector:
 
