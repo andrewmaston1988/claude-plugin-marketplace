@@ -194,6 +194,19 @@ Three widths on one line means three matches. The same page lays out differently
 same config produces both readings in one command. Add selectors to `measure` and each gets its own line;
 `measure.json` holds every box either way.
 
+When the screen's `steps` do not all pass, the block carries `steps: <outcome>` and then the first failing
+step's line in the run digest's form:
+
+```
+[data-testid=action-tile] widths=54,111,111
+steps: failed
+FAILED detail-sheet:2 expect_widths [data-testid=action-tile] measured=[54,111,111] expected=111
+blocked: 0
+```
+
+That line names the step, its op, its target and both values, so a failed screen step is diagnosed from the
+digest — never by re-running the capture as a scenario.
+
 ### Widths, at one viewport
 
 ```yaml
