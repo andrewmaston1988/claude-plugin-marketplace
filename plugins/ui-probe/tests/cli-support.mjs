@@ -139,6 +139,18 @@ export const TV_FEATURES = {
   backdropFilter: false,
 };
 
+// A TV child gets an env with no sdb in it: an empty PATH and an empty home leave findSdb with
+// nothing to find, so no test can spawn one by accident. The TV paths reached never want it.
+export const noSdbEnv = (home) => ({ PATH: null, USERPROFILE: home, HOME: home, TEMP: home, TMP: home });
+
+// The page a stub target reports as settled: the CLI's attach waits for it before any step runs.
+export const SETTLED_PAGE = {
+  href: "http://192.0.2.30:8000/tv?tizen=1",
+  origin: "http://192.0.2.30:8000",
+  ready: "complete",
+  hasBody: true,
+};
+
 // A CDP target that answers the guided listen: it records each banner's key, and answers that
 // key's press from `pressed`. Everything else is a settled page with no tizen.
 export async function startGuidedListenStub({ settledPage, features = TV_FEATURES, pressed = {} } = {}) {
