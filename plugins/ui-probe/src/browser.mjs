@@ -89,6 +89,9 @@ export async function launch({
     "--headless=new", "--remote-debugging-port=0", `--user-data-dir=${profile}`,
     "--no-first-run", "--no-default-browser-check", "--disable-extensions", "--disable-gpu",
     "--disable-background-networking", "--disable-sync",
+    // Headless Chromium reports hover:none/pointer:none with no mouse attached; this gives it one,
+    // so touch emulation is what flips a page to coarse and turning it off restores fine.
+    "--blink-settings=primaryHoverType=2,availableHoverTypes=2,primaryPointerType=4,availablePointerTypes=4",
   ];
   if (viewport) args.push(`--window-size=${viewport.width},${viewport.height}`);
   args.push("about:blank");
