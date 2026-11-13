@@ -4,10 +4,11 @@
 
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { spawnSync } from "node:child_process";
+import { execFile as execFileCallback, spawnSync } from "node:child_process";
+import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
 
 import { startFixtureServer } from "./fixtures/server.mjs";
@@ -64,6 +65,23 @@ function childEnv(extra) {
   const env = { ...process.env, ...extra };
   delete env.NODE_TEST_CONTEXT;
   return env;
+}
+
+const BIN = fileURLToPath(new URL("../bin/ui-probe.mjs", import.meta.url));
+const execFile = promisify(execFileCallback);
+
+// Async spawn only: the fixture server lives in this process's event loop, so a blocking child
+// would starve every request the CLI makes.
+async function probeCli(args, cwd) {
+  try {
+    const { stdout, stderr } = await execFile(process.execPath, [BIN, ...args], {
+      cwd, env: childEnv({}), encoding: "utf8", timeout: 120000, maxBuffer: 16 * 1024 * 1024,
+    });
+    return { status: 0, stdout, stderr };
+  } catch (e) {
+    if (typeof e.code !== "number") throw e;
+    return { status: e.code, stdout: e.stdout ?? "", stderr: e.stderr ?? "" };
+  }
 }
 
 before(async () => {
@@ -161,6 +179,36 @@ test("row 23: a target below the fold is scrolled to and clicked; a fixed overla
   ], { requireAssertion: false });
   assert.equal(covered.steps[2].failure, "target_obscured", JSON.stringify(covered.steps[2]));
   assert.equal(server.log.slice(coveredMark).some((entry) => entry.path === "/deep-click"), false);
+});
+
+test("row 24: run --viewport phone applies the built-in dpr, and capture measures the same density", { skip: SKIP }, async () => {
+  const dir = mkdtempSync(join(tmpdir(), "ui-probe-density-"));
+  try {
+    const scenario = join(dir, "density.yaml");
+    writeFileSync(scenario, [
+      "id: density",
+      "steps:",
+      `  - open: { url: "${server.path("/density.html")}" }`,
+      '  - expect_widths: { target: "#density", equals: 30, timeoutMs: 0 }',
+      "",
+    ].join("\n"));
+    writeFileSync(join(dir, ".ui-probe.json"), JSON.stringify({
+      baseUrl: server.origin,
+      browser: browserPath,
+      screens: { density: { url: "/density.html", measure: ["#density"] } },
+    }, null, 2));
+
+    const ran = await probeCli(["run", scenario, "--viewport", "phone"], dir);
+    assert.equal(ran.status, 0, `${ran.stdout}${ran.stderr}`);
+    assert.match(ran.stdout, /PASSED \S+ expect_widths #density measured=\[30\]/, ran.stdout);
+
+    const out = join(dir, "out");
+    const captured = await probeCli(["capture", "density", "--viewport", "phone", "--out", out], dir);
+    assert.equal(captured.status, 0, `${captured.stdout}${captured.stderr}`);
+    assert.equal(readJson(join(out, "phone", "measure.json"))["#density"][0].width, 30);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test("row 11: a target covered at its centre gives target_obscured", { skip: SKIP }, async () => {

@@ -77,6 +77,14 @@ const PAGES = {
     <button id="covered">Covered</button>
     <div id="overlay" style="position:fixed;inset:0;background:rgba(0,0,0,.1)"></div>`),
 
+  // 10 CSS px that triples on a 2dppx screen: one page, a width that proves which density ran.
+  "/density.html": page(`
+    <style>
+      #density { width: 10px; height: 10px; background: #333; }
+      @media (min-resolution: 2dppx) { #density { width: 30px; } }
+    </style>
+    <div id="density"></div>`),
+
   // 2000px of spacer puts #deep below a 400px viewport, so only a scroll can reach it.
   "/tall.html": page(`
     <div style="height:1500px"></div>
