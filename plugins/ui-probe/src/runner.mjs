@@ -4,43 +4,14 @@ import { evaluate, sleep } from "./cdp.mjs";
 import { setCookies } from "./auth.mjs";
 import { actionAllowed, installFetchGuard } from "./guard.mjs";
 import { assertsNothing, validate } from "./ir.mjs";
+import {
+  ASSERT_TIMEOUT_MS, StepFailure, absolute, inconclusive, matches, near, pollUntil, q,
+} from "./ops/common.mjs";
 
-const POLL_MS = 50;
-const ASSERT_TIMEOUT_MS = 5000;
 const LOAD_TIMEOUT_MS = 15000;
 const FETCH_TIMEOUT_MS = 10000;
 
 const EXIT_CODES = { passed: 0, failed: 1, inconclusive: 2, needs_review: 3, invalid: 64 };
-
-class StepFailure extends Error {
-  constructor(outcome, failure = null, message = outcome, extra = {}) {
-    super(message);
-    this.outcome = outcome;
-    this.failure = failure;
-    this.extra = extra;
-  }
-}
-
-const q = (value) => JSON.stringify(value);
-
-function absolute(url, baseUrl) {
-  if (/^https?:\/\//.test(url)) return url;
-  if (!baseUrl) throw new Error(`relative url ${q(url)} needs baseUrl in the config`);
-  return `${baseUrl.replace(/\/+$/, "")}${url}`;
-}
-
-function near(actual, expected, tolerance = 0) {
-  return Math.abs(actual - expected) <= tolerance;
-}
-
-function matches(actual, expected, tolerance = 0) {
-  const a = String(actual).trim();
-  const e = String(expected).trim();
-  if (a !== "" && e !== "" && Number.isFinite(Number(a)) && Number.isFinite(Number(e))) {
-    return near(Number(a), Number(e), tolerance);
-  }
-  return a === e;
-}
 
 const VISIBLE_JS = (selector) => `(() => {
   const el = document.querySelector(${q(selector)});
@@ -183,25 +154,6 @@ async function isConnected(cdp, nodeId) {
   } finally {
     try { await cdp.send("Runtime.releaseObject", { objectId }); } catch { /* already collected */ }
   }
-}
-
-async function pollUntil(attempt, timeoutMs, { _sleep, now }) {
-  const deadline = now() + Math.max(0, timeoutMs);
-  for (;;) {
-    let value;
-    try {
-      value = await attempt();
-      if (value.ok) return value;
-    } catch (error) {
-      value = { ok: false, error };
-    }
-    if (now() >= deadline) return value;
-    await _sleep(POLL_MS);
-  }
-}
-
-function inconclusive(error) {
-  return error instanceof StepFailure ? error : new StepFailure("inconclusive", null, error?.message ?? String(error));
 }
 
 async function openStep(args, state) {
