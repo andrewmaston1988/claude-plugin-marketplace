@@ -161,6 +161,8 @@ const settle = (code) => { setTimeout(() => process.exit(code), 150); };
     const device = deviceFlag(rest);
     if (device.problem) { err(device.problem); settle(64); return; }
     const outDir = resolveOutDir(config, getFlag("--out", rest));
+    // An include resolves beside the file that names it, so every loader gets that file's path.
+    const scenarioPath = path.resolve(file);
 
     const { digestLine } = await import("../src/digest.mjs");
     const { resolveCookies, AuthError } = await import("../src/auth.mjs");
@@ -179,6 +181,7 @@ const settle = (code) => { setTimeout(() => process.exit(code), 150); };
       const done = await runTvBranch({
         doc, config, rest, getFlag, cookies,
         baseUrl: config?.baseUrl ?? null, source: path.basename(file),
+        baseDir: path.dirname(scenarioPath), file: scenarioPath,
       });
       if (done.stderr) err(done.stderr);
       if (done.exitCode !== 0) { settle(done.exitCode); return; }
@@ -215,6 +218,8 @@ const settle = (code) => { setTimeout(() => process.exit(code), 150); };
           cookies,
           device: "desktop",
           source: path.basename(file),
+          baseDir: path.dirname(scenarioPath),
+          file: scenarioPath,
         });
       } catch (e) {
         if (session) await session.close();
@@ -268,7 +273,8 @@ const settle = (code) => { setTimeout(() => process.exit(code), 150); };
       try {
         const { parseScenario, validate } = await import("../src/ir.mjs");
         const doc = parseScenario(readFileSync(file, "utf8"), { format });
-        const problems = validate(doc);
+        const scenarioPath = path.resolve(file);
+        const problems = validate(doc, { baseDir: path.dirname(scenarioPath), file: scenarioPath });
         if (problems.length) {
           failed = true;
           err(`${file}: ${problems.length} problem(s)`);

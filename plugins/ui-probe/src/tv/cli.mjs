@@ -78,6 +78,8 @@ export async function runOnTv({
   cookies = [],
   baseUrl = null,
   source = null,
+  baseDir = null,
+  file = null,
   _attach = attach,
   _run = null,
 } = {}) {
@@ -97,6 +99,8 @@ export async function runOnTv({
       cookies,
       testOrigin: config?.tv?.testOrigin ?? null,
       source,
+      baseDir,
+      file,
     });
     return { result, port: session.port };
   } finally {
@@ -116,6 +120,8 @@ export async function captureOnTv({
   includeBackground = false,
   outDir = undefined,
   source = null,
+  baseDir = null,
+  file = null,
   _attach = attach,
 } = {}) {
   const opens = scenarioOpens({ steps: screen?.steps ?? [] });
@@ -135,6 +141,8 @@ export async function captureOnTv({
       includeBackground,
       outDir,
       source,
+      baseDir,
+      file,
     });
   } finally {
     await session.detach();
@@ -229,20 +237,23 @@ async function branch(work) {
 }
 
 /** `run --device tv`. */
-export function runTvBranch({ doc, config, rest, getFlag, cookies = [], baseUrl = null, source = null, _attach = attach, _run = null }) {
+export function runTvBranch({
+  doc, config, rest, getFlag, cookies = [], baseUrl = null, source = null,
+  baseDir = null, file = null, _attach = attach, _run = null,
+}) {
   const { port, problem } = portFrom(getFlag, rest);
   if (problem) return { exitCode: 64, stderr: problem };
   return branch(async () => {
     const { result } = await runOnTv({
       doc, config, attachPort: port, allowWrites: rest.includes("--allow-writes"),
-      cookies, baseUrl, source, _attach, _run,
+      cookies, baseUrl, source, baseDir, file, _attach, _run,
     });
     return { result };
   });
 }
 
 /** `capture --device tv`. */
-export function captureTvBranch({ screen, config, rest, getFlag, source = null, _attach = attach }) {
+export function captureTvBranch({ screen, config, rest, getFlag, source = null, baseDir = null, file = null, _attach = attach }) {
   const { port, problem } = portFrom(getFlag, rest);
   if (problem) return { exitCode: 64, stderr: problem };
   return branch(async () => {
@@ -255,6 +266,8 @@ export function captureTvBranch({ screen, config, rest, getFlag, source = null, 
       includeBackground: rest.includes("--include-background"),
       outDir: getFlag("--out", rest) ?? undefined,
       source,
+      baseDir,
+      file,
       _attach,
     });
     return { digest };

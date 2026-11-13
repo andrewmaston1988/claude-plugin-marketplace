@@ -275,6 +275,7 @@ async function captureTv({ screen, config, cdp, ctx, events, guard, blocked, out
         requireAssertion: false,
         source: ctx.source ?? "tv",
         loadTimeoutMs: ctx.loadTimeoutMs,
+        baseDir: ctx.baseDir ?? config.configDir ?? null,
       },
     );
   }
@@ -403,6 +404,8 @@ export async function capture(screen, ctx = {}) {
             cdp, baseUrl: config.baseUrl, allowWrites, guard, blocked,
             requireAssertion: false, source: ctx.source ?? name,
             loadTimeoutMs: ctx.loadTimeoutMs,
+            // A screen's steps live in the config file, so its includes sit beside it.
+            baseDir: ctx.baseDir ?? config.configDir ?? null,
           },
         );
       }

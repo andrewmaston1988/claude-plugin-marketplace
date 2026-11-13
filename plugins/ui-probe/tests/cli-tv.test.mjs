@@ -139,6 +139,39 @@ function tvScenario(dir, { name = "tv.yaml", url = "http://192.0.2.30/tv" } = {}
   return file;
 }
 
+test("row 13: from the CLI, an include resolves beside the scenario file", async () => {
+  const fixture = await startFixtureServer();
+  const dir = scratchDir("ui-probe-include");
+  try {
+    scratchConfig(dir, { baseUrl: fixture.origin });
+    writeFileSync(path.join(dir, "prefix.yaml"), [
+      "id: prefix",
+      "steps:",
+      '  - expect_json: { url: "/json/data", path: "ok", equals: true }',
+      "",
+    ].join("\n"));
+    const journey = path.join(dir, "journey.yaml");
+    writeFileSync(journey, [
+      "id: included-journey",
+      "backend: http",
+      "steps:",
+      "  - include: prefix.yaml",
+      '  - expect_json: { url: "/json/data", path: "nested.value", equals: 5 }',
+      "",
+    ].join("\n"));
+
+    const validated = await probe(["validate", journey], { cwd: dir });
+    assert.equal(validated.status, 0, `validate must resolve the include: ${validated.stderr}`);
+
+    const run = await probe(["run", journey, "--out", path.join(dir, "out")], { cwd: dir });
+    assert.equal(run.status, 0, `run must resolve the include: ${run.stderr}`);
+    assert.match(run.stdout, /^run: passed/m, run.stdout);
+    assert.equal(run.stdout.match(/^PASSED /gm)?.length, 2, "the included step and the journey's own step both ran");
+  } finally {
+    await fixture.close();
+  }
+});
+
 test("row 1: doctor checks the tv block, or reports the tv checks skipped without one", async (t) => {
   let browser;
   try {
