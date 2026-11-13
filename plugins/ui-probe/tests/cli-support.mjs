@@ -86,6 +86,8 @@ export async function startCdpStub({ protocol, evaluate = () => null, onEvaluate
     ].join("\r\n"));
     sockets.add(socket);
     socket.on("close", () => sockets.delete(socket));
+    // A child that exits mid-frame resets the socket; that is the run ending, not a test failure.
+    socket.on("error", () => sockets.delete(socket));
     let pending = Buffer.alloc(0);
     socket.on("data", (chunk) => {
       pending = Buffer.concat([pending, chunk]);

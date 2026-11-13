@@ -45,10 +45,17 @@ export function assertTvPolicy(config, options) {
   if (why) throw new TvRefusal(why);
 }
 
-/** Every `open` a scenario will navigate to, in either step shape, includes already spliced in. */
+/**
+ * Every `open` a scenario will navigate to, in either step shape, includes already spliced in.
+ * A file whose includes cannot be spliced is refused rather than judged on the steps that remain.
+ */
 export function scenarioOpens(doc, { baseDir = null, file = null } = {}) {
+  const { doc: spliced, problems } = expandIncludes(doc, { baseDir, file });
+  if (problems.length) {
+    throw new TvRefusal(`cannot splice this scenario's includes: ${problems[0].field} ${problems[0].problem}`);
+  }
   const opens = [];
-  for (const step of expandIncludes(doc, { baseDir, file }).doc?.steps ?? []) {
+  for (const step of spliced?.steps ?? []) {
     if (step && typeof step === 'object' && 'open' in step) opens.push(step.open);
   }
   return opens;
@@ -130,7 +137,9 @@ export async function captureOnTv({
   file = null,
   _attach = attach,
 } = {}) {
-  const opens = scenarioOpens({ steps: screen?.steps ?? [] });
+  // A screen's steps live in the config file, so its includes resolve beside it.
+  const includeBase = baseDir ?? config.configDir ?? null;
+  const opens = scenarioOpens({ steps: screen?.steps ?? [] }, { baseDir: includeBase, file });
   assertTvPolicy(config, { device: 'tv', allowWrites, opens });
 
   const session = await tvSession(config, { attachPort, _attach });
@@ -147,7 +156,7 @@ export async function captureOnTv({
       includeBackground,
       outDir,
       source,
-      baseDir,
+      baseDir: includeBase,
       file,
       timings: session.timings,
     });

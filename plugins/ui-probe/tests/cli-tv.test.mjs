@@ -150,7 +150,7 @@ test("rows 6 and 7: a tv run exits 64 with the policy's reason before it starts"
   }
 });
 
-// Row 7: the pre-flight must judge the steps the include brings in, not only the file's own.
+// The pre-flight must judge the steps the include brings in, not only the file's own.
 test("row 7: an include-borne open outside tv.testOrigin is refused", async () => {
   const dir = scratchDir("ui-probe-tv-include-policy");
   const env = noSdbEnv(scratchDir("ui-probe-tv-include-policy-home"));
@@ -188,6 +188,70 @@ test("row 7: an include-borne open outside tv.testOrigin is refused", async () =
   } finally {
     await stub.close();
   }
+});
+
+// A capture's screen steps come from the config, so their includes resolve beside it.
+test("row 7: a capture screen whose only open is behind an include is judged on it", async () => {
+  const dir = scratchDir("ui-probe-tv-capture-include");
+  const env = noSdbEnv(scratchDir("ui-probe-tv-capture-include-home"));
+  writeFileSync(path.join(dir, "prefix.yaml"), [
+    "id: prefix",
+    "steps:",
+    '  - open: { url: "http://192.0.2.30/tv" }',
+    "",
+  ].join("\n"));
+  scratchConfig(dir, {
+    baseUrl: "http://127.0.0.1:9",
+    screens: { grid: { url: "/tv", steps: [{ include: "prefix.yaml" }] } },
+    tv: { host: "192.0.2.10:26101", appid: "torrenthub.main", testOrigin: "http://127.0.0.1:8001" },
+  });
+
+  // A target with neither interception: only a fully allowed, test-origin capture may start.
+  const stub = await startCdpStub({
+    protocol: { domains: [{ domain: "Page", commands: [{ name: "navigate" }] }] },
+    evaluate: (js) => settling(js)
+      ?? (String(js).includes("outerHTML") ? "<html></html>"
+        : String(js).includes("SKIP") ? "body" : {}),
+  });
+  try {
+    const result = await probe([
+      "capture", "grid", "--device", "tv", "--attach-port", String(stub.port),
+      "--allow-writes", "--out", path.join(dir, "out"),
+    ], { cwd: dir, env });
+    assert.equal(result.status, 64, `exited ${result.status}: ${result.stdout}${result.stderr}`);
+    assert.match(result.stderr, /192\.0\.2\.30/, "the included open is named");
+    assert.match(result.stderr, /tv\.testOrigin/, result.stderr);
+  } finally {
+    await stub.close();
+  }
+});
+
+// A file whose includes cannot be spliced is refused, never judged on fewer steps.
+test("row 7: an unsplicable include is refused with 64 on both run and capture", async () => {
+  const dir = scratchDir("ui-probe-tv-include-broken");
+  const env = noSdbEnv(scratchDir("ui-probe-tv-include-broken-home"));
+  scratchConfig(dir, {
+    baseUrl: "http://127.0.0.1:9",
+    screens: { grid: { url: "/tv", steps: [{ include: "missing.yaml" }] } },
+    tv: { host: "192.0.2.10:26101", appid: "torrenthub.main", testOrigin: "http://127.0.0.1:8001" },
+  });
+  const scenario = path.join(dir, "journey.yaml");
+  writeFileSync(scenario, [
+    "id: journey",
+    "backend: tv",
+    "steps:",
+    "  - include: missing.yaml",
+    '  - expect_text: { target: "h1", equals: "One" }',
+    "",
+  ].join("\n"));
+
+  const run = await probe(["run", scenario, "--device", "tv"], { cwd: dir, env });
+  assert.equal(run.status, 64, `exited ${run.status}: ${run.stdout}${run.stderr}`);
+  assert.match(run.stderr, /missing\.yaml/, "the run names the include it could not read");
+
+  const capture = await probe(["capture", "grid", "--device", "tv"], { cwd: dir, env });
+  assert.equal(capture.status, 64, `exited ${capture.status}: ${capture.stdout}${capture.stderr}`);
+  assert.match(capture.stderr, /missing\.yaml/, "the capture names the include it could not read");
 });
 
 // Row 6: the device decides the scope, whatever the file declares.
