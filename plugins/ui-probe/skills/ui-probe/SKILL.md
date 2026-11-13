@@ -9,8 +9,8 @@ description: >-
 
 # ui-probe
 
-Observe a running web app by measuring it, not by asking the operator and not by reading a picture. One CLI,
-two verbs: `capture` records the state of a page, `run` judges a claim against a scenario file.
+Observe a running web app by measuring it, not by asking the operator and not by reading a picture. Two verbs
+do the observing: `capture` records the state of a page, `run` judges a claim against a scenario file.
 
 Every command goes through `/ui-probe`. The command file resolves the plugin's own location, so never build
 a path to the binary yourself — a relative path resolves against the user's cwd and breaks.
@@ -33,7 +33,7 @@ No exceptions:
 An image read can kill a cloud-run session outright. `screenshot.png` is a deliverable for the operator: name
 its path and stop.
 
-## Gate 1 — capture or run a scenario?
+## Capture, or run a scenario?
 
 | | `capture` | `run` |
 |---|---|---|
@@ -137,7 +137,7 @@ Exit codes, which tell you what to do next:
    up from the cwd, so work from inside the project.
 2. **`/ui-probe screens`** — does this page already have a name? A named screen carries its `url` and its
    `measure` selectors, so the capture command is one word.
-3. **Pick the verb** — Gate 1.
+3. **Pick the verb** — see *Capture, or run a scenario?* above.
 4. **A scenario: write it, then `/ui-probe validate <file>` until it exits 0, then `/ui-probe run <file>`.**
    Never run an unvalidated file; exit 64 is cheaper to fix than a half-run.
 5. **Read the digest lines first**, then only the output files that answer the question. Do not open the whole
