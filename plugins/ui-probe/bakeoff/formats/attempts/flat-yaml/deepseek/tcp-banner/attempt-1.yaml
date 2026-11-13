@@ -1,0 +1,5 @@
+id: tcp-banner
+task: tcp-banner
+backend: network
+steps:
+  - tcp_banner: { host: "127.0.0.1", port: 18773, equals: "HELLO ui-probe" }

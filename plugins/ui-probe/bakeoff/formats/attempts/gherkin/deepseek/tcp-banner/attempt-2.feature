@@ -1,0 +1,4 @@
+Feature: TCP banner on the fixture listener
+
+  Scenario: The listener greets with its banner line
+    Then the TCP banner from port 18773 is "HELLO ui-probe"

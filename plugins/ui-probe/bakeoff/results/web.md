@@ -90,6 +90,42 @@ Exits **1** with 10 assertions, both contenders, on the phone viewport:
 
 Artifact: `results/artifacts/run-all-red.json`.
 
+### RQ1 (b)-(d) — agent-driven contenders
+
+Each contender ran as a fresh swarm leaf, 3 repeats, plus a no-tool null leaf with the same prompt
+frame. **Model: `ollama/deepseek-v4.1-flash:1017-cloud` for every leaf, not `claude-sonnet-5-5` as
+the plan specified** — operator, 2026-11-13: "All deepseek / Apples to apples". The same three tasks
+on the live hub fixture (`:8001`, first tile of `/recommend`), read-only.
+
+Run: `ui-probe-bakeoff-measure-1` · manifest generator `agents/gen_measure.py` · tabulator
+`agents/score_measure.py <results dir>` · Artifact: `results/artifacts/measure-rq1-rq10.json`
+
+| contender | T1 widths + close, both viewports (n=3) | T2 desktop reveal | T2 touch kept hidden | touch `hover:hover` reported false | T3 reached, unrated | wall-clock s (median) | turns (median) | input tok Δ null (median) | output tok Δ null (median) |
+|---|---|---|---|---|---|---|---|---|---|
+| (b) `playwright-cli` 0.1.24 | 3/3 exact | 3/3 | 3/3 | **3/3** | 3/3 | 233 | 56 | 2.78M | 21k |
+| (c) Playwright MCP | 3/3 exact | 3/3 | 3/3 | **2/3** — only via `browser_run_code_unsafe` → CDP `Emulation.setTouchEmulationEnabled`; MCP's own `browser_resize` cannot set touch | 3/3 | 76 | 33 | 1.41M | 9k |
+| (d) `agent-browser` 0.43.0 | 3/3 exact (1 run left phone values in notes only) | 3/3 | 3/3 | **0/3** — `set device` sets viewport + UA only; every run reported this itself | 3/3 | 149 | 43 | 2.07M | 18k |
+| null control | — | — | — | — | — | 11 | 3 | (69k baseline) | (0) |
+
+Reference: the scripted lane above — phone 111.3 / 111.3 / 111.3, close centre (358, 201.3);
+desktop 90.3 / 91.2 / 116.1, close centre (1016, 171). Every measuring run matched to the sub-pixel.
+
+Reading:
+
+- **Layout and the desktop reveal are not discriminating** — all three tools got every number.
+- **Touch is.** The hub's reveal is pointer-type gated, so a tool that cannot make the page report
+  `hover:none` cannot test the touch half honestly. `.rec-hover` still stayed hidden in every run,
+  because no mouse ever entered the tile — not because the page believed it was a touch device.
+- **MCP is the cheapest and fastest agent path** (≈ half the CLI's input tokens, a third of its time)
+  but needs an escape hatch for touch; the CLI does touch natively at ~2× the tokens.
+- Input tokens are dominated by re-sent transcript (`cacheRead` 86–98% of input), so turns drive
+  cost: MCP's 33 turns vs the CLI's 56 is most of the gap.
+- T3: every run found `form.stars` ("Your rating", unrated). The leaf schema accepted only a number
+  for `t3.value` (a harness defect: the swarm schema subset has no nullable union), so runs either
+  omitted the value or wrote `0` and said why in `notes`. Scored on the notes, not the field.
+- Footer labels varied between runs (`Upload .torrent` is a `<label>`; `Add to qBittorrent` is
+  hidden until a file is chosen) — the task wording, not the tools.
+
 ---
 
 ## RQ2 — hover and pointer reality
@@ -180,7 +216,7 @@ TMDB detail and answers `401 → 500` without one, so `run-rq9.mjs` and `run-liv
 
 ---
 
-## RQ10 — observation size (the model-answer half is OPEN)
+## RQ10 — observation size and model answers
 
 Two arms, same steps:
 
@@ -228,30 +264,39 @@ Consequences for reading the table:
 - Token counts are `chars/4` estimates over the tool's own text form, so a terser serialiser lowers
   the count without lowering what the agent knows. Only the model-answer half can price that.
 
-### OPEN — model-answer half
+### Model-answer half
 
-Not run here (this lane owns the size half only). The exact probe still to run:
+One fresh leaf per contender × journey × arm (12 leaves), `ollama/deepseek-v4.1-flash:1017-cloud`
+(operator, 2026-11-13: "All deepseek / Apples to apples"), reading only that arm's observations
+(`results/rq10-inputs/<contender>-<journey>-<arm>.md`, enforced by `mustRead`). Question: the final
+badge on the "Harbour Lights" tile, and which actions were on the last time the action block was
+observed. Ground truth: `rq10.json` `steps[].state`.
 
-> Take `results/artifacts/rq10-observations.json`. For each contender × journey, ask a model the
-> same fixed question against the `fullText` arm and against the `deltaText` arm alone, then score
-> the answers against the ground truth recorded in `rq10.json` (`steps[].state`, which holds the
-> tile badges and sheet state read from the DOM). Report accuracy per arm alongside the byte and
-> token totals above, and state the model and prompt used.
+| arm | badge right | pressed set right |
+|---|---|---|
+| full | 6/6 | 5/6 — `cdp` J2 dropped "Not for me" |
+| delta | 6/6 | 6/6 |
 
-Until that runs, RQ10 has **size only**. The J3 rows above bound the risk: a delta arm can be 63–79%
-smaller and still be unable to answer a question the full arm can.
+Reading:
+
+- At n=1 per cell the delta arm lost **no** accuracy for 63–79% fewer bytes.
+- **J3 did not test the blindness it was built for.** Its final step re-reads the grid in both arms,
+  so the badge change outside the subscription is visible by the end; the stale-mid-journey case
+  (asking *before* the re-read) was never posed. Probe still to run: the same leaves asked at J3
+  step 6, where the delta arm has not yet seen the badge.
+- The one miss was on a full arm: three toggles, of which "Not for me" changes no label, so
+  the model had to infer it from `pressed`/`on`, which `cdp`'s serialiser does not print.
 
 ---
 
 ## Open items across the lane
 
-- **RQ10 model-answer half** — probe named above; observations are on disk.
+- **RQ10 stale-mid-journey question** — ask J3 at step 6 (before the grid re-read); see above.
 - **Playwright browser coverage** — only `chromium_headless_shell` is installed under
   `%LOCALAPPDATA%\ui-probe\ms-playwright`; no WebKit/Firefox comparison was asked for or run.
 - **Filmstrip pixel diff** — RQ3 reports frame counts and bytes; it does not diff frames pixel-wise.
   The instruments' detection claims (property values vs frame presence) do not depend on that.
-- **`agent-browser` and `playwright-cli`** — not part of this lane's RQ1 contenders (a) and (e); they
-  are other lanes' rows.
+- **RQ1 (b)-(d) on `claude-sonnet-5-5`** — the plan's model; this round ran deepseek by operator choice.
 - **`formats/score.mjs`** (a test-plan gate) — not present in this worktree; it belongs to another
   lane. Not written here.
 - **Fixture safety check** — `python fixtures/hub_fixture.py --check` passes: environment names

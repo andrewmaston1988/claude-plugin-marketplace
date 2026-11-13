@@ -43,7 +43,8 @@ export function staticProblems(rawSource, task) {
     errors.push("must import from '@playwright/test' (the harness ships that specifier)");
   }
   if (!/\btest\s*\(/.test(source)) errors.push('no test(...) declared');
-  if (!/\bexpect\s*\(/.test(source)) errors.push('no expect(...) assertion — a scenario that asserts nothing is not a scenario');
+  // `expect.poll(...)` / `expect.soft(...)` assert too; a bare `expect` reference does not.
+  if (!/\bexpect\s*(?:\.\s*(?:poll|soft)\s*)?\(/.test(source)) errors.push('no expect(...) assertion — a scenario that asserts nothing is not a scenario');
   if (/\.only\s*\(/.test(source)) errors.push('.only is not allowed in a scored scenario');
   if (/\btest\.(skip|fixme)\s*\(/.test(source)) errors.push('skipped tests score as invalid');
   return errors;

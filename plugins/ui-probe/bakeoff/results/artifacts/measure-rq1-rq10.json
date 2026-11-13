@@ -1,0 +1,1104 @@
+{
+ "run": "ui-probe-bakeoff-measure-1",
+ "model": "ollama/deepseek-v4.1-flash:1017-cloud",
+ "leaves": [
+  {
+   "id": "answer-cdp-j1-delta",
+   "durationMs": 12156,
+   "numTurns": 3,
+   "tokens": {
+    "input": 12213,
+    "output": 1157,
+    "cacheCreation": 0,
+    "cacheRead": 57856
+   },
+   "output": {
+    "badge": "Seen",
+    "pressed": [
+     "Seen"
+    ],
+    "unknown": ""
+   }
+  },
+  {
+   "id": "answer-cdp-j1-full",
+   "durationMs": 10444,
+   "numTurns": 3,
+   "tokens": {
+    "input": 25044,
+    "output": 566,
+    "cacheCreation": 0,
+    "cacheRead": 47104
+   },
+   "output": {
+    "badge": "Seen",
+    "pressed": [
+     "Seen"
+    ],
+    "unknown": "Nothing outstanding — both answers are in the observations."
+   }
+  },
+  {
+   "id": "answer-cdp-j2-delta",
+   "durationMs": 13316,
+   "numTurns": 3,
+   "tokens": {
+    "input": 23316,
+    "output": 1447,
+    "cacheCreation": 0,
+    "cacheRead": 47104
+   },
+   "output": {
+    "badge": "Not for me",
+    "pressed": [
+     "On my list",
+     "Seen",
+     "Not for me"
+    ],
+    "unknown": "No explicit pressed/on attribute in the snapshots; on-state inferred from label flips only (My list→On my list, Seen it→Seen). \"Not for me\" was pressed at step 6 with no label change."
+   }
+  },
+  {
+   "id": "answer-cdp-j2-full",
+   "durationMs": 10811,
+   "numTurns": 3,
+   "tokens": {
+    "input": 14602,
+    "output": 1092,
+    "cacheCreation": 0,
+    "cacheRead": 57856
+   },
+   "output": {
+    "badge": "Not for me",
+    "pressed": [
+     "On my list",
+     "Seen"
+    ],
+    "unknown": ""
+   }
+  },
+  {
+   "id": "answer-cdp-j3-delta",
+   "durationMs": 8579,
+   "numTurns": 3,
+   "tokens": {
+    "input": 35881,
+    "output": 666,
+    "cacheCreation": 0,
+    "cacheRead": 34304
+   },
+   "output": {
+    "badge": "In list",
+    "pressed": [
+     "On my list"
+    ],
+    "unknown": ""
+   }
+  },
+  {
+   "id": "answer-cdp-j3-full",
+   "durationMs": 10224,
+   "numTurns": 3,
+   "tokens": {
+    "input": 25338,
+    "output": 624,
+    "cacheCreation": 0,
+    "cacheRead": 47104
+   },
+   "output": {
+    "badge": "In list",
+    "pressed": [
+     "On my list"
+    ],
+    "unknown": "None — both answers are in the observations. Note: steps 5–7 were supposed to re-read the grid/block but captured the detail sheet; the only post-toggle grid observation is step 8, which carries the badge. Pressed-state is inferred from label swap (My list → On my list); Seen it and Not for me show no on-state."
+   }
+  },
+  {
+   "id": "answer-playwright-j1-delta",
+   "durationMs": 8694,
+   "numTurns": 3,
+   "tokens": {
+    "input": 35676,
+    "output": 223,
+    "cacheCreation": 0,
+    "cacheRead": 34304
+   },
+   "output": {
+    "pressed": [
+     "Seen"
+    ],
+    "badge": "Seen",
+    "unknown": ""
+   }
+  },
+  {
+   "id": "answer-playwright-j1-full",
+   "durationMs": 12051,
+   "numTurns": 3,
+   "tokens": {
+    "input": 38767,
+    "output": 530,
+    "cacheCreation": 0,
+    "cacheRead": 34304
+   },
+   "output": {
+    "pressed": [
+     "Seen"
+    ],
+    "badge": "Seen",
+    "unknown": "none — both answers are present in the observations"
+   }
+  },
+  {
+   "id": "answer-playwright-j2-delta",
+   "durationMs": 9412,
+   "numTurns": 3,
+   "tokens": {
+    "input": 36035,
+    "output": 401,
+    "cacheCreation": 0,
+    "cacheRead": 34246
+   },
+   "output": {
+    "pressed": [
+     "On my list",
+     "Seen",
+     "Not for me"
+    ],
+    "badge": "Not for me",
+    "unknown": ""
+   }
+  },
+  {
+   "id": "answer-playwright-j2-full",
+   "durationMs": 7828,
+   "numTurns": 3,
+   "tokens": {
+    "input": 74326,
+    "output": 322,
+    "cacheCreation": 0,
+    "cacheRead": 0
+   },
+   "output": {
+    "pressed": [
+     "On my list",
+     "Seen",
+     "Not for me"
+    ],
+    "badge": "Not for me",
+    "unknown": ""
+   }
+  },
+  {
+   "id": "answer-playwright-j3-delta",
+   "durationMs": 8702,
+   "numTurns": 3,
+   "tokens": {
+    "input": 35730,
+    "output": 244,
+    "cacheCreation": 0,
+    "cacheRead": 34304
+   },
+   "output": {
+    "pressed": [
+     "On my list"
+    ],
+    "badge": "In list",
+    "unknown": ""
+   }
+  },
+  {
+   "id": "answer-playwright-j3-full",
+   "durationMs": 10882,
+   "numTurns": 3,
+   "tokens": {
+    "input": 40071,
+    "output": 735,
+    "cacheCreation": 0,
+    "cacheRead": 34432
+   },
+   "output": {
+    "pressed": [
+     "On my list"
+    ],
+    "badge": "In list",
+    "unknown": ""
+   }
+  },
+  {
+   "id": "measure-web-agent-browser-1",
+   "durationMs": 185913,
+   "numTurns": 53,
+   "tokens": {
+    "input": 61296,
+    "output": 19147,
+    "cacheCreation": 0,
+    "cacheRead": 2591488
+   },
+   "output": {
+    "notes": "T3 value: the rating is UNRATED — the current value is null. The output schema rejects null for t3.value (must be a number), so the value key is omitted and the null is stated here and in t3.control; no number would be truthful.\n\nTool: agent-browser 0.43.0, headless, own session uiprobe-1fd09153c51a. Auth: `--state C:/Users/Andrew/AppData/Local/ui-probe/hub-fixture/storage-state.json` passed on `open` — `state load <path>` alone only sets an autosave path and does NOT inject the cookie (it lands on /pin). Measurements via `eval --stdin` returning getBoundingClientRect/computedStyle; hover driven by `agent-browser hover` (real mouse move) and confirmed via `:hover` plus the tile's JS-added `mouse-over` class.\n\nT1: measured twice, identical both runs. Values are sub-pixel CSS px from getBoundingClientRect, not rounded integers. Sheet sizes: 390x686.8 (phone), 820x622 (desktop). Close button 44x44 on phone, 40x40 on desktop.\n\nT2: `.rec-hover` has no @media (hover) guard — it is display:none by default and shown by `.rec-tile.mouse-over .rec-hover` (JS-added on mouseenter) or `:has(:focus-visible)`. Desktop before hover: display none, 0x0. After hover: display flex, visibility visible, opacity 1, 30.39x99.17. At 390x844 with no hover: display none, 0x0.\n\nT2 CAVEAT — the 390x844 run is NOT a true touch context. agent-browser 0.43.0 has no touch/hover-media emulation: `set device \"iPhone 15\"` applies mobile UA + DPR 3 + 393x852 but leaves maxTouchPoints 0, `(pointer: coarse)` false and `(hover: hover)` true; `set viewport 390 844` afterwards resets the mobile flag and UA back to Windows desktop. Hence touch_hover_media is reported true: that is what the tool observed at 390x844, not what a real phone would report. Both media figures would be expected to differ on real touch hardware, but I could not measure that with this tool. touch_hover_visible (false) is unaffected — the bar is display:none at that width with no hover, and it is gated by a JS class rather than by the media query, so a real phone's behaviour would depend on whether a tap adds `.mouse-over` (not tested — tapping the tile opens the sheet, and I stayed read-only).\n\nOperational gotcha: `set viewport` and `--state` can relaunch the browser mid-session, silently dropping the cookie; re-pass `--state` after any relaunch.\n\nT3: reached the rating control through the open detail sheet: `form.stars[role=group][aria-label=\"Your rating\"]` with 10 half-star submit buttons (name=stars, values 0.5 to 5) and a `span.sv` label reading \"Tap to rate\". Zero filled/pressed star buttons, no aria-pressed, no stars input value → unrated, value null. Same reading at both viewports.\n\nFixture inconsistency worth knowing: the first tile (`ck movie:900001`) is titled \"Harbour Lights\", but the detail sheet head and poster for the same ck render \"Sleepless Mom\". I clicked nothing state-changing and submitted no form.\n\nResults committed on the lane branch as 0c8c61d to plugins/ui-probe/bakeoff/results/artifacts/agent-browser.json.",
+    "t1": {
+     "desktop": {
+      "action_tile_height_px": 40,
+      "action_tile_widths_px": {
+       "my_list": 90.3,
+       "not_for_me": 116.06,
+       "seen_it": 91.16
+      },
+      "close_centre_px": {
+       "x": 1016,
+       "y": 171
+      },
+      "close_size_px": [
+       40,
+       40
+      ],
+      "footer_button_labels": [
+       "Find torrent",
+       "Upload .torrent",
+       "Add to qBittorrent"
+      ],
+      "footer_note": "Find torrent is a <button> (374x48); Upload .torrent is a <label> styled as a button (90.39 wide); Add to qBittorrent is a <button> with the hidden attribute, 0x0 until a file is chosen",
+      "sheet_size_px": [
+       820,
+       622
+      ],
+      "viewport": "1280x900"
+     },
+     "phone": {
+      "action_tile_height_px": 64,
+      "action_tile_widths_px": {
+       "my_list": 111.33,
+       "not_for_me": 111.34,
+       "seen_it": 111.33
+      },
+      "close_centre_px": {
+       "x": 358,
+       "y": 201.25
+      },
+      "close_size_px": [
+       44,
+       44
+      ],
+      "footer_button_labels": [
+       "Find torrent",
+       "Upload .torrent",
+       "Add to qBittorrent"
+      ],
+      "footer_note": "Find torrent is a <button> (350 wide); Upload .torrent is a <label> styled as a button (350 wide); Add to qBittorrent is a <button> with the hidden attribute, 0x0 until a file is chosen",
+      "sheet_size_px": [
+       390,
+       686.8
+      ],
+      "viewport": "390x844"
+     }
+    },
+    "t2": {
+     "desktop_hover_media": true,
+     "desktop_hover_visible": true,
+     "touch_hover_media": true,
+     "touch_hover_visible": false
+    },
+    "t3": {
+     "control": "form.stars[role=group][aria-label=\"Your rating\"] - 10 half-star submit buttons (name=stars, values 0.5,1,1.5,2,2.5,3,3.5,4,4.5,5); state label span.sv reads \"Tap to rate\"; current value is null (unrated: zero filled/pressed stars, no aria-pressed, no stars input value). The output schema forbids a null value field, so it is stated here."
+    }
+   }
+  },
+  {
+   "id": "measure-web-agent-browser-2",
+   "durationMs": 148605,
+   "numTurns": 43,
+   "tokens": {
+    "input": 32077,
+    "output": 19416,
+    "cacheCreation": 0,
+    "cacheRead": 2108416
+   },
+   "output": {
+    "notes": "T3 value is NULL (unrated) - the output schema rejected a null, so the `value` key is omitted rather than filled with a fabricated number. The rating control is `form.stars[aria-label=\"Your rating\"]` in the detail sheet: 5 `.star` spans, 10 submit buttons (0.5 to 5 in half steps), status text reads `Tap to rate`, and zero `.star`/button elements carry `.on` or `aria-checked`. It is distinct from the read-only `.detail-score` (TMDB ★ 10.0) in the sheet header, which is not a user rating.\n\nEverything was run on the first tile (`#rec-card-movie_900001`) on the live app at http://127.0.0.1:8001/recommend, authenticated via `agent-browser --state <storage-state.json>`, headless. Desktop numbers were measured twice in separate browser sessions and matched exactly.\n\nT1 detail: at 1280x900 the three actions are content-sized in a flex row with 10px gaps (x = 534, 634.3, 735.45; all h=40). At 390x844 they become equal thirds (x = 20, 139.3, 258.7; all h=64). Footer is `.detail-foot`: `Find torrent` (visible at both), the file-input label `Upload .torrent`, and the `Add to qBittorrent` submit which is `hidden` until a file is chosen and therefore zero width at both.\n\nT2 detail: desktop baseline `.rec-hover` is `display:none`, 0x0; after `mouse move` onto the tile it becomes `display:flex`, 30.4 x 99.2 px. At 390x844 with no hover it is `display:none`, 0x0.\n\nCAVEAT behind `touch_hover_media: true`: agent-browser 0.43.0 cannot emulate a touch pointer. `set device \"iPhone 12\"` sets viewport + UA only - `matchMedia('(hover: hover)')` still returns true, `(pointer: coarse)` false, `(any-pointer: coarse)` false, `navigator.maxTouchPoints` 0. `AGENT_BROWSER_ARGS=\"--touch-events=enabled\"` sets `'ontouchstart' in window` true but leaves every pointer/hover media query and `maxTouchPoints` unchanged. So the 390x844 run is a small desktop viewport with an iPhone UA, not a real touch device. The T2 touch answer still holds for this app because the stylesheet rule is `.rec-tile.mouse-over .rec-hover, .rec-tile:has(:focus-visible) .rec-hover {display:flex}` - class-driven, with no `@media (hover: none)` rule anywhere.\n\nSide observation, not a tool fault: the first tile's card title reads \"Harbour Lights\" (2019) while the sheet it opens is \"Sleepless Mom\" (2021); the sheet loads `/media/900001` and its hidden inputs still carry `title=Harbour Lights`. Fixture data mismatch.\n\nArtifact committed on `swarm/9b3c79a74c8b/measure-web-agent-browser-2` as `plugins/ui-probe/bakeoff/results/artifacts/live-agent-browser-0.43.0.json` (commit `3603a2b`). Nothing on the page was mutated - only the sheet's open/close and a mouse move.",
+    "t1": {
+     "desktop": {
+      "actionTileWidthsPx": {
+       "myList": 90.3,
+       "notForMe": 116.1,
+       "seenIt": 91.2
+      },
+      "closeCentre": {
+       "h": 40,
+       "w": 40,
+       "x": 1016,
+       "y": 171
+      },
+      "footerButtons": [
+       "Find torrent",
+       "Upload .torrent"
+      ],
+      "footerHiddenButtons": [
+       "Add to qBittorrent"
+      ],
+      "sheet": {
+       "height": 622,
+       "width": 820,
+       "x": 230,
+       "y": 139
+      },
+      "viewport": "1280x900 (set viewport)"
+     },
+     "mobile": {
+      "actionTileWidthsPx": {
+       "myList": 111.3,
+       "notForMe": 111.3,
+       "seenIt": 111.3
+      },
+      "closeCentre": {
+       "h": 44,
+       "w": 44,
+       "x": 358,
+       "y": 201.3
+      },
+      "footerButtons": [
+       "Find torrent",
+       "Upload .torrent"
+      ],
+      "footerHiddenButtons": [
+       "Add to qBittorrent"
+      ],
+      "sheet": {
+       "height": 686.8,
+       "width": 390,
+       "x": 0,
+       "y": 157.3
+      },
+      "viewport": "390x844 (set device \"iPhone 12\": 390x844 CSS px, dpr 3, iPhone UA)"
+     }
+    },
+    "t2": {
+     "desktop_hover_media": true,
+     "desktop_hover_visible": true,
+     "touch_hover_media": true,
+     "touch_hover_visible": false
+    },
+    "t3": {
+     "control": "form.stars[aria-label=\"Your rating\"] in the detail sheet - 5 .star spans, 10 submit buttons (0.5 to 5 in half steps); distinct from the read-only .detail-score (TMDB ★ 10.0) in the sheet header. CURRENT VALUE: null / unrated (status text 'Tap to rate', zero .on stars)."
+    }
+   }
+  },
+  {
+   "id": "measure-web-agent-browser-3",
+   "durationMs": 141951,
+   "numTurns": 41,
+   "tokens": {
+    "input": 116316,
+    "output": 16546,
+    "cacheCreation": 0,
+    "cacheRead": 1888896
+   },
+   "output": {
+    "notes": "T1 desktop measured twice, identical to the sub-pixel. T1 phone measured once. Widths are getBoundingClientRect().width in CSS px at devicePixelRatio 1 (desktop) and 3 (phone); dpr does not affect CSS px. Footer labels: the only footer <button> elements are \"Find torrent\" (visible) and \"Add to qBittorrent\" (in the DOM, hidden until a file is chosen); \"Upload .torrent\" is a <label> for the file input, not a button - included because it is the visible upload control, exclude it if you want buttons only.\n\nT3 value is NULL (UNRATED) - the structured schema's t3.value only accepts a number, so the field is omitted rather than reported as 0, which would be a different fact. Control: #detail-sheet form.stars, role=group, aria-label \"Your rating\" - 10 half-star submit buttons valued 0.5 to 5 plus a status span reading \"Tap to rate\". None of the 10 buttons carries aria-pressed, aria-checked or a filled/on/active class, and the form holds no `stars` input with a value, so nothing was rated. Do not confuse it with span.detail-score, which renders \"★ 10.0\" as text and is not interactive.\n\nT2 desktop 1280x900: .rec-hover computed display:none with no mouse over the tile, display:flex at 30.39x99.17 px after hovering the first tile with the mouse; `is visible` returned true. matchMedia('(hover: hover)').matches = true.\n\nT2 phone 390x844: .rec-hover display:none and `is visible` false with the pointer parked at (2,2). matchMedia('(hover: hover)').matches = true. CAVEAT - agent-browser 0.43.0 could not emulate touch: `set device \"iPhone 14\"` gave the 390x844 viewport and an iPhone user agent but left navigator.maxTouchPoints = 0, 'ontouchstart' in window false, and (hover:hover) true. A mouse hover at that same width still revealed the bar (display:flex, 30.39 px). So touch_hover_visible:false is the honest measurement at that viewport in a mouse-capable browser, not proof of what a real touch device renders. The rule driving the bar is element state, not viewport width: base `.rec-hover { display: none }`, plus `.rec-tile.mouse-over .rec-hover, .rec-tile:has(:focus-visible) .rec-hover { display: flex; }`.\n\nData-quality flag: the first tile is \"Harbour Lights\" (href /media/900001, ck movie:900001) but the opened sheet renders an h1 and poster for \"Sleepless Mom\", while the sheet's hidden form inputs still say title=Harbour Lights. Fixture detail payload and tile disagree; the numbers above are what actually rendered.\n\nTooling: cookie loaded with `cookies set profile_session <value> --url http://127.0.0.1:8001/ --http-only --same-site Lax` (the --domain form was rejected by CDP as invalid cookie fields). Every read came from agent-browser's own `eval`, `is visible`, `get count` and `hover`; no external Playwright/CDP scripting. Only the tile poster and the sheet close button were clicked. Raw JSON committed as results/artifacts/agent-browser-live.json in commit a25cb70 on branch swarm/9b3c79a74c8b/measure-web-agent-browser-3.",
+    "t1": {
+     "desktop": {
+      "action_tile_height_css_px": 40,
+      "action_tile_widths_css_px": {
+       "my_list": 90.296875,
+       "not_for_me": 116.0625,
+       "seen_it": 91.15625
+      },
+      "close_button_centre_css_px": {
+       "x": 1016,
+       "y": 171
+      },
+      "close_button_size_css_px": {
+       "h": 40,
+       "w": 40
+      },
+      "footer_button_labels": [
+       "Find torrent",
+       "Upload .torrent (label for the file input, not a button)",
+       "Add to qBittorrent (button, hidden until a file is chosen)"
+      ],
+      "passes": 2,
+      "sheet_rect": {
+       "h": 622,
+       "w": 820,
+       "x": 230,
+       "y": 139
+      },
+      "viewport": "1280x900"
+     },
+     "phone": {
+      "action_tile_height_css_px": 64,
+      "action_tile_widths_css_px": {
+       "my_list": 111.328125,
+       "not_for_me": 111.34375,
+       "seen_it": 111.328125
+      },
+      "close_button_centre_css_px": {
+       "x": 358,
+       "y": 201.25
+      },
+      "close_button_size_css_px": {
+       "h": 44,
+       "w": 44
+      },
+      "footer_button_labels": [
+       "Find torrent",
+       "Upload .torrent (label for the file input, not a button)",
+       "Add to qBittorrent (button, hidden until a file is chosen)"
+      ],
+      "passes": 1,
+      "sheet_rect": {
+       "h": 686.75,
+       "w": 390,
+       "x": 0,
+       "y": 157.25
+      },
+      "viewport": "390x844"
+     }
+    },
+    "t2": {
+     "desktop_hover_media": true,
+     "desktop_hover_visible": true,
+     "touch_hover_media": true,
+     "touch_hover_visible": false
+    },
+    "t3": {
+     "control": "#detail-sheet form.stars (role=group, aria-label=\"Your rating\") - 10 half-star submit buttons, values 0.5 to 5; current value is null/unrated (see notes - omitted because the schema requires a number and 0 stars would be a different fact)"
+    }
+   }
+  },
+  {
+   "id": "measure-web-cli-1",
+   "durationMs": 250408,
+   "numTurns": 60,
+   "tokens": {
+    "input": 61363,
+    "output": 26165,
+    "cacheCreation": 0,
+    "cacheRead": 2991360
+   },
+   "output": {
+    "notes": "Tool: playwright-cli 0.1.24 (npm @playwright/cli), headless chromium, driven only through the CLI (open/state-load/goto/resize/click/hover/mousemove/eval/press/reload). PLAYWRIGHT_BROWSERS_PATH set on every call.\n\nT3 VALUE IS NULL (unrated). The structured-output schema rejected null for t3.value (\"must be number\"), so the field is omitted rather than filled with a fabricated 0. The rating control is `form.stars[aria-label=\"Your rating\"]` in #detail-sheet: a \"Your rating\" label plus 5 .star spans, each holding a half-step and a whole-step submit button (values 0.5, 1, ... , 5). Its rendered state is unrated: `.sv` reads \"Tap to rate\", zero stars are filled, and every star button is the same grey rgb(156,163,175). `.detail-score` shows \"★ 10.0\" but that is a separate aggregate score, not the user's rating. Identical on desktop and on the 390x844 touch viewport.\n\nAUTH: `open` has no --storage-state flag. Working sequence: `-s=<name> open <url>` (redirects to /pin), then `state-load C:/Users/Andrew/AppData/Local/ui-probe/hub-fixture/storage-state.json`, then `goto http://127.0.0.1:8001/recommend` -> TorrentHub.\n\nVIEWPORTS: desktop = `resize 1280 900`, innerWidth/Height read back 1280x900, dpr 1. Touch = `open --device \"iPhone 13\"` (gives 390x664, dpr 3, pointer coarse, maxTouchPoints 1, matchMedia('(hover: hover)') false) then `resize 390 844` for the requested height with touch emulation intact.\n\nT1: widths are getBoundingClientRect().width of the three `button.act` elements in .acts, DOM order. Desktop reproduced exactly on a second sheet open, so deterministic. Footer: only one footer button renders visibly in either viewport — \"Find torrent\". \"Add to qBittorrent\" is in the DOM but display:none (it appears only after a torrent search returns, which is forbidden here). .detail-foot also holds an \"Upload .torrent\" file-input label — a label, not a button. Footer button labels: [\"Find torrent\", \"Add to qBittorrent\"].\n\nT2: at 1280x900 the bar is display:none at rest and display:flex after a real `mousemove 300 400` onto the first tile (rect 30.39x99.17 at x=320.02,y=289.44); moving the pointer away returns it to display:none. matchMedia('(hover: hover)').matches = true. At 390x844 touch with no pointer event since load, .rec-hover is display:none with a 0x0 rect; matchMedia('(hover: hover)') = false (any-hover false, pointer coarse). Caveat: the rule is `.rec-tile.mouse-over .rec-hover { display:flex }` — a JS-set class, not a :hover rule and not inside a hover media query. A synthetic mouse click inside the touch-emulated context latched .mouse-over and left the bar flex even after the pointer left; a fresh reload with no pointer event leaves it display:none. So \"visible without a hover on touch\" = false, though a pointer event presented as a mouse does reveal it.\n\nT3 access: reached by clicking the first tile's .poster-wrap (a GET that fills #detail-sheet-body). No form submitted; no My list / Seen it / Not for me / star / Find / Upload / Add control clicked.\n\nMisc: the sheet sometimes re-opens on its own after .detail-close (open attr read false, true again later); Escape closed it reliably. Untracked .playwright-cli/ artifacts left uncommitted. Readings committed as plugins/ui-probe/bakeoff/results/measure-web-cli-1.json (1dddef3, 303b9e6).",
+    "t1": {
+     "desktop": {
+      "actionTiles": [
+       {
+        "height": 40,
+        "label": "My list",
+        "width": 90.296875
+       },
+       {
+        "height": 40,
+        "label": "Seen it",
+        "width": 91.15625
+       },
+       {
+        "height": 40,
+        "label": "Not for me",
+        "width": 116.0625
+       }
+      ],
+      "closeCentre": {
+       "x": 1016,
+       "y": 171
+      },
+      "closeSize": "40x40",
+      "dialog": "820x622 at (230,139)",
+      "footerButtons": [
+       "Find torrent",
+       "Add to qBittorrent"
+      ],
+      "footerDetail": [
+       {
+        "display": "flex",
+        "height": 48,
+        "label": "Find torrent",
+        "tag": "button.detail-find",
+        "width": 374
+       },
+       {
+        "display": "none",
+        "label": "Add to qBittorrent",
+        "tag": "button.detail-add",
+        "width": 0
+       },
+       {
+        "display": "flex",
+        "label": "Upload .torrent",
+        "note": "file-input label, not a button",
+        "tag": "label.detail-upload-label",
+        "width": 90.390625
+       }
+      ],
+      "viewport": "1280x900 dpr 1"
+     },
+     "phone": {
+      "actionTiles": [
+       {
+        "height": 64,
+        "label": "My list",
+        "width": 111.328125
+       },
+       {
+        "height": 64,
+        "label": "Seen it",
+        "width": 111.328125
+       },
+       {
+        "height": 64,
+        "label": "Not for me",
+        "width": 111.34375
+       }
+      ],
+      "closeCentre": {
+       "x": 358,
+       "y": 201.25
+      },
+      "closeSize": "44x44",
+      "dialog": "390x686.75 at (0,157.25) - bottom sheet",
+      "footerButtons": [
+       "Find torrent",
+       "Add to qBittorrent"
+      ],
+      "footerDetail": [
+       {
+        "display": "flex",
+        "label": "Find torrent",
+        "tag": "button.detail-find",
+        "width": 350
+       },
+       {
+        "display": "none",
+        "label": "Add to qBittorrent",
+        "tag": "button.detail-add",
+        "width": 0
+       },
+       {
+        "display": "flex",
+        "label": "Upload .torrent",
+        "note": "file-input label, not a button",
+        "tag": "label.detail-upload-label",
+        "width": 350
+       }
+      ],
+      "viewport": "390x844 dpr 3 touch"
+     }
+    },
+    "t2": {
+     "desktop_hover_media": true,
+     "desktop_hover_visible": true,
+     "touch_hover_media": false,
+     "touch_hover_visible": false
+    },
+    "t3": {
+     "control": "form.stars[aria-label=\"Your rating\"] in #detail-sheet"
+    }
+   }
+  },
+  {
+   "id": "measure-web-cli-2",
+   "durationMs": 233095,
+   "numTurns": 56,
+   "tokens": {
+    "input": 102671,
+    "output": 22892,
+    "cacheCreation": 0,
+    "cacheRead": 2745216
+   },
+   "output": {
+    "t1": {
+     "desktop": {
+      "actionTileHeightPx": 40,
+      "actionTileLabels": [
+       "My list",
+       "Seen it",
+       "Not for me"
+      ],
+      "actionTileWidthsCssPx": [
+       90.3,
+       91.16,
+       116.06
+      ],
+      "closeButtonSizePx": [
+       40,
+       40
+      ],
+      "closeCentreCssPx": [
+       1016,
+       171
+      ],
+      "dialogRectCssPx": [
+       230,
+       139,
+       820,
+       622
+      ],
+      "footerButtonLabels": [
+       "Find torrent",
+       "Upload .torrent (label element)",
+       "Add to qBittorrent (hidden until a file is chosen)"
+      ],
+      "viewport": "1280x900"
+     },
+     "phone": {
+      "actionTileHeightPx": 64,
+      "actionTileLabels": [
+       "My list",
+       "Seen it",
+       "Not for me"
+      ],
+      "actionTileWidthsCssPx": [
+       111.33,
+       111.33,
+       111.34
+      ],
+      "closeButtonSizePx": [
+       44,
+       44
+      ],
+      "closeCentreCssPx": [
+       358,
+       201.25
+      ],
+      "dialogRectCssPx": [
+       0,
+       157,
+       390,
+       687
+      ],
+      "footerButtonLabels": [
+       "Find torrent",
+       "Upload .torrent (label element)",
+       "Add to qBittorrent (hidden until a file is chosen)"
+      ],
+      "viewport": "390x844"
+     }
+    },
+    "t2": {
+     "desktop_hover_media": true,
+     "desktop_hover_visible": true,
+     "touch_hover_media": false,
+     "touch_hover_visible": false
+    },
+    "t3": {
+     "control": "#detail-sheet form.stars (role=group, aria-label=\"Your rating\") - 10 submit buttons name=stars with values 0.5..5 grouped in 5 .star spans, plus span.sv reading \"Tap to rate\"; no aria-pressed, no filled-star class, no data-value attribute",
+     "value": 0
+    },
+    "notes": "T3 VALUE IS UNRATED - report null, not 0. The rating control shows no current value: span.sv reads \\\"Tap to rate\\\", no star button has aria-pressed=true, and no .star span carries a filled/on class, at both viewports. The structured-output schema for t3.value only accepts a number (null was rejected), so 0 is a schema-forced placeholder, NOT a measured rating. There is no form input storing a current value either - the state lives only in the sv label and pressed/filled classes.\n\nTool: playwright-cli 0.1.24, headless chromium, auth via `state-load C:/Users/Andrew/AppData/Local/ui-probe/hub-fixture/storage-state.json` (without it /recommend redirects to /pin). Two sessions: d1 (desktop) and t1 (`open --device \\\"iPhone 13\\\"` then `resize 390 844` - the device descriptor alone yields 390x664; the resize gives the exact 390x844 while keeping isMobile/hasTouch and hover:none/pointer:coarse). All values read with `eval` plus getBoundingClientRect/getComputedStyle; the only click was the first tile's poster link to open the sheet (read-only otherwise).\n\nT2 detail: at 1280x900 `.rec-hover` computed display was `none` with the pointer parked away at (640,60), then `flex` (opacity 1, visibility visible, rect 320,289 30x99) after `mousemove 276 416` onto tile 1 - the tile matched `:hover`. At 390x844 with no hover: display `none`, rect 0x0. matchMedia('(hover: hover)') true on desktop, false on touch; '(pointer: fine)' true desktop, '(pointer: coarse)' true touch.\n\nCaveats: (1) the first grid tile is labelled \\\"Harbour Lights\\\" but the opened sheet renders heading \\\"Sleepless Mom\\\" with a mismatched poster and synopsis - same tmdb_id 900001, fixture data inconsistency, not a mis-click; (2) the tool's `hover <selector>` command timed out with \\\"<img class=detail-poster> from <dialog id=detail-sheet> subtree intercepts pointer events\\\" whenever the sheet was open, so mousemove was used for the real-pointer hover; (3) the first two commands after `open` intermittently hit a stale daemon (EADDRINUSE on the named pipe, then \\\"browser is not open\\\") - `kill-all` plus retry fixed it; (4) the sheet's open state flipped to false a couple of times between commands in an unattributable way, so the T1 numbers were re-measured twice and came back identical (90.3/91.16/116.06); the reported figures are the stable re-measurements. Artifacts committed as 6a81e1f under plugins/ui-probe/bakeoff/artifacts/."
+   }
+  },
+  {
+   "id": "measure-web-cli-3",
+   "durationMs": 141934,
+   "numTurns": 48,
+   "tokens": {
+    "input": 134663,
+    "output": 17945,
+    "cacheCreation": 0,
+    "cacheRead": 2122778
+   },
+   "output": {
+    "t1": {
+     "desktop": {
+      "act_tiles": [
+       {
+        "height_css_px": 40,
+        "label": "My list",
+        "width_css_px": 90.296875
+       },
+       {
+        "height_css_px": 40,
+        "label": "Seen it",
+        "width_css_px": 91.15625
+       },
+       {
+        "height_css_px": 40,
+        "label": "Not for me",
+        "width_css_px": 116.0625
+       }
+      ],
+      "close_button_rect_css_px": [
+       996,
+       151,
+       40,
+       40
+      ],
+      "close_centre_css_px": [
+       1016,
+       171
+      ],
+      "dialog_rect_css_px": [
+       230,
+       139,
+       820,
+       622
+      ],
+      "footer_button_labels_hidden": [
+       "Add to qBittorrent"
+      ],
+      "footer_button_labels_visible": [
+       "Find torrent"
+      ],
+      "viewport": "1280x900"
+     },
+     "phone": {
+      "act_tiles": [
+       {
+        "height_css_px": 64,
+        "label": "My list",
+        "width_css_px": 111.328125
+       },
+       {
+        "height_css_px": 64,
+        "label": "Seen it",
+        "width_css_px": 111.328125
+       },
+       {
+        "height_css_px": 64,
+        "label": "Not for me",
+        "width_css_px": 111.34375
+       }
+      ],
+      "close_button_rect_css_px": [
+       336,
+       179.25,
+       44,
+       44
+      ],
+      "close_centre_css_px": [
+       358,
+       201.25
+      ],
+      "dialog_rect_css_px": [
+       0,
+       157.25,
+       390,
+       686.75
+      ],
+      "footer_button_labels_hidden": [
+       "Add to qBittorrent"
+      ],
+      "footer_button_labels_visible": [
+       "Find torrent"
+      ],
+      "viewport": "390x844 touch"
+     }
+    },
+    "t2": {
+     "desktop_hover_media": true,
+     "desktop_hover_visible": true,
+     "touch_hover_media": false,
+     "touch_hover_visible": false
+    },
+    "t3": {
+     "control": "form.stars, role=group aria-label \"Your rating\", inside #detail-rec in the open #detail-sheet; 5 .star spans each holding two half-star submit buttons (0.5,1,1.5,2,2.5,3,3.5,4,4.5,5) submitted as name=stars. CURRENT VALUE IS UNRATED (null) - no star carries a filled/selected class or aria-pressed, and the status span reads \"Tap to rate\". The numeric 0 below is a placeholder forced by the output schema, which rejects null; it is not a measured rating.",
+     "value": 0
+    },
+    "notes": "Tool: playwright-cli 0.1.24 (npm @playwright/cli), headless, PLAYWRIGHT_BROWSERS_PATH set, cookie loaded with its own `state-load` option. First tile on /recommend was #rec-card-movie_900001 (\"Harbour Lights\"); its sheet rendered the title \"Sleepless Mom\" - a title mismatch between tile and sheet, reported as observed.\n\nT1: measured via getBoundingClientRect on the three `.acts .act` buttons (form wrappers measure identically). Desktop 1280x900, sheet open: My list 90.296875 / Seen it 91.15625 / Not for me 116.0625 CSS px, all 40 px tall; close button centre (1016, 171); footer visible button label \"Find torrent\". Touch 390x844, sheet open: 111.328125 / 111.328125 / 111.34375 CSS px, all 64 px tall; close centre (358, 201.25); footer visible label \"Find torrent\". The footer's second button \"Add to qBittorrent\" exists in both viewports but is a submit button hidden until a .torrent file is picked (\"Upload .torrent\" is a label, not a button), so it is not rendered.\n\nT2: Desktop 1280x900 mouse - before hover `.rec-hover` was display:none with a 0x0 rect; after hovering the tile it was display:flex with a 30.39x99.17 rect; moving the mouse away returned it to display:none. Touch 390x844 - display:none, 0x0 rect, never shown without a hover. matchMedia('(hover: hover)').matches read true on desktop and false on the touch viewport. Cross-check: the same 390x844 size reached by resize alone in a non-device session still reports hover:hover true and maxTouchPoints 0, so the touch context came from `open --device \"iPhone 15\"` (iPhone UA, TouchEvent present, pointer:coarse, maxTouchPoints 1), not from the window size.\n\nT3: the rating control is the `form.stars` group labelled \"Your rating\" inside the detail sheet, ten half-star submit buttons. Current value is null/unrated (\"Tap to rate\", no filled class, no aria-pressed). T3 value is encoded as 0 only because the structured-output schema declares `value` as a number and rejects null; treat it as unrated, not as a zero-star rating.\n\nNothing was clicked, hovered-on-action or submitted for state change; the only interactions were opening/closing the sheet and one hover. Evidence written to plugins/ui-probe/bakeoff/results/artifacts/web-cli-t1t2t3.json and committed as 6f81ced / f1279cf on swarm/9b3c79a74c8b/measure-web-cli-3; browsers closed and the .playwright-cli scratch dir removed."
+   }
+  },
+  {
+   "id": "measure-web-mcp-1",
+   "durationMs": 94301,
+   "numTurns": 30,
+   "tokens": {
+    "input": 194981,
+    "output": 12878,
+    "cacheCreation": 0,
+    "cacheRead": 1205888
+   },
+   "output": {
+    "notes": "Playwright MCP only. t3.value is TRULY null (unrated) — the schema here demands a number, so I omitted the field rather than invent a rating: the control is form.stars (role=group, aria-label=\"Your rating\") holding ten half-star submit buttons 0.5..5, the visible label is \"Your rating\" / \"Tap to rate\", no button carries on/active/aria-pressed, and the form has no value attribute. Context note: the MCP browser context is a desktop context (no hasTouch/isMobile in page.context()._options, navigator.maxTouchPoints=0), so browser_resize alone yields a 390px viewport still reporting matchMedia('(hover: hover)')=true. The touch readings were taken after enabling real touch emulation via CDP Emulation.setTouchEmulationEnabled({enabled:true, maxTouchPoints:5}) through browser_run_code_unsafe, which flipped hover:hover to false, hover:none true, pointer:coarse true, maxTouchPoints 5; the emulation was then disabled and the sheet closed (verified hover:hover back to true). T1's 390px numbers were identical with and without touch emulation, so layout is width-driven only. Hover bar: desktop was display:none before hover and display:flex at 30.39x99.17 px after browser_hover on #rec-card-movie_900001 (pointer-events stays none); touch 390x844 with the mouse parked at (5,5) stayed display:none at 0x0 with tile.matches(':hover')=false. The sheet opened from the first tile (.rec-tile #rec-card-movie_900001 at /recommend) renders header \"Sleepless Mom\" while its hidden inputs carry title=Harbour Lights — that is what the first tile loads, and all T1 numbers come from that sheet. Footer labels were read from .detail-foot-row; \"Add to qBittorrent\" carries the hidden attribute and display:none in both viewports, so it is listed separately rather than as a rendered label. No write controls were clicked — only the poster (open) and the close (x) button.",
+    "t1": {
+     "desktop": {
+      "actionLabels": [
+       "My list",
+       "Seen it",
+       "Not for me"
+      ],
+      "actionTileHeightPx": 40,
+      "actionTileWidthsPx": [
+       90.3,
+       91.16,
+       116.06
+      ],
+      "closeButtonSizePx": {
+       "h": 40,
+       "w": 40
+      },
+      "closeCentre": {
+       "x": 1016,
+       "y": 171
+      },
+      "dialogRect": {
+       "h": 622,
+       "w": 820,
+       "x": 230,
+       "y": 139
+      },
+      "footerButtons": [
+       "Find torrent"
+      ],
+      "footerHiddenButtons": [
+       "Add to qBittorrent"
+      ],
+      "viewport": "1280x900"
+     },
+     "phone": {
+      "actionLabels": [
+       "My list",
+       "Seen it",
+       "Not for me"
+      ],
+      "actionTileHeightPx": 64,
+      "actionTileWidthsPx": [
+       111.33,
+       111.33,
+       111.34
+      ],
+      "closeButtonSizePx": {
+       "h": 44,
+       "w": 44
+      },
+      "closeCentre": {
+       "x": 358,
+       "y": 201.25
+      },
+      "dialogRect": {
+       "h": 686.75,
+       "w": 390,
+       "x": 0,
+       "y": 157.25
+      },
+      "footerButtons": [
+       "Find torrent"
+      ],
+      "footerHiddenButtons": [
+       "Add to qBittorrent"
+      ],
+      "viewport": "390x844 (touch emulated)"
+     }
+    },
+    "t2": {
+     "desktop_hover_media": true,
+     "desktop_hover_visible": true,
+     "touch_hover_media": false,
+     "touch_hover_visible": false
+    },
+    "t3": {
+     "control": "form.stars (role=group, aria-label=\"Your rating\") in #detail-rec — ten half-star submit buttons value 0.5..5, label \"Your rating\" / \"Tap to rate\"; no selected state anywhere. Current value: null (unrated)."
+    }
+   }
+  },
+  {
+   "id": "measure-web-mcp-2",
+   "durationMs": 74646,
+   "numTurns": 35,
+   "tokens": {
+    "input": 271929,
+    "output": 10858,
+    "cacheCreation": 0,
+    "cacheRead": 1280424
+   },
+   "output": {
+    "notes": "T3 VALUE IS NULL — UNRATED. The required schema only accepts a number, so `t3.value` carries 0 purely as a placeholder; 0 is NOT an observed rating. Evidence: the control is `form.stars` in `#detail-sheet-body` (role=group, aria-label \"Your rating\") with 10 submit buttons named `stars` at 0.5…5 (aria-label \"0.5 stars\" … \"5 stars\"), no button is selected/checked, no hidden `stars` input is populated, and the adjacent `.sv` status span reads \"Tap to rate\".\n\nAll numbers are getBoundingClientRect() values in CSS px read from the page. The sheet was opened by clicking the poster of the first tile (`#rec-card-movie_900001`) and closed via `button.detail-close`; no action, star, form, Find or Upload control was clicked.\n\nT1 desktop (1280x900): dialog 820x622. Action tiles are content-sized and therefore UNEQUAL — My list 90.30, Seen it 91.16, Not for me 116.06 (all 40px tall). Close button 40x40, centre (1016.00, 171.00).\nT1 phone (390x844): dialog 390x686.75. Tiles are equal thirds — 111.33 / 111.33 / 111.34 (64px tall). Close button 44x44, centre (358.00, 201.25).\nFooter in both: \"Find torrent\" (button) and \"Upload .torrent\" (label bound to the hidden file input). A third button, \"Add to qBittorrent\", exists but is display:none in both viewports.\n\nT2: desktop — `.rec-hover` computes display:none with no hover; hovering the tile flips it to display:flex (30.39x99.17) and the tile matches `:hover`, so the bar is visible; `matchMedia('(hover: hover)')` = true. Phone — after `setViewportSize(390,844)` alone the media query still returned true (Playwright resize does not change hover/pointer media), so I emulated a real touch device over CDP (`Emulation.setEmulatedMedia` hover:none/pointer:coarse + touch emulation): `matchMedia('(hover: hover)')` = false, `(pointer: coarse)` = true, and `.rec-hover` computed display stayed none with no hover. So the bar is not visible without hover on touch. I did not test whether a tap reveals it — that would require tapping action buttons, which are off-limits.\n\nData inconsistency observed (not a measurement failure): the sheet opened from the \"Harbour Lights\" (movie:900001) tile renders heading/meta \"Sleepless Mom / 2021 / movie / ★ 10.0\" and a Sleepless Mom synopsis, while its hidden form fields still carry title=\"Harbour Lights\", year=\"2019\". The network request was the correct `/media/900001?media_type=movie&rec_row=row-quiet-drama`.",
+    "t1": {
+     "desktop": {
+      "actionTileWidths": [
+       90.3,
+       91.16,
+       116.06
+      ],
+      "closeCenter": {
+       "x": 1016,
+       "y": 171
+      },
+      "closeSize": {
+       "h": 40,
+       "w": 40
+      },
+      "footerButtons": [
+       "Find torrent",
+       "Upload .torrent"
+      ],
+      "hiddenFooterButton": "Add to qBittorrent (display:none)",
+      "viewport": "1280x900"
+     },
+     "phone": {
+      "actionTileWidths": [
+       111.33,
+       111.33,
+       111.34
+      ],
+      "closeCenter": {
+       "x": 358,
+       "y": 201.25
+      },
+      "closeSize": {
+       "h": 44,
+       "w": 44
+      },
+      "footerButtons": [
+       "Find torrent",
+       "Upload .torrent"
+      ],
+      "hiddenFooterButton": "Add to qBittorrent (display:none)",
+      "viewport": "390x844"
+     }
+    },
+    "t2": {
+     "desktop_hover_media": true,
+     "desktop_hover_visible": true,
+     "touch_hover_media": false,
+     "touch_hover_visible": false
+    },
+    "t3": {
+     "control": "form.stars in #detail-sheet-body (role=group, aria-label \"Your rating\"): 10 submit buttons name=\"stars\", values 0.5…5, aria-label \"0.5 stars\"…\"5 stars\"; no button selected, status span .sv reads \"Tap to rate\"",
+     "value": 0
+    }
+   }
+  },
+  {
+   "id": "measure-web-mcp-3",
+   "durationMs": 75655,
+   "numTurns": 33,
+   "tokens": {
+    "input": 73844,
+    "output": 9905,
+    "cacheCreation": 0,
+    "cacheRead": 1405568
+   },
+   "output": {
+    "notes": "T3 RATING IS UNRATED — reported as null per the task's rule (\"null if unrated\"), but the structured-output schema requires t3.value to be a number, so it is omitted here and the null lives in this note. The control is the detail sheet's `form.stars` (role=group, aria-label \"Your rating\"): 10 submit buttons from 0.5 to 5, rendered value text is \"Tap to rate\", 0 filled .star spans, no checked input, no data-rating attribute. No star was clicked (read-only). T1 numbers were taken twice per viewport (immediately and after a 600ms settle) and matched exactly, so they are not mid-animation values; widths are getBoundingClientRect().width in CSS px at dpr=1, and the close button is .detail-close with centre = x+w/2, y+h/2. Footer labels are the text of the buttons in .detail-foot (a spinner span there is not a button). T2 desktop: hovering #rec-card-movie_900001 makes .rec-hover display:flex with a real 30.4x99.2px rect (three 30.4px-wide buttons: My list / Seen it / Not for me); before hover it is display:none with a zero rect. T2 touch CAVEAT: Playwright MCP's browser_resize only changes viewport size — it cannot set hasTouch or a coarse/no-hover pointer. At 390x844 the page still reports matchMedia('(hover: hover)')=true, '(hover: none)'=false, '(pointer: coarse)'=false, navigator.maxTouchPoints=0, so that is what I reported for touch_hover_media (true) even though a real touch device would normally report false. The false for touch_hover_visible is a genuine measurement (nothing hovered, .rec-hover display:none, zero rect) but it exercises 'narrow viewport with a fine pointer', not touch input. The stylesheet has no @media (hover: …) rules at all: the bar is revealed by `.rec-tile.mouse-over .rec-hover, .rec-tile:has(:focus-visible) .rec-hover { display:flex }`, a JS-added class, so a real no-hover device would likely never show it. Incidental, no effect on measurements: the sheet's <h1> rendered \"Sleepless Mom\" while the tile and hidden inputs said \"Harbour Lights\" for ck movie:900001. Sheet closed and page closed after measuring.",
+    "t1": {
+     "desktop": {
+      "action_tile_height_px": 40,
+      "action_tile_labels": [
+       "My list",
+       "Seen it",
+       "Not for me"
+      ],
+      "action_tile_widths_css_px": [
+       90.296875,
+       91.15625,
+       116.0625
+      ],
+      "close_button_centre_css_px": {
+       "x": 1016,
+       "y": 171
+      },
+      "close_button_size_px": {
+       "h": 40,
+       "w": 40
+      },
+      "footer_button_labels": [
+       "Find torrent",
+       "Add to qBittorrent"
+      ],
+      "sheet_rect": {
+       "h": 622,
+       "w": 820,
+       "x": 230,
+       "y": 139
+      },
+      "viewport": "1280x900"
+     },
+     "phone": {
+      "action_tile_height_px": 64,
+      "action_tile_labels": [
+       "My list",
+       "Seen it",
+       "Not for me"
+      ],
+      "action_tile_widths_css_px": [
+       111.328125,
+       111.328125,
+       111.34375
+      ],
+      "close_button_centre_css_px": {
+       "x": 358,
+       "y": 201.25
+      },
+      "close_button_size_px": {
+       "h": 44,
+       "w": 44
+      },
+      "footer_button_labels": [
+       "Find torrent",
+       "Add to qBittorrent"
+      ],
+      "sheet_rect": {
+       "h": 686.75,
+       "w": 390,
+       "x": 0,
+       "y": 157.25
+      },
+      "viewport": "390x844"
+     }
+    },
+    "t2": {
+     "desktop_hover_media": true,
+     "desktop_hover_visible": true,
+     "touch_hover_media": true,
+     "touch_hover_visible": false
+    },
+    "t3": {
+     "control": "detail sheet form.stars[aria-label=\"Your rating\"] — 10 submit buttons (0.5→5 stars), value text 'Tap to rate', 0 filled .star spans, no checked input; unrated (schema forces a number here, so value omitted; the true answer is null)"
+    }
+   }
+  },
+  {
+   "id": "measure-web-null-1",
+   "durationMs": 10958,
+   "numTurns": 3,
+   "tokens": {
+    "input": 35010,
+    "output": 923,
+    "cacheCreation": 0,
+    "cacheRead": 34944
+   },
+   "output": {
+    "notes": "null control",
+    "t1": {},
+    "t2": {},
+    "t3": {}
+   }
+  },
+  {
+   "id": "measure-web-null-2",
+   "durationMs": 11716,
+   "numTurns": 3,
+   "tokens": {
+    "input": 69807,
+    "output": 1651,
+    "cacheCreation": 0,
+    "cacheRead": 0
+   },
+   "output": {
+    "notes": "null control",
+    "t1": {},
+    "t2": {},
+    "t3": {}
+   }
+  },
+  {
+   "id": "measure-web-null-3",
+   "durationMs": 8973,
+   "numTurns": 3,
+   "tokens": {
+    "input": 35040,
+    "output": 854,
+    "cacheCreation": 0,
+    "cacheRead": 34944
+   },
+   "output": {
+    "t1": {
+     "desktop": {},
+     "phone": {}
+    },
+    "t2": {},
+    "t3": {},
+    "notes": "null control"
+   }
+  }
+ ]
+}
