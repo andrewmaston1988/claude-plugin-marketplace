@@ -2,7 +2,7 @@
 
 import { sleep } from "./cdp.mjs";
 import { setCookies } from "./auth.mjs";
-import { installGuard, inTvScope } from "./guard.mjs";
+import { installGuard, inTvScope, NO_PROTOCOL } from "./guard.mjs";
 import { assertsNothing, expandIncludes, validate } from "./ir.mjs";
 import { StepFailure, absolute, inconclusive, q } from "./ops/common.mjs";
 import { OPS } from "./ops/index.mjs";
@@ -122,7 +122,9 @@ export async function run(doc, ctx = {}) {
       if (cookieUrl) await setCookies(state.cdp, ctx.cookies, cookieUrl);
     }
     if (!state.guard) {
-      state.guard = await installGuard(state.cdp, ctx.protocol ?? null, {
+      // The set may serve no protocol at all; on the web a null one is the modern browser.
+      const protocol = device === "tv" && ctx.protocol == null ? NO_PROTOCOL : (ctx.protocol ?? null);
+      state.guard = await installGuard(state.cdp, protocol, {
         allowWrites: state.allowWrites,
         blocked: state.blocked,
         testOrigin: ctx.testOrigin ?? null,

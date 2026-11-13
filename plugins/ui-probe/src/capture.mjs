@@ -316,6 +316,7 @@ async function captureTv({ screen, config, cdp, ctx, events, guard, blocked, out
     includeBackground: Boolean(ctx.includeBackground),
     focusSelector: config.tv?.focusSelector,
     protocol: ctx.protocol ?? null,
+    tvScope: true,
   });
   writeAtomic(join(dir, "observation.txt"), observation);
 

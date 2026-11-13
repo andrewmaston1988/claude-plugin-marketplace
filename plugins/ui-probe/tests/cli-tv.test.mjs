@@ -371,3 +371,16 @@ test("tv probe attaches, writes platform.json to both homes and ends on the verd
     await stub.close();
   }
 });
+
+// Row 7: a target that will not serve /json/protocol offers no interception. Null is only a
+// modern browser on the web path, where the protocol is never requested.
+test("row 7: an unreadable protocol on the TV counts as no interception", async () => {
+  const { tvSession } = await import("../src/tv/cli.mjs");
+  const attachTo = (protocol) => async () => ({ cdp: {}, port: 43411, protocol, detach: async () => {} });
+  const config = { tv: { host: "192.0.2.10:26101", appid: "torrenthub.main" } };
+
+  assert.equal((await tvSession(config, { _attach: attachTo(null) })).intercepted, false);
+  assert.equal((await tvSession(config, {
+    _attach: attachTo({ domains: [{ domain: "Network", commands: [{ name: "setRequestInterception" }] }] }),
+  })).intercepted, true);
+});

@@ -246,6 +246,17 @@ test("a tv run installs Network interception when the protocol has no Fetch doma
   assert.equal(cdp.methods().includes("Fetch.enable"), false, cdp.methods().join(","));
 });
 
+// Row 7: the set's protocol can come back null; that is no interception, not a Fetch domain.
+test("a tv run whose protocol the target would not serve installs no guard", async () => {
+  const cdp = stubCdp({ nodeIds: [] });
+  const result = await run({ id: "k", backend: "tv", steps: [{ key: { key: "Left" } }] }, {
+    cdp, requireAssertion: false, device: "tv", protocol: null,
+  });
+  assert.equal(result.outcome, "passed", JSON.stringify(result.steps));
+  assert.equal(cdp.methods().includes("Fetch.enable"), false, cdp.methods().join(","));
+  assert.equal(cdp.methods().includes("Network.setRequestInterception"), false, cdp.methods().join(","));
+});
+
 test("a step's source is the scenario name and its 1-based index", async () => {
   const cdp = stubCdp({ nodeIds: [2] });
   const result = await run(doc({ open: { url: URL } }, { expect_text: { target: "h1", equals: "hello" } }), { cdp, source: "t2-hover.yaml" });

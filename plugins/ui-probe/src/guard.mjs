@@ -67,6 +67,9 @@ function domainsOf(protocol) {
   return Array.isArray(protocol.domains) ? protocol.domains : [];
 }
 
+/** A target that served no protocol at all. On the set that is no interception, never Fetch. */
+export const NO_PROTOCOL = { domains: [] };
+
 /**
  * Which interception this target offers. Chromium 69 on the TV has no Fetch domain, so the guard
  * falls back to Network interception; null means neither is available and the caller must refuse.

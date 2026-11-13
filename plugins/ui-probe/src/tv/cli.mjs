@@ -6,7 +6,7 @@ import { dirname, join } from 'node:path';
 import { attach, AttachInconclusive } from './attach.mjs';
 import { findSdb, listedDevices, sdb } from './sdb.mjs';
 import { platformPath, tvProbe } from './probe.mjs';
-import { interceptionKind, inTvScope, tvWritePolicy } from '../guard.mjs';
+import { interceptionKind, inTvScope, NO_PROTOCOL, tvWritePolicy } from '../guard.mjs';
 
 export { AttachInconclusive };
 
@@ -62,7 +62,8 @@ export async function tvSession(config, { attachPort = null, _attach = attach } 
     cdp: session.cdp,
     port: session.port,
     protocol: session.protocol,
-    intercepted: interceptionKind(session.protocol) !== null,
+    // A protocol the set would not serve is unknown, not a modern browser: no interception.
+    intercepted: interceptionKind(session.protocol ?? NO_PROTOCOL) !== null,
     detach: session.detach,
   };
 }

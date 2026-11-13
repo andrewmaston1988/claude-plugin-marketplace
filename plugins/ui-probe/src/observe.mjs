@@ -103,14 +103,16 @@ export async function domWalk(cdp, root, { focusSelector = DEFAULT_FOCUS_SELECTO
 }
 
 // M69 has no getFullAXTree; the 39-domain protocol is the evidence, not the device name.
-function axTreeAvailable(protocol) {
-  if (!protocol || !Array.isArray(protocol.domains)) return true;
+function axTreeAvailable(protocol, tvScope) {
+  // A null protocol is a modern browser on the web, but an unreadable target on the set.
+  if (!protocol) return !tvScope;
+  if (!Array.isArray(protocol.domains)) return true;
   const accessibility = protocol.domains.find((domain) => domain.domain === "Accessibility");
   return (accessibility?.commands || []).some((command) => command.name === "getFullAXTree");
 }
 
-export async function observe(cdp, { includeBackground = false, focusSelector, protocol } = {}) {
-  if (!axTreeAvailable(protocol)) return domWalk(cdp, undefined, { focusSelector });
+export async function observe(cdp, { includeBackground = false, focusSelector, protocol, tvScope = false } = {}) {
+  if (!axTreeAvailable(protocol, tvScope)) return domWalk(cdp, undefined, { focusSelector });
   const tree = await axText(cdp);
   if (!includeBackground) return tree;
   const dom = await domWalk(cdp, undefined, { focusSelector });
