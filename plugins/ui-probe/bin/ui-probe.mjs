@@ -217,6 +217,8 @@ const settle = (code) => { setTimeout(() => process.exit(code), 150); };
           allowWrites: hasFlag("--allow-writes", rest),
           cookies,
           device: "desktop",
+          // The desktop device stands in for the set, so a tv journey's writes are scoped here too.
+          testOrigin: config?.tv?.testOrigin ?? null,
           source: path.basename(file),
           baseDir: path.dirname(scenarioPath),
           file: scenarioPath,

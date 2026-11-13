@@ -6,7 +6,7 @@ import { dirname, join } from 'node:path';
 import { attach, AttachInconclusive } from './attach.mjs';
 import { findSdb, listedDevices, sdb } from './sdb.mjs';
 import { platformPath, tvProbe } from './probe.mjs';
-import { interceptionKind, tvWritePolicy } from '../guard.mjs';
+import { interceptionKind, inTvScope, tvWritePolicy } from '../guard.mjs';
 
 export { AttachInconclusive };
 
@@ -24,12 +24,13 @@ export class TvRefusal extends Error {
  */
 export function tvRefusal(config, {
   backend = null,
+  device = null,
   allowWrites = false,
   hasInterception = true,
   opens = [],
 } = {}) {
   return tvWritePolicy({
-    backend: backend ?? null,
+    tvScope: inTvScope({ backend, device }),
     allowWrites,
     testOrigin: config?.tv?.testOrigin ?? null,
     hasInterception,
@@ -84,11 +85,12 @@ export async function runOnTv({
   _run = null,
 } = {}) {
   const opens = scenarioOpens(doc);
-  assertTvPolicy(config, { backend: doc?.backend ?? null, allowWrites, opens });
+  const device = 'tv';
+  assertTvPolicy(config, { backend: doc?.backend ?? null, device, allowWrites, opens });
 
   const session = await tvSession(config, { attachPort, _attach });
   try {
-    assertTvPolicy(config, { backend: doc?.backend ?? null, allowWrites, hasInterception: session.intercepted, opens });
+    assertTvPolicy(config, { backend: doc?.backend ?? null, device, allowWrites, hasInterception: session.intercepted, opens });
     const run = _run ?? (await import('../runner.mjs')).run;
     const result = await run(doc, {
       cdp: session.cdp,
@@ -125,11 +127,11 @@ export async function captureOnTv({
   _attach = attach,
 } = {}) {
   const opens = scenarioOpens({ steps: screen?.steps ?? [] });
-  assertTvPolicy(config, { backend: 'tv', allowWrites, opens });
+  assertTvPolicy(config, { device: 'tv', allowWrites, opens });
 
   const session = await tvSession(config, { attachPort, _attach });
   try {
-    assertTvPolicy(config, { backend: 'tv', allowWrites, hasInterception: session.intercepted, opens });
+    assertTvPolicy(config, { device: 'tv', allowWrites, hasInterception: session.intercepted, opens });
     const { capture } = await import('../capture.mjs');
     return await capture(screen, {
       config,

@@ -1,6 +1,13 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { installFetchGuard, installGuard, interceptionKind, isWrite, tvWritePolicy } from "../src/guard.mjs";
+import {
+  installFetchGuard,
+  installGuard,
+  interceptionKind,
+  inTvScope,
+  isWrite,
+  tvWritePolicy,
+} from "../src/guard.mjs";
 
 function stubCdp() {
   const calls = [];
@@ -137,7 +144,7 @@ test("with --allow-writes a TV write to tv.testOrigin continues and one elsewher
   const guard = await installGuard(cdp, TV_PROTOCOL, {
     allowWrites: true,
     testOrigin,
-    backend: "tv",
+    tvScope: true,
   });
 
   await cdp.fire("Network.requestIntercepted", intercepted("POST", `${testOrigin}/tv/api/session`, "int-test"));
@@ -157,9 +164,44 @@ test("with --allow-writes a TV write to tv.testOrigin continues and one elsewher
   ]);
 });
 
+// Row 6 (the Fetch half): the desktop device stands in for the set, so its guard is scoped too.
+test("with --allow-writes a TV-scoped Fetch guard continues a test-origin write and fails one elsewhere", async () => {
+  const cdp = stubCdp();
+  const guard = await installGuard(cdp, MODERN_PROTOCOL, { allowWrites: true, testOrigin, tvScope: true });
+  assert.equal(cdp.methods().includes("Fetch.enable"), true, "the guard installs instead of standing down");
+
+  await cdp.fire("Fetch.requestPaused", {
+    requestId: "req-test",
+    request: { method: "POST", url: `${testOrigin}/tv/api/session` },
+  });
+  assert.deepEqual(cdp.calls.at(-1), { method: "Fetch.continueRequest", params: { requestId: "req-test" } });
+  assert.deepEqual(guard.blocked, []);
+
+  await cdp.fire("Fetch.requestPaused", {
+    requestId: "req-prod",
+    request: { method: "POST", url: "http://192.0.2.30:8000/tv/api/session" },
+  });
+  assert.deepEqual(cdp.calls.at(-1), {
+    method: "Fetch.failRequest",
+    params: { requestId: "req-prod", errorReason: "BlockedByClient" },
+  });
+  assert.deepEqual(guard.blocked.map((entry) => `${entry.method} ${entry.url}`), [
+    "POST http://192.0.2.30:8000/tv/api/session",
+  ]);
+});
+
+// Row 6: the scope follows the device as well as the declared backend.
+test("inTvScope covers a tv backend, a tv device, and neither", () => {
+  assert.equal(inTvScope({ backend: "tv", device: "desktop" }), true);
+  assert.equal(inTvScope({ backend: "browser", device: "tv" }), true);
+  assert.equal(inTvScope({ backend: null, device: "tv" }), true);
+  assert.equal(inTvScope({ backend: "browser", device: "desktop" }), false);
+  assert.equal(inTvScope({}), false);
+});
+
 test("an allowWrites TV guard with no testOrigin blocks every write", async () => {
   const cdp = stubCdp();
-  const guard = await installGuard(cdp, TV_PROTOCOL, { allowWrites: true, backend: "tv" });
+  const guard = await installGuard(cdp, TV_PROTOCOL, { allowWrites: true, tvScope: true });
   await cdp.fire("Network.requestIntercepted", intercepted("POST", "http://127.0.0.1:8001/tv/api/session"));
   assert.equal(guard.blocked.length, 1);
   assert.equal(cdp.calls.at(-1).params.errorReason, "BlockedByClient");
@@ -167,7 +209,7 @@ test("an allowWrites TV guard with no testOrigin blocks every write", async () =
 
 test("without --allow-writes a TV guard blocks a write even on the test origin", async () => {
   const cdp = stubCdp();
-  const guard = await installGuard(cdp, TV_PROTOCOL, { testOrigin, backend: "tv" });
+  const guard = await installGuard(cdp, TV_PROTOCOL, { testOrigin, tvScope: true });
   await cdp.fire("Network.requestIntercepted", intercepted("POST", `${testOrigin}/tv/api/session`));
   assert.equal(guard.blocked.length, 1);
   assert.equal(cdp.calls.at(-1).params.errorReason, "BlockedByClient");
@@ -175,19 +217,19 @@ test("without --allow-writes a TV guard blocks a write even on the test origin",
 
 // Row 7
 test("tvWritePolicy passes a non-TV backend through untouched", () => {
-  assert.equal(tvWritePolicy({ backend: "browser", hasInterception: false }), null);
-  assert.equal(tvWritePolicy({ backend: null, allowWrites: true }), null);
+  assert.equal(tvWritePolicy({ tvScope: false, hasInterception: false }), null);
+  assert.equal(tvWritePolicy({ tvScope: false, allowWrites: true }), null);
 });
 
 test("tvWritePolicy refuses a TV run that has no interception and no --allow-writes", () => {
-  const message = tvWritePolicy({ backend: "tv", hasInterception: false, allowWrites: false, testOrigin });
+  const message = tvWritePolicy({ tvScope: true, hasInterception: false, allowWrites: false, testOrigin });
   assert.match(message, /--allow-writes/);
   assert.match(message, /interception/);
 });
 
 test("tvWritePolicy refuses --allow-writes when tv.testOrigin is unset", () => {
   for (const hasInterception of [true, false]) {
-    const message = tvWritePolicy({ backend: "tv", hasInterception, allowWrites: true, testOrigin: null });
+    const message = tvWritePolicy({ tvScope: true, hasInterception, allowWrites: true, testOrigin: null });
     assert.match(message, /tv\.testOrigin/, String(hasInterception));
   }
 });
@@ -199,7 +241,7 @@ test("tvWritePolicy refuses a TV open outside tv.testOrigin when no interception
     { open: { url: "http://192.0.2.30:8000/tv" } },
     { open: "http://192.0.2.30:8000/tv" },
   ]) {
-    const message = tvWritePolicy({ backend: "tv", hasInterception: false, allowWrites: true, testOrigin, opens: [open] });
+    const message = tvWritePolicy({ tvScope: true, hasInterception: false, allowWrites: true, testOrigin, opens: [open] });
     assert.match(message, /192\.0\.2\.30:8000/, JSON.stringify(open));
     assert.match(message, /tv\.testOrigin/, JSON.stringify(open));
   }
@@ -207,7 +249,7 @@ test("tvWritePolicy refuses a TV open outside tv.testOrigin when no interception
 
 test("tvWritePolicy allows a TV run whose opens are all on tv.testOrigin", () => {
   assert.equal(tvWritePolicy({
-    backend: "tv",
+    tvScope: true,
     hasInterception: false,
     allowWrites: true,
     testOrigin,
@@ -216,8 +258,8 @@ test("tvWritePolicy allows a TV run whose opens are all on tv.testOrigin", () =>
 });
 
 test("tvWritePolicy allows a TV run that has interception, and one with no opens", () => {
-  assert.equal(tvWritePolicy({ backend: "tv", hasInterception: true, allowWrites: false, testOrigin }), null);
-  assert.equal(tvWritePolicy({ backend: "tv", hasInterception: false, allowWrites: true, testOrigin, opens: [] }), null);
+  assert.equal(tvWritePolicy({ tvScope: true, hasInterception: true, allowWrites: false, testOrigin }), null);
+  assert.equal(tvWritePolicy({ tvScope: true, hasInterception: false, allowWrites: true, testOrigin, opens: [] }), null);
 });
 
 test("isWrite is the one predicate the TV guard uses", () => {

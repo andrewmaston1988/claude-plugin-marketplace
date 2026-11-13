@@ -368,7 +368,7 @@ export async function capture(screen, ctx = {}) {
   const guard = await installGuard(cdp, ctx.protocol ?? null, {
     allowWrites,
     blocked,
-    ...(ctx.device === "tv" ? { testOrigin: config.tv?.testOrigin ?? null, backend: "tv" } : {}),
+    ...(ctx.device === "tv" ? { testOrigin: config.tv?.testOrigin ?? null, tvScope: true } : {}),
   });
   const lines = [];
 

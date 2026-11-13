@@ -8,14 +8,26 @@ export function isWrite(method) {
 
 /**
  * Fail every write the page tries to send, at the request stage. Reads pass through untouched.
+ * Under TV scope `--allow-writes` is not a blank cheque: only writes to `testOrigin` continue.
  * Returns the shared `blocked` list so a caller can report what was stopped.
  */
-export async function installFetchGuard(cdp, { allowWrites = false, blocked = [] } = {}) {
-  if (allowWrites) return { blocked, uninstall: async () => {} };
+export async function installFetchGuard(cdp, {
+  allowWrites = false,
+  blocked = [],
+  testOrigin = null,
+  tvScope = false,
+} = {}) {
+  const testOriginValue = testOrigin ? originOf(testOrigin) : null;
+  const allowedWrite = (url) => {
+    if (!allowWrites) return false;
+    if (!tvScope) return true;
+    return testOriginValue != null && originOf(url) === testOriginValue;
+  };
+  if (allowWrites && !tvScope) return { blocked, uninstall: async () => {} };
 
   const off = cdp.on("Fetch.requestPaused", async ({ requestId, request }) => {
     try {
-      if (isWrite(request.method)) {
+      if (isWrite(request.method) && !allowedWrite(request.url)) {
         blocked.push({ method: request.method, url: request.url, at: Date.now() });
         await cdp.send("Fetch.failRequest", { requestId, errorReason: "BlockedByClient" });
       } else {
@@ -38,6 +50,11 @@ export async function installFetchGuard(cdp, { allowWrites = false, blocked = []
       try { await cdp.send("Fetch.disable"); } catch { /* the socket is already gone */ }
     },
   };
+}
+
+/** TV scope follows the target device as well as the file's declared backend. */
+export function inTvScope({ backend = null, device = null } = {}) {
+  return backend === "tv" || device === "tv";
 }
 
 function originOf(url) {
@@ -63,20 +80,20 @@ export function interceptionKind(protocol) {
 }
 
 /**
- * Fail every write at the request stage over Network interception (pre-Fetch Chromium). A `tv`
- * backend with writes allowed only continues writes to `testOrigin`; every other write is blocked
- * and recorded, so an allowed run cannot stray to production.
+ * Fail every write at the request stage over Network interception (pre-Fetch Chromium). Under TV
+ * scope a write is only continued to `testOrigin`; every other write is blocked and recorded, so
+ * an allowed run cannot stray to production.
  */
 export async function installNetworkGuard(cdp, {
   allowWrites = false,
   blocked = [],
   testOrigin = null,
-  backend = null,
+  tvScope = false,
 } = {}) {
   const testOriginValue = testOrigin ? originOf(testOrigin) : null;
   const allowedWrite = (url) => {
     if (!allowWrites) return false;
-    if (backend !== "tv") return true;
+    if (!tvScope) return true;
     return testOriginValue != null && originOf(url) === testOriginValue;
   };
 
@@ -132,13 +149,13 @@ function openUrl(step) {
  * fully allowed run pinned to the test origin; with it, writes are still scoped there.
  */
 export function tvWritePolicy({
-  backend = null,
+  tvScope = false,
   allowWrites = false,
   testOrigin = null,
   hasInterception = false,
   opens = [],
 } = {}) {
-  if (backend !== "tv") return null;
+  if (!tvScope) return null;
 
   const testOriginValue = testOrigin ? originOf(testOrigin) : null;
   if (allowWrites && testOriginValue == null) {

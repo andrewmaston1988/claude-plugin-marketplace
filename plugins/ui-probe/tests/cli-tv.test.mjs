@@ -245,6 +245,28 @@ test("rows 6 and 7: a tv run exits 64 with the policy's reason before it starts"
   }
 });
 
+// Row 6: the device decides the scope, whatever the file declares.
+test("row 6: a --device tv run whose file declares no backend is still TV-scoped", async () => {
+  const dir = scratchDir("ui-probe-tv-scope-device");
+  const home = scratchDir("ui-probe-tv-scope-device-home");
+  scratchConfig(dir, {
+    baseUrl: "http://127.0.0.1:9",
+    tv: { host: "192.0.2.10:26101", appid: "torrenthub.main" },
+  });
+  const scenario = path.join(dir, "plain.yaml");
+  writeFileSync(scenario, [
+    "id: plain-journey",
+    "steps:",
+    '  - open: { url: "http://192.0.2.30/tv" }',
+    '  - expect_text: { target: "h1", equals: "One" }',
+    "",
+  ].join("\n"));
+
+  const result = await probe(["run", scenario, "--device", "tv", "--allow-writes"], { cwd: dir, env: noSdbEnv(home) });
+  assert.equal(result.status, 64, `exited ${result.status}: ${result.stderr}`);
+  assert.match(result.stderr, /tv\.testOrigin/, `the refusal names the missing test origin: ${result.stderr}`);
+});
+
 test("row 9: --device defaults to the desktop device", async (t) => {
   let browser;
   try {

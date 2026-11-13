@@ -2,7 +2,7 @@
 
 import { sleep } from "./cdp.mjs";
 import { setCookies } from "./auth.mjs";
-import { installGuard } from "./guard.mjs";
+import { installGuard, inTvScope } from "./guard.mjs";
 import { assertsNothing, expandIncludes, validate } from "./ir.mjs";
 import { StepFailure, absolute, inconclusive, q } from "./ops/common.mjs";
 import { OPS } from "./ops/index.mjs";
@@ -95,6 +95,7 @@ export async function run(doc, ctx = {}) {
 
   const backend = scenario.backend ?? "browser";
   const device = ctx.device ?? "desktop";
+  const tvScope = inTvScope({ backend, device });
   const browser = backend !== "http";
   const state = {
     baseUrl: ctx.baseUrl ?? null,
@@ -125,7 +126,7 @@ export async function run(doc, ctx = {}) {
         allowWrites: state.allowWrites,
         blocked: state.blocked,
         testOrigin: ctx.testOrigin ?? null,
-        backend,
+        tvScope,
       });
     }
   }
