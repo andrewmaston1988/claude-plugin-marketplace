@@ -95,16 +95,16 @@ test("the Network guard aborts a write with BlockedByClient and records it, and 
   const cdp = stubCdp();
   const guard = await installGuard(cdp, TV_PROTOCOL);
 
-  await cdp.fire("Network.requestIntercepted", intercepted("POST", "http://192.168.1.135:8000/tv/api/session"));
+  await cdp.fire("Network.requestIntercepted", intercepted("POST", "http://192.0.2.30:8000/tv/api/session"));
   assert.deepEqual(guard.blocked.map((entry) => `${entry.method} ${entry.url}`), [
-    "POST http://192.168.1.135:8000/tv/api/session",
+    "POST http://192.0.2.30:8000/tv/api/session",
   ]);
   assert.deepEqual(cdp.calls.at(-1), {
     method: "Network.continueInterceptedRequest",
     params: { interceptionId: "int-1", errorReason: "BlockedByClient" },
   });
 
-  await cdp.fire("Network.requestIntercepted", intercepted("GET", "http://192.168.1.135:8000/tv", "int-2"));
+  await cdp.fire("Network.requestIntercepted", intercepted("GET", "http://192.0.2.30:8000/tv", "int-2"));
   assert.deepEqual(cdp.calls.at(-1), {
     method: "Network.continueInterceptedRequest",
     params: { interceptionId: "int-2" },
@@ -147,13 +147,13 @@ test("with --allow-writes a TV write to tv.testOrigin continues and one elsewher
   });
   assert.equal(guard.blocked.length, 0);
 
-  await cdp.fire("Network.requestIntercepted", intercepted("POST", "http://192.168.1.135:8000/tv/api/session", "int-prod"));
+  await cdp.fire("Network.requestIntercepted", intercepted("POST", "http://192.0.2.30:8000/tv/api/session", "int-prod"));
   assert.deepEqual(cdp.calls.at(-1), {
     method: "Network.continueInterceptedRequest",
     params: { interceptionId: "int-prod", errorReason: "BlockedByClient" },
   });
   assert.deepEqual(guard.blocked.map((entry) => `${entry.method} ${entry.url}`), [
-    "POST http://192.168.1.135:8000/tv/api/session",
+    "POST http://192.0.2.30:8000/tv/api/session",
   ]);
 });
 
@@ -194,13 +194,13 @@ test("tvWritePolicy refuses --allow-writes when tv.testOrigin is unset", () => {
 
 test("tvWritePolicy refuses a TV open outside tv.testOrigin when no interception is available", () => {
   for (const open of [
-    "http://192.168.1.135:8000/tv",
-    { url: "http://192.168.1.135:8000/tv" },
-    { open: { url: "http://192.168.1.135:8000/tv" } },
-    { open: "http://192.168.1.135:8000/tv" },
+    "http://192.0.2.30:8000/tv",
+    { url: "http://192.0.2.30:8000/tv" },
+    { open: { url: "http://192.0.2.30:8000/tv" } },
+    { open: "http://192.0.2.30:8000/tv" },
   ]) {
     const message = tvWritePolicy({ backend: "tv", hasInterception: false, allowWrites: true, testOrigin, opens: [open] });
-    assert.match(message, /192\.168\.1\.135:8000/, JSON.stringify(open));
+    assert.match(message, /192\.0\.2\.30:8000/, JSON.stringify(open));
     assert.match(message, /tv\.testOrigin/, JSON.stringify(open));
   }
 });

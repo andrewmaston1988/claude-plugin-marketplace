@@ -5,7 +5,7 @@ import { allowSdb, findSdb, packageId, parseDebugPort, sdb, SdbRefused } from ".
 
 const HOME = "C:/Users/me";
 const APPID = "torrenthub.main";
-const CONFIG = { tv: { host: "192.168.1.110:26101", appid: APPID } };
+const CONFIG = { tv: { host: "192.0.2.10:26101", appid: APPID } };
 
 test("findSdb honours tv.sdb before PATH and the SDK layouts", () => {
   const got = findSdb(
@@ -57,7 +57,7 @@ test("findSdb returns null when sdb is nowhere", () => {
 test("the sdb allowlist passes the attach sequence", () => {
   const allowed = [
     ["devices"],
-    ["connect", "192.168.1.110:26101"],
+    ["connect", "192.0.2.10:26101"],
     ["version"],
     ["shell", "0", "applist"],
     ["shell", "0", "debug", APPID],
@@ -82,7 +82,7 @@ test("the sdb allowlist refuses everything that is not the configured app's busi
     ["shell", "0", "sendkey", "KEY_LEFT"],
     ["shell", "0", "inputkey", "KEY_LEFT"],
     ["shell", "0", "key", "KEY_LEFT"],
-    ["connect", "192.168.1.110"],
+    ["connect", "192.0.2.10"],
     ["forward", "tcp:43411", "tcp:9222"],
     ["forward", "--remove", "tcp:*"],
   ];

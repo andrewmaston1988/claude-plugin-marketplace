@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { attach, AttachInconclusive } from "../src/tv/attach.mjs";
 
-const HOST = "192.168.1.110:26101";
+const HOST = "192.0.2.10:26101";
 const APPID = "torrenthub.main";
 const PKGID = "torrenthub";
 const PORT = 43411;

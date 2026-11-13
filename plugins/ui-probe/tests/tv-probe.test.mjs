@@ -142,7 +142,7 @@ test('a playing video makes the video step inconclusive and is never touched', a
       cleanupReply,
     ],
   });
-  const platform = await tvProbe(cdp, { video: 'http://192.168.1.135:8000/clip.mp4', _sleep: noSleep });
+  const platform = await tvProbe(cdp, { video: 'http://192.0.2.30:8000/clip.mp4', _sleep: noSleep });
 
   assert.equal(platform.video.status, 'inconclusive');
   const expressions = cdp.sent('Runtime.evaluate').map((call) => call.params.expression);
@@ -167,7 +167,7 @@ test('on the fixture grid the key step dispatches Back and Enter too', async () 
       featuresReply(),
       registerReply('returned'),
       currentReply('object'),
-      { match: (e) => e === 'location.href', value: 'http://192.168.1.135:8000/tv?tizen=1' },
+      { match: (e) => e === 'location.href', value: 'http://192.0.2.30:8000/tv?tizen=1' },
       { match: (e) => e.includes('readyState'), value: { href: 'http://127.0.0.1:8001/grid.html', title: 'grid', ready: 'complete' } },
       installReply,
       readReply([]),
@@ -252,7 +252,7 @@ test('platformSummary keeps the verdict and the evidence a reader acts on', () =
 });
 
 const tvConfig = (appid) => ({
-  baseUrl: 'http://192.168.1.135:8000',
+  baseUrl: 'http://192.0.2.30:8000',
   outDir: 'out',
   configDir: 'C:\\cfg',
   viewports: {},
@@ -262,7 +262,7 @@ const tvConfig = (appid) => ({
 const captureReplies = () => [
   { match: (e) => e.includes('outerHTML'), value: '<html></html>' },
   { match: (e) => e.includes('matchMedia'), value: { hover_none: true, pointer_coarse: true, innerWidth: 1920, innerHeight: 1080, dpr: 1, ua: 'TV' } },
-  { match: (e) => e.trim() === 'location.href', value: 'http://192.168.1.135:8000/tv?tizen=1' },
+  { match: (e) => e.trim() === 'location.href', value: 'http://192.0.2.30:8000/tv?tizen=1' },
   { match: (e) => e.includes('SKIP'), value: 'body [focused]' },
 ];
 
@@ -329,7 +329,7 @@ test('capture on the TV writes the platform.json summary into env.json when the 
     const env = readEnv(run.out);
     assert.equal(env.platform.verdict, 'shell: plan A — evidence');
     assert.equal(env.platform.generatedAt, '2026-11-13T00:00:00.000Z');
-    assert.equal(env.url, 'http://192.168.1.135:8000/tv?tizen=1');
+    assert.equal(env.url, 'http://192.0.2.30:8000/tv?tizen=1');
   } finally {
     rmSync(run.dir, { recursive: true, force: true });
     rmSync(file, { force: true });
@@ -343,7 +343,7 @@ test('capture on the TV leaves platform out of env.json when platform.json is ab
   try {
     const env = readEnv(run.out);
     assert.equal('platform' in env, false);
-    assert.equal(env.url, 'http://192.168.1.135:8000/tv?tizen=1');
+    assert.equal(env.url, 'http://192.0.2.30:8000/tv?tizen=1');
   } finally {
     rmSync(run.dir, { recursive: true, force: true });
   }
