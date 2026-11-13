@@ -6,6 +6,7 @@
 import { readFileSync, writeFileSync, mkdirSync, renameSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { deviceFlag, getFlag, hasFlag, positionals, varsFrom } from "../src/flags.mjs";
 
 const HELP = [
   "usage: ui-probe <command> [options]",
@@ -40,12 +41,6 @@ const HELP = [
 
 const argv = process.argv.slice(2);
 const cmd = argv[0];
-// Above the dispatch: a const at the bottom would still be in its temporal dead zone when
-// the IIFE parses its first flag.
-const VALUE_FLAGS = [
-  "--config", "--url", "--viewport", "--var", "--out",
-  "--device", "--attach-port", "--video", "--navigate", "--listen",
-];
 
 const out = (line) => process.stdout.write(line + "\n");
 const err = (line) => process.stderr.write(line + "\n");
@@ -462,49 +457,3 @@ function scenarioFormat(file) {
   return null;
 }
 
-function varsFrom(args) {
-  const vars = {};
-  for (let i = 0; i < args.length - 1; i++) {
-    if (args[i] !== "--var") continue;
-    const pair = args[i + 1] ?? "";
-    const eq = pair.indexOf("=");
-    if (eq <= 0) return { vars, problem: `--var needs k=value, got ${JSON.stringify(pair)}` };
-    vars[pair.slice(0, eq)] = pair.slice(eq + 1);
-  }
-  return { vars, problem: null };
-}
-
-/** `--device` names where a tv-backend journey runs; the set is opt-in, the stand-in is not. */
-function deviceFlag(args) {
-  const value = getFlag("--device", args);
-  if (value === null) return { value: "desktop", problem: null };
-  if (value !== "tv" && value !== "desktop") {
-    return { value: null, problem: `--device must be tv or desktop, got ${JSON.stringify(value)}` };
-  }
-  return { value, problem: null };
-}
-
-function getFlag(name, args) {
-  const index = args.indexOf(name);
-  if (index === -1) return null;
-  const value = args[index + 1];
-  if (value === undefined || value.startsWith("--")) return null;
-  return value;
-}
-
-function hasFlag(name, args) {
-  return args.includes(name);
-}
-
-function positionals(args) {
-  const values = [];
-  for (let i = 0; i < args.length; i++) {
-    const arg = args[i];
-    if (arg.startsWith("--")) {
-      if (VALUE_FLAGS.includes(arg)) i++;
-      continue;
-    }
-    values.push(arg);
-  }
-  return values;
-}
