@@ -13,7 +13,7 @@ export class AuthError extends Error {
 const FORBIDDEN_VALUE_CHARS = /[\\/;&|<>$`]/;
 const VAR_REF = /\{([A-Za-z0-9_.-]+)\}/g;
 
-export async function resolveCookies(config, vars = {}, { _spawn = spawn } = {}) {
+export async function resolveCookies(config, vars = {}, { _spawn = spawn, timeoutMs = 30000 } = {}) {
   const cookies = config?.auth?.cookies ?? [];
   const cwd = config?.configDir ?? process.cwd();
   const resolved = [];
@@ -23,7 +23,7 @@ export async function resolveCookies(config, vars = {}, { _spawn = spawn } = {})
       throw new AuthError(cookie.name, 'argv[0] must not contain {…}; the program is fixed, only its arguments may reference variables');
     }
     const args = argv.slice(1).map((part) => substitute(part, vars, cookie.name));
-    resolved.push({ name: cookie.name, value: await runCommand([argv[0], ...args], cwd, cookie.name, _spawn), ...(cookie.domain ? { domain: cookie.domain } : {}) });
+    resolved.push({ name: cookie.name, value: await runCommand([argv[0], ...args], cwd, cookie.name, _spawn, timeoutMs), ...(cookie.domain ? { domain: cookie.domain } : {}) });
   }
   return resolved;
 }
@@ -42,20 +42,24 @@ function substitute(part, vars, cookieName) {
   });
 }
 
-function runCommand(argv, cwd, cookieName, _spawn) {
+function runCommand(argv, cwd, cookieName, _spawn, timeoutMs) {
   return new Promise((resolve, reject) => {
     const child = _spawn(argv[0], argv.slice(1), { shell: false, cwd });
     let stdout = '';
+    const timer = setTimeout(() => {
+      reject(new AuthError(cookieName, `command did not exit within ${timeoutMs} ms`));
+    }, timeoutMs);
+    const settle = (fn) => { clearTimeout(timer); fn(); };
     child.stdout?.on('data', (chunk) => { stdout += chunk; });
     // stderr is drained but never reported: it may echo the cookie value.
     child.stderr?.on('data', () => {});
-    child.on('error', (err) => reject(new AuthError(cookieName, `failed to start the command (${err.code ?? err.message})`)));
+    child.on('error', (err) => settle(() => reject(new AuthError(cookieName, `failed to start the command (${err.code ?? err.message})`))));
     child.on('close', (code) => {
       if (code !== 0) {
-        reject(new AuthError(cookieName, `command exited with code ${code}`));
+        settle(() => reject(new AuthError(cookieName, `command exited with code ${code}`)));
         return;
       }
-      resolve(stdout.trim());
+      settle(() => resolve(stdout.trim()));
     });
   });
 }
