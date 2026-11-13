@@ -76,6 +76,17 @@ const PAGES = {
   "/covered.html": page(`
     <button id="covered">Covered</button>
     <div id="overlay" style="position:fixed;inset:0;background:rgba(0,0,0,.1)"></div>`),
+
+  // 2000px of spacer puts #deep below a 400px viewport, so only a scroll can reach it.
+  "/tall.html": page(`
+    <div style="height:1500px"></div>
+    <a id="deep" href="/deep-click" style="display:block;width:120px;height:40px;background:#cdc">Deep target</a>
+    <div style="height:500px"></div>`),
+
+  "/tall-covered.html": page(`
+    <div style="height:1500px"></div>
+    <button id="deep" style="display:block;width:120px;height:40px">Deep target</button>
+    <div id="overlay" style="position:fixed;inset:0;background:rgba(0,0,0,.1)"></div>`),
 };
 
 const DONE = page('<div id="done">saved</div>');
