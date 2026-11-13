@@ -70,7 +70,9 @@ can reset.
   temp dir: right for a one-off, wrong for anything you will refer to again.
 - `--include-background` — add the page behind an open `aria-modal` dialog to `observation.txt`.
 - `--var k=v` — fills `{name}` placeholders in the config's auth cookie commands. A value containing a path
-  separator or a shell metacharacter is rejected, and the error names the variable, never the value.
+  separator or a shell metacharacter is rejected, and the error names the variable, never the value. Both
+  `capture` and `run` set those cookies before their first navigation: a scenario against a signed-in page needs
+  them as much as a capture does.
 
 ## Reading the outputs
 
@@ -174,16 +176,18 @@ Every example names its URL and its selectors. A scenario whose target is vague 
 
 A screen may also carry `steps` — IR steps that run before the capture, for a page you have to click into.
 
-The digest comes back per viewport, one line per `measure` selector:
+The digest comes back in one block per viewport. Each block ends with its own `out:` line, the directory
+holding that viewport's eight files:
 
 ```
 phone 390×844 hover:none pointer:coarse
 [data-testid=action-tile] widths=111.3,111.3,111.3
 blocked: 0
+out: <outDir>/phone
 desktop 1280×900 hover:hover pointer:fine
 [data-testid=action-tile] widths=90.3,91.2,116.1
 blocked: 0
-out: <outDir>
+out: <outDir>/desktop
 ```
 
 Three widths on one line means three matches. The same page lays out differently at each viewport, and the
