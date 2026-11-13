@@ -35,6 +35,8 @@ const HELP = [
   "  --video <url>          tv probe: a same-origin clip for the video checks",
   "  --navigate <url>       tv probe: test what the app may navigate to",
   "  --listen <seconds>     tv probe: record physical remote presses for this long",
+  "  --fetch <url>          tv probe: one credentialed GET from the settled page",
+  "  --exit                 tv probe: exit the app last and report whether it closed",
   "  --help                 this text",
   "",
 ].join("\n");

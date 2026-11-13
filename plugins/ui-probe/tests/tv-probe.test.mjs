@@ -245,6 +245,55 @@ test('the feature script measures nothing on a document with no body instead of 
   assert.equal(features.backdropFilter, false);
 });
 
+// Row 25
+test('the fetch step sends one credentialed GET and records what the page could read', async () => {
+  const fetchReply = {
+    match: (e) => e.includes("credentials: 'include'"),
+    value: {
+      httpStatus: 200,
+      type: 'cors',
+      allowOrigin: 'http://192.0.2.30:8000',
+      allowCredentials: 'true',
+    },
+  };
+  const cdp = stubCdp({ replies: [pageReply(), featuresReply(), registerReply('returned'), currentReply('object'), fetchReply, installReply, readReply([]), cleanupReply] });
+  const platform = await tvProbe(cdp, { fetch: 'http://127.0.0.1:8001/session', _sleep: noSleep });
+
+  assert.equal(platform.fetch.status, 'measured');
+  assert.equal(platform.fetch.httpStatus, 200);
+  assert.equal(platform.fetch.allowOrigin, 'http://192.0.2.30:8000');
+  assert.equal(platform.fetch.allowCredentials, 'true');
+  assert.equal(platform.fetch.url, 'http://127.0.0.1:8001/session');
+  assert.deepEqual(platform.fetch.page, PAGE, 'the origin CORS must name is recorded');
+
+  const js = cdp.sent('Runtime.evaluate').map((call) => call.params.expression).find((e) => e.includes("credentials: 'include'"));
+  assert.match(js, /method: 'GET'/);
+  assert.doesNotMatch(js, /\b(POST|PUT|DELETE|PATCH)\b/, 'one GET, never another method');
+});
+
+// Row 25: a rejected fetch has no status to read; the kind of failure is the measurement.
+test('a fetch the page cannot make records the failure kind, not a status', async () => {
+  const cdp = stubCdp({
+    replies: [
+      pageReply(),
+      featuresReply(),
+      registerReply('returned'),
+      currentReply('object'),
+      { match: (e) => e.includes("credentials: 'include'"), value: { error: 'TypeError', message: 'Failed to fetch' } },
+      installReply,
+      readReply([]),
+      cleanupReply,
+    ],
+  });
+  const platform = await tvProbe(cdp, { fetch: 'http://192.0.2.30:8000/tv/session', _sleep: noSleep });
+
+  assert.equal(platform.fetch.status, 'error');
+  assert.equal(platform.fetch.error, 'TypeError');
+  assert.match(platform.fetch.message, /Failed to fetch/);
+  assert.equal('httpStatus' in platform.fetch, false);
+  assert.deepEqual(platform.fetch.page, PAGE);
+});
+
 // Row 16
 test('verdictLine names plan A, plan B and no tizen from the platform evidence', () => {
   const platform = (features) => ({ features });

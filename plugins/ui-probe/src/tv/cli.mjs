@@ -162,6 +162,7 @@ export async function tvProbeCommand({
   video = null,
   navigate = null,
   listenSeconds = null,
+  fetch = null,
   attachPort = null,
   _attach = attach,
   _tvProbe = tvProbe,
@@ -171,7 +172,7 @@ export async function tvProbeCommand({
   const session = await tvSession(config, { attachPort, _attach });
   let platform;
   try {
-    platform = await _tvProbe(session.cdp, { video, navigate, listenSeconds });
+    platform = await _tvProbe(session.cdp, { video, navigate, listenSeconds, fetch });
   } finally {
     await session.detach();
   }
@@ -196,7 +197,9 @@ function probeLines(platform, dir) {
   const video = platform.video ?? {};
   const keys = platform.keys ?? {};
   const listen = platform.listen ?? {};
+  const fetched = platform.fetch ?? {};
   const lines = [
+    `page: ${features.page?.href ?? 'unread'}`,
     `features: tizen ${features.tizen ?? 'unknown'}, webapis ${features.webapis ?? 'unknown'}, `
       + `registerKey ${features.registerKey?.outcome ?? 'absent'}, `
       + `getCurrentApplication ${features.getCurrentApplication?.outcome ?? 'absent'}`,
@@ -216,6 +219,16 @@ function probeLines(platform, dir) {
 
   if (listen.status === 'measured') lines.push(`listen: ${listen.events?.length ?? 0} physical events in ${listen.seconds}s`);
   else lines.push('listen: skipped');
+
+  if (fetched.status === 'measured') {
+    lines.push(`fetch: ${fetched.httpStatus} from ${fetched.url} `
+      + `(Access-Control-Allow-Origin ${fetched.allowOrigin ?? 'unreadable'}, `
+      + `Access-Control-Allow-Credentials ${fetched.allowCredentials ?? 'unreadable'})`);
+  } else if (fetched.status === 'error') {
+    lines.push(`fetch: failed (${fetched.error}) — ${fetched.message ?? 'no message'}`);
+  } else {
+    lines.push('fetch: skipped');
+  }
 
   lines.push(`out: ${dir}`);
   lines.push(platform.verdict);
@@ -300,6 +313,7 @@ export async function tvProbeBranch({ config, rest, getFlag, resolveOutDir, out,
       video: getFlag("--video", rest),
       navigate: getFlag("--navigate", rest),
       listenSeconds: listen === null ? null : Number(listen),
+      fetch: getFlag("--fetch", rest),
       attachPort: port,
     });
     for (const line of lines) out(line);

@@ -2,7 +2,7 @@
 
 const VALUE_FLAGS = [
   "--config", "--url", "--viewport", "--var", "--out",
-  "--device", "--attach-port", "--video", "--navigate", "--listen",
+  "--device", "--attach-port", "--video", "--navigate", "--listen", "--fetch",
 ];
 
 export function varsFrom(args) {

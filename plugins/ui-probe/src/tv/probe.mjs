@@ -105,6 +105,26 @@ const VIDEO_STATE_JS = `(() => {
   return video ? { currentTime: video.currentTime, readyState: video.readyState } : null;
 })()`;
 
+// A cross-origin response hides its headers unless the server exposes them, so a null header
+// here is the measurement, not a missing one. The in-page catch is the only way to learn the
+// kind of failure: a CORS refusal rejects with a bare TypeError and no status.
+const FETCH_JS = (url) => `(async () => {
+  try {
+    const response = await fetch(${JSON.stringify(url)}, { method: 'GET', credentials: 'include' });
+    return {
+      httpStatus: response.status,
+      type: response.type,
+      allowOrigin: response.headers.get('Access-Control-Allow-Origin'),
+      allowCredentials: response.headers.get('Access-Control-Allow-Credentials'),
+    };
+  } catch (error) {
+    return {
+      error: error && error.name ? error.name : 'Error',
+      message: error && error.message ? error.message : String(error),
+    };
+  }
+})()`;
+
 const KEYS_INSTALL_JS = `(() => {
   const log = [];
   const listener = (event) => {
@@ -324,6 +344,28 @@ async function keysStep(cdp, { features, onFixture }) {
   };
 }
 
+async function fetchStep(cdp, url) {
+  const page = await pageOf(cdp);
+  if (!url) return { status: 'skipped', reason: 'no --fetch url', page };
+  const result = await evaluate(cdp, FETCH_JS(url));
+  if (!result || typeof result !== 'object') {
+    return { status: 'error', url, page, error: 'the page returned no result' };
+  }
+  if (result.error) {
+    return { status: 'error', url, page, method: 'GET', error: result.error, message: result.message ?? null };
+  }
+  return {
+    status: 'measured',
+    url,
+    page,
+    method: 'GET',
+    httpStatus: result.httpStatus ?? null,
+    type: result.type ?? null,
+    allowOrigin: result.allowOrigin ?? null,
+    allowCredentials: result.allowCredentials ?? null,
+  };
+}
+
 async function listenStep(cdp, seconds, { _sleep, onFixture }) {
   const page = await pageOf(cdp);
   const length = Number(seconds);
@@ -358,7 +400,13 @@ async function guardedStep(step) {
  * Back and Enter are dispatched only after it has landed on the test origin, because either can
  * leave or act on the live app.
  */
-export async function tvProbe(cdp, { video = null, navigate = null, listenSeconds = null, _sleep = defaultSleep } = {}) {
+export async function tvProbe(cdp, {
+  video = null,
+  navigate = null,
+  listenSeconds = null,
+  fetch = null,
+  _sleep = defaultSleep,
+} = {}) {
   const platform = {
     schema: 'ui-probe-platform@1',
     generatedAt: new Date().toISOString(),
@@ -368,6 +416,7 @@ export async function tvProbe(cdp, { video = null, navigate = null, listenSecond
     video: null,
     keys: null,
     listen: null,
+    fetch: null,
     verdict: null,
   };
 
@@ -380,6 +429,7 @@ export async function tvProbe(cdp, { video = null, navigate = null, listenSecond
     platform.video = await guardedStep(() => videoStep(cdp, video, { _sleep }));
     platform.keys = await guardedStep(() => keysStep(cdp, { features: platform.features, onFixture }));
     platform.listen = await guardedStep(() => listenStep(cdp, listenSeconds, { _sleep, onFixture }));
+    platform.fetch = await guardedStep(() => fetchStep(cdp, fetch));
   } finally {
     await removeEverything(cdp);
   }

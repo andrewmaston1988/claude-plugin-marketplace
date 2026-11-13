@@ -431,6 +431,9 @@ test("tv probe attaches, writes platform.json to both homes and ends on the verd
     evaluate: (expression) => {
       const js = String(expression);
       if (js.includes("document.readyState")) return SETTLED_PAGE;
+      if (js.includes("credentials: 'include'")) {
+        return { httpStatus: 200, type: "cors", allowOrigin: "http://192.0.2.30:8000", allowCredentials: null };
+      }
       if (js.includes("IntersectionObserver")) return features;
       if (js.includes("__uiProbeKey.read")) return [];
       if (js.includes("__uiProbeKey = {")) return { active: "BODY" };
@@ -441,7 +444,7 @@ test("tv probe attaches, writes platform.json to both homes and ends on the verd
 
   try {
     const result = await probe(
-      ["tv", "probe", "--attach-port", String(stub.port), "--out", outDir],
+      ["tv", "probe", "--attach-port", String(stub.port), "--out", outDir, "--fetch", "http://127.0.0.1:8001/session"],
       { cwd: dir, env },
     );
     assert.equal(result.status, 0, `tv probe exited ${result.status}: ${result.stderr}`);
@@ -453,9 +456,14 @@ test("tv probe attaches, writes platform.json to both homes and ends on the verd
     const cached = path.join(home, "ui-probe", `platform-${appid}.json`);
     assert.equal(JSON.parse(readFileSync(cached, "utf8")).verdict, written.verdict, "capture reads this copy");
 
+    assert.equal(written.fetch.status, "measured");
+    assert.equal(written.fetch.httpStatus, 200);
+    assert.equal(written.fetch.url, "http://127.0.0.1:8001/session");
+
     const lines = result.stdout.trimEnd().split("\n");
     assert.match(lines.at(-1), /^shell: /, `the digest ends on the verdict line: ${lines.at(-1)}`);
     assert.match(result.stdout, /^out: /m, "the digest names its output directory");
+    assert.match(result.stdout, /^fetch: 200 /m, "the digest reports the fetch");
   } finally {
     await stub.close();
   }
