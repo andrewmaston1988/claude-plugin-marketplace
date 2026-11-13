@@ -318,7 +318,7 @@ const platformOn = (page, features, extra = {}) => ({ features: { ...features, p
 
 test('verdictLine calls a widget-local page with both calls working plan B, its fetch and exit beside it', () => {
   const line = verdictLine(platformOn(LOCAL_PAGE, working, {
-    fetch: { status: 'measured', url: 'http://192.168.1.135:8001/session', httpStatus: 200, allowOrigin: 'http://192.168.1.135:8001', allowCredentials: 'true' },
+    fetch: { status: 'measured', url: 'http://192.0.2.30:8001/session', httpStatus: 200, allowOrigin: 'http://192.0.2.30:8001', allowCredentials: 'true' },
     exit: { status: 'measured', called: 'returned', closed: true, ms: 900 },
   }));
 
