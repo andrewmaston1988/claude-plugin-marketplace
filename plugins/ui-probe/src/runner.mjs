@@ -1,46 +1,16 @@
 // Executes the scenario IR over CDP and the network. One record per step, worst step wins.
 
-import { evaluate, sleep } from "./cdp.mjs";
+import { sleep } from "./cdp.mjs";
 import { setCookies } from "./auth.mjs";
 import { installFetchGuard } from "./guard.mjs";
 import { assertsNothing, validate } from "./ir.mjs";
-import {
-  ASSERT_TIMEOUT_MS, StepFailure, absolute, inconclusive, matches, near, pollUntil, q,
-} from "./ops/common.mjs";
+import { StepFailure, absolute, inconclusive, q } from "./ops/common.mjs";
 import { OPS } from "./ops/index.mjs";
-import { boxOf, queryIds } from "./ops/interaction.mjs";
-import { expectCssOver } from "./ops/over.mjs";
 
 const LOAD_TIMEOUT_MS = 15000;
 const FETCH_TIMEOUT_MS = 10000;
 
 const EXIT_CODES = { passed: 0, failed: 1, inconclusive: 2, needs_review: 3, invalid: 64 };
-
-const VISIBLE_JS = (selector) => `(() => {
-  const el = document.querySelector(${q(selector)});
-  if (!el) return { found: false };
-  // display: contents has no box of its own, so a child's box is the only evidence it renders.
-  const visible = (node) => {
-    const style = getComputedStyle(node);
-    if (style.display === "none" || style.visibility === "hidden") return false;
-    const box = node.getBoundingClientRect();
-    if (box.width > 0 && box.height > 0) return true;
-    return style.display === "contents" && Array.from(node.children).some(visible);
-  };
-  return { found: true, visible: visible(el) };
-})()`;
-
-const CSS_JS = (selector, property) => `(() => {
-  const el = document.querySelector(${q(selector)});
-  if (!el) return { found: false };
-  return { found: true, value: getComputedStyle(el).getPropertyValue(${q(property)}) };
-})()`;
-
-const TEXT_JS = (selector) => `(() => {
-  const el = document.querySelector(${q(selector)});
-  if (!el) return { found: false };
-  return { found: true, value: el.textContent || "" };
-})()`;
 
 /**
  * Navigate and wait for the load event. Resolves once the new document has painted its load;
@@ -83,87 +53,6 @@ async function viewportStep(args, state) {
   await state.cdp.send("Emulation.setTouchEmulationEnabled", touchParams);
 }
 
-async function expectVisible(args, state) {
-  const timeout = args.timeoutMs ?? ASSERT_TIMEOUT_MS;
-  const result = await pollUntil(async () => {
-    const seen = await evaluate(state.cdp, VISIBLE_JS(args.target));
-    if (!seen.found) return { ok: false, found: false, measured: null };
-    return { ok: seen.visible, found: true, measured: seen.visible };
-  }, timeout, state);
-  if (result.ok) return { measured: true, expected: true };
-  if (result.error) throw inconclusive(result.error);
-  if (!result.found) throw new StepFailure("failed", "not_found", `no element for ${args.target}`, { measured: null, expected: true });
-  throw new StepFailure("failed", null, `${args.target} is not visible`, { measured: false, expected: true });
-}
-
-async function expectHidden(args, state) {
-  const timeout = args.timeoutMs ?? ASSERT_TIMEOUT_MS;
-  const result = await pollUntil(async () => {
-    const seen = await evaluate(state.cdp, VISIBLE_JS(args.target));
-    if (!seen.found) return { ok: true, measured: false };
-    return { ok: !seen.visible, measured: !seen.visible };
-  }, timeout, state);
-  if (result.ok) return { measured: true, expected: true };
-  if (result.error) throw inconclusive(result.error);
-  throw new StepFailure("failed", null, `${args.target} is still visible`, { measured: false, expected: true });
-}
-
-async function expectWidths(args, state) {
-  const timeout = args.timeoutMs ?? ASSERT_TIMEOUT_MS;
-  const expected = args.equals;
-  const uniform = !Array.isArray(expected) || expected.length === 1;
-  const wanted = uniform ? [].concat(expected)[0] : expected;
-
-  const result = await pollUntil(async () => {
-    const nodeIds = await queryIds(state.cdp, args.target);
-    if (nodeIds.length === 0) return { ok: false, found: false, measured: [] };
-    const widths = [];
-    for (const nodeId of nodeIds) widths.push((await boxOf(state.cdp, nodeId)).width);
-    const ok = uniform
-      ? widths.every((width) => near(width, wanted, args.tolerance))
-      : widths.length === expected.length && widths.every((width, i) => near(width, expected[i], args.tolerance));
-    return { ok, found: true, measured: widths };
-  }, timeout, state);
-
-  if (result.ok) return { measured: result.measured, expected };
-  if (result.error) throw inconclusive(result.error);
-  if (!result.found) throw new StepFailure("failed", "not_found", `no element for ${args.target}`, { measured: [], expected });
-  throw new StepFailure("failed", null, `widths [${result.measured.join(", ")}] do not match ${q(expected)}`, {
-    measured: result.measured, expected,
-  });
-}
-
-async function expectCss(args, state) {
-  if (args.over) return expectCssOver(args, state);
-  const timeout = args.timeoutMs ?? ASSERT_TIMEOUT_MS;
-  const result = await pollUntil(async () => {
-    const read = await evaluate(state.cdp, CSS_JS(args.target, args.property));
-    if (!read.found) return { ok: false, found: false, measured: null };
-    return { ok: matches(read.value, args.equals, args.tolerance), found: true, measured: read.value };
-  }, timeout, state);
-
-  if (result.ok) return { measured: result.measured, expected: args.equals };
-  if (result.error) throw inconclusive(result.error);
-  if (!result.found) throw new StepFailure("failed", "not_found", `no element for ${args.target}`, { measured: null, expected: args.equals });
-  throw new StepFailure("failed", null, `${args.target} ${args.property} = ${q(result.measured)}`, {
-    measured: result.measured, expected: args.equals,
-  });
-}
-
-async function expectText(args, state) {
-  const timeout = args.timeoutMs ?? ASSERT_TIMEOUT_MS;
-  const result = await pollUntil(async () => {
-    const read = await evaluate(state.cdp, TEXT_JS(args.target));
-    if (!read.found) return { ok: false, found: false, measured: null };
-    return { ok: read.value.trim() === String(args.equals).trim(), found: true, measured: read.value.trim() };
-  }, timeout, state);
-
-  if (result.ok) return { measured: result.measured, expected: args.equals };
-  if (result.error) throw inconclusive(result.error);
-  if (!result.found) throw new StepFailure("failed", "not_found", `no element for ${args.target}`, { measured: null, expected: args.equals });
-  throw new StepFailure("failed", null, `${args.target} text = ${q(result.measured)}`, { measured: result.measured, expected: args.equals });
-}
-
 function readPath(value, path) {
   const segments = Array.isArray(path) ? path : String(path).split(".");
   return segments.reduce((current, key) => (current == null ? undefined : current[key]), value);
@@ -201,11 +90,6 @@ const STEPS = {
   open: openStep,
   viewport: viewportStep,
   ...OPS,
-  expect_visible: expectVisible,
-  expect_hidden: expectHidden,
-  expect_widths: expectWidths,
-  expect_css: expectCss,
-  expect_text: expectText,
   expect_json: expectJson,
 };
 
