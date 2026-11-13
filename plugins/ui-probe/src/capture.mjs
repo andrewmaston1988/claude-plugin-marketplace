@@ -3,7 +3,7 @@
 import { mkdirSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { evaluate } from "./cdp.mjs";
-import { resolveCookies } from "./auth.mjs";
+import { resolveCookies, setCookies } from "./auth.mjs";
 import { installFetchGuard } from "./guard.mjs";
 import { observe } from "./observe.mjs";
 import { navigate, run } from "./runner.mjs";
@@ -140,12 +140,7 @@ export async function capture(screen, ctx = {}) {
       mkdirSync(dir, { recursive: true });
 
       await emulate(cdp, viewport);
-      for (const cookie of cookies) {
-        const params = { name: cookie.name, value: cookie.value, path: "/" };
-        if (cookie.domain) params.domain = cookie.domain;
-        else params.url = url;
-        await cdp.send("Network.setCookie", params);
-      }
+      await setCookies(cdp, cookies, url);
 
       await navigate(cdp, url, { timeoutMs: ctx.loadTimeoutMs });
 

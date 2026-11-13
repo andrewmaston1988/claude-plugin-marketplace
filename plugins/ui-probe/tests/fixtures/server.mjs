@@ -100,6 +100,10 @@ const PAGES = {
 const DONE = page('<div id="done">saved</div>');
 const JSON_DATA = { ok: true, nested: { value: 5 } };
 
+// The signed-in page answers 401 unless the request carries this cookie.
+export const AUTH_COOKIE = "SECRET-SESSION-7c1f";
+const SIGNED_IN = page('<h1 id="who">signed in</h1>');
+
 function respond(res, { status = 200, type = "text/html; charset=utf-8", body = "" }) {
   res.writeHead(status, { "content-type": type, "cache-control": "no-store" });
   res.end(body);
@@ -116,6 +120,11 @@ async function handle(req, res, log) {
     return respond(res, { status: 404, body: "not found" });
   }
 
+  if (url.pathname === "/signed-in.html") {
+    const sent = (req.headers.cookie ?? "").split(/;\s*/);
+    if (!sent.includes(`session=${AUTH_COOKIE}`)) return respond(res, { status: 401, body: "signed out" });
+    return respond(res, { body: SIGNED_IN });
+  }
   if (url.pathname === "/json/data") {
     return respond(res, { type: "application/json", body: JSON.stringify(JSON_DATA) });
   }

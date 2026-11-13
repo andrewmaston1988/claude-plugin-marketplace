@@ -5,7 +5,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { execFile as execFileCallback } from "node:child_process";
 import { promisify } from "node:util";
-import { mkdtempSync, writeFileSync, readFileSync } from "node:fs";
+import { mkdtempSync, writeFileSync, readFileSync, existsSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -254,4 +254,28 @@ test("capture exits 64 and prints AuthError when a cookie variable is missing", 
   } finally {
     await fixture.close();
   }
+});
+
+test("run resolves auth cookies before it launches a browser, so a missing --var exits 64", async () => {
+  const dir = scratchDir("ui-probe-run-auth");
+  scratchConfig(dir, {
+    baseUrl: "http://127.0.0.1:9",
+    // A launch attempt would fail here with exit 2, so exit 64 proves no browser started.
+    browser: path.join(dir, "missing-browser.exe"),
+    auth: { cookies: [{ name: "session", command: ["echo", "{missing}"] }] },
+  });
+  const scenario = path.join(dir, "signed-in.yaml");
+  writeFileSync(scenario, [
+    "id: signed-in",
+    "steps:",
+    '  - open: { url: "/" }',
+    '  - expect_text: { target: "#who", equals: "signed in" }',
+    "",
+  ].join("\n"));
+
+  const result = await probe(["run", scenario, "--out", path.join(dir, "out")], { cwd: dir });
+  assert.equal(result.status, 64, `run exited ${result.status}: ${result.stderr}`);
+  assert.match(result.stderr, /auth cookie "session".*variable "missing" is not set/, result.stderr);
+  assert.doesNotMatch(result.stdout, /^run:/m, "no digest may print: the run never started");
+  assert.equal(existsSync(path.join(dir, "out", "results.json")), false, "no run may be recorded");
 });

@@ -11,7 +11,7 @@ import { execFile as execFileCallback, spawnSync } from "node:child_process";
 import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
 
-import { startFixtureServer } from "./fixtures/server.mjs";
+import { startFixtureServer, AUTH_COOKIE } from "./fixtures/server.mjs";
 import { BUILTIN_VIEWPORTS } from "../src/config.mjs";
 import { findBrowser, launch } from "../src/browser.mjs";
 import { connect } from "../src/cdp.mjs";
@@ -284,6 +284,41 @@ test("row 5: the cookie value appears in no output file and not on the digest", 
   const needle = Buffer.from(secret);
   for (const file of files) assert.equal(readFileSync(file).includes(needle), false, `cookie leaked into ${file}`);
   assert.equal(digest.includes(secret), false, "cookie leaked onto stdout");
+});
+
+test("row 27: run sets the config's auth cookies before its first step, and leaks none", { skip: SKIP }, async () => {
+  const dir = mkdtempSync(join(tmpdir(), "ui-probe-run-cookie-"));
+  try {
+    const scenario = join(dir, "signed-in.yaml");
+    writeFileSync(scenario, [
+      "id: signed-in",
+      "steps:",
+      `  - open: { url: "${server.path("/signed-in.html")}" }`,
+      '  - expect_text: { target: "#who", equals: "signed in" }',
+      "",
+    ].join("\n"));
+    const writeConfig = (auth) => writeFileSync(
+      join(dir, ".ui-probe.json"),
+      JSON.stringify({ baseUrl: server.origin, browser: browserPath, ...(auth ? { auth } : {}) }, null, 2),
+    );
+    const auth = { cookies: [{ name: "session", command: [process.execPath, "-e", `process.stdout.write(${JSON.stringify(AUTH_COOKIE)})`] }] };
+
+    writeConfig(auth);
+    const out = join(dir, "out");
+    const signedIn = await probeCli(["run", scenario, "--out", out], dir);
+    assert.equal(signedIn.status, 0, `${signedIn.stdout}${signedIn.stderr}`);
+    assert.match(signedIn.stdout, /^PASSED \S+ expect_text #who measured="signed in"/m, signedIn.stdout);
+    const results = readFileSync(join(out, "results.json"), "utf8");
+    assert.equal(results.includes(AUTH_COOKIE), false, "the cookie leaked into results.json");
+
+    // RED control: the same scenario without a cookie never gets the signed-in page.
+    writeConfig(null);
+    const signedOut = await probeCli(["run", scenario, "--out", join(dir, "out-anon")], dir);
+    assert.equal(signedOut.status, 1, `without a cookie the run must fail: ${signedOut.stdout}${signedOut.stderr}`);
+    assert.match(signedOut.stdout, /^FAILED \S+ expect_text #who/m, signedOut.stdout);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test("row 12: an aria-modal dialog hides the background, and include-background adds it", { skip: SKIP }, async () => {

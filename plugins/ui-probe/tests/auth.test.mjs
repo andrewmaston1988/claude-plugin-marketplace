@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
-import { resolveCookies, AuthError } from '../src/auth.mjs';
+import { resolveCookies, setCookies, AuthError } from '../src/auth.mjs';
 
 function fakeSpawn(calls, { stdout = '', code = 0 } = {}) {
   return (cmd, args, opts) => {
@@ -129,4 +129,17 @@ test('a cookie command that never exits is killed and rejects naming the cookie,
 test('stdout is trimmed before it becomes the cookie value', async () => {
   const [cookie] = await resolveCookies(config(['x']), {}, { _spawn: fakeSpawn([], { stdout: '  tok\r\n' }) });
   assert.equal(cookie.value, 'tok');
+});
+
+test('setCookies scopes a domain cookie by domain and every other by url', async () => {
+  const sent = [];
+  const cdp = { async send(method, params) { sent.push({ method, params }); } };
+  await setCookies(cdp, [
+    { name: 'a', value: '1' },
+    { name: 'b', value: '2', domain: 'example.test' },
+  ], 'http://127.0.0.1:9/page');
+  assert.deepEqual(sent, [
+    { method: 'Network.setCookie', params: { name: 'a', value: '1', path: '/', url: 'http://127.0.0.1:9/page' } },
+    { method: 'Network.setCookie', params: { name: 'b', value: '2', path: '/', domain: 'example.test' } },
+  ]);
 });

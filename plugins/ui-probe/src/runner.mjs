@@ -1,6 +1,7 @@
 // Executes the scenario IR over CDP and the network. One record per step, worst step wins.
 
 import { evaluate, sleep } from "./cdp.mjs";
+import { setCookies } from "./auth.mjs";
 import { actionAllowed, installFetchGuard } from "./guard.mjs";
 import { assertsNothing, validate } from "./ir.mjs";
 
@@ -444,6 +445,11 @@ export async function run(doc, ctx = {}) {
     state.cdp = typeof ctx.cdp === "function" ? await ctx.cdp() : ctx.cdp;
     if (!state.cdp) throw new Error("run() needs ctx.cdp (a connected CDP client) for a browser scenario");
     await state.cdp.send("Page.enable");
+    if (ctx.cookies?.length) {
+      const open = doc.steps.map((step) => step.open).find(Boolean);
+      const cookieUrl = open && /^https?:\/\//.test(open.url) ? open.url : state.baseUrl;
+      if (cookieUrl) await setCookies(state.cdp, ctx.cookies, cookieUrl);
+    }
     if (!state.guard) {
       state.guard = await installFetchGuard(state.cdp, { allowWrites: state.allowWrites, blocked: state.blocked });
     }

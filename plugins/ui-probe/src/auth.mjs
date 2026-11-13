@@ -28,6 +28,19 @@ export async function resolveCookies(config, vars = {}, { _spawn = spawn, timeou
   return resolved;
 }
 
+/**
+ * Set every resolved cookie through CDP. A cookie with no domain is scoped to `url`, the page
+ * the caller is about to navigate to.
+ */
+export async function setCookies(cdp, cookies, url) {
+  for (const cookie of cookies ?? []) {
+    const params = { name: cookie.name, value: cookie.value, path: '/' };
+    if (cookie.domain) params.domain = cookie.domain;
+    else params.url = url;
+    await cdp.send('Network.setCookie', params);
+  }
+}
+
 function substitute(part, vars, cookieName) {
   return part.replace(VAR_REF, (_, name) => {
     if (!Object.prototype.hasOwnProperty.call(vars, name)) {

@@ -138,7 +138,16 @@ const settle = (code) => { setTimeout(() => process.exit(code), 150); };
     const outDir = resolveOutDir(config, getFlag("--out", rest));
 
     const { run } = await import("../src/runner.mjs");
-    const { AuthError } = await import("../src/auth.mjs");
+    const { resolveCookies, AuthError } = await import("../src/auth.mjs");
+    let cookies;
+    try {
+      // Resolved before the browser exists, so a missing --var costs no launch.
+      cookies = await resolveCookies(config, vars);
+    } catch (e) {
+      if (e instanceof AuthError) { err(e.message); settle(64); return; }
+      throw e;
+    }
+
     let session = null;
     let launchError = null;
     let result;
@@ -155,7 +164,7 @@ const settle = (code) => { setTimeout(() => process.exit(code), 150); };
         },
         baseUrl: config?.baseUrl ?? null,
         allowWrites: hasFlag("--allow-writes", rest),
-        vars,
+        cookies,
         source: path.basename(file),
       });
     } catch (e) {
