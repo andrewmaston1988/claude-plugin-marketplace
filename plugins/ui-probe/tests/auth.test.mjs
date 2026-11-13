@@ -106,11 +106,13 @@ test('a spawn error throws naming the cookie, never the stdout value', async () 
   assert.match(err.message, /session/);
 });
 
-test('a cookie command that never exits rejects with an AuthError naming the cookie, not the value', async () => {
+test('a cookie command that never exits is killed and rejects naming the cookie, not the value', async () => {
+  let killed = 0;
   const _spawn = () => {
     const child = new EventEmitter();
     child.stdout = new EventEmitter();
     child.stderr = new EventEmitter();
+    child.kill = () => { killed += 1; };
     return child; // never emits close
   };
   const err = await resolveCookies(
@@ -121,6 +123,7 @@ test('a cookie command that never exits rejects with an AuthError naming the coo
   assert.ok(err instanceof AuthError);
   assert.match(err.message, /session/);
   assert.ok(!err.message.includes('super-secret-value'));
+  assert.equal(killed, 1, 'a timed-out command must be killed, not left running');
 });
 
 test('stdout is trimmed before it becomes the cookie value', async () => {

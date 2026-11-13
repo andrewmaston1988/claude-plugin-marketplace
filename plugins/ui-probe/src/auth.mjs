@@ -46,10 +46,14 @@ function runCommand(argv, cwd, cookieName, _spawn, timeoutMs) {
   return new Promise((resolve, reject) => {
     const child = _spawn(argv[0], argv.slice(1), { shell: false, cwd });
     let stdout = '';
+    let settled = false;
     const timer = setTimeout(() => {
+      settled = true;
+      // A hung keychain or SSO prompt outlives the run otherwise.
+      child.kill();
       reject(new AuthError(cookieName, `command did not exit within ${timeoutMs} ms`));
     }, timeoutMs);
-    const settle = (fn) => { clearTimeout(timer); fn(); };
+    const settle = (fn) => { if (settled) return; settled = true; clearTimeout(timer); fn(); };
     child.stdout?.on('data', (chunk) => { stdout += chunk; });
     // stderr is drained but never reported: it may echo the cookie value.
     child.stderr?.on('data', () => {});
