@@ -4,7 +4,7 @@
 import { mkdirSync, renameSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { attach, AttachInconclusive } from './attach.mjs';
-import { findSdb, sdb } from './sdb.mjs';
+import { findSdb, listedDevices, sdb } from './sdb.mjs';
 import { platformPath, tvProbe } from './probe.mjs';
 import { interceptionKind, tvWritePolicy } from '../guard.mjs';
 
@@ -285,14 +285,6 @@ export async function tvProbeBranch({ config, rest, getFlag, resolveOutDir, out,
     for (const line of lines) out(line);
     return {};
   });
-}
-
-function listedDevices(stdout) {
-  return String(stdout ?? '')
-    .split(/\r?\n/)
-    .map((line) => line.trim().split(/\s+/))
-    .filter((parts) => parts.length >= 2 && parts[1] === 'device')
-    .map((parts) => parts[0]);
 }
 
 /** `'Torrent Hub' 'torrenthub.main'` -> torrenthub.main, for each line applist prints. */

@@ -90,6 +90,15 @@ export function sdb(args, { config, _spawn = spawnSync, _findSdb = findSdb, time
   };
 }
 
+/** The `device` rows of `sdb devices`, by serial; attach and doctor both read this. */
+export function listedDevices(stdout) {
+  return String(stdout ?? "")
+    .split(/\r?\n/)
+    .map((line) => line.trim().split(/\s+/))
+    .filter((parts) => parts.length >= 2 && parts[1] === "device")
+    .map((parts) => parts[0]);
+}
+
 /** `... successfully launched pid = 921 with debug 1 port: 46770` -> 46770. */
 export function parseDebugPort(stdout) {
   const match = String(stdout ?? "").match(/port[:\s]+(\d{2,5})/i);

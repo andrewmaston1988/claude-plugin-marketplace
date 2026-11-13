@@ -2,7 +2,7 @@
 // the dynamic port it prints, then take the first page target. Port 9222 is never assumed.
 
 import { connect, sleep } from "../cdp.mjs";
-import { packageId, parseDebugPort, sdb } from "./sdb.mjs";
+import { listedDevices, packageId, parseDebugPort, sdb } from "./sdb.mjs";
 
 const DEBUG_TIMEOUT_MS = 35000; // a second debug launch while the app runs hangs ~30 s
 const TARGET_ATTEMPTS = 20;
@@ -77,20 +77,12 @@ export async function attach(config, options = {}) {
 
 /** sdb lists nothing until it has been told the TV's address. */
 async function ensureDevice(host, callSdb, timeoutMs) {
-  if (deviceSerials(await callSdb(["devices"], { timeoutMs })).includes(host)) return;
+  if (listedDevices((await callSdb(["devices"], { timeoutMs })).stdout).includes(host)) return;
 
   await callSdb(["connect", host], { timeoutMs });
-  if (deviceSerials(await callSdb(["devices"], { timeoutMs })).includes(host)) return;
+  if (listedDevices((await callSdb(["devices"], { timeoutMs })).stdout).includes(host)) return;
 
   throw new AttachInconclusive(`no TV at ${host}: developer mode is off or has expired, or the TV is off`);
-}
-
-function deviceSerials({ stdout }) {
-  return String(stdout ?? "")
-    .split(/\r?\n/)
-    .map((line) => line.trim().split(/\s+/))
-    .filter((parts) => parts.length >= 2 && parts[1] === "device")
-    .map((parts) => parts[0]);
 }
 
 async function closeApp(pkgid, callSdb, timeoutMs) {

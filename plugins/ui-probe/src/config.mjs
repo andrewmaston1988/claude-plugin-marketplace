@@ -1,6 +1,7 @@
 import { readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
+import { DEFAULT_FOCUS_SELECTOR } from './observe.mjs';
 
 export class ConfigError extends Error {
   constructor(errors) {
@@ -231,7 +232,7 @@ export function loadConfig(configPath) {
   const config = { ...data };
   config.viewports = { ...BUILTIN_VIEWPORTS, ...(data.viewports ?? {}) };
   if (data.tv !== undefined && isPlainObject(data.tv)) {
-    config.tv = { ...data.tv, focusSelector: data.tv.focusSelector ?? '.focused' };
+    config.tv = { ...data.tv, focusSelector: data.tv.focusSelector ?? DEFAULT_FOCUS_SELECTOR };
   }
   if (config.outDir === undefined) {
     config.outDir = path.join(os.tmpdir(), 'ui-probe', new Date().toISOString().replace(/[:.]/g, '-'));
