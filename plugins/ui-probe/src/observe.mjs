@@ -25,9 +25,8 @@ function label(n) {
   return flags ? `${out} [${flags}]` : out;
 }
 
-export function axTextFromTree(tree) {
+function axTextFromTree(tree) {
   const nodes = tree.nodes || [];
-  const byId = new Map(nodes.map((n) => [n.nodeId, n]));
   const children = new Map();
   for (const n of nodes) {
     const parent = n.parentId ?? null;
@@ -41,7 +40,7 @@ export function axTextFromTree(tree) {
   const walk = (n, depth) => {
     const role = n.role?.value || "";
     const keep = !n.ignored && role && !STRUCTURAL.has(role);
-    if (keep) lines.push(`${"  ".repeat(depth)}${label(byId.get(n.nodeId) || n)}`);
+    if (keep) lines.push(`${"  ".repeat(depth)}${label(n)}`);
     const next = keep ? depth + 1 : depth;
     for (const child of children.get(n.nodeId) || []) walk(child, next);
   };
