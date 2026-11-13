@@ -96,6 +96,30 @@ test('row 9: a tv backend is valid and rejects the pointer ops naming why', () =
   assert.ok(validate({ id: 'bad-backend', backend: 'watch', steps: [] }).some((item) => item.field === 'backend'));
 });
 
+test('rows 10-12: validate accepts the geometry and state ops and teaches each malformed form', () => {
+  const ok = (step) => assert.deepEqual(validate({ id: 'state', backend: 'tv', steps: [step] }), [], JSON.stringify(step));
+  const bad = (step, field) => {
+    const problems = validate({ id: 'state', backend: 'tv', steps: [step] });
+    const hit = problems.find((item) => item.field === field);
+    assert.ok(hit && hit.problem && hit.fix && hit.example, `${JSON.stringify(step)}: ${JSON.stringify(problems)}`);
+  };
+
+  ok({ expect_within: { target: '.focused', box: 'safe' } });
+  ok({ expect_within: { target: '.focused', box: { left: 0, top: 0, right: 10, bottom: 10 }, holdMs: 0 } });
+  bad({ expect_within: { target: '.focused', box: 'safe-area' } }, 'steps[0].expect_within.box');
+  bad({ expect_within: { target: '.focused', box: { left: 10, top: 0, right: 5, bottom: 10 } } }, 'steps[0].expect_within.box');
+  bad({ expect_within: { target: '.focused', box: 'safe', holdMs: -1 } }, 'steps[0].expect_within.holdMs');
+
+  ok({ expect_prop: { target: 'video', property: 'paused', equals: false } });
+  ok({ expect_count: { target: 'video', lt: 2 } });
+  bad({ expect_prop: { target: 'video', property: 'paused', equals: true, gt: 1 } }, 'steps[0].expect_prop');
+  bad({ expect_count: { target: 'video' } }, 'steps[0].expect_count');
+
+  ok({ expect_text: { target: '#t', equals: 'a', over: 300, mode: 'all' } });
+  bad({ expect_text: { target: '#t', equals: 'a', mode: 'all' } }, 'steps[0].expect_text.mode');
+  bad({ expect_count: { target: 'video', equals: 1, over: 100, mode: 'some' } }, 'steps[0].expect_count.mode');
+});
+
 test('row 13: include splices the named file steps in order', () => {
   const dir = tempDir();
   try {
