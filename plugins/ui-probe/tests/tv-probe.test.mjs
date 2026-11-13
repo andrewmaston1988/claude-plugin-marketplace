@@ -8,7 +8,7 @@ import {
   pageReply, plainRun, readReply, registerReply, stubCdp,
 } from './tv-support.mjs';
 
-// Row 15
+// A probe that leaves a listener or an element behind has changed the app it measured.
 test('tvProbe removes every listener and element it added, and returns the measured platform', async () => {
   const cdp = stubCdp({ replies: plainRun() });
   const platform = await tvProbe(cdp, { _sleep: noSleep });
@@ -21,7 +21,7 @@ test('tvProbe removes every listener and element it added, and returns the measu
   assert.match(platform.verdict, /^shell: plan A/);
 });
 
-// Row 15
+// A step that fails must still leave the page as it found it.
 test('tvProbe still removes everything when a step throws', async () => {
   const cdp = stubCdp({
     replies: [
@@ -40,7 +40,7 @@ test('tvProbe still removes everything when a step throws', async () => {
   assert.match(cdp.sent('Runtime.evaluate').at(-1).params.expression, /removeEventListener/);
 });
 
-// Row 15
+// Cleanup runs even when the first step is the one that fails, before the error propagates.
 test('a failing features step cleans up before it propagates', async () => {
   const cdp = stubCdp({
     replies: [
@@ -52,7 +52,7 @@ test('a failing features step cleans up before it propagates', async () => {
   assert.match(cdp.sent('Runtime.evaluate').at(-1).params.expression, /removeEventListener/);
 });
 
-// Row 15
+// The set has one decoder: a clip already playing is reported, never displaced.
 test('a playing video makes the video step inconclusive and is never touched', async () => {
   const cdp = stubCdp({
     replies: [
@@ -72,7 +72,7 @@ test('a playing video makes the video step inconclusive and is never touched', a
   assert.equal(expressions.some((e) => e.includes("createElement('video')")), false);
 });
 
-// Row 15
+// Back and Enter can leave or act on the live app, so off the fixture grid they are withheld.
 test('off the fixture grid the key step dispatches neither Back nor Enter', async () => {
   const cdp = stubCdp({ replies: plainRun() });
   const platform = await tvProbe(cdp, { _sleep: noSleep });
@@ -107,7 +107,7 @@ test('on the test origin the key step dispatches Back and Enter too', async () =
   assert.equal(keyCodes(cdp).includes(13), true);
 });
 
-// Row 15
+// registerKey has three states, and a boolean would collapse "threw" into "absent".
 test('features records registerKey as threw, returned or absent', async () => {
   const threw = stubCdp({
     replies: [
@@ -137,7 +137,7 @@ test('features records registerKey as threw, returned or absent', async () => {
   assert.equal(absentPlatform.features.registerKey.present, false);
 });
 
-// Row 24: step 9 read presence on one document and made the calls on another.
+// Presence read on one document and calls made on another is no evidence at all.
 test('every probe step records the page it ran on', async () => {
   const cdp = stubCdp({ replies: [pageReply(), ...plainRun()] });
   const platform = await tvProbe(cdp, { video: 'http://192.0.2.30:8000/clip.mp4', _sleep: noSleep });
@@ -148,8 +148,7 @@ test('every probe step records the page it ran on', async () => {
   }
 });
 
-// Row 24: step 9's probe1 read tizen on the widget's bootstrap document and the calls on the hub
-// page. The settled page is the only one the probe reads, so its answer decides the verdict.
+// The settled page is the only one the probe reads, so its answer decides the verdict.
 test('the settled page decides the verdict, not the bootstrap document the widget ran first', async () => {
   const cdp = stubCdp({
     replies: [
@@ -173,7 +172,7 @@ test('the settled page decides the verdict, not the bootstrap document the widge
   assert.doesNotMatch(platform.verdict, /plan B/);
 });
 
-// Row 24: step 9's probe2 crashed on a document that had no body yet.
+// A feature measurement appends a box, so it must report on a body-less document, not throw.
 test('the feature script measures nothing on a document with no body instead of throwing', () => {
   const element = () => ({
     style: {},
@@ -192,7 +191,7 @@ test('the feature script measures nothing on a document with no body instead of 
   assert.equal(features.backdropFilter, false);
 });
 
-// Row 25
+// The fetch runs from the page, so only the headers CORS exposes can be read back.
 test('the fetch step sends one credentialed GET and records what the page could read', async () => {
   const fetchReply = {
     match: (e) => e.includes("credentials: 'include'"),
@@ -218,7 +217,7 @@ test('the fetch step sends one credentialed GET and records what the page could 
   assert.doesNotMatch(js, /\b(POST|PUT|DELETE|PATCH)\b/, 'one GET, never another method');
 });
 
-// Row 25: a rejected fetch has no status to read; the kind of failure is the measurement.
+// A rejected fetch has no status to read; the kind of failure is the measurement.
 test('a fetch the page cannot make records the failure kind, not a status', async () => {
   const cdp = stubCdp({
     replies: [
@@ -241,7 +240,7 @@ test('a fetch the page cannot make records the failure kind, not a status', asyn
   assert.deepEqual(platform.fetch.page, PAGE);
 });
 
-// Row 26
+// exit() is the last call the probe makes: once the app closes there is nothing left to measure.
 test('the exit step calls exit() last and reports a socket that closed within 3 s', async () => {
   let exited = false;
   let clock = 0;
@@ -269,7 +268,7 @@ test('the exit step calls exit() last and reports a socket that closed within 3 
   assert.match(expressions.at(-1), /1 \+ 1/, 'exit is the last thing the probe does');
 });
 
-// Row 26
+// An app that stays up is reported as not closed once the 3 s wait runs out.
 test('a socket that stays open past 3 s reports closed false', async () => {
   let clock = 0;
   const cdp = stubCdp({
@@ -287,7 +286,7 @@ test('a socket that stays open past 3 s reports closed false', async () => {
   assert.ok(platform.exit.ms >= 3000, `the wait is bounded at 3 s: ${platform.exit.ms} ms`);
 });
 
-// Row 26
+// Closing the app is opt-in: a plain probe never touches the thing it was sent to measure.
 test('without --exit the probe never calls exit()', async () => {
   const cdp = stubCdp({ replies: plainRun() });
   const platform = await tvProbe(cdp, { _sleep: noSleep });
@@ -297,7 +296,7 @@ test('without --exit the probe never calls exit()', async () => {
   assert.equal(expressions.some((e) => e.includes('.exit()')), false);
 });
 
-// Row 16
+// The verdict follows the page it names: a hub page is plan A, a widget-local one plan B.
 const HUB_PAGE = { href: 'http://192.0.2.30:8000/tv', origin: 'http://192.0.2.30:8000' };
 const LOCAL_PAGE = { href: 'file:///opt/usr/app/index.html', origin: 'null' };
 const working = {

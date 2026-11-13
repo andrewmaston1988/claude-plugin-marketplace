@@ -118,13 +118,14 @@ test("rows 6 and 7: a tv run exits 64 with the policy's reason before it starts"
   const scenario = tvScenario(dir);
   const base = { host: "192.0.2.10:26101", appid: "torrenthub.main" };
 
-  // Row 6: --allow-writes with no tv.testOrigin, refused before any attach is attempted.
+  // --allow-writes needs a test origin to lift the block on, and the config alone can say it.
   scratchConfig(dir, { baseUrl: "http://127.0.0.1:9", tv: base });
   const noOrigin = await probe(["run", scenario, "--device", "tv", "--allow-writes"], { cwd: dir, env });
   assert.equal(noOrigin.status, 64, `exited ${noOrigin.status}: ${noOrigin.stderr}`);
   assert.match(noOrigin.stderr, /tv\.testOrigin/, noOrigin.stderr);
 
-  // Row 7: a target with neither Fetch nor Network interception.
+  // A target with neither Fetch nor Network interception cannot block a write, so a scenario that
+  // wants to make one is refused before it starts rather than half-way through.
   const stub = await startCdpStub({
     protocol: { domains: [{ domain: "Page", commands: [{ name: "navigate" }] }] },
     evaluate: (js) => settling(js) ?? null,
@@ -254,7 +255,7 @@ test("row 7: an unsplicable include is refused with 64 on both run and capture",
   assert.match(capture.stderr, /missing\.yaml/, "the capture names the include it could not read");
 });
 
-// Row 6: the device decides the scope, whatever the file declares.
+// A --device tv run is guarded as TV work even when the file itself declares no backend.
 test("row 6: a --device tv run whose file declares no backend is still TV-scoped", async () => {
   const dir = scratchDir("ui-probe-tv-scope-device");
   const home = scratchDir("ui-probe-tv-scope-device-home");
@@ -276,7 +277,7 @@ test("row 6: a --device tv run whose file declares no backend is still TV-scoped
   assert.match(result.stderr, /tv\.testOrigin/, `the refusal names the missing test origin: ${result.stderr}`);
 });
 
-// Row 22: the attach cost is the first thing a TV run's digest says.
+// The attach is the slow part of a TV run and the digest says what it cost before any result.
 test("row 22: a TV run prints its attach timings on the digest header", async () => {
   const dir = scratchDir("ui-probe-tv-timings");
   const env = noSdbEnv(scratchDir("ui-probe-tv-timings-home"));
@@ -419,7 +420,7 @@ test("tv probe attaches, writes platform.json to both homes and ends on the verd
   }
 });
 
-// Row 26: the exit flag reaches the probe, and detach runs whether or not the app closed.
+// --exit and --fetch reach the probe, and the socket is detached even when the app closed.
 test("row 26: tv probe hands --exit and --fetch to the probe and detaches afterwards", async () => {
   const { tvProbeCommand } = await import("../src/tv/cli.mjs");
   const dir = scratchDir("ui-probe-tv-exit-unit");
@@ -455,7 +456,8 @@ test("row 26: tv probe hands --exit and --fetch to the probe and detaches afterw
   assert.match(result.lines.at(-1), /^shell: /);
 });
 
-// Row 27: the operator is told what to press, and for how long, before the window opens.
+// The key list and the per-key wait are printed before the first banner, so the operator knows
+// what to press and how long they have.
 test("row 27: tv probe --listen prints the key list and wait, then runs the guided check", async () => {
   const dir = scratchDir("ui-probe-tv-listen-cli");
   const env = noSdbEnv(scratchDir("ui-probe-tv-listen-cli-home"));
@@ -497,8 +499,8 @@ test("row 27: tv probe --listen prints the key list and wait, then runs the guid
   }
 });
 
-// Row 27: the old --listen took seconds; the number is now an unknown key, and the refusal says
-// where the wait went.
+// A bare number used to be the wait and is now an unknown key, so the refusal points at
+// --listen-wait where the wait moved.
 test("row 27: --listen refuses an unknown key name and a bare number", async () => {
   const dir = scratchDir("ui-probe-tv-listen-flags");
   const env = noSdbEnv(scratchDir("ui-probe-tv-listen-flags-home"));
@@ -521,8 +523,8 @@ test("row 27: --listen refuses an unknown key name and a bare number", async () 
   assert.match(waitAlone.stderr, /--listen-wait only means something with --listen/);
 });
 
-// Row 7: a target that will not serve /json/protocol offers no interception. Null is only a
-// modern browser on the web path, where the protocol is never requested.
+// An unreadable protocol is only "no interception" on the set; on the web path a null protocol
+// still means a modern browser, because the protocol is never requested there.
 test("row 7: an unreadable protocol on the TV counts as no interception", async () => {
   const { tvSession } = await import("../src/tv/cli.mjs");
   const attachTo = (protocol) => async () => ({ cdp: {}, port: 43411, protocol, detach: async () => {} });

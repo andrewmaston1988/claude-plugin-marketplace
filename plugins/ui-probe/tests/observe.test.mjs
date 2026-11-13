@@ -180,7 +180,8 @@ test("observation is the DOM walk alone when the protocol has no getFullAXTree",
   assert.match(withBackground, /div#tile-a\.tv-card\.focused \[focused\]/);
 });
 
-// Row 7: on the set a null protocol is unreadable; on the web it still means a modern browser.
+// On the set an unreadable protocol means no accessibility tree; on the web a null protocol is
+// still a modern browser, so the AX tree stays.
 test("a null protocol on the TV walks the DOM, while the web path keeps its AX tree", async () => {
   const tv = pageCdp(gridPage("tile-a"));
   const text = await observe(tv, { protocol: null, tvScope: true });

@@ -246,7 +246,7 @@ test("a tv run installs Network interception when the protocol has no Fetch doma
   assert.equal(cdp.methods().includes("Fetch.enable"), false, cdp.methods().join(","));
 });
 
-// Row 7: the set's protocol can come back null; that is no interception, not a Fetch domain.
+// A protocol the set would not serve is not a modern browser: there is no interception to install.
 test("a tv run whose protocol the target would not serve installs no guard", async () => {
   const cdp = stubCdp({ nodeIds: [] });
   const result = await run({ id: "k", backend: "tv", steps: [{ key: { key: "Left" } }] }, {

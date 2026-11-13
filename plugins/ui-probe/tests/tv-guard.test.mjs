@@ -64,7 +64,7 @@ test("interceptionKind reads the protocol's domains", () => {
   assert.equal(interceptionKind({ domains: [{ domain: "Page" }] }), null);
 });
 
-// Row 5
+// A target with Fetch gets the phase 1 guard; installing a second one would double-handle requests.
 test("a protocol with Fetch installs the phase 1 Fetch guard and nothing else", async () => {
   const cdp = stubCdp();
   const guard = await installGuard(cdp, MODERN_PROTOCOL);
@@ -84,7 +84,7 @@ test("a missing protocol takes the Fetch path, so a browser attach is unchanged"
   await guard.uninstall();
 });
 
-// Row 5
+// Without Fetch, the older Network interception is the only way to see a request before it leaves.
 test("a protocol without Fetch installs Network interception at the request stage", async () => {
   const cdp = stubCdp();
   const guard = await installGuard(cdp, TV_PROTOCOL);
@@ -97,7 +97,7 @@ test("a protocol without Fetch installs Network interception at the request stag
   assert.deepEqual(guard.blocked, []);
 });
 
-// Row 5
+// A blocked write is aborted at the client and recorded; a read is never in the way.
 test("the Network guard aborts a write with BlockedByClient and records it, and lets a read through", async () => {
   const cdp = stubCdp();
   const guard = await installGuard(cdp, TV_PROTOCOL);
@@ -138,7 +138,7 @@ test("a failed Network interception setup leaves no listener behind", async () =
   assert.equal((cdp.handlers.get("Network.requestIntercepted") || []).length, 0);
 });
 
-// Row 7: neither interception means the guard must not pretend to intercept.
+// Neither interception means there is nothing to block with; a guard that said otherwise would lie.
 test("a protocol with neither Fetch nor Network interception installs nothing", async () => {
   const cdp = stubCdp();
   const guard = await installGuard(cdp, { domains: [{ domain: "Page", commands: [{ name: "navigate" }] }] }, {
@@ -152,7 +152,7 @@ test("a protocol with neither Fetch nor Network interception installs nothing", 
   assert.deepEqual(cdp.calls, []);
 });
 
-// Row 6 (the guard half)
+// --allow-writes lifts the block only on tv.testOrigin; a write to any other host still goes nowhere.
 test("with --allow-writes a TV write to tv.testOrigin continues and one elsewhere is still blocked", async () => {
   const cdp = stubCdp();
   const guard = await installGuard(cdp, TV_PROTOCOL, {
@@ -178,7 +178,7 @@ test("with --allow-writes a TV write to tv.testOrigin continues and one elsewher
   ]);
 });
 
-// Row 6 (the Fetch half): the desktop device stands in for the set, so its guard is scoped too.
+// A desktop run of a TV journey stands in for the set, so the same origin rule binds its Fetch guard.
 test("with --allow-writes a TV-scoped Fetch guard continues a test-origin write and fails one elsewhere", async () => {
   const cdp = stubCdp();
   const guard = await installGuard(cdp, MODERN_PROTOCOL, { allowWrites: true, testOrigin, tvScope: true });
@@ -204,7 +204,7 @@ test("with --allow-writes a TV-scoped Fetch guard continues a test-origin write 
   ]);
 });
 
-// Row 6: the scope follows the device as well as the declared backend.
+// The device decides the scope, so a desktop run of a TV journey is guarded exactly like the set.
 test("inTvScope covers a tv backend, a tv device, and neither", () => {
   assert.equal(inTvScope({ backend: "tv", device: "desktop" }), true);
   assert.equal(inTvScope({ backend: "browser", device: "tv" }), true);
@@ -229,7 +229,7 @@ test("without --allow-writes a TV guard blocks a write even on the test origin",
   assert.equal(cdp.calls.at(-1).params.errorReason, "BlockedByClient");
 });
 
-// Row 7
+// The write policy only speaks for TV work; a browser run is never refused by it.
 test("tvWritePolicy passes a non-TV backend through untouched", () => {
   assert.equal(tvWritePolicy({ tvScope: false, hasInterception: false }), null);
   assert.equal(tvWritePolicy({ tvScope: false, allowWrites: true }), null);

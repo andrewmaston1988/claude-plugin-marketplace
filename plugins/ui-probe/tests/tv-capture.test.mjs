@@ -72,7 +72,7 @@ async function captureTv(overrides = {}) {
 
 const readEnv = (out) => JSON.parse(readFileSync(join(out, 'env.json'), 'utf8'));
 
-// Row 17
+// The platform probe's summary rides into env.json, so a capture says which shell it measured.
 test('capture on the TV writes the platform.json summary into env.json when the file exists', async () => {
   const appid = `uiprobe.summary${process.pid}`;
   const file = platformPath(appid);
@@ -94,7 +94,7 @@ test('capture on the TV writes the platform.json summary into env.json when the 
   }
 });
 
-// Row 22
+// The attach cost lands in the capture's own record, not only in what it printed.
 test('capture on the TV writes the attach timings into env.json', async () => {
   const timings = { attachMs: 4200, relaunchMs: 3800 };
   const run = await captureTv({ ctx: { timings } });
@@ -130,7 +130,7 @@ test('capture on the TV leaves platform out of env.json when platform.json is ab
   }
 });
 
-// Row 17
+// The app is already on its page: a capture observes it rather than driving it.
 test('capture on the TV never screenshots, never screencasts and never runs the probe', async () => {
   const run = await captureTv();
   try {
@@ -150,7 +150,7 @@ test('capture on the TV never screenshots, never screencasts and never runs the 
   }
 });
 
-// Row 17
+// Replay costs TV CPU, so a capture without --screenshot takes none of it.
 test('without --screenshot capture sends no LayerTree call and writes no screenshot.png', async () => {
   const run = await captureTv();
   try {
@@ -162,7 +162,7 @@ test('without --screenshot capture sends no LayerTree call and writes no screens
   }
 });
 
-// Row 17
+// A screenshot is the composite of every painting layer, each replayed at half scale.
 test('with --screenshot capture replays every painting layer at half scale and composites in-page', async () => {
   const run = await captureTv({ ctx: { screenshot: true } });
   try {
@@ -195,7 +195,7 @@ test('with --screenshot capture replays every painting layer at half scale and c
   }
 });
 
-// Row 17
+// An overrun leaves no file at all and names the overrun, rather than a half-painted image.
 test('a replay that overruns its bound leaves no screenshot.png and says why in env.json', async () => {
   const cdp = tvCaptureCdp({
     onSend: (method, params, api) => {
