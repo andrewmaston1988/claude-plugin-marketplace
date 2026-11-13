@@ -1,6 +1,6 @@
 {
   "name": "ui-probe",
-  "description": "Capture and test web interfaces with a zero-dependency Chromium probe.",
+  "description": "Capture and test web interfaces and Tizen TV apps with a zero-dependency Chromium probe.",
   "author": {
     "name": "Andrew Maston",
     "email": "andrew.maston1988@gmail.com"
