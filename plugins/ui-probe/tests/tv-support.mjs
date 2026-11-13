@@ -13,7 +13,13 @@ export const noSleep = async () => {};
 
 // The reply kit for a stub TV page: what the probe's page scripts answer, in the order it asks.
 export const PAGE = { href: 'http://192.0.2.30:8000/tv?tizen=1', origin: 'http://192.0.2.30:8000' };
-export const pageReply = (value = PAGE) => ({ match: (e) => e.includes('location.origin'), value, sticky: true });
+// The probe's page read. `navigateStep`'s location read also names the origin, so it is excluded
+// here: the two ask different questions and must not answer each other.
+export const pageReply = (value = PAGE) => ({
+  match: (e) => e.includes('location.origin') && !e.includes('document.title'),
+  value,
+  sticky: true,
+});
 
 const featuresValue = (overrides = {}) => ({
   userAgent: 'Mozilla/5.0 (SMART-TV)',

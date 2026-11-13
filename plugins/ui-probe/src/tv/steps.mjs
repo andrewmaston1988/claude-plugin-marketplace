@@ -65,7 +65,7 @@ const CURRENT_APP_JS = `(() => {
   return app && typeof app === 'object' ? 'object' : typeof app;
 })()`;
 
-const LOCATION_JS = `(() => ({ href: location.href, title: document.title, ready: document.readyState }))()`;
+const LOCATION_JS = `(() => ({ href: location.href, origin: location.origin, title: document.title, ready: document.readyState }))()`;
 
 const ALREADY_PLAYING_JS = `(() => Array.from(document.querySelectorAll('video')).some((video) => !video.paused && !video.ended && video.readyState >= 2))()`;
 
@@ -241,6 +241,7 @@ export async function navigateStep(cdp, target, { _sleep }) {
     page,
     status: result?.errorText ? 'refused' : changed ? 'reached' : 'refused',
     location: state?.href ?? before,
+    origin: state?.origin ?? null,
     title: state?.title ?? null,
     ...(result?.errorText ? { error: result.errorText } : {}),
   };

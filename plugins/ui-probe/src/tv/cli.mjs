@@ -188,6 +188,7 @@ export async function tvProbeCommand({
     // The guided check prints what to press while the window is still open, not after it closes.
     platform = await _tvProbe(session.cdp, {
       video, navigate, listenKeys, listenWaitSeconds, fetch, exit, _note,
+      testOrigin: config?.tv?.testOrigin ?? null,
     });
   } finally {
     await session.detach();

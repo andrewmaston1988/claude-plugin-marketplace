@@ -83,21 +83,23 @@ test('off the fixture grid the key step dispatches neither Back nor Enter', asyn
   assert.equal(keyCodes(cdp).includes(37), true, 'the arrow keys are still the measurement');
 });
 
-// Row 15 — the positive control: the gate is the fixture grid, not an unconditional skip.
-test('on the fixture grid the key step dispatches Back and Enter too', async () => {
+// The positive control: the gate is the test origin, not an unconditional skip.
+test('on the test origin the key step dispatches Back and Enter too', async () => {
   const cdp = stubCdp({
     replies: [
       featuresReply(),
       registerReply('returned'),
       currentReply('object'),
       pageReply({ href: 'http://192.0.2.30:8000/tv?tizen=1', origin: 'http://192.0.2.30:8000' }),
-      { match: (e) => e.includes('readyState'), value: { href: 'http://127.0.0.1:8001/grid.html', title: 'grid', ready: 'complete' } },
+      { match: (e) => e.includes('readyState'), value: { href: 'http://127.0.0.1:8001/grid.html', origin: 'http://127.0.0.1:8001', title: 'grid', ready: 'complete' } },
       installReply,
       readReply([]),
       cleanupReply,
     ],
   });
-  const platform = await tvProbe(cdp, { navigate: 'http://127.0.0.1:8001/grid.html', _sleep: noSleep });
+  const platform = await tvProbe(cdp, {
+    navigate: 'http://127.0.0.1:8001/grid.html', testOrigin: 'http://127.0.0.1:8001', _sleep: noSleep,
+  });
 
   assert.equal(platform.navigate.status, 'reached');
   assert.equal(platform.keys.onFixture, true);
@@ -427,20 +429,38 @@ test('row 27: the overlay and the listener are removed when a step throws', asyn
   assert.match(last, /\[id\^="__ui-probe"\]/, 'the overlay is removed');
 });
 
-test('row 27: OK and Back are prompted only when the probe is on the fixture grid', async () => {
+test('row 27: OK and Back are prompted only when the page reached is on tv.testOrigin', async () => {
   const off = listenStub({ replies: plainRun() });
-  await tvProbe(off.cdp, { listenWaitSeconds: 8, _sleep: noSleep });
+  await tvProbe(off.cdp, { testOrigin: 'http://127.0.0.1:8001', listenWaitSeconds: 8, _sleep: noSleep });
   assert.deepEqual(off.prompts, ['Left', 'Right', '1', 'Play']);
+
+  const elsewhere = listenStub({
+    replies: [
+      pageReply(PAGE), featuresReply(), registerReply('returned'), currentReply('object'),
+      { match: (e) => e.includes('readyState'), value: { href: 'http://127.0.0.1:8001/grid.html', origin: 'http://127.0.0.1:8001', title: 'grid', ready: 'complete' } },
+      installReply, readReply([]), cleanupReply,
+    ],
+  });
+  const other = await tvProbe(elsewhere.cdp, {
+    navigate: 'http://127.0.0.1:8001/grid.html',
+    testOrigin: 'http://192.0.2.30:8000',
+    listenWaitSeconds: 8, _sleep: noSleep,
+  });
+  assert.equal(other.navigate.status, 'reached', 'the gate is the origin, not whether the page moved');
+  assert.deepEqual(elsewhere.prompts, ['Left', 'Right', '1', 'Play'], 'no OK or Back off the test origin');
+  assert.equal(keyCodes(elsewhere.cdp).includes(10009), false, 'and no Back is dispatched either');
 
   const on = listenStub({
     replies: [
       pageReply(PAGE), featuresReply(), registerReply('returned'), currentReply('object'),
-      { match: (e) => e.includes('readyState'), value: { href: 'http://127.0.0.1:8001/grid.html', title: 'grid', ready: 'complete' } },
+      { match: (e) => e.includes('readyState'), value: { href: 'http://127.0.0.1:8001/grid.html', origin: 'http://127.0.0.1:8001', title: 'grid', ready: 'complete' } },
       installReply, readReply([]), cleanupReply,
     ],
   });
   const platform = await tvProbe(on.cdp, {
-    navigate: 'http://127.0.0.1:8001/grid.html', listenWaitSeconds: 8, _sleep: noSleep,
+    navigate: 'http://127.0.0.1:8001/grid.html',
+    testOrigin: 'http://127.0.0.1:8001',
+    listenWaitSeconds: 8, _sleep: noSleep,
   });
 
   assert.equal(platform.navigate.status, 'reached');

@@ -84,10 +84,14 @@ export function platformSummary(platform) {
   };
 }
 
+function originOf(url) {
+  try { return new URL(url).origin; } catch { return null; }
+}
+
 /**
  * Measure the platform without changing it. `navigate` is the only step that moves the page;
- * Back and Enter are dispatched only after it has landed on the test origin, because either can
- * leave or act on the live app.
+ * Back and Enter are dispatched only when the page it lands on is on `testOrigin`, because
+ * either can leave or act on the live app — reaching any other URL is not enough.
  */
 export async function tvProbe(cdp, {
   video = null,
@@ -96,6 +100,7 @@ export async function tvProbe(cdp, {
   listenWaitSeconds = null,
   fetch = null,
   exit = false,
+  testOrigin = null,
   _note = null,
   _sleep = defaultSleep,
   _now = Date.now,
@@ -119,7 +124,8 @@ export async function tvProbe(cdp, {
     // The page the features and the calls were both read from; the verdict names it.
     platform.page = platform.features.page;
     platform.navigate = await navigateStep(cdp, navigate, { _sleep });
-    const onFixture = platform.navigate?.status === 'reached';
+    const wanted = testOrigin ? originOf(testOrigin) : null;
+    const onFixture = wanted != null && originOf(platform.navigate?.origin) === wanted;
     platform.video = await guardedStep(() => videoStep(cdp, video, { _sleep }));
     platform.keys = await guardedStep(() => keysStep(cdp, { features: platform.features, onFixture }));
     platform.listen = await guardedStep(() => listenStep(cdp, {
