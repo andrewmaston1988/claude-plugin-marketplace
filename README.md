@@ -12,6 +12,7 @@ A collection of [Claude Code](https://claude.ai/code) plugins.
 | swarm | Alternative-model fan-out engine — manifest-driven parallel runs across capable :cloud models and Claude, with digest compression and worktree isolation | beta | [Setup guide](./plugins/swarm/README.md) |
 | claude-peers | Peer discovery and real-time messaging between local Claude Code sessions — per-session stdio MCP server plus a self-healing singleton localhost broker | beta | [Setup guide](./plugins/claude-peers/README.md) |
 | agent-investigation | Investigate agent transcripts — locate, summary, errors, retries, pivots, report | beta | [Setup guide](./plugins/agent-investigation/README.md) |
+| ui-probe | Capture and test web interfaces with a zero-dependency Chromium probe | beta | [Setup guide](./plugins/ui-probe/README.md) |
 | discipline | Per-model discipline deltas injected on every prompt (Sonnet 5 first), with baseline scanner and blind judge grader for measuring violation rates | beta | [Setup guide](./plugins/discipline/README.md) |
 
 ## Using the marketplace

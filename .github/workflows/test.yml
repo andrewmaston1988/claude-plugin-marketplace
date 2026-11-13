@@ -77,6 +77,26 @@ jobs:
         run: npm test
         working-directory: plugins/swarm
 
+  ui-probe:
+    name: ui-probe
+    runs-on: ubuntu-latest
+    env:
+      UI_PROBE_REQUIRE_BROWSER: 1
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Check plugin file types
+        run: |
+          unexpected=$(find plugins/ui-probe/ -type f ! -name '*.mjs' ! -name '*.md' ! -name '*.json' -print)
+          if [ -n "$unexpected" ]; then
+            printf 'Unexpected plugin files:\n%s\n' "$unexpected"
+            exit 1
+          fi
+      - name: Run tests
+        run: node --test plugins/ui-probe/tests/*.test.mjs
+
   pipeline:
     name: pipeline
     runs-on: ubuntu-latest
