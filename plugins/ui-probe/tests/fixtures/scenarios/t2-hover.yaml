@@ -1,0 +1,12 @@
+id: t2-hover
+backend: browser
+steps:
+  - viewport: { width: 1280, height: 900 }
+  - open: { url: "http://127.0.0.1:18771/sheet.html" }
+  - hover: { target: "[data-testid=rec-tile]" }
+  - expect_css: { target: "[data-testid=hover-bar]", property: "opacity", equals: "1" }
+
+  - viewport: { width: 390, height: 844, touch: true }
+  - open: { url: "http://127.0.0.1:18771/sheet.html" }
+  - tap: { target: "[data-testid=rec-tile]" }
+  - expect_css: { target: "[data-testid=hover-bar]", property: "opacity", equals: "0" }
