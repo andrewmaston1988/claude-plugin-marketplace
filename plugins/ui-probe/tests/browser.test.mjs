@@ -168,3 +168,21 @@ test("the module never kills a process", () => {
   const source = readFileSync(fileURLToPath(new URL("../src/browser.mjs", import.meta.url)), "utf8");
   assert.doesNotMatch(source, /\.kill\(|process\.kill/);
 });
+
+test("a profile that cannot be removed is named rather than silently left behind", async () => {
+  const fs = fakeFs();
+  const attempted = [];
+  fs.rmSync = (path) => { attempted.push(path); throw new Error("EBUSY"); };
+  const { deps } = launchWith({ answers: 1, fs });
+  const session = await launch(deps);
+  const warnings = [];
+  const original = console.warn;
+  console.warn = (message) => warnings.push(String(message));
+  try {
+    await session.close();
+  } finally {
+    console.warn = original;
+  }
+  assert.equal(attempted.length, 5);
+  assert.match(warnings.join("\n"), /could not remove the browser profile/);
+});

@@ -37,6 +37,7 @@ const CLOSE_POLL_MS = 150;
 const CLOSE_POLLS = 40;
 const CLOSE_CALL_TIMEOUT_MS = 5000;
 const PROFILE_REMOVE_TRIES = 5;
+const PROFILE_REMOVE_RETRY_MS = 200;
 
 export function findBrowser({ browser, _exists = existsSync, _spawnSync = spawnSync } = {}) {
   if (browser) {
@@ -117,14 +118,17 @@ export async function launch({
         await _sleep(CLOSE_POLL_MS);
       }
       if (!dead) console.warn(`ui-probe: browser on port ${port} still answering after Browser.close`);
+      let removed = false;
       for (let i = 0; i < PROFILE_REMOVE_TRIES; i++) {
         try {
           _fs.rmSync(profile, { recursive: true, force: true });
+          removed = true;
           break;
         } catch {
-          await _sleep(200);
+          await _sleep(PROFILE_REMOVE_RETRY_MS);
         }
       }
+      if (!removed) console.warn(`ui-probe: could not remove the browser profile at ${profile}`);
     },
   };
 }
