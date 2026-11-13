@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync, existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { platformPath, platformSummary, tvProbe, verdictLine } from '../src/tv/probe.mjs';
+import { FEATURES_JS, platformPath, platformSummary, tvProbe, verdictLine } from '../src/tv/probe.mjs';
 import { capture } from '../src/capture.mjs';
 
 // The set's 39-domain protocol: Network interception exists, Fetch does not.
@@ -40,7 +40,7 @@ function stubCdp({ replies = [], onSend = null } = {}) {
       if (method === 'Runtime.evaluate') {
         const reply = queue.find((entry) => !entry.used && entry.match(params.expression));
         if (!reply) return { result: { value: null } };
-        reply.used = true;
+        if (!reply.sticky) reply.used = true;
         if (reply.error) throw reply.error;
         return { result: { value: reply.value } };
       }
@@ -49,6 +49,9 @@ function stubCdp({ replies = [], onSend = null } = {}) {
   };
   return api;
 }
+
+const PAGE = { href: 'http://192.0.2.30:8000/tv?tizen=1', origin: 'http://192.0.2.30:8000' };
+const pageReply = (value = PAGE) => ({ match: (e) => e.includes('location.origin'), value, sticky: true });
 
 const featuresValue = (overrides = {}) => ({
   userAgent: 'Mozilla/5.0 (SMART-TV)',
@@ -167,7 +170,7 @@ test('on the fixture grid the key step dispatches Back and Enter too', async () 
       featuresReply(),
       registerReply('returned'),
       currentReply('object'),
-      { match: (e) => e === 'location.href', value: 'http://192.0.2.30:8000/tv?tizen=1' },
+      pageReply({ href: 'http://192.0.2.30:8000/tv?tizen=1', origin: 'http://192.0.2.30:8000' }),
       { match: (e) => e.includes('readyState'), value: { href: 'http://127.0.0.1:8001/grid.html', title: 'grid', ready: 'complete' } },
       installReply,
       readReply([]),
@@ -210,6 +213,36 @@ test('features records registerKey as threw, returned or absent', async () => {
   const absentPlatform = await tvProbe(absent, { _sleep: noSleep });
   assert.equal(absentPlatform.features.registerKey.outcome, 'absent');
   assert.equal(absentPlatform.features.registerKey.present, false);
+});
+
+// Row 24: step 9 read presence on one document and made the calls on another.
+test('every probe step records the page it ran on', async () => {
+  const cdp = stubCdp({ replies: [pageReply(), ...plainRun()] });
+  const platform = await tvProbe(cdp, { video: 'http://192.0.2.30:8000/clip.mp4', _sleep: noSleep });
+
+  assert.deepEqual(platform.page, PAGE, 'the platform names the page it measured');
+  for (const step of ['features', 'navigate', 'video', 'keys', 'listen']) {
+    assert.deepEqual(platform[step].page, PAGE, `${step} records the page it ran on`);
+  }
+});
+
+// Row 24: step 9's probe2 crashed on a document that had no body yet.
+test('the feature script measures nothing on a document with no body instead of throwing', () => {
+  const element = () => ({
+    style: {},
+    appendChild() {},
+    parentNode: null,
+    getBoundingClientRect: () => ({ left: 0, right: 0, height: 0 }),
+  });
+  const fakeWindow = { tizen: undefined, webapis: undefined };
+  const run = new Function('window', 'document', 'navigator', 'getComputedStyle', `return ${FEATURES_JS}`);
+  const features = run(fakeWindow, { body: null, createElement: element }, { userAgent: 'stub' }, () => ({}));
+
+  assert.equal(features.tizen, 'undefined');
+  assert.equal(features.userAgent, 'stub');
+  assert.equal(features.flexGap, false);
+  assert.equal(features.aspectRatio, false);
+  assert.equal(features.backdropFilter, false);
 });
 
 // Row 16

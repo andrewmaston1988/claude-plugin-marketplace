@@ -18,13 +18,20 @@ export function platformPath(appid) {
   return join(os.tmpdir(), 'ui-probe', `platform-${appid}.json`);
 }
 
+// Every read below names the same page: a probe that mixes documents reports two pages as one.
+const PAGE_JS = `(() => ({ href: location.href, origin: location.origin }))()`;
+
 // Measured by laying out a hidden box: a property the engine does not know is silently dropped.
-const FEATURES_JS = `(() => {
+// A document without a body cannot lay anything out, so the measurement reports absent rather
+// than throwing on an append.
+export const FEATURES_JS = `(() => {
   const tizen = window.tizen;
   const measure = (style, read) => {
+    const body = document.body;
+    if (!body) return false;
     const box = document.createElement('div');
     box.style.cssText = 'position:absolute;left:-9999px;top:0;visibility:hidden;' + style;
-    document.body.appendChild(box);
+    body.appendChild(box);
     let ok = false;
     try { ok = Boolean(read(box)); } catch (error) { ok = false; }
     if (box.parentNode) box.parentNode.removeChild(box);
@@ -57,10 +64,10 @@ const FEATURES_JS = `(() => {
   };
 })()`;
 
-const REGISTER_KEY_JS = `(() => { tizen.tvinputdevice.registerKey('1'); return 'returned'; })()`;
-const UNREGISTER_KEY_JS = `(() => { tizen.tvinputdevice.unregisterKey('1'); return 'returned'; })()`;
+const REGISTER_KEY_JS = `(() => { window.tizen.tvinputdevice.registerKey('1'); return 'returned'; })()`;
+const UNREGISTER_KEY_JS = `(() => { window.tizen.tvinputdevice.unregisterKey('1'); return 'returned'; })()`;
 const CURRENT_APP_JS = `(() => {
-  const app = tizen.application.getCurrentApplication();
+  const app = window.tizen.application.getCurrentApplication();
   return app && typeof app === 'object' ? 'object' : typeof app;
 })()`;
 
@@ -175,7 +182,17 @@ export function platformSummary(platform) {
   };
 }
 
+/** The page a step ran on. A read that fails leaves it unnamed rather than failing the step. */
+export async function pageOf(cdp) {
+  try {
+    const value = await evaluate(cdp, PAGE_JS);
+    if (value && typeof value.href === 'string') return { href: value.href, origin: value.origin ?? null };
+  } catch { /* the page may be mid-navigation */ }
+  return { href: null, origin: null };
+}
+
 async function readFeatures(cdp) {
+  const page = await pageOf(cdp);
   const raw = await evaluate(cdp, FEATURES_JS);
   const registerKey = { present: Boolean(raw.registerKeyPresent), outcome: 'absent' };
   if (registerKey.present) {
@@ -198,24 +215,23 @@ async function readFeatures(cdp) {
     }
   }
   const { registerKeyPresent, currentAppPresent, ...features } = raw;
-  return { ...features, registerKey, getCurrentApplication: current };
+  return { ...features, page, registerKey, getCurrentApplication: current };
 }
 
 async function navigateStep(cdp, target, { _sleep }) {
-  if (!target) return { requested: null, status: 'skipped' };
+  const page = await pageOf(cdp);
+  if (!target) return { requested: null, status: 'skipped', page };
   const requested = String(target);
-  let before;
-  try {
-    before = await evaluate(cdp, 'location.href');
-  } catch (error) {
-    return { requested, status: 'threw', error: messageOf(error) };
+  const before = page.href;
+  if (!before) {
+    return { requested, status: 'threw', page, error: 'location.href could not be read' };
   }
 
   let result;
   try {
     result = await cdp.send('Page.navigate', { url: requested });
   } catch (error) {
-    return { requested, status: 'threw', location: before, error: messageOf(error) };
+    return { requested, status: 'threw', page, location: before, error: messageOf(error) };
   }
 
   let state = null;
@@ -232,6 +248,7 @@ async function navigateStep(cdp, target, { _sleep }) {
   const changed = Boolean(state && state.href !== before);
   return {
     requested,
+    page,
     status: result?.errorText ? 'refused' : changed ? 'reached' : 'refused',
     location: state?.href ?? before,
     title: state?.title ?? null,
@@ -240,9 +257,10 @@ async function navigateStep(cdp, target, { _sleep }) {
 }
 
 async function videoStep(cdp, url, { _sleep }) {
-  if (!url) return { status: 'skipped', reason: 'no --video url' };
+  const page = await pageOf(cdp);
+  if (!url) return { status: 'skipped', reason: 'no --video url', page };
   if (await evaluate(cdp, ALREADY_PLAYING_JS)) {
-    return { status: 'inconclusive', reason: 'the page already plays a video (one decoder)' };
+    return { status: 'inconclusive', reason: 'the page already plays a video (one decoder)', page };
   }
   try {
     await evaluate(cdp, VIDEO_CREATE_JS(url));
@@ -253,6 +271,7 @@ async function videoStep(cdp, url, { _sleep }) {
     const unmuted = await evaluate(cdp, UNMUTED_PLAY_JS);
     return {
       status: 'measured',
+      page,
       url,
       mutedPlay: muted?.result ?? null,
       readyState: later?.readyState ?? muted?.readyState ?? null,
@@ -265,6 +284,7 @@ async function videoStep(cdp, url, { _sleep }) {
 }
 
 async function keysStep(cdp, { features, onFixture }) {
+  const page = await pageOf(cdp);
   const installed = await evaluate(cdp, KEYS_INSTALL_JS);
   const dispatched = Object.keys(KEYS).filter((name) => onFixture || (name !== 'Back' && name !== 'Enter'));
   let events = [];
@@ -294,6 +314,7 @@ async function keysStep(cdp, { features, onFixture }) {
   }
   return {
     status: 'measured',
+    page,
     onFixture,
     activeElement: installed?.active ?? null,
     swallow: 'holds only for listeners below the window capture phase',
@@ -304,8 +325,9 @@ async function keysStep(cdp, { features, onFixture }) {
 }
 
 async function listenStep(cdp, seconds, { _sleep, onFixture }) {
+  const page = await pageOf(cdp);
   const length = Number(seconds);
-  if (!Number.isFinite(length) || length <= 0) return { status: 'skipped', seconds: 0 };
+  if (!Number.isFinite(length) || length <= 0) return { status: 'skipped', seconds: 0, page };
   await evaluate(cdp, KEYS_INSTALL_JS);
   let events = [];
   try {
@@ -314,7 +336,7 @@ async function listenStep(cdp, seconds, { _sleep, onFixture }) {
   } finally {
     await removeEverything(cdp);
   }
-  return { status: 'measured', seconds: length, onFixture, events: Array.isArray(events) ? events : [] };
+  return { status: 'measured', page, seconds: length, onFixture, events: Array.isArray(events) ? events : [] };
 }
 
 async function removeEverything(cdp) {
@@ -340,6 +362,7 @@ export async function tvProbe(cdp, { video = null, navigate = null, listenSecond
   const platform = {
     schema: 'ui-probe-platform@1',
     generatedAt: new Date().toISOString(),
+    page: null,
     features: null,
     navigate: null,
     video: null,
@@ -350,6 +373,8 @@ export async function tvProbe(cdp, { video = null, navigate = null, listenSecond
 
   try {
     platform.features = await readFeatures(cdp);
+    // The page the features and the calls were both read from; the verdict names it.
+    platform.page = platform.features.page;
     platform.navigate = await navigateStep(cdp, navigate, { _sleep });
     const onFixture = platform.navigate?.status === 'reached';
     platform.video = await guardedStep(() => videoStep(cdp, video, { _sleep }));
