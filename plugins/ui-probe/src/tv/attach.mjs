@@ -52,6 +52,7 @@ export async function attach(config, options = {}) {
   let port = joined;
   let launched = false;
   let relaunchMs = null;
+  let cdp = null;
   const started = _now();
 
   try {
@@ -74,7 +75,7 @@ export async function attach(config, options = {}) {
 
     const target = await pageTarget(port, { _fetch, _sleep });
     const protocol = await fetchProtocol(port, _fetch);
-    const cdp = await _connect(target.webSocketDebuggerUrl);
+    cdp = await _connect(target.webSocketDebuggerUrl);
     const settled = await settlePage(cdp, {
       _evaluate, _sleep, _now,
       timeoutMs: settleTimeoutMs,
@@ -98,6 +99,7 @@ export async function attach(config, options = {}) {
       },
     };
   } catch (error) {
+    if (cdp) try { cdp.close(); } catch { /* the socket may already be gone */ }
     if (launched) await quietly(() => callSdb(["shell", "0", "kill", pkgid], { timeoutMs }));
     if (port !== null) await quietly(() => callSdb(["forward", "--remove", `tcp:${port}`], { timeoutMs }));
     throw error;

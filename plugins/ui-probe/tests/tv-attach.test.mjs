@@ -294,8 +294,8 @@ test("a protocol the target will not serve leaves protocol null instead of faili
   assert.equal(attached.protocol, null);
 });
 
-// Row 24: the widget runs a bootstrap document that redirects to `content src`; a decision
-// taken on the first one is taken on a page the user never sees.
+// The widget runs a bootstrap document that redirects to `content src`; a decision taken on the
+// first one is taken on a page the user never sees.
 test("attach waits through a redirect and returns the page it settled on", async () => {
   let polls = 0;
   let clock = 0;
@@ -383,6 +383,29 @@ test("a document with no body yet is waited out, not read", async () => {
 
   assert.equal(attached.settled.href, SETTLED.href);
   assert.ok(polls > 10, `the body had to appear before the hold began: ${polls} polls`);
+});
+
+test("a settle that never completes closes the socket it opened", async () => {
+  let polls = 0;
+  let clock = 0;
+  const connectStub = stubConnect();
+
+  await assert.rejects(
+    attach(CONFIG, {
+      _sdb: stubSdb(launchAnswers()),
+      _fetch: stubFetch({ ...LIST, ...PROTOCOL }),
+      _connect: connectStub,
+      _evaluate: async () => {
+        polls += 1;
+        return { href: `http://127.0.0.1/loading-${polls}.html`, origin: "http://127.0.0.1", ready: "loading", hasBody: true };
+      },
+      _sleep: async () => { clock += 100; },
+      _now: () => clock,
+    }),
+    AttachInconclusive,
+  );
+
+  assert.equal(connectStub.state.closed, 1, "the inspector socket does not outlive a failed attach");
 });
 
 test("attach without tv.host and tv.appid names both config keys", async () => {
