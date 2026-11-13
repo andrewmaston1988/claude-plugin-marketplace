@@ -164,6 +164,17 @@ test("no browser found is an actionable error", () => {
   );
 });
 
+test("launch removes the profile when no DevToolsActivePort appears", async () => {
+  const fs = fakeFs();
+  // The port file never appears: existsSync answers only for the browser binary.
+  fs.existsSync = (path) => path.endsWith("msedge.exe");
+  const child = fakeChild();
+  const { deps } = launchWith({ child, fs });
+  await assert.rejects(launch(deps), /DevToolsActivePort/);
+  assert.deepEqual(fs.removed, [PROFILE]);
+  assert.equal(child.kills, 0);
+});
+
 test("the module never kills a process", () => {
   const source = readFileSync(fileURLToPath(new URL("../src/browser.mjs", import.meta.url)), "utf8");
   assert.doesNotMatch(source, /\.kill\(|process\.kill/);

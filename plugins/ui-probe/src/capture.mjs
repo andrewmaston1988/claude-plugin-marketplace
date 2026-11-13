@@ -123,10 +123,10 @@ export async function capture(screen, ctx = {}) {
   const offs = listen(cdp, events);
   const blocked = [];
   const guard = await installFetchGuard(cdp, { allowWrites, blocked });
-  const cookies = await resolveCookies(config, ctx.vars ?? {}, { _spawn: ctx._spawn });
   const lines = [];
 
   try {
+    const cookies = await resolveCookies(config, ctx.vars ?? {}, { _spawn: ctx._spawn });
     for (const name of viewportNames) {
       const viewport = config.viewports?.[name];
       if (!viewport) {

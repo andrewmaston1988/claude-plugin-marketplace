@@ -85,53 +85,63 @@ export async function launch({
   const exe = findBrowser({ browser, _exists: _fs.existsSync, _spawnSync });
   const profile = _fs.mkdtempSync(join(tmpdir(), "ui-probe-profile-"));
 
-  const args = [
-    "--headless=new", "--remote-debugging-port=0", `--user-data-dir=${profile}`,
-    "--no-first-run", "--no-default-browser-check", "--disable-extensions", "--disable-gpu",
-    "--disable-background-networking", "--disable-sync",
-    // Headless Chromium reports hover:none/pointer:none with no mouse attached; this gives it one,
-    // so touch emulation is what flips a page to coarse and turning it off restores fine.
-    "--blink-settings=primaryHoverType=2,availableHoverTypes=2,primaryPointerType=4,availablePointerTypes=4",
-  ];
-  if (viewport) args.push(`--window-size=${viewport.width},${viewport.height}`);
-  args.push("about:blank");
+  try {
+    const args = [
+      "--headless=new", "--remote-debugging-port=0", `--user-data-dir=${profile}`,
+      "--no-first-run", "--no-default-browser-check", "--disable-extensions", "--disable-gpu",
+      "--disable-background-networking", "--disable-sync",
+      // Headless Chromium reports hover:none/pointer:none with no mouse attached; this gives it one,
+      // so touch emulation is what flips a page to coarse and turning it off restores fine.
+      "--blink-settings=primaryHoverType=2,availableHoverTypes=2,primaryPointerType=4,availablePointerTypes=4",
+    ];
+    if (viewport) args.push(`--window-size=${viewport.width},${viewport.height}`);
+    args.push("about:blank");
 
-  const child = _spawn(exe, args, { stdio: "ignore" });
-  const port = await devtoolsPort(profile, child, { _fs, _sleep });
-  const versionUrl = `http://127.0.0.1:${port}/json/version`;
-  const version = await (await _fetch(versionUrl)).json();
-  const browserWs = await connect(version.webSocketDebuggerUrl, { _WebSocket, timeoutMs: CLOSE_CALL_TIMEOUT_MS });
+    const child = _spawn(exe, args, { stdio: "ignore" });
+    const port = await devtoolsPort(profile, child, { _fs, _sleep });
+    const versionUrl = `http://127.0.0.1:${port}/json/version`;
+    const version = await (await _fetch(versionUrl)).json();
+    const browserWs = await connect(version.webSocketDebuggerUrl, { _WebSocket, timeoutMs: CLOSE_CALL_TIMEOUT_MS });
 
-  return {
-    port,
-    browserWs,
-    // The spawned PID is the launcher stub, already exited, so the only handle on the real browser
-    // is its socket: ask it to close, confirm the debugging port went quiet, then drop the profile.
-    async close() {
-      try { await browserWs.send("Browser.close"); } catch { /* the browser may already be gone */ }
-      browserWs.close();
-      let dead = false;
-      for (let i = 0; i < CLOSE_POLLS; i++) {
-        try {
-          await _fetch(versionUrl, { signal: AbortSignal.timeout(300) });
-        } catch {
-          dead = true;
-          break;
+    return {
+      port,
+      browserWs,
+      // The spawned PID is the launcher stub, already exited, so the only handle on the real browser
+      // is its socket: ask it to close, confirm the debugging port went quiet, then drop the profile.
+      async close() {
+        try { await browserWs.send("Browser.close"); } catch { /* the browser may already be gone */ }
+        browserWs.close();
+        let dead = false;
+        for (let i = 0; i < CLOSE_POLLS; i++) {
+          try {
+            await _fetch(versionUrl, { signal: AbortSignal.timeout(300) });
+          } catch {
+            dead = true;
+            break;
+          }
+          await _sleep(CLOSE_POLL_MS);
         }
-        await _sleep(CLOSE_POLL_MS);
-      }
-      if (!dead) console.warn(`ui-probe: browser on port ${port} still answering after Browser.close`);
-      let removed = false;
-      for (let i = 0; i < PROFILE_REMOVE_TRIES; i++) {
-        try {
-          _fs.rmSync(profile, { recursive: true, force: true });
-          removed = true;
-          break;
-        } catch {
-          await _sleep(PROFILE_REMOVE_RETRY_MS);
+        if (!dead) console.warn(`ui-probe: browser on port ${port} still answering after Browser.close`);
+        let removed = false;
+        for (let i = 0; i < PROFILE_REMOVE_TRIES; i++) {
+          try {
+            _fs.rmSync(profile, { recursive: true, force: true });
+            removed = true;
+            break;
+          } catch {
+            await _sleep(PROFILE_REMOVE_RETRY_MS);
+          }
         }
-      }
-      if (!removed) console.warn(`ui-probe: could not remove the browser profile at ${profile}`);
-    },
-  };
+        if (!removed) console.warn(`ui-probe: could not remove the browser profile at ${profile}`);
+      },
+    };
+  } catch (error) {
+    // The browser may never have started; the profile is still ours to clean up.
+    try {
+      _fs.rmSync(profile, { recursive: true, force: true });
+    } catch {
+      console.warn(`ui-probe: could not remove the browser profile at ${profile}`);
+    }
+    throw error;
+  }
 }

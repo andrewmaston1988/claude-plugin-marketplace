@@ -106,6 +106,23 @@ test('a spawn error throws naming the cookie, never the stdout value', async () 
   assert.match(err.message, /session/);
 });
 
+test('a cookie command that never exits rejects with an AuthError naming the cookie, not the value', async () => {
+  const _spawn = () => {
+    const child = new EventEmitter();
+    child.stdout = new EventEmitter();
+    child.stderr = new EventEmitter();
+    return child; // never emits close
+  };
+  const err = await resolveCookies(
+    config(['get-cookie', '--token', '{TOKEN}']),
+    { TOKEN: 'super-secret-value' },
+    { _spawn, timeoutMs: 25 },
+  ).then(() => { throw new Error('should have rejected'); }, (e) => e);
+  assert.ok(err instanceof AuthError);
+  assert.match(err.message, /session/);
+  assert.ok(!err.message.includes('super-secret-value'));
+});
+
 test('stdout is trimmed before it becomes the cookie value', async () => {
   const [cookie] = await resolveCookies(config(['x']), {}, { _spawn: fakeSpawn([], { stdout: '  tok\r\n' }) });
   assert.equal(cookie.value, 'tok');
