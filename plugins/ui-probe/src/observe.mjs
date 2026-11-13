@@ -1,11 +1,10 @@
 import { evaluate } from "./cdp.mjs";
+import { DEFAULT_FOCUS_SELECTOR } from "./config.mjs";
 
 // CDP emits structural wrappers that carry no name and no information an agent can act on.
 const STRUCTURAL = new Set(["none", "generic", "presentation", "InlineTextBox"]);
 const STATES = ["pressed", "checked", "expanded", "selected", "disabled"];
 const DOM_MARKER = "-- dom --";
-// A remote-driven app marks focus with a class; config's tv.focusSelector defaults to the same one.
-export const DEFAULT_FOCUS_SELECTOR = ".focused";
 
 function state(n) {
   return STATES
