@@ -30,7 +30,7 @@ const settling = (js) => String(js).includes("document.readyState") ? SETTLED_PA
 
 // A CDP target the CLI can attach to with --attach-port: /json/list, /json/protocol and a
 // WebSocket that answers CDP calls. Only reachable over loopback, never the set.
-async function startCdpStub({ protocol, evaluate = () => null } = {}) {
+async function startCdpStub({ protocol, evaluate = () => null, onEvaluated = null } = {}) {
   const sockets = new Set();
   const server = createServer((req, res) => {
     const json = (body) => {
@@ -71,10 +71,15 @@ async function startCdpStub({ protocol, evaluate = () => null } = {}) {
         if (frame.opcode !== 0x1) continue;
         const message = JSON.parse(frame.text);
         if (message.id == null) continue;
+        const expression = message.params?.expression ?? "";
         const value = message.method === "Runtime.evaluate"
-          ? { result: { result: { value: evaluate(message.params?.expression ?? "") } } }
+          ? { result: { result: { value: evaluate(expression) } } }
           : { result: {} };
         socket.write(encodeFrame(JSON.stringify({ id: message.id, ...value })));
+        if (message.method === "Runtime.evaluate" && onEvaluated?.(expression) === "close") {
+          socket.end();
+          return;
+        }
       }
     });
   });
@@ -428,12 +433,15 @@ test("tv probe attaches, writes platform.json to both homes and ends on the verd
   };
   const stub = await startCdpStub({
     protocol: { domains: [{ domain: "Page" }, { domain: "Network" }] },
+    // The app exits under the probe: the inspector goes with it.
+    onEvaluated: (js) => (js.includes(".exit()") ? "close" : undefined),
     evaluate: (expression) => {
       const js = String(expression);
       if (js.includes("document.readyState")) return SETTLED_PAGE;
       if (js.includes("credentials: 'include'")) {
         return { httpStatus: 200, type: "cors", allowOrigin: "http://192.0.2.30:8000", allowCredentials: null };
       }
+      if (js.includes(".exit()")) return "called";
       if (js.includes("IntersectionObserver")) return features;
       if (js.includes("__uiProbeKey.read")) return [];
       if (js.includes("__uiProbeKey = {")) return { active: "BODY" };
@@ -444,7 +452,8 @@ test("tv probe attaches, writes platform.json to both homes and ends on the verd
 
   try {
     const result = await probe(
-      ["tv", "probe", "--attach-port", String(stub.port), "--out", outDir, "--fetch", "http://127.0.0.1:8001/session"],
+      ["tv", "probe", "--attach-port", String(stub.port), "--out", outDir,
+        "--fetch", "http://127.0.0.1:8001/session", "--exit"],
       { cwd: dir, env },
     );
     assert.equal(result.status, 0, `tv probe exited ${result.status}: ${result.stderr}`);
@@ -464,9 +473,47 @@ test("tv probe attaches, writes platform.json to both homes and ends on the verd
     assert.match(lines.at(-1), /^shell: /, `the digest ends on the verdict line: ${lines.at(-1)}`);
     assert.match(result.stdout, /^out: /m, "the digest names its output directory");
     assert.match(result.stdout, /^fetch: 200 /m, "the digest reports the fetch");
+    assert.equal(written.exit.closed, true, "the app closed within 3 s");
+    assert.match(result.stdout, /^exit: closed true/m, "the digest reports the exit");
   } finally {
     await stub.close();
   }
+});
+
+// Row 26: the exit flag reaches the probe, and detach runs whether or not the app closed.
+test("row 26: tv probe hands --exit and --fetch to the probe and detaches afterwards", async () => {
+  const { tvProbeCommand } = await import("../src/tv/cli.mjs");
+  const dir = scratchDir("ui-probe-tv-exit-unit");
+  let detached = 0;
+  let seen = null;
+  const _attach = async () => ({
+    cdp: {}, port: 1, protocol: null, timings: { attachMs: 5, relaunchMs: null },
+    detach: async () => { detached += 1; },
+  });
+  const _tvProbe = async (cdp, options) => {
+    seen = options;
+    return {
+      schema: "ui-probe-platform@1",
+      page: { href: "file:///index.html", origin: "null" },
+      fetch: { status: "skipped" },
+      exit: { status: "measured", closed: true, ms: 12 },
+      verdict: "shell: no tizen — absent",
+    };
+  };
+
+  const result = await tvProbeCommand({
+    config: { tv: { host: "192.0.2.10:26101", appid: "example.app" }, outDir: dir },
+    outDir: dir,
+    exit: true,
+    fetch: "http://192.0.2.30:8000/session",
+    _attach,
+    _tvProbe,
+  });
+
+  assert.equal(seen.exit, true);
+  assert.equal(seen.fetch, "http://192.0.2.30:8000/session");
+  assert.equal(detached, 1, "detach ran after the app was asked to exit");
+  assert.match(result.lines.at(-1), /^shell: /);
 });
 
 // Row 7: a target that will not serve /json/protocol offers no interception. Null is only a

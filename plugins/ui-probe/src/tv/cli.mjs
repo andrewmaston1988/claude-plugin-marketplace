@@ -163,6 +163,7 @@ export async function tvProbeCommand({
   navigate = null,
   listenSeconds = null,
   fetch = null,
+  exit = false,
   attachPort = null,
   _attach = attach,
   _tvProbe = tvProbe,
@@ -172,7 +173,7 @@ export async function tvProbeCommand({
   const session = await tvSession(config, { attachPort, _attach });
   let platform;
   try {
-    platform = await _tvProbe(session.cdp, { video, navigate, listenSeconds, fetch });
+    platform = await _tvProbe(session.cdp, { video, navigate, listenSeconds, fetch, exit });
   } finally {
     await session.detach();
   }
@@ -198,6 +199,7 @@ function probeLines(platform, dir) {
   const keys = platform.keys ?? {};
   const listen = platform.listen ?? {};
   const fetched = platform.fetch ?? {};
+  const exited = platform.exit;
   const lines = [
     `page: ${features.page?.href ?? 'unread'}`,
     `features: tizen ${features.tizen ?? 'unknown'}, webapis ${features.webapis ?? 'unknown'}, `
@@ -228,6 +230,12 @@ function probeLines(platform, dir) {
     lines.push(`fetch: failed (${fetched.error}) — ${fetched.message ?? 'no message'}`);
   } else {
     lines.push('fetch: skipped');
+  }
+
+  if (exited) {
+    lines.push(`exit: closed ${Boolean(exited.closed)} (${exited.ms ?? '?'} ms, called ${exited.called ?? 'unknown'})`);
+  } else {
+    lines.push('exit: skipped');
   }
 
   lines.push(`out: ${dir}`);
@@ -314,6 +322,7 @@ export async function tvProbeBranch({ config, rest, getFlag, resolveOutDir, out,
       navigate: getFlag("--navigate", rest),
       listenSeconds: listen === null ? null : Number(listen),
       fetch: getFlag("--fetch", rest),
+      exit: rest.includes("--exit"),
       attachPort: port,
     });
     for (const line of lines) out(line);

@@ -9,6 +9,8 @@ import { KEYS, dispatchKey } from './keys.mjs';
 const NAVIGATE_TIMEOUT_MS = 10000;
 const NAVIGATE_POLL_MS = 200;
 const VIDEO_ADVANCE_MS = 2000;
+const EXIT_TIMEOUT_MS = 3000;
+const EXIT_POLL_MS = 250;
 
 const defaultSleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -74,6 +76,13 @@ const CURRENT_APP_JS = `(() => {
 const LOCATION_JS = `(() => ({ href: location.href, title: document.title, ready: document.readyState }))()`;
 
 const ALREADY_PLAYING_JS = `(() => Array.from(document.querySelectorAll('video')).some((video) => !video.paused && !video.ended && video.readyState >= 2))()`;
+
+const EXIT_JS = `(() => {
+  window.tizen.application.getCurrentApplication().exit();
+  return 'called';
+})()`;
+// An app that closed takes its inspector with it, so a reply that never comes is the result.
+const EXIT_POLL_JS = '1 + 1';
 
 const VIDEO_CREATE_JS = (url) => `(() => {
   const video = document.createElement('video');
@@ -381,6 +390,42 @@ async function listenStep(cdp, seconds, { _sleep, onFixture }) {
   return { status: 'measured', page, seconds: length, onFixture, events: Array.isArray(events) ? events : [] };
 }
 
+async function exitStep(cdp, { _sleep, _now }) {
+  const page = await pageOf(cdp);
+  const started = _now();
+  let called = 'returned';
+  let error = null;
+  try {
+    await evaluate(cdp, EXIT_JS);
+  } catch (failure) {
+    // The socket can go before the reply: that is still the app closing.
+    called = 'threw';
+    error = messageOf(failure);
+  }
+
+  let closed = false;
+  const attempts = Math.max(1, Math.ceil(EXIT_TIMEOUT_MS / EXIT_POLL_MS) + 1);
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    await _sleep(EXIT_POLL_MS);
+    try {
+      await evaluate(cdp, EXIT_POLL_JS);
+    } catch {
+      closed = true;
+      break;
+    }
+    if (_now() - started >= EXIT_TIMEOUT_MS) break;
+  }
+
+  return {
+    status: 'measured',
+    page,
+    called,
+    closed,
+    ms: _now() - started,
+    ...(error ? { error } : {}),
+  };
+}
+
 async function removeEverything(cdp) {
   try {
     await evaluate(cdp, CLEANUP_JS);
@@ -405,7 +450,9 @@ export async function tvProbe(cdp, {
   navigate = null,
   listenSeconds = null,
   fetch = null,
+  exit = false,
   _sleep = defaultSleep,
+  _now = Date.now,
 } = {}) {
   const platform = {
     schema: 'ui-probe-platform@1',
@@ -417,6 +464,7 @@ export async function tvProbe(cdp, {
     keys: null,
     listen: null,
     fetch: null,
+    exit: null,
     verdict: null,
   };
 
@@ -434,6 +482,8 @@ export async function tvProbe(cdp, {
     await removeEverything(cdp);
   }
 
+  // Last of all: once the app exits, nothing else can be measured.
+  if (exit) platform.exit = await guardedStep(() => exitStep(cdp, { _sleep, _now }));
   platform.verdict = verdictLine(platform);
   return platform;
 }

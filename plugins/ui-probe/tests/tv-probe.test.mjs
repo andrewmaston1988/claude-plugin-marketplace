@@ -294,6 +294,62 @@ test('a fetch the page cannot make records the failure kind, not a status', asyn
   assert.deepEqual(platform.fetch.page, PAGE);
 });
 
+// Row 26
+test('the exit step calls exit() last and reports a socket that closed within 3 s', async () => {
+  let exited = false;
+  let clock = 0;
+  const cdp = stubCdp({
+    replies: [pageReply(), ...plainRun()],
+    onSend: (method, params) => {
+      if (method !== 'Runtime.evaluate') return undefined;
+      const js = String(params.expression);
+      if (js.includes('.exit()')) { exited = true; return 'called'; }
+      if (exited && js === '1 + 1') throw new Error('websocket closed');
+      return undefined;
+    },
+  });
+
+  const platform = await tvProbe(cdp, {
+    exit: true,
+    _sleep: async () => { clock += 100; },
+    _now: () => clock,
+  });
+
+  assert.equal(platform.exit.status, 'measured');
+  assert.equal(platform.exit.closed, true);
+  assert.deepEqual(platform.exit.page, PAGE);
+  const expressions = cdp.sent('Runtime.evaluate').map((call) => call.params.expression);
+  assert.match(expressions.at(-1), /1 \+ 1/, 'exit is the last thing the probe does');
+});
+
+// Row 26
+test('a socket that stays open past 3 s reports closed false', async () => {
+  let clock = 0;
+  const cdp = stubCdp({
+    replies: [...plainRun()],
+    onSend: (method, params) => (method === 'Runtime.evaluate' && String(params.expression).includes('.exit()') ? 'called' : undefined),
+  });
+
+  const platform = await tvProbe(cdp, {
+    exit: true,
+    _sleep: async () => { clock += 250; },
+    _now: () => clock,
+  });
+
+  assert.equal(platform.exit.closed, false);
+  assert.ok(platform.exit.ms >= 3000, `the wait is bounded at 3 s: ${platform.exit.ms} ms`);
+});
+
+// Row 26
+test('without --exit the probe never calls exit()', async () => {
+  const cdp = stubCdp({ replies: plainRun() });
+  const platform = await tvProbe(cdp, { _sleep: noSleep });
+
+  assert.equal(platform.exit, null);
+  const expressions = cdp.sent('Runtime.evaluate').map((call) => call.params.expression);
+  assert.equal(expressions.some((e) => e.includes('.exit()')), false);
+});
+
 // Row 16
 test('verdictLine names plan A, plan B and no tizen from the platform evidence', () => {
   const platform = (features) => ({ features });
