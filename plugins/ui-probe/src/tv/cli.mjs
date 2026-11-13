@@ -65,6 +65,7 @@ export async function tvSession(config, { attachPort = null, _attach = attach } 
     protocol: session.protocol,
     // A protocol the set would not serve is unknown, not a modern browser: no interception.
     intercepted: interceptionKind(session.protocol ?? NO_PROTOCOL) !== null,
+    timings: session.timings ?? null,
     detach: session.detach,
   };
 }
@@ -106,7 +107,7 @@ export async function runOnTv({
       baseDir,
       file,
     });
-    return { result, port: session.port };
+    return { result, port: session.port, timings: session.timings };
   } finally {
     await session.detach();
   }
@@ -147,6 +148,7 @@ export async function captureOnTv({
       source,
       baseDir,
       file,
+      timings: session.timings,
     });
   } finally {
     await session.detach();
@@ -175,9 +177,10 @@ export async function tvProbeCommand({
   }
 
   const dir = outDir ?? config.outDir;
-  writeJson(join(dir, 'platform.json'), platform);
-  writeJson(platformPath(config.tv.appid), platform);
-  return { platform, outDir: dir, lines: probeLines(platform, dir) };
+  const record = { ...platform, timings: session.timings };
+  writeJson(join(dir, 'platform.json'), record);
+  writeJson(platformPath(config.tv.appid), record);
+  return { platform: record, outDir: dir, lines: probeLines(record, dir) };
 }
 
 function writeJson(file, value) {
@@ -248,11 +251,11 @@ export function runTvBranch({
   const { port, problem } = portFrom(getFlag, rest);
   if (problem) return { exitCode: 64, stderr: problem };
   return branch(async () => {
-    const { result } = await runOnTv({
+    const { result, timings } = await runOnTv({
       doc, config, attachPort: port, allowWrites: rest.includes("--allow-writes"),
       cookies, baseUrl, source, baseDir, file, _attach, _run,
     });
-    return { result };
+    return { result, timings };
   });
 }
 

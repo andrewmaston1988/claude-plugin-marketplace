@@ -304,6 +304,40 @@ test("row 6: a --device tv run whose file declares no backend is still TV-scoped
   assert.match(result.stderr, /tv\.testOrigin/, `the refusal names the missing test origin: ${result.stderr}`);
 });
 
+// Row 22: the attach cost is the first thing a TV run's digest says.
+test("row 22: a TV run prints its attach timings on the digest header", async () => {
+  const dir = scratchDir("ui-probe-tv-timings");
+  const env = noSdbEnv(scratchDir("ui-probe-tv-timings-home"));
+  scratchConfig(dir, {
+    baseUrl: "http://127.0.0.1:9",
+    tv: { host: "192.0.2.10:26101", appid: "torrenthub.main", testOrigin: "http://127.0.0.1:8001" },
+  });
+  const scenario = path.join(dir, "keys.yaml");
+  writeFileSync(scenario, [
+    "id: key-journey",
+    "backend: tv",
+    "steps:",
+    '  - key: { key: "Left" }',
+    '  - expect_text: { target: "h1", equals: "One" }',
+    "",
+  ].join("\n"));
+
+  const stub = await startCdpStub({
+    protocol: { domains: [{ domain: "Input", commands: [{ name: "dispatchKeyEvent" }] }] },
+    evaluate: (js) => (String(js).includes("textContent") ? { found: true, value: "One" } : null),
+  });
+  try {
+    const result = await probe([
+      "run", scenario, "--device", "tv", "--attach-port", String(stub.port), "--allow-writes",
+    ], { cwd: dir, env });
+    assert.equal(result.status, 0, `exited ${result.status}: ${result.stdout}${result.stderr}`);
+    const header = result.stdout.split("\n")[0];
+    assert.match(header, /^tv attach: \d+ ms, relaunch: n\/a$/, `the header: ${header}`);
+  } finally {
+    await stub.close();
+  }
+});
+
 test("row 9: --device defaults to the desktop device", async (t) => {
   let browser;
   try {
@@ -398,6 +432,8 @@ test("tv probe attaches, writes platform.json to both homes and ends on the verd
 
     const written = JSON.parse(readFileSync(path.join(outDir, "platform.json"), "utf8"));
     assert.equal(written.schema, "ui-probe-platform@1");
+    assert.equal(typeof written.timings.attachMs, "number", "the attach cost is recorded");
+    assert.equal(written.timings.relaunchMs, null, "a join has no relaunch to time");
     const cached = path.join(home, "ui-probe", `platform-${appid}.json`);
     assert.equal(JSON.parse(readFileSync(cached, "utf8")).verdict, written.verdict, "capture reads this copy");
 

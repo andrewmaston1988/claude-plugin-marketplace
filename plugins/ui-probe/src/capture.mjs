@@ -309,6 +309,7 @@ async function captureTv({ screen, config, cdp, ctx, events, guard, blocked, out
     ...env,
     url,
     screenshot,
+    ...(ctx.timings ? { timings: ctx.timings } : {}),
     ...(platform ? { platform } : {}),
   });
 

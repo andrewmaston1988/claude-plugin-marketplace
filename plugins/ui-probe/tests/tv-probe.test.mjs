@@ -336,6 +336,17 @@ test('capture on the TV writes the platform.json summary into env.json when the 
   }
 });
 
+// Row 22
+test('capture on the TV writes the attach timings into env.json', async () => {
+  const timings = { attachMs: 4200, relaunchMs: 3800 };
+  const run = await captureTv({ ctx: { timings } });
+  try {
+    assert.deepEqual(readEnv(run.out).timings, timings);
+  } finally {
+    rmSync(run.dir, { recursive: true, force: true });
+  }
+});
+
 // Row 17
 test('capture on the TV leaves platform out of env.json when platform.json is absent', async () => {
   const appid = `uiprobe.noplatform${process.pid}`;

@@ -173,6 +173,34 @@ test("detach after launch kills the package id, then removes the forward", async
   assert.equal(sdbStub.calls.length, launched + 2, "a second detach does nothing");
 });
 
+// Row 22: a stub clock, so the split between the relaunch and the whole attach is exact.
+test("attach reports attachMs and the relaunch's share of it", async () => {
+  let clock = 1000;
+  const sdbStub = stubSdb(launchAnswers());
+  const fetchStub = stubFetch({ ...LIST, ...PROTOCOL });
+  const attached = await attach(CONFIG, {
+    _sdb: async (...args) => { clock += 10; return sdbStub(...args); },
+    _fetch: async (...args) => { clock += 5; return fetchStub(...args); },
+    _connect: async () => { clock += 100; return { close() {} }; },
+    _sleep: instant,
+    _now: () => clock,
+  });
+  assert.deepEqual(attached.timings, { attachMs: 150, relaunchMs: 40 });
+});
+
+test("a join has no relaunch to time", async () => {
+  let clock = 0;
+  const attached = await attach(CONFIG, {
+    attachPort: PORT,
+    _sdb: stubSdb({ [`forward --remove tcp:${PORT}`]: ok() }),
+    _fetch: async (...args) => { clock += 5; return stubFetch({ ...LIST, ...PROTOCOL })(...args); },
+    _connect: async () => ({ close() {} }),
+    _sleep: instant,
+    _now: () => clock,
+  });
+  assert.deepEqual(attached.timings, { attachMs: 10, relaunchMs: null });
+});
+
 test("an attach-port join never kills the app and only removes the forward", async () => {
   const sdbStub = stubSdb({ [`forward --remove tcp:${PORT}`]: ok() });
   const attached = await attach(CONFIG, {

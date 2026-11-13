@@ -21,6 +21,7 @@ export async function attach(config, options = {}) {
     _connect = connect,
     _fetch = fetch,
     _sleep = sleep,
+    _now = Date.now,
     timeoutMs = DEBUG_TIMEOUT_MS,
   } = options;
   const tv = config?.tv;
@@ -34,6 +35,8 @@ export async function attach(config, options = {}) {
 
   let port = joined;
   let launched = false;
+  let relaunchMs = null;
+  const started = _now();
 
   try {
     if (joined === null) {
@@ -49,6 +52,8 @@ export async function attach(config, options = {}) {
       }
       launched = true;
       await callSdb(["forward", `tcp:${port}`, `tcp:${port}`], { timeoutMs });
+      // A relaunch costs seconds; this is how many the caller can expect to spend again.
+      relaunchMs = _now() - started;
     }
 
     const target = await pageTarget(port, { _fetch, _sleep });
@@ -60,6 +65,7 @@ export async function attach(config, options = {}) {
       cdp,
       port,
       protocol,
+      timings: { attachMs: _now() - started, relaunchMs },
       async detach() {
         if (detached) return;
         detached = true;

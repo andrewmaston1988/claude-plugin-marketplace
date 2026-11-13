@@ -185,6 +185,8 @@ const settle = (code) => { setTimeout(() => process.exit(code), 150); };
       });
       if (done.stderr) err(done.stderr);
       if (done.exitCode !== 0) { settle(done.exitCode); return; }
+      // What the set cost to reach, before any step is judged.
+      if (done.timings) out(attachLine(done.timings));
       result = done.result;
     } else {
       const backend = doc.backend ?? "browser";
@@ -408,6 +410,11 @@ function printConfigErrors(e) {
     if (item.fix) err(`  fix: ${item.fix}`);
     if (item.example) err(`  e.g. ${item.example}`);
   }
+}
+
+function attachLine({ attachMs, relaunchMs }) {
+  const relaunch = relaunchMs == null ? "n/a" : `${relaunchMs} ms`;
+  return `tv attach: ${attachMs} ms, relaunch: ${relaunch}`;
 }
 
 function printProblem(problem) {
