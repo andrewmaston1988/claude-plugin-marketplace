@@ -7,6 +7,7 @@ import { attach, AttachInconclusive } from './attach.mjs';
 import { findSdb, listedDevices, sdb } from './sdb.mjs';
 import { platformPath, tvProbe } from './probe.mjs';
 import { interceptionKind, inTvScope, NO_PROTOCOL, tvWritePolicy } from '../guard.mjs';
+import { expandIncludes } from '../ir.mjs';
 
 export { AttachInconclusive };
 
@@ -43,10 +44,10 @@ export function assertTvPolicy(config, options) {
   if (why) throw new TvRefusal(why);
 }
 
-/** Every `open` a scenario will navigate to, in either step shape. */
-export function scenarioOpens(doc) {
+/** Every `open` a scenario will navigate to, in either step shape, includes already spliced in. */
+export function scenarioOpens(doc, { baseDir = null, file = null } = {}) {
   const opens = [];
-  for (const step of doc?.steps ?? []) {
+  for (const step of expandIncludes(doc, { baseDir, file }).doc?.steps ?? []) {
     if (step && typeof step === 'object' && 'open' in step) opens.push(step.open);
   }
   return opens;
@@ -85,7 +86,7 @@ export async function runOnTv({
   _attach = attach,
   _run = null,
 } = {}) {
-  const opens = scenarioOpens(doc);
+  const opens = scenarioOpens(doc, { baseDir, file });
   const device = 'tv';
   assertTvPolicy(config, { backend: doc?.backend ?? null, device, allowWrites, opens });
 

@@ -192,7 +192,11 @@ const settle = (code) => { setTimeout(() => process.exit(code), 150); };
         // The config-only half of the write policy: refused before a browser launches.
         const { assertTvPolicy, scenarioOpens, TvRefusal } = await import("../src/tv/cli.mjs");
         try {
-          assertTvPolicy(config, { backend, allowWrites: hasFlag("--allow-writes", rest), opens: scenarioOpens(doc) });
+          assertTvPolicy(config, {
+            backend,
+            allowWrites: hasFlag("--allow-writes", rest),
+            opens: scenarioOpens(doc, { baseDir: path.dirname(scenarioPath), file: scenarioPath }),
+          });
         } catch (e) {
           if (e instanceof TvRefusal) { err(e.message); settle(64); return; }
           throw e;

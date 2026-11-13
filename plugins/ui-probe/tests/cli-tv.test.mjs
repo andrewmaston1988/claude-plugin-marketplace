@@ -245,6 +245,43 @@ test("rows 6 and 7: a tv run exits 64 with the policy's reason before it starts"
   }
 });
 
+// Row 7: the pre-flight must judge the steps the include brings in, not only the file's own.
+test("row 7: an include-borne open outside tv.testOrigin is refused", async () => {
+  const dir = scratchDir("ui-probe-tv-include-policy");
+  const env = noSdbEnv(scratchDir("ui-probe-tv-include-policy-home"));
+  writeFileSync(path.join(dir, "prefix.yaml"), [
+    "id: prefix",
+    "steps:",
+    '  - open: { url: "http://192.0.2.30/tv" }',
+    "",
+  ].join("\n"));
+  const scenario = path.join(dir, "journey.yaml");
+  writeFileSync(scenario, [
+    "id: journey",
+    "backend: tv",
+    "steps:",
+    "  - include: prefix.yaml",
+    '  - expect_text: { target: "h1", equals: "One" }',
+    "",
+  ].join("\n"));
+  scratchConfig(dir, {
+    baseUrl: "http://127.0.0.1:9",
+    tv: { host: "192.0.2.10:26101", appid: "torrenthub.main", testOrigin: "http://127.0.0.1:8001" },
+  });
+
+  const stub = await startCdpStub({ protocol: { domains: [{ domain: "Page", commands: [{ name: "navigate" }] }] } });
+  try {
+    const result = await probe([
+      "run", scenario, "--device", "tv", "--attach-port", String(stub.port), "--allow-writes",
+    ], { cwd: dir, env });
+    assert.equal(result.status, 64, `exited ${result.status}: ${result.stdout}${result.stderr}`);
+    assert.match(result.stderr, /192\.0\.2\.30/, "the included open is named");
+    assert.match(result.stderr, /tv\.testOrigin/, result.stderr);
+  } finally {
+    await stub.close();
+  }
+});
+
 // Row 6: the device decides the scope, whatever the file declares.
 test("row 6: a --device tv run whose file declares no backend is still TV-scoped", async () => {
   const dir = scratchDir("ui-probe-tv-scope-device");
