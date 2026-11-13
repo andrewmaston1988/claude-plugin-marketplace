@@ -139,3 +139,91 @@ test('loadConfig exposes the config directory for the auth spawn cwd', (t) => {
   assert.equal(config.configDir, dirname(file));
   assert.ok(!Object.keys(config).includes('configDir'), 'configDir stays non-enumerable');
 });
+
+// --- tv block ---
+
+const TV_FULL = { host: '192.0.2.10:26101', appid: 'torrenthub.main', sdb: 'C:\tizen\sdb.exe', testOrigin: 'http://192.0.2.20:8001', focusSelector: '.tile.focused' };
+
+test('accepts a full tv block and keeps the given focusSelector', (t) => {
+  const config = loadConfig(tmpCase(t, { baseUrl: 'http://x.test', tv: TV_FULL }));
+  assert.equal(config.tv.host, '192.0.2.10:26101');
+  assert.equal(config.tv.appid, 'torrenthub.main');
+  assert.equal(config.tv.sdb, TV_FULL.sdb);
+  assert.equal(config.tv.testOrigin, 'http://192.0.2.20:8001');
+  assert.equal(config.tv.focusSelector, '.tile.focused');
+});
+
+test('focusSelector defaults to .focused when the tv block omits it', (t) => {
+  const config = loadConfig(tmpCase(t, { baseUrl: 'http://x.test', tv: { host: '192.0.2.10:26101', appid: 'torrenthub.main' } }));
+  assert.equal(config.tv.focusSelector, '.focused');
+});
+
+test('a config with no tv block is still valid and has no tv key', (t) => {
+  const config = loadConfig(tmpCase(t, { baseUrl: 'http://x.test' }));
+  assert.equal(config.tv, undefined);
+});
+
+test('rejects a tv block that is not an object', (t) => {
+  for (const bad of ['tv', 42, []]) {
+    const err = loadError(t, { baseUrl: 'http://x.test', tv: bad });
+    assert.ok(err.errors.some((e) => e.field === 'tv'), `expected a tv error for ${JSON.stringify(bad)}`);
+  }
+});
+
+test('rejects a tv.host without a port, with a non-numeric port, and out of range', (t) => {
+  for (const host of ['192.0.2.10', '192.0.2.10:abc', '192.0.2.10:99999', '192.0.2.10:0', 'http://192.0.2.10:26101', '']) {
+    const err = loadError(t, { baseUrl: 'http://x.test', tv: { host, appid: 'torrenthub.main' } });
+    assert.ok(err.errors.some((e) => e.field === 'tv.host'), `expected tv.host error for ${JSON.stringify(host)}`);
+  }
+});
+
+test('rejects a missing or malformed tv.appid', (t) => {
+  for (const appid of [undefined, '', '   ', 'has space', 'a/b', 42]) {
+    const tv = { host: '192.0.2.10:26101' };
+    if (appid !== undefined) tv.appid = appid;
+    const err = loadError(t, { baseUrl: 'http://x.test', tv });
+    assert.ok(err.errors.some((e) => e.field === 'tv.appid'), `expected tv.appid error for ${JSON.stringify(appid)}`);
+  }
+});
+
+test('rejects an empty tv.sdb and a non-string tv.sdb', (t) => {
+  for (const sdb of ['', '   ', 42]) {
+    const err = loadError(t, { baseUrl: 'http://x.test', tv: { host: '192.0.2.10:26101', appid: 'torrenthub.main', sdb } });
+    assert.ok(err.errors.some((e) => e.field === 'tv.sdb'), `expected tv.sdb error for ${JSON.stringify(sdb)}`);
+  }
+});
+
+test('rejects a tv.testOrigin that is not an http(s) origin', (t) => {
+  for (const testOrigin of ['ftp://192.0.2.20:8001', 'not a url', 'http://192.0.2.20:8001/path', 'http://192.0.2.20:8001/?q=1', 'file:///tmp/x']) {
+    const err = loadError(t, { baseUrl: 'http://x.test', tv: { host: '192.0.2.10:26101', appid: 'torrenthub.main', testOrigin } });
+    assert.ok(err.errors.some((e) => e.field === 'tv.testOrigin'), `expected tv.testOrigin error for ${JSON.stringify(testOrigin)}`);
+  }
+});
+
+test('accepts http and https tv.testOrigin with and without a trailing slash', (t) => {
+  for (const testOrigin of ['http://192.0.2.20:8001', 'https://tv.example.com', 'http://192.0.2.20:8001/']) {
+    const config = loadConfig(tmpCase(t, { baseUrl: 'http://x.test', tv: { host: '192.0.2.10:26101', appid: 'torrenthub.main', testOrigin } }));
+    assert.equal(config.tv.testOrigin, testOrigin);
+  }
+});
+
+test('rejects an empty tv.focusSelector and a non-string one', (t) => {
+  for (const focusSelector of ['', '   ', 42]) {
+    const err = loadError(t, { baseUrl: 'http://x.test', tv: { host: '192.0.2.10:26101', appid: 'torrenthub.main', focusSelector } });
+    assert.ok(err.errors.some((e) => e.field === 'tv.focusSelector'), `expected tv.focusSelector error for ${JSON.stringify(focusSelector)}`);
+  }
+});
+
+test('rejects unknown keys inside tv, naming the key', (t) => {
+  const err = loadError(t, { baseUrl: 'http://x.test', tv: { host: '192.0.2.10:26101', appid: 'torrenthub.main', bogus: 1 } });
+  assert.ok(err.errors.some((e) => e.field === 'tv.bogus'));
+});
+
+test('tv errors carry fix and example like the rest of the teaching errors', (t) => {
+  const err = loadError(t, { baseUrl: 'http://x.test', tv: { host: 'nope' } });
+  for (const e of err.errors) {
+    assert.equal(typeof e.problem, 'string');
+    assert.equal(typeof e.fix, 'string');
+    assert.equal(typeof e.example, 'string');
+  }
+});

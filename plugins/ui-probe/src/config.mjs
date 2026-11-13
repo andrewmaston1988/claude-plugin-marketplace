@@ -15,7 +15,8 @@ export const BUILTIN_VIEWPORTS = Object.freeze({
   desktop: Object.freeze({ width: 1280, height: 900 }),
 });
 
-const TOP_LEVEL_KEYS = ['baseUrl', 'viewports', 'screens', 'auth', 'outDir', 'browser'];
+const TOP_LEVEL_KEYS = ['baseUrl', 'viewports', 'screens', 'auth', 'outDir', 'browser', 'tv'];
+const TV_KEYS = ['host', 'appid', 'sdb', 'testOrigin', 'focusSelector'];
 const SCREEN_KEYS = ['url', 'steps', 'measure'];
 const VIEWPORT_KEYS = ['width', 'height', 'dpr', 'touch'];
 const COOKIE_KEYS = ['name', 'command', 'domain'];
@@ -54,6 +55,48 @@ function validateViewport(name, value, errors) {
   if (!isPositiveNumber(value.height)) errors.push(err(`${field}.height`, `must be a positive finite number, got ${JSON.stringify(value.height)}`, 'set height in CSS pixels to a number greater than 0', '{ "width": 390, "height": 844 }'));
   if (value.dpr !== undefined && !isPositiveNumber(value.dpr)) errors.push(err(`${field}.dpr`, `must be a positive finite number, got ${JSON.stringify(value.dpr)}`, 'set dpr to a number greater than 0, or omit it', '{ "width": 390, "height": 844, "dpr": 3 }'));
   if (value.touch !== undefined && typeof value.touch !== 'boolean') errors.push(err(`${field}.touch`, `must be a boolean, got ${JSON.stringify(value.touch)}`, 'set touch to true or false, or omit it', '{ "width": 390, "height": 844, "touch": true }'));
+}
+
+function isHttpOrigin(v) {
+  if (typeof v !== 'string') return false;
+  let u;
+  try {
+    u = new URL(v);
+  } catch {
+    return false;
+  }
+  return (u.protocol === 'http:' || u.protocol === 'https:') && (u.pathname === '' || u.pathname === '/') && !u.search && !u.hash;
+}
+
+function validateTv(value, errors) {
+  const field = 'tv';
+  if (!isPlainObject(value)) {
+    errors.push(err(field, 'must be an object like { "host": "192.0.2.10:26101", "appid": "myapp.main" }', 'make tv an object with host and appid', '{ "tv": { "host": "192.0.2.10:26101", "appid": "myapp.main" } }'));
+    return;
+  }
+  for (const key of Object.keys(value)) {
+    if (!TV_KEYS.includes(key)) {
+      errors.push(err(`${field}.${key}`, `unknown tv key ${JSON.stringify(key)}`, `use one of ${TV_KEYS.join(', ')}`, '{ "tv": { "host": "192.0.2.10:26101", "appid": "myapp.main" } }'));
+    }
+  }
+  const host = value.host;
+  const hostMatch = typeof host === 'string' ? /^([^\s/:]+):(\d{1,5})$/.exec(host) : null;
+  const port = hostMatch ? Number(hostMatch[2]) : NaN;
+  if (!hostMatch || port < 1 || port > 65535) {
+    errors.push(err('tv.host', `must be "host:port" with a port of 1-65535, got ${JSON.stringify(host)}`, 'set host to the TV address and debug port, e.g. from sdb devices', '{ "tv": { "host": "192.0.2.10:26101", "appid": "myapp.main" } }'));
+  }
+  if (typeof value.appid !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(value.appid)) {
+    errors.push(err('tv.appid', `must be a Tizen app id like "myapp.main", got ${JSON.stringify(value.appid)}`, 'set appid to the id from sdb shell 0 applist', '{ "tv": { "host": "192.0.2.10:26101", "appid": "myapp.main" } }'));
+  }
+  if (value.sdb !== undefined && (typeof value.sdb !== 'string' || !value.sdb.trim())) {
+    errors.push(err('tv.sdb', `must be a non-empty path to the sdb executable, got ${JSON.stringify(value.sdb)}`, 'set sdb to the sdb binary path, or omit it to search PATH and the SDK layouts', '{ "tv": { "host": "192.0.2.10:26101", "appid": "myapp.main", "sdb": "C:\\tizen\\tools\\sdb.exe" } }'));
+  }
+  if (value.testOrigin !== undefined && !isHttpOrigin(value.testOrigin)) {
+    errors.push(err('tv.testOrigin', `must be an http(s) origin with no path, got ${JSON.stringify(value.testOrigin)}`, 'set testOrigin to the scheme, host and port only, e.g. "http://192.0.2.20:8001"', '{ "tv": { "host": "192.0.2.10:26101", "appid": "myapp.main", "testOrigin": "http://192.0.2.20:8001" } }'));
+  }
+  if (value.focusSelector !== undefined && (typeof value.focusSelector !== 'string' || !value.focusSelector.trim())) {
+    errors.push(err('tv.focusSelector', `must be a non-empty CSS selector, got ${JSON.stringify(value.focusSelector)}`, 'set focusSelector to the class your app moves on focus, or omit it for ".focused"', '{ "tv": { "host": "192.0.2.10:26101", "appid": "myapp.main", "focusSelector": ".focused" } }'));
+  }
 }
 
 function validateScreen(name, value, errors) {
@@ -174,6 +217,8 @@ export function loadConfig(configPath) {
     }
   }
 
+  if (data.tv !== undefined) validateTv(data.tv, errors);
+
   if (data.outDir !== undefined && (typeof data.outDir !== 'string' || !data.outDir.trim())) {
     errors.push(err('outDir', `must be a non-empty string, got ${JSON.stringify(data.outDir)}`, 'set outDir to a directory path, or omit it for a per-run temp dir', '{ "outDir": "C:\\\\tmp\\\\ui-probe" }'));
   }
@@ -185,6 +230,9 @@ export function loadConfig(configPath) {
 
   const config = { ...data };
   config.viewports = { ...BUILTIN_VIEWPORTS, ...(data.viewports ?? {}) };
+  if (data.tv !== undefined && isPlainObject(data.tv)) {
+    config.tv = { ...data.tv, focusSelector: data.tv.focusSelector ?? '.focused' };
+  }
   if (config.outDir === undefined) {
     config.outDir = path.join(os.tmpdir(), 'ui-probe', new Date().toISOString().replace(/[:.]/g, '-'));
   }
