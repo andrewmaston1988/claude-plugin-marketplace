@@ -1,10 +1,7 @@
 import { readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
-
-// A remote-driven app marks focus with a class; the DOM walk falls back to the same one. It lives
-// here because config owns the default and observe must not drag the config loader into a walk.
-export const DEFAULT_FOCUS_SELECTOR = '.focused';
+import { DEFAULT_FOCUS_SELECTOR } from './focus.mjs';
 
 export class ConfigError extends Error {
   constructor(errors) {

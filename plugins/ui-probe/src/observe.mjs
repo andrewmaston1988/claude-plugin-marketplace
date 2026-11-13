@@ -1,5 +1,5 @@
 import { evaluate } from "./cdp.mjs";
-import { DEFAULT_FOCUS_SELECTOR } from "./config.mjs";
+import { DEFAULT_FOCUS_SELECTOR } from "./focus.mjs";
 
 // CDP emits structural wrappers that carry no name and no information an agent can act on.
 const STRUCTURAL = new Set(["none", "generic", "presentation", "InlineTextBox"]);
