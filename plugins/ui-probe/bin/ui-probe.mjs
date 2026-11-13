@@ -74,9 +74,10 @@ const settle = (code) => { setTimeout(() => process.exit(code), 150); };
     const viewports = getFlag("--viewport", rest)?.split(",").map((v) => v.trim()).filter(Boolean);
 
     const { capture } = await import("../src/capture.mjs");
+    const { AuthError } = await import("../src/auth.mjs");
     let session = null;
     try {
-      const digest = await capture(screen, {
+      const { digest } = await capture(screen, {
         config,
         cdp: async () => {
           session = await openBrowser(config.browser);
@@ -90,6 +91,9 @@ const settle = (code) => { setTimeout(() => process.exit(code), 150); };
         source: name ?? url,
       });
       if (digest) process.stdout.write(digest.endsWith("\n") ? digest : `${digest}\n`);
+    } catch (e) {
+      if (e instanceof AuthError) { err(e.message); settle(64); return; }
+      throw e;
     } finally {
       if (session) await session.close();
     }
@@ -125,6 +129,7 @@ const settle = (code) => { setTimeout(() => process.exit(code), 150); };
       if (!viewport) { err(`unknown viewport ${JSON.stringify(viewportName)}; add it to viewports in the config`); settle(64); return; }
       const step = { width: viewport.width, height: viewport.height };
       if (viewport.touch) step.touch = true;
+      if (viewport.dpr !== undefined) step.dpr = viewport.dpr;
       doc = { ...doc, steps: [{ viewport: step }, ...doc.steps] };
     }
 
@@ -133,6 +138,7 @@ const settle = (code) => { setTimeout(() => process.exit(code), 150); };
     const outDir = resolveOutDir(config, getFlag("--out", rest));
 
     const { run } = await import("../src/runner.mjs");
+    const { AuthError } = await import("../src/auth.mjs");
     let session = null;
     let launchError = null;
     let result;
@@ -154,6 +160,7 @@ const settle = (code) => { setTimeout(() => process.exit(code), 150); };
       });
     } catch (e) {
       if (session) await session.close();
+      if (e instanceof AuthError) { err(e.message); settle(64); return; }
       // The environment failed the probe, not the app: inconclusive, never "failed".
       if (launchError) { err(`inconclusive: browser: ${e.message}`); settle(2); return; }
       throw e;

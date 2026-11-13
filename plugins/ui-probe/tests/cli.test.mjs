@@ -203,3 +203,55 @@ test("doctor names the first failing check and exits 0 when all pass", async () 
     await fixture.close();
   }
 });
+
+test("capture prints the browser digest and exits 0", async (t) => {
+  let browser;
+  try {
+    browser = findBrowser({});
+  } catch (error) {
+    if (process.env.UI_PROBE_REQUIRE_BROWSER === "1") throw error;
+    t.skip(`no Chromium browser found: ${error.message}`);
+    return;
+  }
+
+  const fixture = await startFixtureServer();
+  const dir = scratchDir("ui-probe-capture-cli");
+  const outDir = path.join(dir, "out");
+  scratchConfig(dir, {
+    baseUrl: fixture.origin,
+    browser,
+    viewports: { desktop: { width: 800, height: 600 } },
+    screens: {
+      tiles: { url: "/tiles-good.html", measure: ["[data-testid=action-tile]"] },
+    },
+  });
+
+  try {
+    const result = await probe(["capture", "tiles", "--viewport", "desktop", "--out", outDir], { cwd: dir });
+    assert.equal(result.status, 0, `capture exited ${result.status}: ${result.stderr}`);
+    assert.match(result.stdout, /desktop 800×600 hover:(none|hover) pointer:(coarse|fine)/);
+    assert.match(result.stdout, /\[data-testid=action-tile\] widths=111,111,111/);
+    assert.match(result.stdout, /blocked: \d+/);
+    assert.match(result.stdout, /out:/);
+  } finally {
+    await fixture.close();
+  }
+});
+
+test("capture exits 64 and prints AuthError when a cookie variable is missing", async () => {
+  const fixture = await startFixtureServer();
+  const dir = scratchDir("ui-probe-capture-auth");
+  scratchConfig(dir, {
+    baseUrl: fixture.origin,
+    screens: { tiles: { url: "/tiles-good.html" } },
+    auth: { cookies: [{ name: "session", command: ["echo", "{missing}"] }] },
+  });
+
+  try {
+    const result = await probe(["capture", "tiles", "--viewport", "phone"], { cwd: dir });
+    assert.equal(result.status, 64, `capture exited ${result.status}: ${result.stderr}`);
+    assert.match(result.stderr, /auth cookie "session".*variable "missing" is not set/);
+  } finally {
+    await fixture.close();
+  }
+});
