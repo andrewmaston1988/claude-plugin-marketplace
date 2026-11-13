@@ -1,12 +1,24 @@
 // Attach to the TV's inspector: close the app, launch it under `sdb debug`, forward
 // the dynamic port it prints, then take the first page target. Port 9222 is never assumed.
 
-import { connect, sleep } from "../cdp.mjs";
+import { connect, evaluate, sleep } from "../cdp.mjs";
 import { listedDevices, packageId, parseDebugPort, sdb } from "./sdb.mjs";
 
 const DEBUG_TIMEOUT_MS = 35000; // a second debug launch while the app runs hangs ~30 s
 const TARGET_ATTEMPTS = 20;
 const TARGET_POLL_MS = 500;
+// The widget loads a bootstrap document that redirects to `content src`; until that settles,
+// every read is of a page the app does not run on.
+const SETTLE_TIMEOUT_MS = 20000;
+const SETTLE_HOLD_MS = 1500;
+const SETTLE_POLL_MS = 250;
+
+const SETTLE_JS = `(() => ({
+  href: location.href,
+  origin: location.origin,
+  ready: document.readyState,
+  hasBody: Boolean(document.body),
+}))()`;
 
 export class AttachInconclusive extends Error {
   constructor(message) {
@@ -19,10 +31,14 @@ export async function attach(config, options = {}) {
   const {
     attachPort = null,
     _connect = connect,
+    _evaluate = evaluate,
     _fetch = fetch,
     _sleep = sleep,
     _now = Date.now,
     timeoutMs = DEBUG_TIMEOUT_MS,
+    settleTimeoutMs = SETTLE_TIMEOUT_MS,
+    settleHoldMs = SETTLE_HOLD_MS,
+    settlePollMs = SETTLE_POLL_MS,
   } = options;
   const tv = config?.tv;
   if (!tv?.host || !tv?.appid) {
@@ -59,12 +75,19 @@ export async function attach(config, options = {}) {
     const target = await pageTarget(port, { _fetch, _sleep });
     const protocol = await fetchProtocol(port, _fetch);
     const cdp = await _connect(target.webSocketDebuggerUrl);
+    const settled = await settlePage(cdp, {
+      _evaluate, _sleep, _now,
+      timeoutMs: settleTimeoutMs,
+      holdMs: settleHoldMs,
+      pollMs: settlePollMs,
+    });
     let detached = false;
 
     return {
       cdp,
       port,
       protocol,
+      settled,
       timings: { attachMs: _now() - started, relaunchMs },
       async detach() {
         if (detached) return;
@@ -122,6 +145,47 @@ async function pageTarget(port, { _fetch, _sleep }) {
     await _sleep(TARGET_POLL_MS);
   }
   throw new AttachInconclusive(problem);
+}
+
+/**
+ * Wait for the document `content src` loads: complete, with a body, and the same href for the
+ * hold. A redirect mid-hold restarts it, so the bootstrap document can never be what the caller
+ * reads. Bounded, because a page that never settles has to end the attach, not hang it.
+ */
+async function settlePage(cdp, { _evaluate, _sleep, _now, timeoutMs, holdMs, pollMs }) {
+  const started = _now();
+  const attempts = Math.max(1, Math.ceil(timeoutMs / pollMs) + 1);
+  let stable = null;
+  let stableSince = started;
+  let last = null;
+
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    let state = null;
+    try {
+      state = await _evaluate(cdp, SETTLE_JS);
+    } catch { /* the page is mid-navigation; the next poll reads the new one */ }
+
+    const now = _now();
+    if (state && typeof state.href === "string") last = state;
+    if (state && state.ready === "complete" && state.hasBody && typeof state.href === "string") {
+      if (!stable || state.href !== stable.href) {
+        stable = state;
+        stableSince = now;
+      }
+      if (now - stableSince >= holdMs) return { href: state.href, origin: state.origin ?? null };
+    } else {
+      stable = null;
+      stableSince = now;
+    }
+
+    if (now - started >= timeoutMs) break;
+    await _sleep(pollMs);
+  }
+
+  throw new AttachInconclusive(
+    `the page did not settle within ${timeoutMs} ms — last href ${JSON.stringify(last?.href ?? null)}; `
+    + "the app may still be starting, so re-run once it has loaded",
+  );
 }
 
 /** The guard picks its interception from this; a target that will not report it is not fatal. */

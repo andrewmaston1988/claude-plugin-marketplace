@@ -19,6 +19,15 @@ function noSdbEnv(home) {
   return { PATH: null, USERPROFILE: home, HOME: home, TEMP: home, TMP: home };
 }
 
+// The page a stub target reports as settled: the CLI's attach waits for it before any step runs.
+const SETTLED_PAGE = {
+  href: "http://192.0.2.30:8000/tv?tizen=1",
+  origin: "http://192.0.2.30:8000",
+  ready: "complete",
+  hasBody: true,
+};
+const settling = (js) => String(js).includes("document.readyState") ? SETTLED_PAGE : undefined;
+
 // A CDP target the CLI can attach to with --attach-port: /json/list, /json/protocol and a
 // WebSocket that answers CDP calls. Only reachable over loopback, never the set.
 async function startCdpStub({ protocol, evaluate = () => null } = {}) {
@@ -223,7 +232,10 @@ test("rows 6 and 7: a tv run exits 64 with the policy's reason before it starts"
   assert.match(noOrigin.stderr, /tv\.testOrigin/, noOrigin.stderr);
 
   // Row 7: a target with neither Fetch nor Network interception.
-  const stub = await startCdpStub({ protocol: { domains: [{ domain: "Page", commands: [{ name: "navigate" }] }] } });
+  const stub = await startCdpStub({
+    protocol: { domains: [{ domain: "Page", commands: [{ name: "navigate" }] }] },
+    evaluate: (js) => settling(js) ?? null,
+  });
   scratchConfig(dir, {
     baseUrl: "http://127.0.0.1:9",
     tv: { ...base, testOrigin: "http://127.0.0.1:8001" },
@@ -269,7 +281,10 @@ test("row 7: an include-borne open outside tv.testOrigin is refused", async () =
     tv: { host: "192.0.2.10:26101", appid: "torrenthub.main", testOrigin: "http://127.0.0.1:8001" },
   });
 
-  const stub = await startCdpStub({ protocol: { domains: [{ domain: "Page", commands: [{ name: "navigate" }] }] } });
+  const stub = await startCdpStub({
+    protocol: { domains: [{ domain: "Page", commands: [{ name: "navigate" }] }] },
+    evaluate: (js) => settling(js) ?? null,
+  });
   try {
     const result = await probe([
       "run", scenario, "--device", "tv", "--attach-port", String(stub.port), "--allow-writes",
@@ -324,7 +339,7 @@ test("row 22: a TV run prints its attach timings on the digest header", async ()
 
   const stub = await startCdpStub({
     protocol: { domains: [{ domain: "Input", commands: [{ name: "dispatchKeyEvent" }] }] },
-    evaluate: (js) => (String(js).includes("textContent") ? { found: true, value: "One" } : null),
+    evaluate: (js) => settling(js) ?? (String(js).includes("textContent") ? { found: true, value: "One" } : null),
   });
   try {
     const result = await probe([
@@ -415,6 +430,7 @@ test("tv probe attaches, writes platform.json to both homes and ends on the verd
     protocol: { domains: [{ domain: "Page" }, { domain: "Network" }] },
     evaluate: (expression) => {
       const js = String(expression);
+      if (js.includes("document.readyState")) return SETTLED_PAGE;
       if (js.includes("IntersectionObserver")) return features;
       if (js.includes("__uiProbeKey.read")) return [];
       if (js.includes("__uiProbeKey = {")) return { active: "BODY" };
