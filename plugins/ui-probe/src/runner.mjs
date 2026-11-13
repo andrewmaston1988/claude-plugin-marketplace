@@ -7,6 +7,7 @@ import { assertsNothing, validate } from "./ir.mjs";
 const POLL_MS = 50;
 const ASSERT_TIMEOUT_MS = 5000;
 const LOAD_TIMEOUT_MS = 15000;
+const FETCH_TIMEOUT_MS = 10000;
 
 const EXIT_CODES = { passed: 0, failed: 1, inconclusive: 2, needs_review: 3, invalid: 64 };
 
@@ -46,6 +47,15 @@ const VISIBLE_JS = (selector) => `(() => {
   const style = getComputedStyle(el);
   const box = el.getBoundingClientRect();
   return { found: true, display: style.display, visibility: style.visibility, width: box.width, height: box.height };
+})()`;
+
+// getBoundingClientRect and elementFromPoint are viewport-relative, so a target below the fold
+// reads as covered until it is scrolled to.
+const SCROLL_JS = (selector) => `(() => {
+  const el = document.querySelector(${q(selector)});
+  if (!el) return { found: false };
+  el.scrollIntoView({ block: "center", inline: "center" });
+  return { found: true };
 })()`;
 
 const OBSCURED_JS = (selector) => `(() => {
@@ -199,7 +209,7 @@ async function openStep(args, state) {
 async function viewportStep(args, state) {
   const touch = args.touch === true;
   await state.cdp.send("Emulation.setDeviceMetricsOverride", {
-    width: args.width, height: args.height, deviceScaleFactor: 1, mobile: touch,
+    width: args.width, height: args.height, deviceScaleFactor: args.dpr ?? 1, mobile: touch,
   });
   const touchParams = touch ? { enabled: true, maxTouchPoints: 1 } : { enabled: false };
   await state.cdp.send("Emulation.setTouchEmulationEnabled", touchParams);
@@ -237,6 +247,7 @@ async function interact(op, args, state) {
 
   let point;
   try {
+    await evaluate(state.cdp, SCROLL_JS(args.target));
     point = await boxOf(state.cdp, nodeIds[0]);
   } catch {
     throw new StepFailure("failed", "not_found", `${args.target} has no box to aim at`);
@@ -311,7 +322,7 @@ async function expectCssOver(args, state) {
   }
   if (!result.matched) {
     throw new StepFailure("failed", null, `${args.target} ${args.property} never matched ${q(args.equals)} in ${args.over}ms`, {
-      measured: null, expected: args.equals, frame: { index: -1, ms: result.frames },
+      measured: null, expected: args.equals, frame: { index: -1, frames: result.frames },
     });
   }
   return { measured: result.matched.value, expected: args.equals, frame: { index: result.matched.index, ms: result.matched.ms } };
@@ -362,7 +373,7 @@ async function expectJson(args, state) {
   const url = absolute(args.url, state.baseUrl);
   let response;
   try {
-    response = await state._fetch(url);
+    response = await state._fetch(url, { signal: AbortSignal.timeout(state.fetchTimeoutMs) });
   } catch (error) {
     throw new StepFailure("inconclusive", null, `GET ${url} failed: ${error.message}`);
   }
@@ -418,6 +429,7 @@ export async function run(doc, ctx = {}) {
     baseUrl: ctx.baseUrl ?? null,
     allowWrites: Boolean(ctx.allowWrites),
     loadTimeoutMs: ctx.loadTimeoutMs ?? LOAD_TIMEOUT_MS,
+    fetchTimeoutMs: ctx.fetchTimeoutMs ?? FETCH_TIMEOUT_MS,
     _fetch: ctx._fetch ?? fetch,
     _sleep: ctx._sleep ?? sleep,
     now: ctx.now ?? Date.now,

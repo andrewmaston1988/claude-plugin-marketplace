@@ -173,6 +173,51 @@ test("a scenario with no assertion step is needs_review and never connects", asy
   assert.equal(connected, false);
 });
 
+test("row 23: an interaction scrolls the target into view before the obscured check", async () => {
+  const cdp = stubCdp({ nodeIds: [2] });
+  const result = await run(doc({ open: { url: URL } }, { click: { target: "#deep" } }), { cdp, requireAssertion: false });
+  assert.equal(result.outcome, "passed");
+  const evaluated = cdp.calls.filter((call) => call.method === "Runtime.evaluate").map((call) => call.params.expression);
+  const scrollAt = evaluated.findIndex((expression) => expression.includes("scrollIntoView"));
+  const hitAt = evaluated.findIndex((expression) => expression.includes("elementFromPoint"));
+  assert.ok(scrollAt >= 0, "no scrollIntoView was evaluated");
+  assert.ok(scrollAt < hitAt, `scroll at ${scrollAt}, obscured check at ${hitAt}`);
+});
+
+test("row 24: a viewport step sends its dpr and defaults to 1", async () => {
+  const dprOf = (cdp) => cdp.calls
+    .filter((call) => call.method === "Emulation.setDeviceMetricsOverride")
+    .map((call) => call.params.deviceScaleFactor);
+
+  const dense = stubCdp({ nodeIds: [2] });
+  const scaled = await run(doc({ viewport: { width: 390, height: 844, dpr: 3 } }, { expect_text: { target: "h1", equals: "hello" } }), { cdp: dense });
+  assert.equal(scaled.outcome, "passed");
+  assert.deepEqual(dprOf(dense), [3]);
+
+  const plain = stubCdp({ nodeIds: [2] });
+  await run(doc({ viewport: { width: 1280, height: 900 } }, { expect_text: { target: "h1", equals: "hello" } }), { cdp: plain });
+  assert.deepEqual(dprOf(plain), [1]);
+});
+
+test("row 25: expect_json bounds its fetch, and an abort is inconclusive", { timeout: 5000 }, async () => {
+  let options = null;
+  const ok = await run({ id: "j", backend: "http", steps: [{ expect_json: { url: URL, path: "ok", equals: true } }] }, {
+    _fetch: async (url, opts) => { options = opts; return { status: 200, json: async () => ({ ok: true }) }; },
+  });
+  assert.equal(ok.outcome, "passed");
+  assert.ok(options?.signal instanceof AbortSignal, "no signal was passed to fetch");
+
+  const aborted = await run({ id: "j", backend: "http", steps: [{ expect_json: { url: URL, path: "ok", equals: true } }] }, {
+    fetchTimeoutMs: 20,
+    _fetch: (url, opts) => new Promise((_, reject) => {
+      if (!opts?.signal) return;
+      opts.signal.addEventListener("abort", () => reject(new Error("The operation was aborted due to timeout")));
+    }),
+  });
+  assert.equal(aborted.outcome, "inconclusive");
+  assert.equal(aborted.exitCode, 2);
+});
+
 test("a step's source is the scenario name and its 1-based index", async () => {
   const cdp = stubCdp({ nodeIds: [2] });
   const result = await run(doc({ open: { url: URL } }, { expect_text: { target: "h1", equals: "hello" } }), { cdp, source: "t2-hover.yaml" });

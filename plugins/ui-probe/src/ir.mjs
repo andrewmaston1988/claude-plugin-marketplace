@@ -2,7 +2,7 @@ import { parseYaml } from './yaml.mjs';
 
 export const OPS = {
   open: { required: ['url'], url: true },
-  viewport: { required: ['width', 'height'], optional: ['touch'] },
+  viewport: { required: ['width', 'height'], optional: ['touch', 'dpr'] },
   hover: { required: ['target'], target: true },
   tap: { required: ['target'], target: true },
   click: { required: ['target'], target: true },
@@ -16,7 +16,7 @@ export const OPS = {
 
 const EXAMPLES = {
   open: '{ open: { url: "/media/603" } }',
-  viewport: '{ viewport: { width: 390, height: 844, touch: true } }',
+  viewport: '{ viewport: { width: 390, height: 844, dpr: 3, touch: true } }',
   target: '{ click: { target: "[data-testid=save]" } }',
   expect_visible: '{ expect_visible: { target: ".dialog", timeoutMs: 5000 } }',
   expect_hidden: '{ expect_hidden: { target: ".dialog" } }',
@@ -58,8 +58,7 @@ function validateStep(step, index, backend, problems) {
   const spec = OPS[op];
   if (!spec) {
     if (op === 'tcp_banner' || op === 'uia_text') {
-      const plan = op === 'tcp_banner' ? 'ui-probe-4-protocols' : 'ui-probe-3-windows';
-      problems.push(problem(`${where}.${op}`, `${op} is not in this version; it belongs to the later ${plan} plan.`, 'Use a supported operation in this phase.', EXAMPLES.expect_json));
+      problems.push(problem(`${where}.${op}`, `${op} is not supported in this version.`, 'Use a supported operation in this phase.', EXAMPLES.expect_json));
     } else {
       problems.push(problem(`${where}.${op}`, `unknown op ${JSON.stringify(op)}`, `Choose one of: ${Object.keys(OPS).join(', ')}.`, EXAMPLES.expect_visible));
     }
@@ -96,6 +95,9 @@ function validateStep(step, index, backend, problems) {
     if (op === 'viewport' && key in args && (!isFiniteNumber(args[key]) || args[key] <= 0)) {
       problems.push(problem(`${where}.viewport.${key}`, `${key} must be a positive finite number`, `Set ${key} to a positive number.`, EXAMPLES.viewport));
     }
+  }
+  if (op === 'viewport' && 'dpr' in args && (!isFiniteNumber(args.dpr) || args.dpr <= 0)) {
+    problems.push(problem(`${where}.viewport.dpr`, 'dpr must be a positive finite number', 'Set dpr to a number greater than 0, or omit it.', EXAMPLES.viewport));
   }
   if ('touch' in args && typeof args.touch !== 'boolean') {
     problems.push(problem(`${where}.viewport.touch`, 'touch must be a boolean', 'Set touch to true or false.', EXAMPLES.viewport));

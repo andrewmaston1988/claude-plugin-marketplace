@@ -33,12 +33,25 @@ test('row 2: YAML examples compile after removing bake-off task metadata', () =>
 test('row 2: document shape and deferred operations are named', () => {
   assert.ok(validate({ steps: [] }).some((item) => item.field === 'id'));
   assert.ok(validate({ id: 'valid-id', steps: [] }).some((item) => item.field === 'steps'));
+  const deferred = [];
   for (const op of ['tcp_banner', 'uia_text']) {
-    assert.ok(validate({ id: 'valid-id', steps: [{ [op]: {} }] })
-      .some((item) => item.field.includes(op) && /later/i.test(item.problem)));
+    const problems = validate({ id: 'valid-id', steps: [{ [op]: {} }] });
+    deferred.push(...problems);
+    assert.ok(problems.some((item) => item.field.includes(op) && /not supported in this version/i.test(item.problem)));
   }
-  assert.ok(validate({ id: 'valid-id', steps: [{ click: { target: 'role=button[name="Save"]' } }] })
-    .some((item) => item.field === 'steps[0].click.target' && /not in this version/i.test(item.problem)));
+  const role = validate({ id: 'valid-id', steps: [{ click: { target: 'role=button[name="Save"]' } }] });
+  assert.ok(role.some((item) => item.field === 'steps[0].click.target' && /not in this version/i.test(item.problem)));
+  const all = [...deferred, ...role, ...validate({ id: 'valid-id', steps: [{ expect_magic: {} }] })];
+  assert.equal(all.some((item) => `${item.problem} ${item.fix} ${item.example}`.includes('ui-probe-')), false, JSON.stringify(all));
+});
+
+test('row 24: a viewport step carries an optional dpr and rejects a non-positive one', () => {
+  assert.ok(OPS.viewport.optional.includes('dpr'));
+  assert.deepEqual(validate({ id: 'valid-id', steps: [{ viewport: { width: 390, height: 844, dpr: 3 } }] }), []);
+  for (const dpr of [0, -1, 'x']) {
+    const problems = validate({ id: 'valid-id', steps: [{ viewport: { width: 390, height: 844, dpr } }] });
+    assert.ok(problems.some((item) => item.field === 'steps[0].viewport.dpr' && item.problem && item.fix && item.example), String(dpr));
+  }
 });
 
 test('JSON parsing and assertion detection share the scenario IR', () => {

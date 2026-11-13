@@ -131,6 +131,36 @@ test("row 10: expect_css over samples frames and catches a flip 150ms after hove
   ]);
   assert.equal(one.outcome, "failed");
   assert.equal(one.steps[2].measured, "none");
+
+  const never = await runOn([
+    { open: { url: "/tiles-good.html" } },
+    { expect_css: { target: ".tile", property: "display", equals: "none", over: 200 } },
+  ]);
+  assert.equal(never.outcome, "failed");
+  assert.ok(Number.isInteger(never.steps[1].frame.frames) && never.steps[1].frame.frames >= 2, JSON.stringify(never.steps[1].frame));
+  assert.equal("ms" in never.steps[1].frame, false, JSON.stringify(never.steps[1].frame));
+});
+
+test("row 23: a target below the fold is scrolled to and clicked; a fixed overlay still obscures", { skip: SKIP }, async () => {
+  const mark = server.log.length;
+  const deep = await runOn([
+    { viewport: { width: 800, height: 400 } },
+    { open: { url: "/tall.html" } },
+    { click: { target: "#deep" } },
+    { expect_visible: { target: "body" } },
+  ]);
+  assert.equal(deep.outcome, "passed", JSON.stringify(deep.steps));
+  const paths = server.log.slice(mark).filter((entry) => entry.method === "GET").map((entry) => entry.path);
+  assert.ok(paths.includes("/deep-click"), JSON.stringify(paths));
+
+  const coveredMark = server.log.length;
+  const covered = await runOn([
+    { viewport: { width: 800, height: 400 } },
+    { open: { url: "/tall-covered.html" } },
+    { click: { target: "#deep" } },
+  ], { requireAssertion: false });
+  assert.equal(covered.steps[2].failure, "target_obscured", JSON.stringify(covered.steps[2]));
+  assert.equal(server.log.slice(coveredMark).some((entry) => entry.path === "/deep-click"), false);
 });
 
 test("row 11: a target covered at its centre gives target_obscured", { skip: SKIP }, async () => {
