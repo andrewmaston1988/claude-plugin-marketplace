@@ -2,6 +2,7 @@
 
 import { expectCss, expectHidden, expectText, expectVisible, expectWidths } from "./assertions.mjs";
 import { interact } from "./interaction.mjs";
+import { expectJson } from "./json.mjs";
 
 export const OPS = {
   hover: (args, state) => interact("hover", args, state),
@@ -12,4 +13,5 @@ export const OPS = {
   expect_widths: expectWidths,
   expect_css: expectCss,
   expect_text: expectText,
+  expect_json: expectJson,
 };
