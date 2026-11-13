@@ -2,7 +2,7 @@
 // T1 and T2 against the live hub fixture on :8001 — the real page, the real htmx sheet, the real
 // pointer-type reveal. Same reads, same repeats and same assertions as the static run.
 //
-//   node plugins/ui-probe/bakeoff/web/run-live.mjs [--repeats 3] [--only cdp]
+//   node bakeoff/ui-probe/web/run-live.mjs [--repeats 3] [--only cdp]
 //
 // The fixture is spawned here and killed by the PID this script created; nothing else is touched.
 import { writeFileSync } from "node:fs";

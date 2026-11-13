@@ -12,7 +12,7 @@ is handed to the leaf verbatim, with the `{{...}}` placeholders substituted.
 - `{{FORMAT_BRIEF}}` is exactly one of the three format briefs in the appendix, matching
   the format the leaf is writing. Do not include the other two.
 - `{{OUTPUT_PATH}}` is
-  `plugins/ui-probe/bakeoff/formats/attempts/{{FORMAT}}/{{MODEL}}/{{TASK_ID}}/attempt-{{N}}.{{EXT}}`.
+  `bakeoff/ui-probe/formats/attempts/{{FORMAT}}/{{MODEL}}/{{TASK_ID}}/attempt-{{N}}.{{EXT}}`.
 - Give the leaf no other repository context, no validator source, and no reference to
   another format. The measurement is "can this model write this format from one example".
 

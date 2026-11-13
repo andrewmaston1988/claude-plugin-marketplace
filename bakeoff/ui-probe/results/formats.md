@@ -7,10 +7,10 @@ Every number below is reproducible from a committed script.
 
 | Format | Validator (the contract) | Shipped examples valid / correct | Broken scenario rejected | Run ms (5 examples, 1 pass) | Artifact |
 |---|---|---|---|---|---|
-| Playwright Test (TS) | `playwright test --list` collection + structural rules (import, `test(`, `expect(`, no `.only`/skip) on comment-stripped source | 5 / 5 · 5 / 5 | yes | 2016 · 2216 · 2659 · 2002 · 2453 | `plugins/ui-probe/bakeoff/results/formats-selfcheck.json` |
+| Playwright Test (TS) | `playwright test --list` collection + structural rules (import, `test(`, `expect(`, no `.only`/skip) on comment-stripped source | 5 / 5 · 5 / 5 | yes | 2016 · 2216 · 2659 · 2002 · 2453 | `bakeoff/ui-probe/results/formats-selfcheck.json` |
 | Flat YAML step list | Compile to the shared 13-op IR, then op/param/type checks | 5 / 5 · 5 / 5 | yes | 23 · 778 · 726 · 2 · 382 | same |
 | Gherkin + step bindings | Feature parse → binding resolve → IR checks; an unbound step is an error | 5 / 5 · 5 / 5 | yes | 3 · 426 · 742 · 1 · 394 | same |
-| **Authoring sweep — Playwright Test** | same | **10 / 10 valid · 9 / 10 correct** | — | — | `plugins/ui-probe/bakeoff/results/formats-attempts.json` |
+| **Authoring sweep — Playwright Test** | same | **10 / 10 valid · 9 / 10 correct** | — | — | `bakeoff/ui-probe/results/formats-attempts.json` |
 | **Authoring sweep — Flat YAML** | same | **10 / 10 valid · 8 / 10 correct** | — | — | same |
 | **Authoring sweep — Gherkin** | same | **10 / 10 valid · 8 / 10 correct** | — | — | same |
 
@@ -31,8 +31,8 @@ Apples to apples"). So the sweep is 10 attempts per format, and the plan's fixed
 are feasibility, not a ranking.
 
 ```bash
-python plugins/ui-probe/bakeoff/agents/gen_measure.py      # writes the manifest beside it
-node   plugins/ui-probe/bakeoff/formats/score.mjs --dir plugins/ui-probe/bakeoff/formats/attempts        --out plugins/ui-probe/bakeoff/results/formats-attempts.json
+python bakeoff/ui-probe/agents/gen_measure.py      # writes the manifest beside it
+node   bakeoff/ui-probe/formats/score.mjs --dir bakeoff/ui-probe/formats/attempts        --out bakeoff/ui-probe/results/formats-attempts.json
 ```
 
 Every miss, by cause:
@@ -56,7 +56,7 @@ Every miss, by cause:
 
 ## The five pinned tasks
 
-Reference values live in `plugins/ui-probe/bakeoff/formats/tasks.json` and are what both
+Reference values live in `bakeoff/ui-probe/formats/tasks.json` and are what both
 validity (does a step address the check) and correctness (does the run observe it) score
 against.
 
@@ -72,13 +72,13 @@ against.
 
 ```bash
 # self-check: validate + run every shipped example, and prove every broken one is rejected
-node plugins/ui-probe/bakeoff/formats/score.mjs --out plugins/ui-probe/bakeoff/results/formats-selfcheck.json
+node bakeoff/ui-probe/formats/score.mjs --out bakeoff/ui-probe/results/formats-selfcheck.json
 
 # validity only, no fixtures started (cheap, no browser, no WinForms window)
-node plugins/ui-probe/bakeoff/formats/score.mjs --validate-only
+node bakeoff/ui-probe/formats/score.mjs --validate-only
 
 # score authored attempts laid out as attempts/<format>/<model>/<task>/attempt-<n>.<ext>
-node plugins/ui-probe/bakeoff/formats/score.mjs --dir plugins/ui-probe/bakeoff/formats/attempts
+node bakeoff/ui-probe/formats/score.mjs --dir bakeoff/ui-probe/formats/attempts
 ```
 
 Exit codes: 0 when every broken scenario was rejected and every shipped example is valid

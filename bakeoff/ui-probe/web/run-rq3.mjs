@@ -9,7 +9,7 @@
 // second injects the same 240 ms WAAPI animation into both tools, so the instruments are compared
 // on a signal that actually exists rather than on an absence.
 //
-//   node plugins/ui-probe/bakeoff/web/run-rq3.mjs [--repeats 3]
+//   node bakeoff/ui-probe/web/run-rq3.mjs [--repeats 3]
 import { readFileSync, writeFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import {

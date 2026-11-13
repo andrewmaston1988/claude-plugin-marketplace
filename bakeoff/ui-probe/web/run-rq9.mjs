@@ -11,7 +11,7 @@
 // scratch DB's `rec_feedback` row count (did it land?). A guard that only hides the response
 // would pass the log check and fail the DB check.
 //
-//   node plugins/ui-probe/bakeoff/web/run-rq9.mjs [--only cdp]
+//   node bakeoff/ui-probe/web/run-rq9.mjs [--only cdp]
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {

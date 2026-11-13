@@ -12,7 +12,7 @@
 // connect, shell 0 debug, forward, forward --remove, version, kill-server). Nothing here can
 // install, uninstall or kill an app.
 //
-//   node plugins/ui-probe/bakeoff/tv/probe.mjs [--appid torrenthub.tizen] [--host 192.168.1.110:26101]
+//   node bakeoff/ui-probe/tv/probe.mjs [--appid torrenthub.tizen] [--host 192.168.1.110:26101]
 //                                              [--sdb <path>] [--json <path>] [--no-connect]
 //                                              [--attach-port <port>]
 //
@@ -27,7 +27,7 @@ import { existsSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { connect as cdpConnect } from "../../../swarm/scripts/lib/cdp.mjs";
+import { connect as cdpConnect } from "../../../plugins/swarm/scripts/lib/cdp.mjs";
 import { guarded, InputError, sdbPolicy } from "../protocols/allow.mjs";
 import { writeArtifact } from "../protocols/harness.mjs";
 
@@ -165,7 +165,7 @@ async function main() {
   const opts = parseArgs(process.argv.slice(2));
   if (opts.help) {
     process.stdout.write(
-      "Usage: node plugins/ui-probe/bakeoff/tv/probe.mjs [--appid torrenthub.tizen] [--host ip:port] [--sdb path] [--attach-port N]\n",
+      "Usage: node bakeoff/ui-probe/tv/probe.mjs [--appid torrenthub.tizen] [--host ip:port] [--sdb path] [--attach-port N]\n",
     );
     return 0;
   }

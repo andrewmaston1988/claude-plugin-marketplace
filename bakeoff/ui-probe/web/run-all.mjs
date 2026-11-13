@@ -2,9 +2,9 @@
 // RQ1's T1 (layout) and T2 (hover/timing) plus RQ2 (hover and pointer reality), on the static
 // fixture. Every contender runs the same tasks, the same reads and the same repeat count.
 //
-//   node plugins/ui-probe/bakeoff/web/run-all.mjs
-//   node plugins/ui-probe/bakeoff/web/run-all.mjs --dir <fixture-dir>   # the RED run: pre-fix CSS
-//   node plugins/ui-probe/bakeoff/web/run-all.mjs --only playwright --repeats 1
+//   node bakeoff/ui-probe/web/run-all.mjs
+//   node bakeoff/ui-probe/web/run-all.mjs --dir <fixture-dir>   # the RED run: pre-fix CSS
+//   node bakeoff/ui-probe/web/run-all.mjs --only playwright --repeats 1
 //
 // Exits non-zero when any T1 row disagrees with the fixture's known values.
 import { writeFileSync } from "node:fs";

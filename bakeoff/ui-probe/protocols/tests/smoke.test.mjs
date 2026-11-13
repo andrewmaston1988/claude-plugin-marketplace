@@ -5,7 +5,7 @@
 // globalThis.fetch is replaced with a throwing stub for the duration, so an adapter that
 // quietly reached for the real thing fails loudly instead of passing.
 //
-//   node --test plugins/ui-probe/bakeoff/protocols/tests/
+//   node --test bakeoff/ui-probe/protocols/tests/
 
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";

@@ -24,12 +24,12 @@ Fairness notes that belong with every row:
 Reproduce everything from the repo root of this worktree:
 
 ```bash
-python plugins/ui-probe/bakeoff/fixtures/hub_fixture.py --check
-node   plugins/ui-probe/bakeoff/web/run-all.mjs
-node   plugins/ui-probe/bakeoff/web/run-live.mjs
-node   plugins/ui-probe/bakeoff/web/run-rq3.mjs
-node   plugins/ui-probe/bakeoff/web/run-rq9.mjs
-node   plugins/ui-probe/bakeoff/web/run-rq10.mjs
+python bakeoff/ui-probe/fixtures/hub_fixture.py --check
+node   bakeoff/ui-probe/web/run-all.mjs
+node   bakeoff/ui-probe/web/run-live.mjs
+node   bakeoff/ui-probe/web/run-rq3.mjs
+node   bakeoff/ui-probe/web/run-rq9.mjs
+node   bakeoff/ui-probe/web/run-rq10.mjs
 ```
 
 ---
@@ -39,7 +39,7 @@ node   plugins/ui-probe/bakeoff/web/run-rq10.mjs
 Static fixture (`fixtures/static/detail-sheet.html`): the real sheet markup rendered from the
 torrent-hub templates by `fixtures/static/render_sheet.py`.
 
-Command: `node plugins/ui-probe/bakeoff/web/run-all.mjs` · Artifact: `results/artifacts/run-all.json`
+Command: `node bakeoff/ui-probe/web/run-all.mjs` · Artifact: `results/artifacts/run-all.json`
 
 | contender | viewport | launch ms | warm ms (n=2) | action tiles px | close x | top band px | observation |
 |---|---|---|---|---|---|---|---|
@@ -51,7 +51,7 @@ Command: `node plugins/ui-probe/bakeoff/web/run-all.mjs` · Artifact: `results/a
 Live hub fixture (`fixtures/hub_fixture.py --tmdb`, port 8001): the real page, real htmx, real
 `/media/<id>` partial.
 
-Command: `node plugins/ui-probe/bakeoff/web/run-live.mjs` · Artifact: `results/artifacts/run-live.json`
+Command: `node bakeoff/ui-probe/web/run-live.mjs` · Artifact: `results/artifacts/run-live.json`
 
 | contender | viewport | warm ms (n=2) | action tiles px | close x,y | top band px | observation |
 |---|---|---|---|---|---|---|
@@ -75,9 +75,9 @@ Reading:
 Pre-fix CSS (`e0ac239`) rendered into `fixtures/red/` from the same templates:
 
 ```bash
-python plugins/ui-probe/bakeoff/fixtures/static/render_sheet.py --base-ref e0ac239 \
-  --out plugins/ui-probe/bakeoff/fixtures/red
-node   plugins/ui-probe/bakeoff/web/run-all.mjs --dir plugins/ui-probe/bakeoff/fixtures/red
+python bakeoff/ui-probe/fixtures/static/render_sheet.py --base-ref e0ac239 \
+  --out bakeoff/ui-probe/fixtures/red
+node   bakeoff/ui-probe/web/run-all.mjs --dir bakeoff/ui-probe/fixtures/red
 ```
 
 Exits **1** with 10 assertions, both contenders, on the phone viewport:
@@ -130,7 +130,7 @@ Reading:
 
 ## RQ2 — hover and pointer reality
 
-Command: `node plugins/ui-probe/bakeoff/web/run-all.mjs` (static) and `run-live.mjs` (live) ·
+Command: `node bakeoff/ui-probe/web/run-all.mjs` (static) and `run-live.mjs` (live) ·
 Artifacts: `run-all.json`, `run-live.json`
 
 | contender | page | viewport | `hover:hover` | `pointer:fine` | `maxTouchPoints` | after input |
@@ -157,7 +157,7 @@ Two arms, because the target's own reveal has no animation to sample: `.rec-hove
 `display:none → flex` with no transition. The "controlled" arm injects the same 240 ms WAAPI
 animation into both tools with `element.animate()`, from the revealed state so it paints.
 
-Command: `node plugins/ui-probe/bakeoff/web/run-rq3.mjs` · Artifact: `results/artifacts/rq3.json`
+Command: `node bakeoff/ui-probe/web/run-rq3.mjs` · Artifact: `results/artifacts/rq3.json`
 plus `results/artifacts/rq3-trace-playwright.zip`
 
 | contender | real reveal: getAnimations / rAF | controlled: getAnimations | A rAF sampling | B metadata | C filmstrip (median of 3) |
@@ -195,7 +195,7 @@ Same live page, same action ("Seen it"), same 1.5 s settle, three arms:
 Evidence is two-sided on purpose: the fixture's access log (did a request leave?) and the scratch
 DB's `rec_feedback` row count (did it land?). Each arm clears its title's rows first.
 
-Command: `node plugins/ui-probe/bakeoff/web/run-rq9.mjs` · Artifact: `results/artifacts/rq9.json`
+Command: `node bakeoff/ui-probe/web/run-rq9.mjs` · Artifact: `results/artifacts/rq9.json`
 
 | contender | arm | POSTs logged | `rec_feedback` rows | button after | guard evidence | end-to-end |
 |---|---|---|---|---|---|---|
@@ -227,7 +227,7 @@ Two arms, same steps:
 Three journeys on the live page, 7–8 steps each. Token figures are the fixed `chars/4` estimate —
 no model calls were made here.
 
-Command: `node plugins/ui-probe/bakeoff/web/run-rq10.mjs` · Artifacts: `results/artifacts/rq10.json`
+Command: `node bakeoff/ui-probe/web/run-rq10.mjs` · Artifacts: `results/artifacts/rq10.json`
 and `results/artifacts/rq10-observations.json` (every observation text, both arms, all steps).
 
 | contender | journey | full (bytes / tokens) | delta (bytes / tokens) | saved |

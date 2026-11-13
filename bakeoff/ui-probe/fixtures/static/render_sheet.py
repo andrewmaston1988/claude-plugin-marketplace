@@ -5,7 +5,7 @@ Reads the sheet's real templates, its `<style>` block and its sheet script strai
 torrent-hub checkout — nothing is copied by hand, so a re-render after the sheet changes picks the
 change up. Synthetic title data only: no household data, no external image, no network.
 
-    python plugins/ui-probe/bakeoff/fixtures/static/render_sheet.py
+    python bakeoff/ui-probe/fixtures/static/render_sheet.py
     python .../render_sheet.py --hub C:/code/.worktrees/torrent-hub/ui-probe-fixture --out <path>
 
 `--view sheet` (default) opens the dialog through the sheet script's own htmx:afterSwap path;

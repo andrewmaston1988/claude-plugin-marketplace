@@ -53,20 +53,20 @@ From the marketplace worktree root:
 
 ```bash
 # the automated gate — exits non-zero on any layout mismatch
-node plugins/ui-probe/bakeoff/web/run-all.mjs
+node bakeoff/ui-probe/web/run-all.mjs
 
 # the same gate against the pre-fix CSS (must fail)
-python plugins/ui-probe/bakeoff/fixtures/static/render_sheet.py --base-ref e0ac239 \
-  --out plugins/ui-probe/bakeoff/fixtures/red
-node   plugins/ui-probe/bakeoff/web/run-all.mjs --dir plugins/ui-probe/bakeoff/fixtures/red
+python bakeoff/ui-probe/fixtures/static/render_sheet.py --base-ref e0ac239 \
+  --out bakeoff/ui-probe/fixtures/red
+node   bakeoff/ui-probe/web/run-all.mjs --dir bakeoff/ui-probe/fixtures/red
 
 # the live app (spawns and kills its own fixture on :8001)
-node plugins/ui-probe/bakeoff/web/run-live.mjs
-node plugins/ui-probe/bakeoff/web/run-rq9.mjs
-node plugins/ui-probe/bakeoff/web/run-rq10.mjs
+node bakeoff/ui-probe/web/run-live.mjs
+node bakeoff/ui-probe/web/run-rq9.mjs
+node bakeoff/ui-probe/web/run-rq10.mjs
 
 # temporal capture
-node plugins/ui-probe/bakeoff/web/run-rq3.mjs
+node bakeoff/ui-probe/web/run-rq3.mjs
 ```
 
 Useful flags: `--only playwright|cdp`, `--repeats N` (`run-all`, `run-live`, `run-rq3`).
@@ -84,7 +84,7 @@ cookie written to `<scratch>/session.json` (mode 0600). The runners read that fi
 secret.
 
 ```bash
-python plugins/ui-probe/bakeoff/fixtures/hub_fixture.py --check   # prints env NAMES only
+python bakeoff/ui-probe/fixtures/hub_fixture.py --check   # prints env NAMES only
 ```
 
 `--check` fails if any credential-family variable is present, any path is outside the scratch dir,

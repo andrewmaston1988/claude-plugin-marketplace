@@ -1,6 +1,6 @@
 // RQ7 runner: one harness, every protocol contender, one table.
 //
-//   node plugins/ui-probe/bakeoff/protocols/run.mjs [--repeats 5] [--only http,tcp,ssh]
+//   node bakeoff/ui-probe/protocols/run.mjs [--repeats 5] [--only http,tcp,ssh]
 //                                                    [--json <path>] [--md <path>]
 //
 // Real dependencies are constructed HERE, once, and injected into the adapters. Nothing
@@ -61,7 +61,7 @@ async function main() {
   const opts = parseArgs(process.argv.slice(2));
   if (opts.help) {
     process.stdout.write(
-      "Usage: node plugins/ui-probe/bakeoff/protocols/run.mjs [--repeats 5] [--only http,tcp,ssh] [--json <path>]\n",
+      "Usage: node bakeoff/ui-probe/protocols/run.mjs [--repeats 5] [--only http,tcp,ssh] [--json <path>]\n",
     );
     return 0;
   }

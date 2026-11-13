@@ -12,7 +12,7 @@
 // results/artifacts/rq10-observations.json so the session can ask a model the same questions of
 // each arm and compare accuracy against size.
 //
-//   node plugins/ui-probe/bakeoff/web/run-rq10.mjs [--only cdp]
+//   node bakeoff/ui-probe/web/run-rq10.mjs [--only cdp]
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {

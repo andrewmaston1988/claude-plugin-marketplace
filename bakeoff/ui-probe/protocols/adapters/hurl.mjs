@@ -27,7 +27,7 @@ export function createHurlAdapter({ which } = {}) {
             : "Hurl is not installed and was not on the operator's approved install list",
           probe:
             "hurl --version && hurl --test --variable host=http://127.0.0.1:<fixture-port> " +
-            `plugins/ui-probe/bakeoff/protocols/hurl/${task.id}.hurl`,
+            `bakeoff/ui-probe/protocols/hurl/${task.id}.hurl`,
         },
       };
     },

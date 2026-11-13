@@ -15,16 +15,16 @@ verification predicate. Workarounds needed by a contender are recorded in its ow
 | PowerShell | `C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe` (5.1 — required; the WinRT OCR projection does not load under pwsh 7) |
 | pywinauto | 0.6.9, `uia` backend, Python 3.14 |
 | .NET SDK | 8.0.428 (`dotnet --list-sdks`) — **present**, so contender (e) is built, not OPEN |
-| FlaUI | 4.0.0 from NuGet; `dotnet build -c Release` in `plugins/ui-probe/bakeoff/windows/flaui` (2.4 s) |
+| FlaUI | 4.0.0 from NuGet; `dotnet build -c Release` in `bakeoff/ui-probe/windows/flaui` (2.4 s) |
 | Tesseract | **not installed** — see OPEN rows |
-| Fixtures | `powershell.exe -File plugins/ui-probe/bakeoff/fixtures/windows_fixtures.ps1 -Kind WinForms\|Wpf\|OwnerDrawn -ReadyFile <tmp>` |
+| Fixtures | `powershell.exe -File bakeoff/ui-probe/fixtures/windows_fixtures.ps1 -Kind WinForms\|Wpf\|OwnerDrawn -ReadyFile <tmp>` |
 
 Every run below is from the worktree root:
 
 ```
-node plugins/ui-probe/bakeoff/windows/run.mjs --contender <id>            # latency + every probe
-node plugins/ui-probe/bakeoff/windows/run.mjs --contender <id> --probes   # probes only, keeps prior latency
-node plugins/ui-probe/bakeoff/ocr/run-ocr.mjs --repeats 10                # RQ5
+node bakeoff/ui-probe/windows/run.mjs --contender <id>            # latency + every probe
+node bakeoff/ui-probe/windows/run.mjs --contender <id> --probes   # probes only, keeps prior latency
+node bakeoff/ui-probe/ocr/run-ocr.mjs --repeats 10                # RQ5
 ```
 
 Latency statistics are `p50/p95 [min–max]` in milliseconds over the 10 measured runs (2 warmups discarded).
@@ -80,7 +80,7 @@ Same WinForms fixture, `tree` = plain `FindAll(TreeScope.Descendants)` walk, `tr
 | `ps-cold` | 620.5/711 | 17 / 1911 | 1797.5/2092.1 | 17 / 1938 | -2.9× | `results/raw/ps-cold.json` |
 | `flaui-cold` | 226.5/256.8 | 17 / 1871 | 214/251.6 | 16 / 1776 | ~1.06× (noise) | `results/raw/flaui-cold.json` |
 
-Command for every row: `node plugins/ui-probe/bakeoff/windows/run.mjs --contender <id>`. Node counts measured
+Command for every row: `node bakeoff/ui-probe/windows/run.mjs --contender <id>`. Node counts measured
 by a direct `tree` / `tree_cached` call on the same fixture (bytes are the row's `bytes_p50`).
 `CacheRequest` did not reduce the walk on this fixture for any contender; on the warm workers it is a
 straight 3–23× regression, and FlaUI's cached walk returns **16 nodes where the plain walk returns 17** —
@@ -91,7 +91,7 @@ OwnerDrawn 8 — see 4.5.)
 
 `subscribe` to the fixture window, click `RemoveTarget` (which disposes the checkbox), then poll the
 adapter's queue for 2 s. Artifact: `results/raw/<id>.json` → `events`.
-Command: `node plugins/ui-probe/bakeoff/windows/run.mjs --contender <id> --probes`.
+Command: `node bakeoff/ui-probe/windows/run.mjs --contender <id> --probes`.
 
 | Contender | structure-changed | property-changed | First event | Notes |
 |---|---|---|---|---|
@@ -191,7 +191,7 @@ Method ported from `C:/code/vehicle-audio-visual-experience/tools/dhu-ocr.ps1` (
 async awaited through `WindowsRuntimeSystemExtensions.AsTask`). Copied, not imported — that repo was not
 touched.
 
-Command: `node plugins/ui-probe/bakeoff/ocr/run-ocr.mjs --repeats 10`
+Command: `node bakeoff/ui-probe/ocr/run-ocr.mjs --repeats 10`
 Artifact: `results/raw/rq5.json`; PNG: `results/owner-drawn-capture.png`
 (`capture.ps1` = `PrintWindow(hwnd, dc, PW_RENDERFULLCONTENT 0x2)`, `ocr-json.ps1` = PNG → OCR JSON.)
 

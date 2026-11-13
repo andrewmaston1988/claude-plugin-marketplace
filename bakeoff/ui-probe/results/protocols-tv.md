@@ -2,7 +2,7 @@
 
 *Lane: `swarm/d70a4826efa1/build-protocols-tv` · built by `deepseek-v4.1-flash:1017-cloud` · 2026-11-13.*
 
-Everything under `plugins/ui-probe/bakeoff/{protocols,tv}/` is measurement scaffolding; none of it ships
+Everything under `bakeoff/ui-probe/{protocols,tv}/` is measurement scaffolding; none of it ships
 as plugin behaviour. Every number below was produced by one harness, on this machine, in this worktree.
 
 ## Harness (the fairness contract)
@@ -13,7 +13,7 @@ clock, the byte/token measurement and the row schema; each contender is a thin a
 and `measure()` is the only place a transcript is counted, so no contender can be measured differently
 from another. The same loop drives the TV steps.
 
-- Offline smoke test: `node --test plugins/ui-probe/bakeoff/protocols/tests/smoke.test.mjs` — **7/7 pass**,
+- Offline smoke test: `node --test bakeoff/ui-probe/protocols/tests/smoke.test.mjs` — **7/7 pass**,
   with every egress point (fetch, `node:net`, `child_process`) injected as a call-time fake and
   `globalThis.fetch` replaced by a throwing stub. No socket opened; 0.1–0.2 s across runs.
 - Repeats: **5** per task (the first HTTP sample carries connection setup; the median is the reported
@@ -21,26 +21,26 @@ from another. The same loop drives the TV steps.
 - Tokens: `chars/4` on the serialised UTF-8 transcript — the plan's RQ10 meter, model-free.
 
 ```
-node plugins/ui-probe/bakeoff/protocols/run.mjs --repeats 5
-node plugins/ui-probe/bakeoff/tv/probe.mjs [--attach-port <port>]
+node bakeoff/ui-probe/protocols/run.mjs --repeats 5
+node bakeoff/ui-probe/tv/probe.mjs [--attach-port <port>]
 ```
 
 ---
 
 ## RQ7 — what each protocol transcript looks like, and how read-only is enforced
 
-Artifact: `plugins/ui-probe/bakeoff/results/artifacts/protocols.json`
+Artifact: `bakeoff/ui-probe/results/artifacts/protocols.json`
 (HTTP target in that run: the local `node:http` fixture at `127.0.0.1:53871` — **no hub fixture was
 listening on :8001**, so the fallback the plan prescribes was used. `"fixtureWrites": 0`.)
 
 | Task | Contender | Verified | Median ms (min–max) | Transcript bytes | Est. tokens | Read-only layer | Exact command | Artifact |
 |---|---|---|---|---|---|---|---|---|
-| HTTP GET `/api/scan-status` (authenticated) | fetch (Node 24 global) | PASS | 1.54 (1.39–20.44) | 453 | 114 | method/host/port/path allowlist, enforced before `fetch()`; `redirect: manual` | `node plugins/ui-probe/bakeoff/protocols/run.mjs --only http --repeats 5` | `results/artifacts/protocols.json` |
+| HTTP GET `/api/scan-status` (authenticated) | fetch (Node 24 global) | PASS | 1.54 (1.39–20.44) | 453 | 114 | method/host/port/path allowlist, enforced before `fetch()`; `redirect: manual` | `node bakeoff/ui-probe/protocols/run.mjs --only http --repeats 5` | `results/artifacts/protocols.json` |
 | HTTP GET `/api/scan-status` (no cookie) | fetch | PASS | 1.01 (0.92–1.27) | 192 | 48 | same | same | same |
 | HTTP GET `/api/does-not-exist` | fetch | PASS | 0.91 (0.59–1.40) | 186 | 47 | same | same | same |
-| TCP connect + banner read | node:net | PASS | 0.59 (0.56–1.49) | 86 | 22 | exact write-allowlist (`""` only), enforced before `connect()` | `node plugins/ui-probe/bakeoff/protocols/run.mjs --only tcp --repeats 5` | same |
+| TCP connect + banner read | node:net | PASS | 0.59 (0.56–1.49) | 86 | 22 | exact write-allowlist (`""` only), enforced before `connect()` | `node bakeoff/ui-probe/protocols/run.mjs --only tcp --repeats 5` | same |
 | TCP allowlisted write + echo read | node:net | PASS | 0.70 (0.62–0.95) | 124 | 31 | same, writes `""` or `"HELLO ui-probe\r\n"` | same | same |
-| SSH BatchMode `df -h` on localhost | ssh.exe (in-box OpenSSH 9.5p2) | **OPEN** | — | — | — | argv allowlist: BatchMode forced, localhost only, exact remote command, no forwards | `node plugins/ui-probe/bakeoff/protocols/run.mjs --only ssh` | same |
+| SSH BatchMode `df -h` on localhost | ssh.exe (in-box OpenSSH 9.5p2) | **OPEN** | — | — | — | argv allowlist: BatchMode forced, localhost only, exact remote command, no forwards | `node bakeoff/ui-probe/protocols/run.mjs --only ssh` | same |
 | Hurl GET (3 tasks) | Hurl | **OPEN** | — | — | — | not exercised | — | same |
 | qBittorrent `/api/v2/app/version` | qBittorrent Web API | **OPEN** | — | — | — | not exercised | — | same |
 
@@ -129,7 +129,7 @@ effect, which is why the design plan still needs RQ9's scenario-level layer on t
 | Item | Why OPEN | Exact probe still to run |
 |---|---|---|
 | qBittorrent `/api/v2/app/version` | Not contacted. The probe needs `QB_*` credentials and no credential value may enter the bake-off. | `POST /api/v2/auth/login` with `QB_USER`/`QB_PASS` from the environment → `GET http://127.0.0.1:<qb-port>/api/v2/app/version` with `Cookie: SID=<redacted>` |
-| Hurl GET | Hurl is **not installed** and was **not on the operator's approved install list** (plan Current Status, 2026-11-13). | `hurl --version && hurl --test --variable host=http://127.0.0.1:<fixture-port> plugins/ui-probe/bakeoff/protocols/hurl/http.scan-status.hurl` (the `.hurl` file still has to be written) |
+| Hurl GET | Hurl is **not installed** and was **not on the operator's approved install list** (plan Current Status, 2026-11-13). | `hurl --version && hurl --test --variable host=http://127.0.0.1:<fixture-port> bakeoff/ui-probe/protocols/hurl/http.scan-status.hurl` (the `.hurl` file still has to be written) |
 | SSH `df -h` | **No sshd is listening on 127.0.0.1:22.** The adapter ran one BatchMode attempt to capture the real refusal: exit 255 after 2082.8 ms, `stderr: banner exchange: Connection to UNKNOWN port -1: Connection refused`. No key, agent or NAS credential is supplied by the probe. | `ssh -F NUL -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=NUL -o ConnectTimeout=5 -o NumberOfPasswordPrompts=0 localhost df -h` — run once a local sshd exists; the guard also accepts `127.0.0.1` |
 
 `-F NUL` and `UserKnownHostsFile=NUL` are deliberate: they stop ssh.exe reading `~/.ssh/config` (where
@@ -180,7 +180,7 @@ its first run; a second full run then hung for **30007 ms** and printed no port
 step could not be repeated headlessly. `tv-inspector.json` re-measures the *whole inspector half* against
 the same forward (port 43411) and passes; that is the reproducible artifact for every CDP fact above.
 To re-run the launch half: press EXIT on the TV remote, then
-`node plugins/ui-probe/bakeoff/tv/probe.mjs`.
+`node bakeoff/ui-probe/tv/probe.mjs`.
 
 ### Side effects on the TV
 
@@ -204,8 +204,8 @@ To re-run the launch half: press EXIT on the TV remote, then
 ## Reproduce
 
 ```bash
-node --test plugins/ui-probe/bakeoff/protocols/tests/smoke.test.mjs   # offline, 7/7
-node plugins/ui-probe/bakeoff/protocols/run.mjs --repeats 5          # RQ7 table + protocols.json
-node plugins/ui-probe/bakeoff/tv/probe.mjs                           # RQ6, TV app closed
-node plugins/ui-probe/bakeoff/tv/probe.mjs --attach-port 43411       # RQ6 inspector half only
+node --test bakeoff/ui-probe/protocols/tests/smoke.test.mjs   # offline, 7/7
+node bakeoff/ui-probe/protocols/run.mjs --repeats 5          # RQ7 table + protocols.json
+node bakeoff/ui-probe/tv/probe.mjs                           # RQ6, TV app closed
+node bakeoff/ui-probe/tv/probe.mjs --attach-port 43411       # RQ6 inspector half only
 ```

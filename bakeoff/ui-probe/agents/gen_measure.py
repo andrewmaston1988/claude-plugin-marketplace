@@ -3,8 +3,8 @@ import json
 import os
 from pathlib import Path
 
-BK = Path(__file__).resolve().parents[4]   # the marketplace checkout
-BO = BK / "plugins/ui-probe/bakeoff"
+BK = Path(__file__).resolve().parents[3]   # the marketplace checkout
+BO = BK / "bakeoff/ui-probe"
 FMT = BO / "formats"
 ART = BO / "results/artifacts"
 LA = Path(os.environ["LOCALAPPDATA"]).as_posix()
@@ -127,7 +127,7 @@ for fmt, (ext, lang) in FORMATS.items():
         refs = json.dumps([{k: v for k, v in c.items() if k not in ("markers", "id")} for c in t["checks"]], indent=1)
         for mkey, (prov, model) in MODELS.items():
             for n in (1, 2):
-                out_path = f"plugins/ui-probe/bakeoff/formats/attempts/{fmt}/{mkey}/{t['id']}/attempt-{n}.{ext}"
+                out_path = f"bakeoff/ui-probe/formats/attempts/{fmt}/{mkey}/{t['id']}/attempt-{n}.{ext}"
                 p = (body.replace("{{TASK_TITLE}}", t["title"]).replace("{{TASK_ASK}}", t["ask"])
                      .replace("{{REFERENCE_VALUES}}", refs).replace("{{OUTPUT_PATH}}", out_path)
                      .replace("{{FORMAT_BRIEF}}", briefs[fmt]).replace("{{EXAMPLE_LANGUAGE}}", lang)

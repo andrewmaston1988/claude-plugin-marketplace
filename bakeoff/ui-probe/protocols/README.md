@@ -7,15 +7,15 @@ Re-run guide for this lane. The measured numbers and findings live in
 
 ```bash
 # offline smoke test: every egress point faked at call time, no socket opened
-node --test plugins/ui-probe/bakeoff/protocols/tests/smoke.test.mjs
+node --test bakeoff/ui-probe/protocols/tests/smoke.test.mjs
 
 # RQ7 — fetch, node:net, ssh.exe, Hurl, qBittorrent; 5 repeats each
-node plugins/ui-probe/bakeoff/protocols/run.mjs --repeats 5
-node plugins/ui-probe/bakeoff/protocols/run.mjs --only http,tcp   # one family
+node bakeoff/ui-probe/protocols/run.mjs --repeats 5
+node bakeoff/ui-probe/protocols/run.mjs --only http,tcp   # one family
 
 # RQ6 — the TV (requires developer mode on; the app must be closed first)
-node plugins/ui-probe/bakeoff/tv/probe.mjs
-node plugins/ui-probe/bakeoff/tv/probe.mjs --attach-port <port>   # inspector half only
+node bakeoff/ui-probe/tv/probe.mjs
+node bakeoff/ui-probe/tv/probe.mjs --attach-port <port>   # inspector half only
 ```
 
 Artifacts land in `../results/artifacts/`:
