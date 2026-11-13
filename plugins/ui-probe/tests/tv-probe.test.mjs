@@ -3,46 +3,10 @@ import assert from 'node:assert/strict';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { FEATURES_JS, platformPath, platformSummary, tvProbe, verdictLine } from '../src/tv/probe.mjs';
-import { noSleep, stubCdp } from './tv-support.mjs';
-
-const PAGE = { href: 'http://192.0.2.30:8000/tv?tizen=1', origin: 'http://192.0.2.30:8000' };
-const pageReply = (value = PAGE) => ({ match: (e) => e.includes('location.origin'), value, sticky: true });
-
-const featuresValue = (overrides = {}) => ({
-  userAgent: 'Mozilla/5.0 (SMART-TV)',
-  tizen: 'object',
-  tvinputdevice: 'object',
-  application: 'object',
-  webapis: 'object',
-  IntersectionObserver: true,
-  ResizeObserver: false,
-  flexGap: false,
-  aspectRatio: false,
-  backdropFilter: false,
-  registerKeyPresent: true,
-  currentAppPresent: true,
-  ...overrides,
-});
-
-const featuresReply = (overrides) => ({ match: (e) => e.includes('IntersectionObserver'), value: featuresValue(overrides) });
-const registerReply = (value) => ({ match: (e) => e.includes('registerKey'), value });
-const currentReply = (value) => ({ match: (e) => e.includes('getCurrentApplication'), value });
-const installReply = { match: (e) => e.includes('__uiProbeKey ='), value: { active: 'BODY' } };
-const readReply = (value) => ({ match: (e) => e.includes('__uiProbeKey.read()'), value });
-const cleanupReply = { match: (e) => e.includes('removeEventListener'), value: true };
-
-const plainRun = (overrides = {}) => [
-  pageReply(PAGE),
-  featuresReply(),
-  registerReply('returned'),
-  currentReply('object'),
-  installReply,
-  readReply([{ type: 'keydown', key: 'ArrowLeft', code: 'ArrowLeft', keyCode: 37 }]),
-  cleanupReply,
-  ...(overrides.extra ?? []),
-];
-
-const keyCodes = (cdp) => cdp.sent('Input.dispatchKeyEvent').map((call) => call.params.windowsVirtualKeyCode);
+import {
+  cleanupReply, currentReply, featuresReply, installReply, keyCodes, listenStub, noSleep, PAGE,
+  pageReply, plainRun, readReply, registerReply, stubCdp,
+} from './tv-support.mjs';
 
 // Row 15
 test('tvProbe removes every listener and element it added, and returns the measured platform', async () => {
@@ -400,5 +364,102 @@ test('platformSummary keeps the verdict and the evidence a reader acts on', () =
   assert.equal(summary.generatedAt, '2026-11-13T00:00:00.000Z');
   assert.match(summary.verdict, /^shell: plan A/);
   assert.equal(summary.registerKey, 'returned');
+});
+
+// -- row 27: the guided physical-press check --------------------------------
+
+test('row 27: --listen prompts each key in order and records the fields that arrived', async () => {
+  const left = { type: 'keydown', key: 'ArrowLeft', code: 'ArrowLeft', keyCode: 37 };
+  const stub = listenStub({ replies: plainRun(), batches: { Left: [[left]] } });
+  const platform = await tvProbe(stub.cdp, { listenWaitSeconds: 8, _sleep: noSleep });
+
+  assert.deepEqual(stub.prompts, ['Left', 'Right', '1', 'Play'], 'the overlay names every key, in order');
+  assert.deepEqual(platform.listen.keys, ['Left', 'Right', 'Digit1', 'MediaPlay']);
+  assert.deepEqual(platform.listen.results, [
+    { key: 'Left', received: true, event: left },
+    { key: 'Right', received: false },
+    { key: 'Digit1', received: false },
+    { key: 'MediaPlay', received: false },
+  ]);
+  assert.equal(platform.listen.waitSeconds, 8);
+});
+
+// A press of the right key arrives as both a keydown and a keyup, and a held key repeats.
+test('row 27: a key counts only when its keyCode arrives as a keydown', async () => {
+  const right = { type: 'keydown', key: 'ArrowRight', code: 'ArrowRight', keyCode: 39 };
+  const stub = listenStub({
+    replies: plainRun(),
+    batches: {
+      Right: [
+        [{ type: 'keyup', key: 'ArrowRight', code: 'ArrowRight', keyCode: 39 }],
+        [{ type: 'keydown', key: 'ArrowLeft', code: 'ArrowLeft', keyCode: 37 }],
+        [right],
+      ],
+    },
+  });
+  const platform = await tvProbe(stub.cdp, { listenKeys: ['Right'], listenWaitSeconds: 8, _sleep: noSleep });
+
+  assert.deepEqual(platform.listen.results, [{ key: 'Right', received: true, event: right }]);
+});
+
+test('row 27: a key that never arrives is not received after the whole wait', async () => {
+  let clock = 0;
+  const stub = listenStub({ replies: plainRun() });
+  const platform = await tvProbe(stub.cdp, {
+    listenKeys: ['Digit1'],
+    listenWaitSeconds: 2,
+    _sleep: async (ms) => { clock += ms; },
+    _now: () => clock,
+  });
+
+  assert.deepEqual(platform.listen.results, [{ key: 'Digit1', received: false }]);
+  assert.ok(clock >= 2000, `waited the whole 2 s before giving up: ${clock} ms`);
+});
+
+test('row 27: the overlay and the listener are removed when a step throws', async () => {
+  const stub = listenStub({ replies: plainRun(), failKey: 'Right' });
+  const platform = await tvProbe(stub.cdp, { listenWaitSeconds: 8, _sleep: noSleep });
+
+  assert.equal(platform.listen.status, 'error');
+  assert.match(platform.listen.error, /evaluate failed/);
+  const last = stub.cdp.sent('Runtime.evaluate').at(-1).params.expression;
+  assert.match(last, /removeEventListener/, 'the capture listener is removed');
+  assert.match(last, /\[id\^="__ui-probe"\]/, 'the overlay is removed');
+});
+
+test('row 27: OK and Back are prompted only when the probe is on the fixture grid', async () => {
+  const off = listenStub({ replies: plainRun() });
+  await tvProbe(off.cdp, { listenWaitSeconds: 8, _sleep: noSleep });
+  assert.deepEqual(off.prompts, ['Left', 'Right', '1', 'Play']);
+
+  const on = listenStub({
+    replies: [
+      pageReply(PAGE), featuresReply(), registerReply('returned'), currentReply('object'),
+      { match: (e) => e.includes('readyState'), value: { href: 'http://127.0.0.1:8001/grid.html', title: 'grid', ready: 'complete' } },
+      installReply, readReply([]), cleanupReply,
+    ],
+  });
+  const platform = await tvProbe(on.cdp, {
+    navigate: 'http://127.0.0.1:8001/grid.html', listenWaitSeconds: 8, _sleep: noSleep,
+  });
+
+  assert.equal(platform.navigate.status, 'reached');
+  assert.deepEqual(on.prompts, ['Left', 'Right', '1', 'Play', 'OK', 'Back']);
+});
+
+test('row 27: the key list and the wait are printed before the window opens', async () => {
+  const lines = [];
+  const stub = listenStub({ replies: plainRun() });
+  const platform = await tvProbe(stub.cdp, {
+    listenWaitSeconds: 8,
+    _sleep: noSleep,
+    _note: (line) => { lines.push(line); stub.order.push('note'); },
+  });
+
+  assert.equal(lines.length, 1);
+  assert.match(lines[0], /press Left, Right, 1, Play on the remote/);
+  assert.match(lines[0], /8s each/);
+  assert.equal(stub.order[0], 'note', 'the list is printed before the first prompt');
+  assert.equal(platform.listen.status, 'measured');
 });
 

@@ -121,6 +121,49 @@ export async function startCdpStub({ protocol, evaluate = () => null, onEvaluate
   };
 }
 
+// What a TV page reports when it has no tizen at all: the shape the CLI's probe tests answer with.
+export const TV_FEATURES = {
+  userAgent: "stub",
+  tizen: "undefined",
+  tvinputdevice: "undefined",
+  application: "undefined",
+  webapis: "undefined",
+  IntersectionObserver: false,
+  ResizeObserver: false,
+  registerKeyPresent: false,
+  currentAppPresent: false,
+  flexGap: true,
+  aspectRatio: true,
+  backdropFilter: false,
+};
+
+// A CDP target that answers the guided listen: it records each banner's key, and answers that
+// key's press from `pressed`. Everything else is a settled page with no tizen.
+export async function startGuidedListenStub({ settledPage, features = TV_FEATURES, pressed = {} } = {}) {
+  const prompts = [];
+  let current = null;
+  const stub = await startCdpStub({
+    protocol: { domains: [{ domain: "Page" }, { domain: "Network" }] },
+    evaluate: (expression) => {
+      const js = String(expression);
+      if (js.includes("document.readyState")) return settledPage;
+      if (js.includes("IntersectionObserver")) return features;
+      const prompt = /Press (.+?) on the remote/.exec(js);
+      if (prompt) {
+        current = prompt[1];
+        prompts.push(current);
+        return true;
+      }
+      if (js.includes("state.log.slice")) return { events: pressed[current] ?? [] };
+      if (js.includes("__uiProbeKey.read()")) return [];
+      if (js.includes("__uiProbeKey = {")) return { active: "BODY" };
+      if (js.includes("removeEventListener")) return true;
+      return null;
+    },
+  });
+  return { ...stub, prompts };
+}
+
 function readFrame(buffer) {
   if (buffer.length < 2) return null;
   const opcode = buffer[0] & 0x0f;

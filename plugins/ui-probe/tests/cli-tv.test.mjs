@@ -7,7 +7,9 @@ import { readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { startFixtureServer } from "./fixtures/server.mjs";
 import { findBrowser } from "../src/browser.mjs";
-import { probe, scratchConfig, scratchDir, startCdpStub } from "./cli-support.mjs";
+import {
+  probe, scratchConfig, scratchDir, startCdpStub, startGuidedListenStub, TV_FEATURES,
+} from "./cli-support.mjs";
 
 // -- the TV branches --------------------------------------------------------
 
@@ -303,20 +305,6 @@ test("tv probe attaches, writes platform.json to both homes and ends on the verd
     tv: { host: "192.0.2.10:26101", appid },
   });
 
-  const features = {
-    userAgent: "stub",
-    tizen: "undefined",
-    tvinputdevice: "undefined",
-    application: "undefined",
-    webapis: "undefined",
-    IntersectionObserver: false,
-    ResizeObserver: false,
-    registerKeyPresent: false,
-    currentAppPresent: false,
-    flexGap: true,
-    aspectRatio: true,
-    backdropFilter: false,
-  };
   const stub = await startCdpStub({
     protocol: { domains: [{ domain: "Page" }, { domain: "Network" }] },
     // The app exits under the probe: the inspector goes with it.
@@ -328,7 +316,7 @@ test("tv probe attaches, writes platform.json to both homes and ends on the verd
         return { httpStatus: 200, type: "cors", allowOrigin: "http://192.0.2.30:8000", allowCredentials: null };
       }
       if (js.includes(".exit()")) return "called";
-      if (js.includes("IntersectionObserver")) return features;
+      if (js.includes("IntersectionObserver")) return TV_FEATURES;
       if (js.includes("__uiProbeKey.read")) return [];
       if (js.includes("__uiProbeKey = {")) return { active: "BODY" };
       if (js.includes("data-ui-probe-focus")) return true;
@@ -400,6 +388,72 @@ test("row 26: tv probe hands --exit and --fetch to the probe and detaches afterw
   assert.equal(seen.fetch, "http://192.0.2.30:8000/session");
   assert.equal(detached, 1, "detach ran after the app was asked to exit");
   assert.match(result.lines.at(-1), /^shell: /);
+});
+
+// Row 27: the operator is told what to press, and for how long, before the window opens.
+test("row 27: tv probe --listen prints the key list and wait, then runs the guided check", async () => {
+  const dir = scratchDir("ui-probe-tv-listen-cli");
+  const env = noSdbEnv(scratchDir("ui-probe-tv-listen-cli-home"));
+  const outDir = path.join(dir, "out");
+  scratchConfig(dir, {
+    baseUrl: "http://127.0.0.1:9",
+    tv: { host: "192.0.2.10:26101", appid: "torrenthub.main" },
+  });
+
+  const { prompts, port, close } = await startGuidedListenStub({
+    settledPage: SETTLED_PAGE,
+    pressed: { Left: [{ type: "keydown", key: "ArrowLeft", code: "ArrowLeft", keyCode: 37 }] },
+  });
+
+  try {
+    const result = await probe(
+      ["tv", "probe", "--attach-port", String(port), "--listen", "--listen-wait", "0.2", "--out", outDir],
+      { cwd: dir, env },
+    );
+    assert.equal(result.status, 0, `tv probe exited ${result.status}: ${result.stderr}`);
+
+    const said = result.stdout.split("\n");
+    const announce = said.findIndex((line) => /press Left, Right, 1, Play on the remote/.test(line));
+    assert.ok(announce >= 0, `the CLI names the keys before the window opens: ${result.stdout}`);
+    assert.match(said[announce], /0\.2s each/, "and the wait per key");
+    const outLine = said.findIndex((line) => /^out: /.test(line));
+    assert.ok(announce < outLine, "the list is printed during the run, not in the digest after it");
+
+    assert.deepEqual(prompts, ["Left", "Right", "1", "Play"], "the overlay names each key in order");
+
+    const written = JSON.parse(readFileSync(path.join(outDir, "platform.json"), "utf8"));
+    assert.equal(written.listen.status, "measured");
+    assert.deepEqual(written.listen.results.map((entry) => entry.key), ["Left", "Right", "Digit1", "MediaPlay"]);
+    assert.equal(written.listen.results[0].received, true);
+    assert.equal(written.listen.results[1].received, false);
+    assert.match(result.stdout, /^listen: 1\/4 keys received in 0\.2s each/m, result.stdout);
+  } finally {
+    await close();
+  }
+});
+
+// Row 27: the old --listen took seconds; the number is now an unknown key, and the refusal says
+// where the wait went.
+test("row 27: --listen refuses an unknown key name and a bare number", async () => {
+  const dir = scratchDir("ui-probe-tv-listen-flags");
+  const env = noSdbEnv(scratchDir("ui-probe-tv-listen-flags-home"));
+  scratchConfig(dir, {
+    baseUrl: "http://127.0.0.1:9",
+    tv: { host: "192.0.2.10:26101", appid: "torrenthub.main" },
+  });
+
+  const unknown = await probe(["tv", "probe", "--listen", "Nope"], { cwd: dir, env });
+  assert.equal(unknown.status, 64, `exited ${unknown.status}: ${unknown.stderr}`);
+  assert.match(unknown.stderr, /Nope/);
+  assert.match(unknown.stderr, /Left, Up, Right/, "the refusal lists the key names it accepts");
+
+  const seconds = await probe(["tv", "probe", "--listen", "30"], { cwd: dir, env });
+  assert.equal(seconds.status, 64, `exited ${seconds.status}: ${seconds.stderr}`);
+  assert.match(seconds.stderr, /--listen-wait/);
+
+  const waitAlone = await probe(["tv", "probe", "--listen-wait", "3"], { cwd: dir, env });
+  assert.equal(waitAlone.status, 64, `exited ${waitAlone.status}: ${waitAlone.stderr}`);
+  assert.match(waitAlone.stderr, /--listen-wait only means something with --listen/);
 });
 
 // Row 7: a target that will not serve /json/protocol offers no interception. Null is only a

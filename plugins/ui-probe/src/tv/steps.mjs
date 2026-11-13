@@ -126,7 +126,7 @@ const FETCH_JS = (url) => `(async () => {
   }
 })()`;
 
-const KEYS_INSTALL_JS = `(() => {
+export const KEYS_INSTALL_JS = `(() => {
   const log = [];
   const listener = (event) => {
     log.push({ type: event.type, key: event.key, code: event.code, keyCode: event.keyCode });
@@ -147,7 +147,7 @@ const KEYS_INSTALL_JS = `(() => {
   return { active: document.activeElement ? document.activeElement.tagName : null };
 })()`;
 
-const KEYS_READ_JS = `(() => (window.__uiProbeKey ? window.__uiProbeKey.read() : []))()`;
+export const KEYS_READ_JS = `(() => (window.__uiProbeKey ? window.__uiProbeKey.read() : []))()`;
 
 const CLEANUP_JS = `(() => {
   const state = window.__uiProbeKey;
@@ -163,6 +163,11 @@ const CLEANUP_JS = `(() => {
   if (body && body.getAttribute('data-ui-probe-focus') === '1') {
     body.removeAttribute('tabindex');
     body.removeAttribute('data-ui-probe-focus');
+  }
+  // Every element the probe adds carries this prefix, so one sweep cannot miss a new one.
+  const leftovers = document.querySelectorAll('[id^="__ui-probe"]');
+  for (let i = 0; i < leftovers.length; i += 1) {
+    if (leftovers[i].parentNode) leftovers[i].parentNode.removeChild(leftovers[i]);
   }
   return true;
 })()`;
@@ -329,21 +334,6 @@ export async function fetchStep(cdp, url) {
     allowOrigin: result.allowOrigin ?? null,
     allowCredentials: result.allowCredentials ?? null,
   };
-}
-
-export async function listenStep(cdp, seconds, { _sleep, onFixture }) {
-  const page = await pageOf(cdp);
-  const length = Number(seconds);
-  if (!Number.isFinite(length) || length <= 0) return { status: 'skipped', seconds: 0, page };
-  await evaluate(cdp, KEYS_INSTALL_JS);
-  let events = [];
-  try {
-    await _sleep(length * 1000);
-    events = (await evaluate(cdp, KEYS_READ_JS)) ?? [];
-  } finally {
-    await removeEverything(cdp);
-  }
-  return { status: 'measured', page, seconds: length, onFixture, events: Array.isArray(events) ? events : [] };
 }
 
 export async function exitStep(cdp, { _sleep, _now }) {

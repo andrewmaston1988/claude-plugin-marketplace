@@ -9,12 +9,12 @@ import {
   fetchStep,
   guardedStep,
   keysStep,
-  listenStep,
   navigateStep,
   readFeatures,
   removeEverything,
   videoStep,
 } from './steps.mjs';
+import { listenStep } from './listen.mjs';
 
 export { FEATURES_JS, pageOf } from './steps.mjs';
 
@@ -92,9 +92,11 @@ export function platformSummary(platform) {
 export async function tvProbe(cdp, {
   video = null,
   navigate = null,
-  listenSeconds = null,
+  listenKeys = null,
+  listenWaitSeconds = null,
   fetch = null,
   exit = false,
+  _note = null,
   _sleep = defaultSleep,
   _now = Date.now,
 } = {}) {
@@ -120,7 +122,13 @@ export async function tvProbe(cdp, {
     const onFixture = platform.navigate?.status === 'reached';
     platform.video = await guardedStep(() => videoStep(cdp, video, { _sleep }));
     platform.keys = await guardedStep(() => keysStep(cdp, { features: platform.features, onFixture }));
-    platform.listen = await guardedStep(() => listenStep(cdp, listenSeconds, { _sleep, onFixture }));
+    platform.listen = await guardedStep(() => listenStep(cdp, {
+      requested: listenKeys,
+      waitSeconds: listenWaitSeconds,
+      onFixture,
+      _sleep,
+      _note,
+    }));
     platform.fetch = await guardedStep(() => fetchStep(cdp, fetch));
   } finally {
     await removeEverything(cdp);

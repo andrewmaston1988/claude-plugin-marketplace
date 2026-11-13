@@ -14,6 +14,8 @@ For a TV-backend journey, `--device desktop` (the default) runs it in desktop Ch
 
 `/ui-probe tv probe --navigate http://127.0.0.1:8001` measures the settled page's Tizen APIs, video support, remote keys and navigation reach; add `--fetch <url>` for one credentialed GET and `--exit` to exit the app last. It writes `platform.json` and ends with a verdict that names the page it measured, such as `shell: no tizen — registerKey("1") absent; getCurrentApplication() absent on http://192.0.2.30:8000/tv`. Presence alone is never plan A or B: only calls that returned are.
 
+Add `--listen` when the operator is at the remote. The TV shows a banner naming one key at a time and ticks the press it received, or says "not received" after `--listen-wait <seconds>` (default 8). Tell the operator the key list the CLI prints before the first banner, and pass your own comma-separated key names as `--listen Left,Right,MediaPlay` when the defaults do not cover what you are checking.
+
 ## Suggest next step
 
 Read the exit code and the digest, then:

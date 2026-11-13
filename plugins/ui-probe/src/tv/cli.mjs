@@ -6,6 +6,7 @@ import { dirname, join } from 'node:path';
 import { attach, AttachInconclusive } from './attach.mjs';
 import { findSdb, listedDevices, sdb } from './sdb.mjs';
 import { platformPath, tvProbe } from './probe.mjs';
+import { DEFAULT_LISTEN_WAIT_SECONDS, listenLabel, parseListenKeys } from './listen.mjs';
 import { interceptionKind, inTvScope, NO_PROTOCOL, tvWritePolicy } from '../guard.mjs';
 import { expandIncludes } from '../ir.mjs';
 
@@ -161,10 +162,12 @@ export async function tvProbeCommand({
   outDir = undefined,
   video = null,
   navigate = null,
-  listenSeconds = null,
+  listenKeys = null,
+  listenWaitSeconds = null,
   fetch = null,
   exit = false,
   attachPort = null,
+  _note = null,
   _attach = attach,
   _tvProbe = tvProbe,
 } = {}) {
@@ -173,7 +176,10 @@ export async function tvProbeCommand({
   const session = await tvSession(config, { attachPort, _attach });
   let platform;
   try {
-    platform = await _tvProbe(session.cdp, { video, navigate, listenSeconds, fetch, exit });
+    // The guided check prints what to press while the window is still open, not after it closes.
+    platform = await _tvProbe(session.cdp, {
+      video, navigate, listenKeys, listenWaitSeconds, fetch, exit, _note,
+    });
   } finally {
     await session.detach();
   }
@@ -219,8 +225,17 @@ function probeLines(platform, dir) {
   const withheld = keys.onFixture ? '' : ' (Back and Enter withheld: not on the test origin)';
   lines.push(`keys: ${keys.events?.length ?? 0} events from ${keys.dispatched?.length ?? 0} keys${withheld}`);
 
-  if (listen.status === 'measured') lines.push(`listen: ${listen.events?.length ?? 0} physical events in ${listen.seconds}s`);
-  else lines.push('listen: skipped');
+  if (listen.status === 'measured') {
+    const results = listen.results ?? [];
+    const got = results.filter((entry) => entry.received).length;
+    const missed = results.filter((entry) => !entry.received).map((entry) => listenLabel(entry.key));
+    lines.push(`listen: ${got}/${results.length} keys received in ${listen.waitSeconds}s each`
+      + (missed.length ? ` — not received: ${missed.join(', ')}` : ''));
+  } else if (listen.status === 'error') {
+    lines.push(`listen: failed (${listen.error})`);
+  } else {
+    lines.push('listen: skipped');
+  }
 
   if (fetched.status === 'measured') {
     lines.push(`fetch: ${fetched.httpStatus} from ${fetched.url} `
@@ -304,9 +319,27 @@ export function captureTvBranch({ screen, config, rest, getFlag, source = null, 
 
 /** `tv probe`. */
 export async function tvProbeBranch({ config, rest, getFlag, resolveOutDir, out, err }) {
-  const listen = getFlag("--listen", rest);
-  if (listen !== null && !(Number.isFinite(Number(listen)) && Number(listen) > 0)) {
-    err(`--listen needs a positive number of seconds, got ${JSON.stringify(listen)}`);
+  // `--listen` takes an optional key list; the per-key wait moved to its own flag.
+  const listenValue = getFlag("--listen", rest);
+  const listenWaitValue = getFlag("--listen-wait", rest);
+  let listenKeys = null;
+  let listenWaitSeconds = null;
+  if (listenValue !== null) {
+    try {
+      listenKeys = parseListenKeys(listenValue);
+    } catch (error) {
+      err(error.message);
+      return { exitCode: 64 };
+    }
+  }
+  if (rest.includes("--listen")) {
+    listenWaitSeconds = listenWaitValue === null ? DEFAULT_LISTEN_WAIT_SECONDS : Number(listenWaitValue);
+    if (!Number.isFinite(listenWaitSeconds) || listenWaitSeconds <= 0) {
+      err(`--listen-wait needs a positive number of seconds, got ${JSON.stringify(listenWaitValue)}`);
+      return { exitCode: 64 };
+    }
+  } else if (listenWaitValue !== null) {
+    err("--listen-wait only means something with --listen");
     return { exitCode: 64 };
   }
   const { port, problem } = portFrom(getFlag, rest);
@@ -320,10 +353,12 @@ export async function tvProbeBranch({ config, rest, getFlag, resolveOutDir, out,
       outDir: resolveOutDir(config, getFlag("--out", rest)),
       video: getFlag("--video", rest),
       navigate: getFlag("--navigate", rest),
-      listenSeconds: listen === null ? null : Number(listen),
+      listenKeys,
+      listenWaitSeconds,
       fetch: getFlag("--fetch", rest),
       exit: rest.includes("--exit"),
       attachPort: port,
+      _note: out,
     });
     for (const line of lines) out(line);
     return {};
