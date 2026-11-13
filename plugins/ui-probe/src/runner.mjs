@@ -245,9 +245,10 @@ async function interact(op, args, state) {
     }
   }
 
+  await evaluate(state.cdp, SCROLL_JS(args.target));
+
   let point;
   try {
-    await evaluate(state.cdp, SCROLL_JS(args.target));
     point = await boxOf(state.cdp, nodeIds[0]);
   } catch {
     throw new StepFailure("failed", "not_found", `${args.target} has no box to aim at`);
