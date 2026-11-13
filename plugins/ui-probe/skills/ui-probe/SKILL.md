@@ -116,8 +116,9 @@ A `failed` step may carry a failure type when the target itself was the problem:
 - `ambiguous_target` — more than one match where one action needs one. Narrow the selector.
 - `stale_target` — the node resolved at step start was gone by dispatch. The page re-rendered; assert on the
   new state first.
-- `target_obscured` — something covers the target's centre, usually a modal or a sticky bar. Close it, or
-  pick another target.
+- `target_obscured` — the runner scrolls the target into view first, so this means something covers its
+  centre, usually a modal or a sticky bar — not that the target is off screen. Close it, or pick another
+  target.
 - `write_blocked` — the target submits a non-GET form and the guard refused it. That is the guard working.
 
 Exit codes, which tell you what to do next:
@@ -176,12 +177,12 @@ A screen may also carry `steps` — IR steps that run before the capture, for a 
 The digest comes back per viewport, one line per `measure` selector:
 
 ```
-phone 390x844 hover:none pointer:coarse
+phone 390×844 hover:none pointer:coarse
 [data-testid=action-tile] widths=111.3,111.3,111.3
-blocked 0
-desktop 1280x900 hover:hover pointer:fine
+blocked: 0
+desktop 1280×900 hover:hover pointer:fine
 [data-testid=action-tile] widths=90.3,91.2,116.1
-blocked 0
+blocked: 0
 out: <outDir>
 ```
 
@@ -244,9 +245,10 @@ steps:
 ```
 
 `over` samples the computed value every animation frame for that many milliseconds and passes if any frame
-matches, carrying that frame's index and time into the result. Without it the assertion polls until `timeoutMs`
-(default 5000) — use `timeoutMs: 0` for a single deliberate sample. A `display` flip has no animation to
-query; the frames are the only instrument that sees it.
+matches, carrying that frame's index and time into the result. A window that never matches records
+`frame.index: -1` and `frame.frames` — the number of frames sampled, not a time. Without it the assertion
+polls until `timeoutMs` (default 5000) — use `timeoutMs: 0` for a single deliberate sample. A `display` flip
+has no animation to query; the frames are the only instrument that sees it.
 
 ### A page with no browser at all
 
