@@ -19,6 +19,31 @@ Create `.ui-probe.json` in your project:
 
 Use `/ui-probe screens` to list screens, `/ui-probe capture home --viewport phone,desktop` to capture, and `/ui-probe run scenario.yaml` to run a scenario. `/ui-probe validate scenario.yaml` checks a scenario; `/ui-probe validate --config` checks config.
 
+### Tizen TV setup
+
+On the TV, enable Developer Mode and note its IP address. Developer Mode switches itself off after two weeks, so enable it again if `/ui-probe doctor` reports that the TV is not listed. Install the Tizen SDK so `sdb` is on PATH, or set `tv.sdb` to the sdb executable. The TV's developer connection usually uses port `26101`; use the host value shown by Developer Mode, including its port. Set the installed application id from `sdb shell 0 applist`.
+
+Add a `tv` block to `.ui-probe.json`:
+
+```json
+{
+  "baseUrl": "http://127.0.0.1:8001",
+  "tv": {
+    "host": "192.0.2.10:26101",
+    "appid": "example.app",
+    "sdb": "C:/tizen-studio/tools/sdb.exe",
+    "testOrigin": "http://127.0.0.1:8001",
+    "focusSelector": ".focused"
+  }
+}
+```
+
+`tv.host` is the TV's developer-mode address and port. `tv.appid` is the installed widget application id. `tv.sdb` is optional; omit it when `sdb` is on PATH or in a standard Tizen SDK location. `tv.testOrigin` is the origin allowed to receive writes when a TV journey uses `--allow-writes`; use a test server, not a live service. `tv.focusSelector` is optional and defaults to `.focused`; it selects the app element whose focus marker should be shown in observations.
+
+Run `/ui-probe doctor` to check `sdb`, the connected TV, and the configured app id. `/ui-probe run journey.yaml --device tv` attaches to the set. Use `--device desktop` (the default) to run the same TV journey in desktop Chromium for faster iteration. `/ui-probe tv probe --navigate http://127.0.0.1:8001` records the platform probe and its shell verdict; add `--listen 30` to observe physical remote presses.
+
+The TV write guard blocks and records intercepted write requests outside the configured test origin. It cannot stop a GET request with a side effect. With `--allow-writes`, writes to the configured test origin are allowed, and writes the app makes to other origins remain blocked; the guard cannot stop writes the app makes outside the test origin through mechanisms that do not use intercepted network requests.
+
 ## Configuration
 
 | Key | Type | Meaning |
@@ -29,6 +54,7 @@ Use `/ui-probe screens` to list screens, `/ui-probe capture home --viewport phon
 | `auth.cookies` | array | Cookie entries `{name, command: [argv...], domain?}`. The command's stdout supplies the cookie value. |
 | `outDir` | string | Output directory; defaults to `<os tmpdir>/ui-probe/<stamp>`. |
 | `browser` | string | Browser executable path, overriding discovery. |
+| `tv` | object | Optional TV settings: `host`, `appid`, optional `sdb`, `testOrigin`, and `focusSelector`. |
 
 Cookie commands run as argv arrays without a shell, from the config directory. `{var}` substitution is forbidden in the executable and substituted values cannot contain path separators or shell metacharacters. Pass variables with `--var k=v`.
 
@@ -36,13 +62,13 @@ Cookie commands run as argv arrays without a shell, from the config directory. `
 
 ## Outputs
 
-Capture produces `screenshot.png`, `dom.html`, `measure.json`, `console.json`, `network.json`, `assets.json`, `env.json`, and `observation.txt` per viewport. Measurements contain boxes for each matching selector; the environment records the page's reported pointer and hover capabilities. The stdout digest reports viewport dimensions, pointer and hover, measured widths, blocked request count, and output directory. Traffic records contain method, URL, status, and whether blocked, without headers. Cookie values are not written to outputs or the digest.
+Browser capture produces `screenshot.png`, `dom.html`, `measure.json`, `console.json`, `network.json`, `assets.json`, `env.json`, and `observation.txt` per viewport. TV capture writes these outputs under `<outDir>/tv/`; it writes `screenshot.png` only when `--screenshot` is supplied. The TV screenshot is an operator artifact, not an input for agent analysis. Measurements contain boxes for each matching selector; the environment records the page's reported pointer and hover capabilities. The stdout digest reports viewport dimensions, pointer and hover, measured widths, blocked request count, and output directory. Traffic records contain method, URL, status, and whether blocked, without headers. Cookie values are not written to outputs or the digest.
 
 Scenario runs write `results.json` with each step's source, operation, optional target, outcome, failure, measured and expected values, and duration. The digest reports each step and the overall outcome and output directory. Runs return 0 for passed, 1 for failed, 2 for inconclusive, 3 for needs review, and 64 for invalid input.
 
 ## Read-only guard
 
-By default, before a click or tap the action allowlist refuses a non-GET form submit as `write_blocked`. A CDP Fetch guard also blocks and records requests other than GET, HEAD, and OPTIONS. `--allow-writes` disables both layers for that capture or run. Neither layer can stop a GET request with a side effect; use a safe target environment.
+By default, before a click or tap the action allowlist refuses a non-GET form submit as `write_blocked`. A CDP network guard also blocks and records requests other than GET, HEAD, and OPTIONS. `--allow-writes` disables the action guard; on TV it allows intercepted writes only to `tv.testOrigin`, while writes to other origins remain blocked and recorded. Neither guard can stop a GET request with a side effect, and the network guard cannot stop writes made outside intercepted network requests. Use a safe target environment.
 
 ## Limitations
 

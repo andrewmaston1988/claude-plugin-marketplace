@@ -1,10 +1,9 @@
 ---
 name: ui-probe
 description: >-
-  Use when a session needs to know how a running web app looks or behaves instead of asking the operator —
-  layout widths, hover versus tap, responsive breakpoints, a JSON endpoint. Triggers — "how does it look",
-  "check the UI", "is the layout right", "does the hover work", "capture the page". SKIP for — desktop
-  windows, TV, or OCR targets; this plugin is web only in phase 1.
+  Use when a session needs evidence about a running web app or Tizen TV app — layout measurements, responsive
+  behavior, remote-key behavior, a JSON endpoint, or a platform probe. Triggers — "check the UI", "capture the
+  page", "test the remote", "probe the TV". SKIP for: desktop windows or OCR targets.
 ---
 
 # ui-probe
@@ -61,6 +60,18 @@ Both guards are on unless you pass `--allow-writes`:
 Neither layer stops a **GET that has a side effect**. So point the probe at a fixture or a local dev server,
 never at a live service. `--allow-writes` turns both layers off for one run: use it only on a page you own and
 can reset.
+
+## Tizen TV
+
+Use `--device tv` when the question needs the installed app on a real Tizen set: the TV's browser, remote input, or platform behavior. Use `--device desktop` (the default) to run a `backend: tv` journey in desktop Chromium at TV dimensions with the same key events. Desktop iteration is faster, but it does not prove the TV browser behaves the same. Configure `tv.host` and `tv.appid` in `.ui-probe.json`, then run `/ui-probe doctor` before attaching.
+
+A TV capture attaches to the app already running on the set. Its DOM observation marks the app's configured focus element (default selector `.focused`) with `[focused]`; many TV apps move this marker while `document.activeElement` stays on `body`. Capture writes under `<outDir>/tv/`. `--screenshot` is opt-in because replay is slow and uses TV CPU. `screenshot.png` is for the operator only: give them its path when requested, and never Read it.
+
+`/ui-probe tv probe --navigate http://127.0.0.1:8001` writes `platform.json` and reports Tizen API availability, video behavior, injected keys, and whether the page reached the test URL. Its final verdict line is `shell: plan A` when both `registerKey("1")` and `getCurrentApplication()` work, `shell: plan B` when Tizen exists but either check fails, or `shell: no tizen` when the loaded page has no `tizen` object. `--listen 30` additionally records physical remote presses for 30 seconds.
+
+The remote key names are `Left`, `Up`, `Right`, `Down`, `Enter`, `Back`, `Digit0` through `Digit9`, and `MediaPlay`, `MediaPause`, `MediaPlayPause`, `MediaStop`, `MediaRewind`, `MediaFastForward`. Use these names in `key` steps. During `tv probe`, Back and Enter are withheld until navigation reaches the test URL, because either can leave or act on the installed app.
+
+A `--device tv` run or capture has no action guard — a key press targets no form — so the network guard is the only one. There, `--allow-writes` allows writes to `tv.testOrigin` only: every write to another origin is still blocked and recorded. When the target offers no interception at all, a TV run or capture starts only with `--allow-writes` and every `open` naming `tv.testOrigin`.
 
 ### Flags worth knowing
 
