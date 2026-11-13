@@ -1,0 +1,890 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>ui-probe fixture — detail sheet</title>
+<link rel="stylesheet" href="theme.css">
+<style>
+/* The fixture's own chrome only. Everything the sheet is measured on comes from base.html. */
+body{background:var(--bg-darker);color:var(--text-bright);font-family:system-ui,sans-serif;margin:0}
+.fixture-page{max-width:56rem;margin:0 auto;padding:1.5rem 1rem}
+.fixture-row{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:.75rem}
+.poster-wrap{position:relative;display:block;aspect-ratio:2/3;background:var(--bg-card-alt);border-radius:.375rem;overflow:hidden}
+.no-img{display:flex;align-items:center;justify-content:center;height:100%;color:var(--text-dim);font-size:.75rem}
+</style>
+<style>
+
+    html,body{overflow-x:hidden}
+    body{background:var(--bg-darker);color:var(--text-bright);font-family:system-ui,sans-serif;margin:0}
+    header{background:var(--bg-card);border-bottom:1px solid var(--border-light);padding:.75rem 1rem .75rem 1rem;display:flex;gap:1rem;align-items:center}
+    header a{color:var(--text-accent-2);font-size:1.25rem;font-weight:700;text-decoration:none}
+    .nav-link{color:var(--text-secondary);font-size:.875rem}
+    .nav-link.nav-active{color:var(--text-accent)}
+    main{max-width:56rem;margin:0 auto;padding:2rem 1rem}
+    input{background:var(--bg-input);border:1px solid var(--border);color:#fff;padding:.5rem 1rem;border-radius:var(--radius-lg);flex:1;font-size:1rem}
+    input::placeholder{color:var(--text-muted)}
+    input:focus{outline:2px solid var(--accent-primary)}
+    button{display:inline-flex;align-items:center;justify-content:center;background:var(--border-light);color:var(--text-secondary);padding:.5rem 1.25rem;border:1px solid var(--border);border-radius:var(--radius-lg);font-weight:500;cursor:pointer;font-size:1rem;font-family:inherit;white-space:nowrap;text-decoration:none}
+    button:hover{background:var(--border);color:var(--text-primary)}
+    button:disabled{opacity:.5;cursor:not-allowed}
+    button.highlighted{background:var(--accent-primary-dark);color:#fff;border-color:transparent}
+    button.highlighted:hover{background:var(--accent-primary-darker)}
+    button.admin{display:inline-flex;align-items:center;background:var(--border-light);color:var(--text-secondary);font-size:.8rem;padding:.3rem .75rem;border-radius:.375rem;border:1px solid var(--border);cursor:pointer;white-space:nowrap;text-decoration:none;font-family:inherit;font-weight:500}
+    button.admin:hover{background:var(--border);color:var(--text-primary)}
+    button.search{background:var(--accent-primary-dark);color:#fff;border-color:transparent;padding:.5rem 1rem;font-size:1rem}
+    button.search:hover{background:var(--accent-primary-darker)}
+    form{display:flex;gap:.5rem;width:100%;max-width:32rem}
+    .center{display:flex;flex-direction:column;align-items:center;gap:2rem;margin-top:4rem}
+    h1{font-size:1.875rem;font-weight:700;color:#fff;margin:0}
+    .grid{display:grid;grid-template-columns:repeat(2,1fr);gap:1rem}
+    @media(min-width:480px){.grid{grid-template-columns:repeat(3,1fr)}}
+    @media(min-width:768px){.grid{grid-template-columns:repeat(4,1fr)}}
+    .card{background:var(--bg-card);border-radius:var(--radius-lg);overflow:hidden;text-decoration:none;color:inherit;display:block}
+    @media (hover:hover) and (pointer:fine){ .card:hover{outline:2px solid var(--accent-primary)} }
+    .card img{width:100%;aspect-ratio:2/3;object-fit:cover;display:block}
+    .card .no-img{width:100%;aspect-ratio:2/3;background:var(--bg-card-alt);display:flex;align-items:center;justify-content:center;color:var(--text-dim);font-size:.875rem}
+    .card .info{padding:.5rem}
+    .card .title{font-weight:500;font-size:.875rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .card .meta{color:var(--text-secondary);font-size:.75rem}
+    .count{color:var(--text-secondary);font-size:.875rem;margin-bottom:1rem}
+    .detail{display:flex;flex-direction:column;gap:1rem}
+    @media(min-width:480px){.detail{flex-direction:row;gap:2rem}}
+    .detail img{width:100%;max-width:12rem;border-radius:var(--radius-lg);align-self:flex-start}
+    select{background:var(--bg-input);border:1px solid var(--border);color:#fff;padding:.5rem 1rem;border-radius:var(--radius-lg);font-size:1rem}
+    select:focus{outline:2px solid var(--accent-primary)}
+    .detail h1{margin-bottom:.25rem}
+    .detail .meta{color:var(--text-secondary);font-size:.875rem;margin-bottom:1rem}
+    .detail p{color:var(--text-primary);line-height:1.6;margin-bottom:1.5rem}
+    .ok{color:var(--color-ok-alt)}.err{color:var(--color-error)}
+    /* IPT account stats strip */
+    .ipt-stats{background:var(--bg-page);border-bottom:1px solid var(--border-light);padding:.375rem 1rem .375rem 1rem;display:flex;gap:1.5rem;font-size:.75rem;color:var(--text-secondary);flex-wrap:nowrap;overflow:hidden}
+    .ipt-stats span{display:flex;align-items:center;gap:.25rem;flex-shrink:0;white-space:nowrap}
+    .ratio-green{color:var(--color-ok);font-weight:600}
+    .ratio-amber{color:var(--bg-warn-light);font-weight:600}
+    .ratio-red{color:var(--color-error);font-weight:600}
+    .grn{color:var(--color-ok)}.red{color:var(--color-error)}
+    /* Freeleech badge */
+    .fl-badge{display:inline-flex;align-items:center;align-self:center;flex-shrink:0;line-height:1;background:var(--bg-ok-light);color:#fff;font-size:.625rem;font-weight:700;padding:.1rem .35rem;border-radius:var(--radius-sm);text-transform:uppercase;letter-spacing:.05em}
+    /* Outline badge utility classes (tier, H&R, filter buttons) */
+    .badge-sm{font-size:.6rem;font-weight:600;letter-spacing:.06em;text-transform:uppercase;padding:.1rem .35rem;border-radius:.25rem;display:inline-flex;align-items:center;line-height:1}
+    .badge-outline-green{border:1px solid var(--color-ok-alt);color:var(--color-ok-alt);background:transparent}
+    .badge-outline-amber{border:1px solid var(--color-warn);color:var(--color-warn);background:transparent}
+    .badge-outline-red{border:1px solid var(--color-error);color:var(--color-error);background:transparent}
+    .badge-new{background:#1e40af;color:#bfdbfe;font-size:.6rem;padding:.1rem .3rem;border-radius:.2rem;flex-shrink:0}
+    .stuffing-filter-btn{cursor:pointer;padding:.2rem .5rem}
+    /* Poster card overlay system */
+    .poster-card{position:relative}
+    .poster-wrap{position:relative;display:block}
+    .poster-wrap img{width:100%;aspect-ratio:2/3;object-fit:cover;display:block}
+    .poster-wrap .no-img{width:100%;aspect-ratio:2/3;background:var(--bg-card-alt);display:flex;align-items:center;justify-content:center;color:var(--text-dim);font-size:.75rem}
+    .poster-badges-bl{position:absolute;bottom:.35rem;left:.35rem;display:flex;flex-direction:column;gap:.2rem;align-items:flex-start}
+    .poster-badges-br{position:absolute;bottom:.35rem;right:.35rem;display:flex;flex-direction:column;gap:.2rem;align-items:flex-end;z-index:2}
+    .poster-badges-tl{position:absolute;top:.35rem;left:.35rem;display:flex;flex-direction:column;gap:.2rem;align-items:flex-start;z-index:2}
+    .badge-fl{background:var(--bg-ok-light);color:#fff;font-size:.55rem;font-weight:700;padding:.1rem .3rem;border-radius:.2rem;text-transform:uppercase;letter-spacing:.05em}
+    .badge-res{background:var(--bg-info-dark);color:#fff;font-size:.55rem;font-weight:600;padding:.1rem .3rem;border-radius:.2rem}
+    .badge-codec{background:var(--border);color:var(--text-primary);font-size:.55rem;padding:.1rem .3rem;border-radius:.2rem}
+    .badge-dl{background:var(--bg-ok-dark);color:#fff;font-size:.7rem;font-weight:700;padding:.15rem .35rem;border-radius:var(--radius-sm)}
+    .badge-avail{background:var(--bg-warn-light);color:#fff;font-size:.55rem;font-weight:600;padding:.1rem .3rem;border-radius:.2rem}
+    .avail-slot{display:inline-block}
+    /* Certification badges */
+    .badge-cert{background:var(--border);color:var(--text-primary);font-size:.55rem;font-weight:600;padding:.1rem .3rem;border-radius:.2rem}
+    .badge-restricted{background:var(--bg-error-dark);color:var(--text-error-light);font-size:.55rem;font-weight:700;padding:.1rem .3rem;border-radius:.2rem}
+    .cert-slot{display:inline-block}
+    /* IPT results */
+    .ipt-result{background:var(--bg-card);border-radius:var(--radius-lg);padding:.75rem 1rem;margin-bottom:.5rem;display:flex;flex-direction:column;gap:.25rem}
+    .ipt-result .t-name{font-weight:500;font-size:.9rem;display:flex;align-items:center;gap:.5rem;flex-wrap:wrap;overflow-wrap:break-word;word-break:break-word;min-width:0}
+    .ipt-result .t-meta{color:var(--text-secondary);font-size:.75rem;display:flex;gap:.75rem;flex-wrap:wrap}
+    /* Browse cards */
+    .scroll-row{display:flex;gap:.75rem;overflow-x:auto;padding-bottom:.5rem;scrollbar-width:thin}
+    .t-card{background:var(--bg-card);border-radius:var(--radius-lg);padding:.75rem;min-width:160px;max-width:200px;flex:0 0 auto}
+    .t-card .tc-name{font-size:.8rem;font-weight:500;margin-bottom:.25rem;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+    .t-card .tc-meta{color:var(--text-secondary);font-size:.7rem}
+    .section-title{font-size:1rem;font-weight:600;color:var(--text-light);margin:1.5rem 0 .5rem}
+    /* NAS health strip */
+    .health-strip{width:100%;box-sizing:border-box;padding:.375rem 1rem .375rem 1rem;background:var(--bg-page);border-bottom:1px solid var(--border-light);font-size:.75rem;color:var(--text-secondary);display:flex;flex-wrap:nowrap;overflow:visible;gap:.75rem;align-items:center}
+    .health-offline{color:var(--text-muted)}
+    .health-item{color:var(--text-secondary);flex-shrink:0;white-space:nowrap}
+    .vol-pills-wrap{position:relative;display:flex;align-items:center;gap:.3rem;cursor:pointer;padding:.18rem .4rem .18rem 0;border-radius:1rem;background:rgba(0,0,0,.35);transition:background .15s}
+    .vol-pills-wrap:hover{background:rgba(0,0,0,.55)}
+    .vol-pill-outer{width:2.4rem;height:.35rem;background:var(--border);border-radius:1rem;overflow:hidden;flex:none}
+    .vol-pill-fill{height:100%;border-radius:1rem;transition:width .4s}
+    .vol-panel{position:absolute;left:0;top:calc(100% + .4rem);width:17rem;background:var(--bg-card);border:1px solid var(--border-light);border-radius:.75rem;padding:.9rem 1rem;z-index:200;box-shadow:0 10px 30px rgba(0,0,0,.6);opacity:0;transform:translateY(-8px) scale(.96);pointer-events:none;transition:opacity .18s,transform .18s}
+    .vol-panel.open{opacity:1;transform:none;pointer-events:auto}
+    .vol-full+.vol-full{margin-top:.85rem}
+    .vol-full-header{display:flex;justify-content:space-between;align-items:baseline;font-size:.78rem;margin-bottom:.3rem}
+    .vol-full-name{font-weight:600;color:var(--text-light)}
+    .vol-full-size{color:var(--text-muted);font-size:.72rem}
+    .vol-full-bar{width:100%;height:.6rem;background:var(--bg-card-alt);border-radius:1rem;overflow:hidden}
+    .vol-full-fill{height:100%;border-radius:1rem}
+    .vol-full-pct{text-align:right;font-size:.68rem;color:var(--text-muted);margin-top:.2rem}
+    /* Season accordion */
+    details.season-row > summary { list-style: none; }
+    details.season-row > summary::-webkit-details-marker { display: none; }
+    details[open] .season-chevron { transform: rotate(90deg); }
+    /* A-Z filter + pagination */
+    .az-filter{display:flex;flex-wrap:wrap;gap:.25rem;margin-bottom:.5rem}
+    .az-btn{background:var(--bg-card-alt);color:var(--text-secondary);padding:.25rem .5rem;border:1px solid var(--border);border-radius:var(--radius);font-size:.75rem;cursor:pointer;font-weight:500}
+    .az-btn:hover{background:var(--border);color:var(--text-bright)}
+    .az-btn.active{background:var(--accent-primary-dark);color:#fff;border-color:var(--accent-primary-dark)}
+    .az-pagination{display:flex;justify-content:center;align-items:center;gap:.75rem;margin-top:1.25rem}
+    .az-content{}
+    .az-tab{display:none}
+    .az-backdrop{display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:58}
+    .az-backdrop.open{display:block}
+    .az-inner{display:contents}
+    /* Mobile: filofax drawer — panel is tab+content wide; translateX reveals only the tab */
+    @media(max-width:640px){
+      .az-filter{position:fixed;right:0;top:0;height:100%;width:5.7rem;z-index:59;display:flex;flex-direction:row;gap:0;padding:0;background:transparent;overflow:hidden;transform:translateX(calc(100% - 2.2rem));transition:transform .22s cubic-bezier(.4,0,.2,1);margin:0}
+      .az-filter.open{transform:translateX(0)}
+      .az-tab{flex:0 0 2.2rem;align-self:center;height:7rem;display:flex;align-items:center;justify-content:center;cursor:pointer;color:var(--text-primary);font-size:.75rem;font-weight:700;writing-mode:vertical-lr;letter-spacing:.25em;padding:0;user-select:none;background:var(--bg-darkest);border:1px solid var(--border-light);border-right:none;border-radius:.6rem 0 0 .6rem}
+      .az-tab:hover,.az-tab:focus{background:var(--bg-darkest);color:var(--text-primary)}
+      .az-tab:active{background:var(--bg-card-alt)}
+      .az-inner{flex:1;align-self:stretch;display:flex;flex-direction:column;overflow-y:auto;background:var(--bg-darkest);padding:.5rem .35rem;gap:0}
+      .az-filter .az-btn{width:100%;padding:.1rem 0;font-size:.8rem;background:none;border:none;border-radius:0;text-align:center;flex:none;color:var(--text-secondary)}
+      .az-filter .az-btn.active{background:none;border:none;color:var(--text-accent-2);font-weight:700}
+      .az-filter .az-btn:hover{color:var(--text-bright)}
+      .az-filter .az-btn:first-child{margin-bottom:.2rem}
+    }
+    /* Quota bar pill */
+    /* Admin panel — canonical classes used across show_detail, movie_detail, library */
+    .admin-panel{display:flex;align-items:center;justify-content:space-between;border:1px solid var(--bg-error-dark);border-radius:var(--radius-lg);padding:var(--radius-lg) .75rem;margin-bottom:1rem}
+    .admin-panel-label{font-size:.65rem;color:var(--bg-error-dark);text-transform:uppercase;letter-spacing:.08em;white-space:nowrap}
+    .admin-panel-actions{display:flex;gap:.5rem;flex-shrink:0;white-space:nowrap}
+    /* Search bar */
+    .search-bar form{display:flex;gap:.5rem;width:100%;max-width:none}
+    .search-bar input{flex:1}
+    .quota-wrap{position:relative;cursor:pointer;display:flex;align-items:center;gap:.3rem;padding:.18rem .4rem .18rem .4rem;border-radius:1rem;background:rgba(0,0,0,.35);transition:background .15s;width:fit-content}
+    .quota-wrap:hover{background:rgba(0,0,0,.55)}
+    .quota-panel{position:absolute;right:0;top:calc(100% + .5rem);width:13rem;background:var(--bg-card);border:1px solid var(--border-light);border-radius:.75rem;padding:.85rem 1rem;z-index:300;box-shadow:0 10px 30px rgba(0,0,0,.6);opacity:0;transform:translateY(-8px) scale(.96);pointer-events:none;transition:opacity .18s,transform .18s}
+    .quota-panel.open{opacity:1;transform:none;pointer-events:auto}
+    /* Downloads page */
+    .dl-filters{margin-bottom:.75rem}
+    .dl-filter-row{display:flex;align-items:center;gap:.25rem;flex-wrap:wrap}
+    .dl-count{background:var(--border);color:var(--text-primary);font-size:.65rem;font-weight:700;padding:.05rem .35rem;border-radius:.75rem;margin-left:.25rem;vertical-align:middle}
+    .dl-table{width:100%;border-collapse:collapse;font-size:.875rem;margin-top:.25rem}
+    .dl-table thead tr{color:var(--text-secondary);border-bottom:1px solid var(--border-light)}
+    .dl-table thead th{padding:.4rem .5rem;font-weight:500}
+    .dl-table tbody tr{border-bottom:1px solid var(--bg-card)}
+    .dl-table tbody tr:hover{background:var(--bg-card)}
+    .dl-name{padding:.45rem .5rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:0;width:100%}
+    .dl-r{text-align:right;padding:.45rem .5rem;white-space:nowrap}
+    .dl-meta{color:var(--text-secondary);font-size:.8rem}
+    /* Watch state badges */
+    .poster-badges-tr{position:absolute;top:.35rem;right:.35rem;display:flex;flex-direction:column;gap:.2rem;align-items:flex-end}
+    .badge-watched{background:var(--bg-ok-dark);color:#fff;font-size:.7rem;font-weight:700;padding:.15rem .35rem;border-radius:.25rem}
+    .badge-progress{background:var(--bg-warn-light);color:#fff;font-size:.6rem;font-weight:600;padding:.1rem .3rem;border-radius:.2rem}
+    /* Profile dropdown menu */
+    .profile-menu-wrap {
+      position: relative;
+      margin-left: auto;
+    }
+    .profile-pill {
+      background: var(--bg-accent);
+      color: var(--text-accent);
+      font-size: .75rem;
+      font-weight: 600;
+      padding: .2rem .6rem;
+      border-radius: 1rem;
+      border: none;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: .2rem;
+      max-width: 8rem;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      transition: background .15s, color .15s;
+    }
+    .profile-pill:hover { background: var(--accent-primary-dark); color: #fff; }
+    .profile-menu {
+      position: absolute;
+      right: 0;
+      top: calc(100% + .5rem);
+      width: 13rem;
+      background: var(--bg-card);
+      border: 1px solid var(--border-light);
+      border-radius: .75rem;
+      z-index: 300;
+      box-shadow: 0 10px 30px rgba(0,0,0,.6);
+      opacity: 0;
+      transform: translateY(-8px) scale(.96);
+      pointer-events: none;
+      transition: opacity .18s, transform .18s;
+    }
+    .profile-menu.open {
+      opacity: 1;
+      transform: none;
+      pointer-events: auto;
+    }
+    .profile-menu-header {
+      padding: .6rem .75rem;
+      font-size: .72rem;
+      color: var(--text-secondary);
+      border-bottom: 1px solid rgba(255,255,255,.06);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .profile-menu-item {
+      display: flex;
+      align-items: center;
+      gap: .5rem;
+      padding: .45rem .75rem;
+      color: var(--text-bright);
+      font-size: .85rem;
+      text-decoration: none;
+      transition: background .1s;
+    }
+    .profile-menu-item:hover { background: rgba(255,255,255,.06); }
+    .profile-menu-item-active { color: var(--text-accent-2); }
+    .profile-menu-item i { width: .9rem; text-align: center; color: var(--text-secondary); font-size: .78rem; flex: none; }
+    .profile-menu-item-active i { color: var(--text-accent-2); }
+    .profile-menu-divider { height: 1px; background: rgba(255,255,255,.06); margin: .25rem 0; }
+    /* Mobile: collapse the header nav links into the profile dropdown so the
+       header is just wordmark + pill (declutters the cramped mobile header). */
+    .profile-menu-mobile-nav { display: none; }
+    @media (max-width: 640px) {
+      header .nav-link { display: none; }
+      .profile-menu-mobile-nav { display: block; }
+      /* Row 2 (IPT stats) is left-packed by default; on mobile spread it edge-to-edge
+         so it starts (left) and ends (right) at the same 1rem as the rows above/below. */
+      .ipt-stats { justify-content: space-between; gap: .3rem; }
+    }
+    .profile-menu-badge {
+      margin-left: auto;
+      background: var(--bg-accent);
+      color: var(--text-accent);
+      font-size: .6rem;
+      font-weight: 700;
+      padding: .05rem .3rem;
+      border-radius: .75rem;
+    }
+    .profile-menu-badge-error { background: var(--bg-error-dark); color: var(--text-error-light); }
+    /* Pill button styling (subscription builder tabs) */
+    .pill { background:var(--bg-card-alt);color:var(--text-secondary);border:1px solid var(--border);padding:.35rem .65rem;border-radius:.375rem;font-size:.8rem;cursor:pointer;transition:background .15s,color .15s,border-color .15s;font-family:inherit;font-weight:500;display:inline-flex;align-items:center;justify-content:center }
+    .pill:hover { background:var(--border);color:var(--text-bright) }
+    .pill.active { background:var(--accent-primary-dark);color:#fff;border-color:var(--accent-primary-dark) }
+    .pill:disabled { opacity:.5;cursor:not-allowed }
+    /* Skeleton loading animation (preview results) */
+    .preview-skeleton { background:linear-gradient(90deg, var(--bg-card-alt) 0%, var(--bg-card) 50%, var(--bg-card-alt) 100%);background-size:200% 100%;animation:shimmer 1.5s infinite;border-radius:.375rem;height:2.5rem;margin-bottom:.5rem }
+    @keyframes shimmer { 0% { background-position:200% 0 } 100% { background-position:-200% 0 } }
+    /* Delete button styling for subscriptions */
+    #delete-sub-btn:not(:disabled) { background:none;color:var(--color-error);border-color:var(--color-error);opacity:1;cursor:pointer }
+    #delete-sub-btn:not(:disabled):hover { background:rgba(239, 68, 68, .1) }
+    #delete-sub-btn:disabled { background:none;color:var(--text-muted);border-color:var(--border);opacity:.5;cursor:not-allowed }
+    /* Subscribe button disabled styling */
+    #save-btn:disabled { background:var(--border);color:var(--text-secondary);border-color:var(--border);opacity:.5;cursor:not-allowed }
+    /* Shared page-layout primitives */
+    .wrn{color:var(--color-warn)}
+    .page-section{margin-bottom:2rem}
+    .section-heading{font-size:1rem;font-weight:600;color:var(--text-light);margin:0 0 .75rem;border-bottom:1px solid var(--bg-card-alt);padding-bottom:.4rem}
+    .empty-state{color:var(--text-muted);font-size:.875rem;padding:.75rem 0;margin:0}
+    /* Stat cards */
+    .stat-cards{display:flex;flex-wrap:wrap;gap:1rem}
+    .stat-card{background:var(--bg-card);border:1px solid var(--border-light);border-radius:var(--radius-lg);padding:1rem;flex:1;min-width:10rem}
+    .stat-card.info{background:var(--bg-info);border-color:var(--bg-info-dark)}
+    .stat-card-label{font-size:.75rem;color:var(--text-secondary);margin-bottom:.25rem}
+    .stat-card-value{font-size:2.25rem;font-weight:700;line-height:1}
+    .stat-card-sub{font-size:.72rem;color:var(--text-muted);margin-top:.35rem}
+    /* Two-column responsive grid */
+    .col-2{display:grid;grid-template-columns:1fr 1fr;gap:1.5rem}
+    @media(max-width:768px){.col-2{grid-template-columns:1fr}}
+    /* Torrent row variants */
+    .ipt-result-drain{border-left:2px solid var(--bg-error-dark)}
+    /* Warning / alert panel */
+    .warn-panel{background:var(--bg-warn);border:1px solid var(--bg-warn-medium);border-radius:var(--radius-lg);padding:1.25rem}
+    .warn-panel-title{font-size:1rem;font-weight:700;color:var(--color-warn);margin:0 0 .35rem}
+    .warn-panel-desc{font-size:.8rem;color:var(--text-secondary);margin:0 0 1rem}
+    .warn-panel-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(18rem,1fr));gap:1rem}
+    .warn-card{background:var(--bg-card);border:1px solid var(--bg-warn-medium);border-radius:var(--radius-lg);padding:1rem}
+    .warn-card-name{font-family:monospace;font-size:.85rem;font-weight:600;color:var(--text-bright);margin-bottom:.5rem}
+    .warn-card-meta{font-size:.78rem;color:var(--text-secondary);margin-bottom:.75rem}
+    .warn-card-meta strong{color:var(--color-warn)}
+    .warn-card-meta .note{color:var(--text-warn)}
+    /* Shared form styling */
+    .settings-section{background:var(--bg-card);border-radius:.5rem;padding:1.5rem;margin-bottom:2rem}
+    .settings-section h2{margin:0 0 1.25rem;font-size:1.1rem;font-weight:600;color:var(--text-primary)}
+    .settings-section form{display:block;max-width:none;width:auto;gap:0}
+    .field-row{display:flex;flex-wrap:wrap;gap:1rem;margin-bottom:1rem}
+    .field{display:flex;flex-direction:column;gap:.35rem;flex:1;min-width:180px}
+    .field label{font-size:.85rem;font-weight:500;color:var(--text-secondary)}
+    .field input{background:var(--bg-card-alt);color:var(--text-primary);border:1px solid var(--border);border-radius:.375rem;padding:.5rem .75rem;font-size:.9rem;line-height:1.5;font-family:inherit;box-sizing:border-box;width:100%;flex:none;height:2.375rem}
+    .field input:focus{outline:2px solid var(--accent-primary);outline-offset:1px}
+    .field input[type=password]{letter-spacing:.05em}
+    .field-check{display:flex;align-items:center;gap:.5rem;font-size:.9rem;color:var(--text-primary);cursor:pointer;margin-bottom:.75rem}
+    .field-check input{width:1.1rem;height:1.1rem;flex:none}
+    .hint{font-size:.8rem;color:var(--text-secondary);margin-top:.25rem}
+    .save-row{display:flex;justify-content:flex-end;align-items:center;gap:.75rem;margin-top:1.25rem}
+    /* Page title row — flex header pattern */
+    .page-title-row{display:flex;align-items:center;justify-content:space-between;margin-bottom:1.25rem;flex-wrap:wrap;gap:.75rem}
+    /* Loading overlay */
+    .loading-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:50;align-items:center;justify-content:center;flex-direction:column;gap:1rem}
+    .loading-overlay.htmx-request{display:flex}
+    .loading-spinner{width:2.5rem;height:2.5rem;border:3px solid var(--accent-primary-dark);border-top-color:transparent;border-radius:50%;animation:spin 1s linear infinite}
+    .loading-text{color:#e5e7eb;font-size:1rem;margin:0}
+    @keyframes spin{to{transform:rotate(360deg)}}
+    /* Error panel */
+    .error-panel{background:var(--bg-error);color:var(--text-error);border:1px solid var(--bg-error-dark);border-radius:.5rem;padding:.6rem .85rem;font-size:.85rem;margin-bottom:1rem}
+    /* Empty state card variant */
+    .empty-state-card{background:var(--bg-card-alt);border:1px solid var(--border);border-radius:.5rem;padding:2rem;text-align:center;color:var(--text-secondary)}
+    /* Stat card variant */
+    .stat-card-sm{background:var(--bg-card-alt);border:1px solid var(--border);border-radius:.5rem;padding:.6rem 1rem;min-width:7rem}
+    .stat-card-sm .stat-card-value{font-size:1.5rem}
+    /* Optional section heading variant for top borders */
+    .section-heading-top{border-top:1px solid var(--bg-card-alt);padding-top:.75rem;margin-top:1.5rem}
+    /* TorrentHub wordmark */
+    .th-wordmark{display:inline-flex;align-items:baseline;gap:.4em;font-family:'Space Grotesk',system-ui,sans-serif;font-weight:700;letter-spacing:.02em;line-height:1;color:var(--text-bright);text-decoration:none}
+    .th-wordmark::before{content:"";width:.42em;height:.42em;border-radius:999px;background:var(--text-accent-2);box-shadow:0 0 .6em var(--text-accent-2);align-self:center}
+    .th-wordmark em{font-style:normal;color:var(--text-accent-2)}
+    /* Inline trailer teaser (iteration 1 — carousels): muted preview, cover-cropped over the 2:3 poster.
+       Drive size off HEIGHT (no aspect-ratio conflict): a 16:9 iframe at 100% height needs ~266.7% of a
+       2:3 box's width; centred + overflow:hidden crops the sides. The layer is hidden (opacity:0) until
+       trailer.js adds .playing on the YT PLAYING event — so the title-card / thumbnail flash never shows. */
+    .teaser-layer{position:absolute;inset:0;background:#000;z-index:1;overflow:hidden;border-radius:inherit;opacity:0;transition:opacity .25s ease}
+    .teaser-layer.loading{opacity:1;background:rgba(3,7,18,.6);display:flex;align-items:center;justify-content:center}
+    .teaser-layer.playing{opacity:1}
+    /* Self-hosted clip: native <video> fills the card cleanly via object-fit (no chrome, no iframe hacks) */
+    .teaser-layer video{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;display:block;pointer-events:none;border-radius:inherit}
+    /* Don't let a long-press pop the OS callout/save-image menu over a carousel card — the hold IS the teaser trigger */
+    [data-trailer-id]{-webkit-touch-callout:none;-webkit-user-select:none;user-select:none;-webkit-tap-highlight-color:transparent}
+    [data-trailer-id] img{-webkit-touch-callout:none;-webkit-user-drag:none}
+    /* Outline applied by trailer.js when the hold/hover registers — matches exactly when the teaser starts */
+    .trailer-active .poster-wrap{outline:2px solid var(--accent-primary);outline-offset:-2px}
+    /* Trailers overlay (global, opens over the current screen) */
+    .trailers-overlay{display:none;position:fixed;inset:0;z-index:500;background:rgba(3,7,18,.97);flex-direction:column;gap:.5rem;padding:.75rem;box-sizing:border-box}
+    .trailers-overlay.open{display:flex}
+    .trailers-overlay-bar{flex:0 0 auto;display:flex;align-items:center;gap:.6rem}
+    .trailers-overlay-title{flex:1;min-width:0;color:var(--text-bright);font-weight:600;font-size:.95rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .trailers-overlay-close{background:none;border:none;color:#fff;font-size:1.8rem;line-height:1;cursor:pointer;padding:0 .35rem;flex:none}
+    .trailers-overlay-btn{background:none;border:none;color:var(--text-secondary);font-size:1.1rem;line-height:1;cursor:pointer;padding:0 .35rem;flex:none}
+    .trailers-overlay-btn:hover{color:#fff}
+    .trailers-overlay-stage{flex:1;min-height:0;position:relative;display:flex;align-items:center;justify-content:center;background:#000;border-radius:var(--radius-lg);overflow:hidden}
+    .trailers-overlay-stage video,.trailers-overlay-stage #to-yt{width:100%;height:100%;border:0;display:none;background:#000}
+    .trailers-overlay-stage video{object-fit:contain}
+    .trailers-overlay-stage video.show,.trailers-overlay-stage #to-yt.show{display:block}
+    .trailers-overlay-stage #to-yt iframe{width:100%;height:100%;border:0;display:block}
+    .to-spinner{position:absolute;inset:0;display:none;align-items:center;justify-content:center}
+    .to-spinner.show{display:flex}
+    .to-empty{position:absolute;inset:0;display:none;align-items:center;justify-content:center;color:var(--text-secondary);text-align:center;padding:1rem}
+    .to-empty.show{display:flex}
+    .trailers-overlay-strip{flex:0 0 auto;display:flex;gap:.5rem;overflow-x:auto;padding:.25rem;scrollbar-width:thin}
+    .to-poster{flex:0 0 auto;width:60px;border:0;background:none;padding:0;margin:0;cursor:pointer;border-radius:.35rem;overflow:hidden;opacity:.55;transition:opacity .15s;-webkit-tap-highlight-color:transparent}
+    .to-poster img{width:100%;display:block;aspect-ratio:2/3;object-fit:cover;border-radius:.35rem}
+    .to-poster.active{opacity:1;outline:2px solid var(--accent-primary);outline-offset:-2px}
+    @media(min-width:480px){ .to-poster{width:80px} }
+    /* Background-scan banner — non-blocking; shown when periodic scan is in flight */
+    .scan-banner{display:none;background:var(--bg-info,rgba(59,130,246,.1));border-bottom:1px solid var(--bg-info-dark,rgba(59,130,246,.35));color:var(--text-info,#bfdbfe);padding:.4rem 1rem;font-size:.75rem;align-items:center;gap:.5rem;justify-content:center}
+    .scan-banner.show{display:flex}
+    .scan-banner .spin{animation:spin 1s linear infinite;display:inline-block}
+    .scan-progress{display:none;width:8rem;max-width:25vw;height:.2rem;background:var(--border-light);border-radius:1rem;overflow:hidden;flex:none}
+    .scan-progress.show{display:inline-block}
+    .scan-progress-fill{height:100%;width:0;background:var(--text-info,#bfdbfe);transition:width .3s}
+    /* Global toast — full-width banner across the top for short-lived action feedback */
+    .th-toast{position:fixed;top:.75rem;left:.75rem;right:.75rem;transform:translateY(-150%);background:var(--bg-card);border:1px solid var(--border-light);border-radius:var(--radius-lg);padding:.75rem 1rem;font-size:.875rem;color:var(--text-primary);box-shadow:0 10px 30px rgba(0,0,0,.5);z-index:600;opacity:0;transition:opacity .25s ease,transform .25s ease;pointer-events:none;cursor:pointer}
+    .th-toast.show{opacity:1;transform:translateY(0);pointer-events:auto}
+    .th-toast.success{border-color:var(--color-ok-alt)}
+    .th-toast.error{border-color:var(--color-error)}
+    .th-toast p{margin:0}
+    .th-toast a{color:var(--text-accent-2)}
+    /* Carousel — shared by the home "What's New" row and the recommendation rows (/ and /recommend).
+       Lives here, not in index.html, because /recommend extends base.html and would render unstyled. */
+    .carousel-row {
+      display:flex;gap:.75rem;overflow-x:auto;padding:.25rem .25rem .5rem;
+      scroll-snap-type:x mandatory;scrollbar-width:thin
+    }
+    .carousel-card {
+      flex:0 0 auto;width:140px;border-radius:.5rem;
+      text-decoration:none;color:inherit;display:block;
+      scroll-snap-align:start;
+    }
+    .carousel-card .poster-wrap { border-radius:.5rem;overflow:hidden }
+    @media(min-width:480px){ .carousel-card{width:160px} }
+    /* Instant hover outline only on a real mouse — touch (pointer:coarse) gets the outline from
+       trailer.js (.trailer-active) when the hold registers, so border and playback line up. */
+    @media (hover:hover) and (pointer:fine){ .carousel-card:hover .poster-wrap{ outline:2px solid var(--accent-primary);outline-offset:-2px } }
+    .carousel-card-title {
+      background:rgba(0,0,0,.7);color:var(--text-bright);font-size:.7rem;font-weight:500;
+      padding:.3rem .4rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis
+    }
+    /* Recommendation rows and cards */
+    .rec-page{display:flex;flex-direction:column;gap:1.5rem}
+    .rec-row-head{display:flex;align-items:baseline;justify-content:space-between;gap:.75rem}
+    .rec-row-head .section-title{margin:1.5rem 0 .25rem}
+    .rec-row-sub{color:var(--text-secondary);font-size:.78rem;line-height:1.4;margin:0 0 .5rem}
+    .rec-card{background:var(--bg-card);overflow:hidden}
+    .rec-why{color:var(--text-secondary);font-size:.65rem;line-height:1.3;margin:.3rem .4rem 0;max-height:2.6em;overflow:hidden}
+    .rec-actions{display:flex;flex-wrap:wrap;gap:.25rem;padding:.35rem .4rem .5rem}
+    .rec-btn{background:var(--bg-card-alt);color:var(--text-secondary);border:1px solid var(--border);border-radius:.3rem;font-size:.65rem;line-height:1.2;padding:.2rem .4rem;cursor:pointer;font-family:inherit;text-decoration:none;white-space:nowrap}
+    .rec-btn:hover{background:var(--border);color:var(--text-bright)}
+    .rec-hide{flex:none}
+    .rec-more{color:var(--text-accent);font-size:.78rem;text-decoration:none;white-space:nowrap}
+    .rec-rate{display:inline-flex;width:auto;max-width:none;margin:0}
+    .rec-rate select{background:var(--bg-card-alt);color:var(--text-secondary);border:1px solid var(--border);border-radius:.3rem;font-size:.65rem;padding:.15rem .25rem;width:auto}
+    /* Recommendation tile chrome — plain card, state badge, mouse-only hover bar. The bar shows
+       for the sheet script's `mouse-over` class (set only by a mouse pointer, so a tap always opens
+       the sheet) or keyboard focus — not `:hover` or a media query: Chrome on a mouse-driven
+       Windows desktop can report `hover: none`. */
+    .rec-tile{position:relative}
+    .rec-open{display:block;color:inherit;text-decoration:none}
+    .rec-badge{position:absolute;top:.35rem;left:.35rem;z-index:2;background:var(--accent-primary);color:#fff;font-size:.6rem;font-weight:700;letter-spacing:.03em;padding:.1rem .35rem;border-radius:var(--radius-sm)}
+    .rec-badge:empty{display:none}
+    .rec-tile:has(.poster-badges-tl) .rec-badge{top:1.9rem}
+    .rec-badge[data-state="seen"]{background:var(--bg-ok);color:var(--text-ok)}
+    .rec-badge[data-state="dismissed"]{background:var(--bg-error);color:var(--text-error)}
+    .rec-hover{display:none;position:absolute;top:.35rem;right:.35rem;flex-direction:column;z-index:3;gap:.25rem;align-items:flex-end;pointer-events:none}
+    .rec-hover-btn{display:inline-flex;align-items:center;justify-content:center;width:1.9rem;height:1.9rem;padding:0;border:1px solid var(--border-light);border-radius:.35rem;background:rgba(3,7,18,.82);color:var(--text-bright);cursor:pointer;font-size:.85rem;line-height:1;font-family:inherit;pointer-events:auto}
+    .rec-hover-btn:hover{background:var(--accent-primary-dark);border-color:transparent}
+    .rec-tile.mouse-over .rec-hover, .rec-tile:has(:focus-visible) .rec-hover{display:flex}
+    /* Shared detail sheet — bottom sheet on a phone, centred dialog from 720 px. The top bar and
+       footer are static siblings of the one scrolling .detail-scroll: a position:sticky grid item
+       only pins inside its own grid area, so a sticky × would scroll away with the body. */
+    #detail-sheet{border:0;padding:0;margin:auto auto 0;width:100%;max-width:640px;max-height:92dvh;background:var(--bg-card);color:var(--text-bright);border-radius:20px 20px 0 0;box-shadow:0 -10px 40px rgba(0,0,0,.6);overflow:hidden}
+    #detail-sheet::backdrop{background:rgba(3,7,18,.72)}
+    #detail-sheet-body{display:flex;flex-direction:column;max-height:92dvh;min-height:0}
+    .detail-shell{display:flex;flex-direction:column;min-height:0;max-height:inherit}
+    .detail-sheet-inner{padding:1rem}
+    .detail-sheet-denied{color:var(--text-secondary);margin:0 0 .75rem}
+    .detail-top{position:relative;flex:none;height:17px}
+    .detail-handle{position:absolute;left:50%;top:10px;transform:translateX(-50%);width:40px;height:5px;border-radius:3px;background:var(--border)}
+    .detail-close{position:absolute;top:22px;right:10px;z-index:1;display:flex;align-items:center;justify-content:center;width:44px;height:44px;padding:0;border:0;border-radius:22px;background:var(--bg-card);color:var(--text-secondary);font-size:1.5rem;line-height:1;cursor:pointer}
+    .detail-close:hover{color:var(--text-bright)}
+    .detail-scroll{flex:1 1 auto;min-height:0;overflow-y:auto;overscroll-behavior:contain}
+    /* One grid, two layouts. No row-gap: spacing comes from item margins, so an absent action
+       block, rating card, why strip or results list leaves no phantom gap. */
+    .detail-grid{display:grid;grid-template-columns:104px minmax(0,1fr);grid-template-rows:auto 1fr auto auto auto auto;grid-template-areas:"poster head" "poster why" "acts acts" "synopsis synopsis" "rate rate" "results results";column-gap:16px;align-items:start;padding:12px 20px 0}
+    .detail-poster{grid-area:poster;width:104px;height:156px;object-fit:cover;border-radius:10px;margin:0 0 18px}
+    .detail-no-img{display:flex;align-items:center;justify-content:center;background:var(--bg-card-alt);color:var(--text-dim);font-size:.75rem}
+    .detail-head{grid-area:head;min-width:0;margin:0 0 10px}
+    .detail-head h1{margin:0 0 6px;padding-right:40px;font-size:22px;line-height:1.2;font-weight:700}
+    .detail-meta{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin:0;font-size:13px;color:var(--text-secondary)}
+    .detail-score{display:inline-flex;align-items:center;gap:3px;color:var(--section-plex)}
+    .detail-synopsis{grid-area:synopsis;margin:0 0 18px;font-size:15px;line-height:1.55;color:var(--text-primary)}
+    .detail-results{grid-area:results}
+    .detail-foot{flex:none;display:flex;flex-direction:column;gap:10px;padding:14px 20px calc(14px + env(safe-area-inset-bottom));background:var(--bg-card);border-top:1px solid var(--border-light)}
+    .detail-foot-row{display:flex;align-items:center;gap:10px;min-width:0}
+    .detail-season-label{font-size:13px;color:var(--text-secondary)}
+    .detail-season{width:5rem;flex:none}
+    .detail-find{flex:1;height:52px;display:inline-flex;align-items:center;justify-content:center;gap:8px;padding:0 16px;border:0;border-radius:12px;background:var(--accent-primary-dark);color:#fff;font-size:16px;font-weight:600}
+    .detail-find:hover{background:var(--accent-primary-darker)}
+    .detail-find svg{width:18px;height:18px}
+    #ipt-spinner{display:none;font-size:13px;color:var(--text-secondary)}
+    #ipt-spinner.htmx-request{display:inline}
+    .detail-upload-form{display:flex;align-items:center;gap:10px;width:auto;max-width:none;flex:1;min-width:0}
+    .detail-upload-label{display:inline-flex;align-items:center;justify-content:center;flex:1;height:44px;padding:0 12px;border-radius:12px;background:var(--bg-card-alt);border:1px solid var(--border-light);color:var(--text-bright);font-size:14px;font-weight:500;cursor:pointer;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    .detail-file{display:none}
+    .detail-add[hidden]{display:none}
+    #torrent-result:empty{display:none}
+    .detail-add{height:44px;padding:0 14px;border-radius:12px;background:transparent;border:1px solid var(--border);color:var(--text-secondary);font-size:13px;white-space:nowrap}
+    /* Action block — tiles on a phone, pills on a desktop. #detail-rec is display:contents, so its
+       children are grid items of .detail-grid while the block stays one swap target. */
+    .detail-rec{display:contents}
+    .detail-rec .acts{grid-area:acts;display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:0 0 18px}
+    .detail-rec .acts form{display:block;width:auto;max-width:none}
+    .detail-rec .act{width:100%;height:64px;min-width:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;padding:8px;border:1px solid var(--border);border-radius:12px;background:var(--bg-card-alt);color:var(--text-bright);font-size:12px;font-weight:500;cursor:pointer;font-family:inherit}
+    .detail-rec .act svg{width:20px;height:20px}
+    .detail-rec .act.on.watchlist{background:var(--accent-primary);border-color:var(--accent-primary);color:#fff}
+    .detail-rec .act.on.seen{background:var(--bg-ok);border-color:var(--bg-ok);color:var(--text-ok)}
+    .detail-rec .act.on.dismissed{background:var(--bg-error);border-color:var(--color-error);color:var(--text-error)}
+    .detail-rec .why{grid-area:why;margin:0 0 12px}
+    .detail-rec .why h4{font-size:.7rem;text-transform:uppercase;letter-spacing:.06em;color:var(--text-muted);margin:0 0 6px}
+    .detail-rec .chips{display:flex;flex-wrap:wrap;gap:6px}
+    .detail-rec .chip{background:var(--bg-accent);color:var(--text-accent);border-radius:999px;padding:4px 9px;font-size:11px}
+    .detail-rec .stars{grid-area:rate;display:flex;align-items:center;justify-content:space-between;gap:6px;width:auto;max-width:none;margin:0 0 18px;padding:12px 14px;background:var(--bg-card-alt);border:1px solid var(--border-light);border-radius:12px}
+    .detail-rec .rate-label{font-size:13px;color:var(--text-secondary)}
+    /* Outline star in the dim token, filled in the rating gold — 40 px targets on a phone. */
+    .detail-rec .star{position:relative;display:inline-block;width:40px;height:40px;font-size:30px;line-height:40px;text-align:center}
+    .detail-rec .star::before{content:"\2606";color:var(--text-muted)}
+    .detail-rec .star.full::before{content:"\2605";color:var(--section-plex)}
+    .detail-rec .star.half::before{content:"\2605";background:linear-gradient(90deg,var(--section-plex) 50%,var(--text-muted) 50%);-webkit-background-clip:text;background-clip:text;color:transparent}
+    .detail-rec .star button{position:absolute;top:0;bottom:0;width:50%;border:0;padding:0;background:transparent;cursor:pointer}
+    .detail-rec .star button:first-child{left:0}
+    .detail-rec .star button:last-child{right:0}
+    .detail-rec .sv{color:var(--text-secondary);font-size:13px}
+    @media (min-width:720px){
+      #detail-sheet{margin:auto;max-width:820px;border-radius:16px}
+      .detail-top{height:auto;display:flex;justify-content:flex-end;padding:12px 14px 0}
+      .detail-close{position:static;width:40px;height:40px;border-radius:10px;background:var(--bg-card-alt);border:1px solid var(--border);font-size:1.25rem}
+      /* The poster spans the right column's rows; the 1fr synopsis row absorbs the poster's extra
+         height, so the title, chips and actions stay together instead of starting below it. */
+      .detail-grid{grid-template-columns:260px minmax(0,1fr);grid-template-rows:auto auto auto 1fr auto;grid-template-areas:"poster head" "poster why" "poster acts" "poster synopsis" "rate results";padding:28px}
+      .detail-poster{width:232px;height:348px;border-radius:10px;margin:0 0 16px}
+      .detail-head{margin:0 0 18px}
+      .detail-head h1{padding-right:0;font-size:28px;letter-spacing:-.01em}
+      .detail-synopsis{font-size:15px;line-height:1.6}
+      .detail-rec .acts{display:flex;flex-wrap:wrap;gap:10px}
+      .detail-rec .act{width:auto;height:40px;flex-direction:row;gap:6px;padding:0 14px;border-radius:999px;background:transparent;font-size:13px}
+      .detail-rec .act svg{width:15px;height:15px}
+      .detail-rec .stars{flex-wrap:wrap;justify-content:center;gap:4px 0;width:232px;margin:0;padding:0;background:none;border:0}
+      .detail-rec .rate-label,.detail-rec .sv{flex-basis:100%;text-align:center}
+      .detail-rec .star{width:32px;height:32px;font-size:24px;line-height:32px}
+      .detail-rec .sv{font-size:12px}
+      .detail-foot{flex-direction:row;align-items:center;gap:16px;padding:14px 28px calc(14px + env(safe-area-inset-bottom))}
+      .detail-foot-row{flex:1}
+      .detail-find{height:48px;border-radius:10px;font-size:15px}
+      .detail-upload-form{flex:none}
+      .detail-upload-label{flex:none;height:auto;padding:0;border:0;background:none;color:var(--text-accent);font-size:13px}
+    }
+  
+</style>
+</head>
+<body data-view="sheet">
+<main class="fixture-page">
+  <div class="carousel-row fixture-row">
+
+
+<div class="carousel-card rec-card rec-tile" id="rec-card-movie_900001"
+     data-ck="movie:900001">
+  <a class="rec-open"
+     href="/media/900001?media_type=movie&amp;rec_row=row-quiet-drama"
+     hx-get="/media/900001?media_type=movie&amp;rec_row=row-quiet-drama"
+     hx-target="#detail-sheet-body" hx-swap="innerHTML" data-detail>
+    <div class="poster-wrap">
+      
+      <div class="no-img">No image</div>
+      
+      <div class="poster-badges-br"><div id="avail-900001" class="avail-slot"></div></div>
+    </div>
+    <div class="carousel-card-title">Harbour Lights</div>
+  </a>
+  
+  <span class="rec-badge" data-state=""></span>
+  
+  
+<div class="rec-hover">
+  <button type="button" class="rec-hover-btn" data-act="watchlist"
+          aria-label="My list" hx-post="/recommend/action" hx-swap="none"
+          hx-vals='{"ck":"movie:900001","action":"watchlist","title":"Harbour Lights","year":"2019","kind":"movie","row_key":"row-quiet-drama","from_tile":"1"}'>&#43;</button>
+  <button type="button" class="rec-hover-btn" data-act="seen" aria-label="Seen it"
+          hx-post="/recommend/action" hx-swap="none"
+          hx-vals='{"ck":"movie:900001","action":"seen","title":"Harbour Lights","year":"2019","kind":"movie","row_key":"row-quiet-drama","from_tile":"1"}'>&#10003;</button>
+  <button type="button" class="rec-hover-btn" data-act="dismissed" aria-label="Not for me"
+          hx-post="/recommend/action" hx-swap="none"
+          hx-vals='{"ck":"movie:900001","action":"dismissed","title":"Harbour Lights","year":"2019","kind":"movie","row_key":"row-quiet-drama","from_tile":"1"}'>&#10005;</button>
+</div>
+</div>
+
+
+<div class="carousel-card rec-card rec-tile" id="rec-card-movie_900002"
+     data-ck="movie:900002">
+  <a class="rec-open"
+     href="/media/900002?media_type=movie&amp;rec_row=row-quiet-drama"
+     hx-get="/media/900002?media_type=movie&amp;rec_row=row-quiet-drama"
+     hx-target="#detail-sheet-body" hx-swap="innerHTML" data-detail>
+    <div class="poster-wrap">
+      
+      <div class="no-img">No image</div>
+      
+      <div class="poster-badges-br"><div id="avail-900002" class="avail-slot"></div></div>
+    </div>
+    <div class="carousel-card-title">The Long Static</div>
+  </a>
+  
+  <span class="rec-badge" data-state=""></span>
+  
+  
+<div class="rec-hover">
+  <button type="button" class="rec-hover-btn" data-act="watchlist"
+          aria-label="My list" hx-post="/recommend/action" hx-swap="none"
+          hx-vals='{"ck":"movie:900002","action":"watchlist","title":"The Long Static","year":"2019","kind":"movie","row_key":"row-quiet-drama","from_tile":"1"}'>&#43;</button>
+  <button type="button" class="rec-hover-btn" data-act="seen" aria-label="Seen it"
+          hx-post="/recommend/action" hx-swap="none"
+          hx-vals='{"ck":"movie:900002","action":"seen","title":"The Long Static","year":"2019","kind":"movie","row_key":"row-quiet-drama","from_tile":"1"}'>&#10003;</button>
+  <button type="button" class="rec-hover-btn" data-act="dismissed" aria-label="Not for me"
+          hx-post="/recommend/action" hx-swap="none"
+          hx-vals='{"ck":"movie:900002","action":"dismissed","title":"The Long Static","year":"2019","kind":"movie","row_key":"row-quiet-drama","from_tile":"1"}'>&#10005;</button>
+</div>
+</div>
+
+
+<div class="carousel-card rec-card rec-tile" id="rec-card-movie_900003"
+     data-ck="movie:900003">
+  <a class="rec-open"
+     href="/media/900003?media_type=movie&amp;rec_row=row-quiet-drama"
+     hx-get="/media/900003?media_type=movie&amp;rec_row=row-quiet-drama"
+     hx-target="#detail-sheet-body" hx-swap="innerHTML" data-detail>
+    <div class="poster-wrap">
+      
+      <div class="no-img">No image</div>
+      
+      <div class="poster-badges-br"><div id="avail-900003" class="avail-slot"></div></div>
+    </div>
+    <div class="carousel-card-title">Winter Ferry</div>
+  </a>
+  
+  <span class="rec-badge" data-state=""></span>
+  
+  
+<div class="rec-hover">
+  <button type="button" class="rec-hover-btn" data-act="watchlist"
+          aria-label="My list" hx-post="/recommend/action" hx-swap="none"
+          hx-vals='{"ck":"movie:900003","action":"watchlist","title":"Winter Ferry","year":"2019","kind":"movie","row_key":"row-quiet-drama","from_tile":"1"}'>&#43;</button>
+  <button type="button" class="rec-hover-btn" data-act="seen" aria-label="Seen it"
+          hx-post="/recommend/action" hx-swap="none"
+          hx-vals='{"ck":"movie:900003","action":"seen","title":"Winter Ferry","year":"2019","kind":"movie","row_key":"row-quiet-drama","from_tile":"1"}'>&#10003;</button>
+  <button type="button" class="rec-hover-btn" data-act="dismissed" aria-label="Not for me"
+          hx-post="/recommend/action" hx-swap="none"
+          hx-vals='{"ck":"movie:900003","action":"dismissed","title":"Winter Ferry","year":"2019","kind":"movie","row_key":"row-quiet-drama","from_tile":"1"}'>&#10005;</button>
+</div>
+</div>
+  </div>
+</main>
+<dialog id="detail-sheet" aria-label="Title details">
+  <div id="detail-sheet-body">
+
+
+
+<div class="detail-shell">
+  
+  <div class="detail-top">
+    <span class="detail-handle" aria-hidden="true"></span>
+    <button type="button" class="detail-close" data-detail-close aria-label="Close">&times;</button>
+  </div>
+  
+
+  <div class="detail-scroll">
+    <div class="detail-grid">
+      
+      <div class="detail-poster detail-no-img" aria-hidden="true">No image</div>
+      
+
+      <div class="detail-head">
+        <h1>Harbour Lights</h1>
+        <p class="detail-meta">
+          <span>2019</span>
+          <span aria-hidden="true">&middot;</span>
+          <span>movie</span>
+          
+          <span aria-hidden="true">&middot;</span>
+          <span class="detail-score">&#9733; 7.4</span>
+          
+        </p>
+      </div>
+
+      
+      
+
+<div id="detail-rec" class="detail-rec">
+  
+  <div class="acts">
+    <form hx-post="/recommend/action" hx-target="#detail-rec" hx-swap="outerHTML">
+      <input type="hidden" name="ck" value="movie:900001">
+  <input type="hidden" name="from_detail" value="1"><input type="hidden" name="row_key" value="row-quiet-drama">
+  <input type="hidden" name="title" value="Harbour Lights"><input type="hidden" name="year" value="2019">
+  <input type="hidden" name="kind" value="movie">
+      <input type="hidden" name="action" value="watchlist">
+      <button type="submit" class="act"
+              aria-pressed="false">
+        <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 4v12M4 10h12" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+        <span>My list</span>
+      </button>
+    </form>
+    <form hx-post="/recommend/action" hx-target="#detail-rec" hx-swap="outerHTML">
+      <input type="hidden" name="ck" value="movie:900001">
+  <input type="hidden" name="from_detail" value="1"><input type="hidden" name="row_key" value="row-quiet-drama">
+  <input type="hidden" name="title" value="Harbour Lights"><input type="hidden" name="year" value="2019">
+  <input type="hidden" name="kind" value="movie">
+      <input type="hidden" name="action" value="seen">
+      <button type="submit" class="act"
+              aria-pressed="false">
+        <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 11l4.5 4.5L17 5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        <span>Seen it</span>
+      </button>
+    </form>
+    <form hx-post="/recommend/action" hx-target="#detail-rec" hx-swap="outerHTML">
+      <input type="hidden" name="ck" value="movie:900001">
+  <input type="hidden" name="from_detail" value="1"><input type="hidden" name="row_key" value="row-quiet-drama">
+  <input type="hidden" name="title" value="Harbour Lights"><input type="hidden" name="year" value="2019">
+  <input type="hidden" name="kind" value="movie">
+      <input type="hidden" name="action" value="dismissed">
+      <button type="submit" class="act"
+              aria-pressed="false">
+        <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M5 5l10 10M15 5L5 15" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+        <span>Not for me</span>
+      </button>
+    </form>
+  </div>
+  <form class="stars" role="group" aria-label="Your rating" hx-post="/recommend/action"
+        hx-target="#detail-rec" hx-swap="outerHTML">
+    <input type="hidden" name="ck" value="movie:900001">
+  <input type="hidden" name="from_detail" value="1"><input type="hidden" name="row_key" value="row-quiet-drama">
+  <input type="hidden" name="title" value="Harbour Lights"><input type="hidden" name="year" value="2019">
+  <input type="hidden" name="kind" value="movie">
+    <input type="hidden" name="action" value="seen">
+    <span class="rate-label">Your rating</span>
+    <span class="star"><button type="submit" name="stars" value="0.5" aria-label="0.5 stars"></button><button type="submit" name="stars" value="1" aria-label="1 star"></button></span><span class="star"><button type="submit" name="stars" value="1.5" aria-label="1.5 stars"></button><button type="submit" name="stars" value="2" aria-label="2 stars"></button></span><span class="star"><button type="submit" name="stars" value="2.5" aria-label="2.5 stars"></button><button type="submit" name="stars" value="3" aria-label="3 stars"></button></span><span class="star"><button type="submit" name="stars" value="3.5" aria-label="3.5 stars"></button><button type="submit" name="stars" value="4" aria-label="4 stars"></button></span><span class="star"><button type="submit" name="stars" value="4.5" aria-label="4.5 stars"></button><button type="submit" name="stars" value="5" aria-label="5 stars"></button></span>
+    <span class="sv">Tap to rate</span>
+  </form>
+  
+  <div class="why">
+    <h4>Why it's here</h4>
+    <div class="chips"><span class="chip">Quiet drama</span><span class="chip">Slow burn</span><span class="chip">Coastal</span></div>
+  </div>
+  
+</div>
+
+      <p class="detail-synopsis">A lighthouse keeper trades weather reports with a radio operator she has never met. Over one winter the two build a map of each other out of shipping forecasts and static.</p>
+
+      <div class="detail-results">
+        <div id="torrent-results"></div>
+      </div>
+    </div>
+  </div>
+
+  
+  
+  <div class="detail-foot">
+    <div class="detail-foot-row">
+      
+      <button
+        class="detail-find"
+        hx-get="/ipt-search-inline"
+        hx-vals='{"q": "Harbour Lights", "title": "Harbour Lights", "media_type": "movie", "tmdb_id": "900001"}'
+        hx-include="#season"
+        hx-target="#torrent-results"
+        hx-swap="innerHTML"
+        hx-indicator="#ipt-spinner"
+      ><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v11M7 10l5 5 5-5M5 20h14"></path></svg>Find torrent</button>
+      <span id="ipt-spinner" class="htmx-indicator">Searching&hellip;</span>
+    </div>
+
+    <div class="detail-foot-row detail-upload">
+      <form
+        class="detail-upload-form"
+        hx-post="/add-torrent"
+        hx-target="#torrent-result"
+        hx-swap="innerHTML"
+        enctype="multipart/form-data"
+      >
+        <input type="hidden" name="title" value="Harbour Lights">
+        <input type="hidden" name="media_type" value="movie">
+        <input type="hidden" name="tmdb_id" value="900001">
+        
+        
+        <label for="torrent_file" class="detail-upload-label">Upload .torrent</label>
+        <input
+          type="file" id="torrent_file" name="torrent_file" accept=".torrent"
+          required class="detail-file"
+          onchange="this.previousElementSibling.textContent=this.files[0]?.name||'Upload .torrent';this.nextElementSibling.hidden=!this.files.length"
+        >
+        <button type="submit" class="detail-add" hidden>Add to qBittorrent</button>
+      </form>
+      <div id="torrent-result"></div>
+    </div>
+  </div>
+  
+</div></div>
+</dialog>
+<script>
+
+// Detail sheet — open after the swap, close on ×/backdrop/Esc/Back, follow rec-state
+(function () {
+  var dlg = document.getElementById('detail-sheet');
+  var body = document.getElementById('detail-sheet-body');
+  if (!dlg || !body) return;
+  var opened = false, pushed = false, toast = null, toastHome = null;
+
+  // A modal dialog sits in the top layer above every z-index, so #th-toast would hide behind the
+  // backdrop. Move it inside while open, and put it back where it came from on close.
+  function toastIn() {
+    toast = document.getElementById('th-toast');
+    if (!toast) return;
+    toastHome = toast.parentNode;
+    dlg.appendChild(toast);
+  }
+  function toastOut() {
+    if (toast && toastHome) toastHome.appendChild(toast);
+    toast = null; toastHome = null;
+  }
+
+  function open() {
+    if (opened) return;
+    opened = true;
+    if (!dlg.open && dlg.showModal) dlg.showModal();
+    // A second title opens at the top, and the page behind the modal cannot scroll away. The
+    // sheet's own scroller is .detail-scroll, not the body — the top bar and footer never move.
+    body.scrollTop = 0;
+    var scroller = body.querySelector('.detail-scroll');
+    if (scroller) scroller.scrollTop = 0;
+    document.documentElement.style.overflow = 'hidden';
+    toastIn();
+    if (!pushed) { pushed = true; history.pushState({ detail: 1 }, ''); }
+  }
+  // `fromPop` is the Back button: the entry is already gone, so never pop again.
+  function close(fromPop) {
+    if (!opened) return;
+    opened = false;
+    if (dlg.open && dlg.close) dlg.close();
+    document.documentElement.style.overflow = '';
+    toastOut();
+    if (pushed) { pushed = false; if (!fromPop) history.back(); }
+  }
+
+  dlg.addEventListener('click', function (e) {
+    var btn = e.target && e.target.closest && e.target.closest('[data-detail-close]');
+    if (e.target === dlg || btn) close(false);   // border:0 + inner panel, so this is the backdrop
+  });
+  dlg.addEventListener('cancel', function (e) {    // Esc: take over so the history entry is popped
+    if (e.preventDefault) e.preventDefault();
+    close(false);
+  });
+  document.addEventListener('htmx:afterSwap', function (e) {
+    if (e.target === body) open();
+  });
+  window.addEventListener('popstate', function () { close(true); });
+
+  // An action response carries HX-Trigger {"rec-state": {ck, state}}. Update every tile showing
+  // that ck; a tile in the My list row goes once the title left the list or was seen/dismissed.
+  document.addEventListener('rec-state', function (e) {
+    var d = e.detail || {};
+    var ck = d.ck, st = d.state || {};
+    if (!ck) return;
+    // Same priority the tile rendered (dismissed > seen > watchlist) — the state carries every
+    // independent flag, so picking a different one would show a second badge for the same title.
+    var badgeState = st.dismissed ? 'dismissed' : st.seen ? 'seen' : st.watchlist ? 'watchlist' : '';
+    var label = { watchlist: 'In list', seen: 'Seen', dismissed: 'Not for me' }[badgeState] || '';
+    var tiles = document.querySelectorAll('[data-ck]');
+    for (var i = 0; i < tiles.length; i++) {
+      var tile = tiles[i];
+      if (tile.getAttribute('data-ck') !== ck) continue;
+      var badge = tile.querySelector('.rec-badge');
+      if (badge) {
+        badge.setAttribute('data-state', badgeState);
+        badge.textContent = label;
+      }
+      if (!st.watchlist || st.seen || st.dismissed) {
+        // The My list row drops a title a seen/dismissed action outranks, even while its
+        // watchlist row still exists — same rule the row render applies.
+        if (tile.hasAttribute('data-mylist')) tile.remove();
+      }
+    }
+  });
+
+  // The tile hover bar follows a mouse pointer only, decided per event (see the .rec-tile CSS).
+  document.addEventListener('pointerover', function (e) {
+    if (e.pointerType !== 'mouse') return;
+    var tile = e.target.closest && e.target.closest('.rec-tile');
+    if (tile) tile.classList.add('mouse-over');
+  });
+  document.addEventListener('pointerout', function (e) {
+    var tile = e.target.closest && e.target.closest('.rec-tile');
+    if (tile && !tile.contains(e.relatedTarget)) tile.classList.remove('mouse-over');
+  });
+})();
+
+</script>
+<script>
+// The fixture's only addition: stand in for htmx's swap so the sheet opens through the real
+// handler (open() pushes history, sets `opened`, moves the toast) instead of a fixture-only path.
+(function () {
+  var body = document.getElementById('detail-sheet-body');
+  if (!body) return;
+  if (document.body.dataset.view === 'sheet') {
+    body.dispatchEvent(new CustomEvent('htmx:afterSwap', {bubbles: true}));
+  }
+  window.__fixtureReady = true;
+})();
+</script>
+</body>
+</html>

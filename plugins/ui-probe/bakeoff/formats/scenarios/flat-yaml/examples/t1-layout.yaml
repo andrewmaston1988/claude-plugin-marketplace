@@ -1,0 +1,10 @@
+id: t1-layout
+task: t1-layout
+backend: browser
+steps:
+  - viewport: { width: 390, height: 844, touch: true }
+  - open: { url: "http://127.0.0.1:18771/sheet.html" }
+  - expect_widths:
+      target: "[data-testid=action-tile]"
+      equals: [111, 111, 111]
+      tolerance: 1

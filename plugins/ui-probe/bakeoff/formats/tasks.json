@@ -1,0 +1,108 @@
+{
+  "version": 1,
+  "note": "Five pinned tasks for the scenario-format bake-off. Reference values are what a correct scenario must assert and observe on the fixtures in fixtures/.",
+  "fixtures": {
+    "sheet": "http://127.0.0.1:18771/sheet.html",
+    "health": "http://127.0.0.1:18772/health",
+    "tcpHost": "127.0.0.1",
+    "tcpPort": 18773,
+    "tcpBanner": "HELLO ui-probe",
+    "windows": {
+      "window": "ui-probe-fixture",
+      "control": "ValueBox",
+      "value": "fixture-value-42"
+    }
+  },
+  "tasks": [
+    {
+      "id": "t1-layout",
+      "backend": "browser",
+      "title": "Detail sheet: action tile widths at 390x844",
+      "ask": "Open the fixture detail sheet in a 390x844 touch viewport. Report the width, in CSS pixels, of each of the three action tiles. A correct scenario asserts all three widths are 111 px (within 1 px).",
+      "checks": [
+        {
+          "id": "tile_widths",
+          "op": "expect_widths",
+          "target": "[data-testid=action-tile]",
+          "equals": [111, 111, 111],
+          "tolerance": 1,
+          "markers": ["action-tile", "111"]
+        }
+      ]
+    },
+    {
+      "id": "t2-hover",
+      "backend": "browser",
+      "title": "Recommendation hover bar: shown on desktop, hidden on touch",
+      "ask": "On the fixture detail sheet, on a desktop viewport (1280x900, no touch), hover the first recommendation tile and assert its hover bar becomes fully visible (computed opacity 1). Then on a 390x844 touch viewport, tap the same tile and assert the hover bar stays hidden (computed opacity 0).",
+      "checks": [
+        {
+          "id": "hoverbar_desktop",
+          "op": "expect_css",
+          "target": "[data-testid=hover-bar]",
+          "property": "opacity",
+          "equals": "1",
+          "tolerance": 0.01,
+          "markers": ["hover-bar", "opacity"]
+        },
+        {
+          "id": "hoverbar_touch",
+          "op": "expect_css",
+          "target": "[data-testid=hover-bar]",
+          "property": "opacity",
+          "equals": "0",
+          "tolerance": 0.01,
+          "markers": ["hover-bar", "opacity"]
+        }
+      ]
+    },
+    {
+      "id": "http-health",
+      "backend": "network",
+      "title": "HTTP health endpoint returns ok",
+      "ask": "Request http://127.0.0.1:18772/health and assert the response is HTTP 200 with a JSON body whose \"ok\" field is true.",
+      "checks": [
+        {
+          "id": "health_ok",
+          "op": "expect_json",
+          "url": "http://127.0.0.1:18772/health",
+          "path": "ok",
+          "equals": true,
+          "markers": ["/health", "ok"]
+        }
+      ]
+    },
+    {
+      "id": "win-textbox",
+      "backend": "desktop",
+      "title": "WinForms textbox value",
+      "ask": "A WinForms fixture window titled \"ui-probe-fixture\" is already running. Read the value of its textbox control named \"ValueBox\" and assert it is exactly \"fixture-value-42\".",
+      "checks": [
+        {
+          "id": "textbox_value",
+          "op": "uia_text",
+          "window": "ui-probe-fixture",
+          "control": "ValueBox",
+          "equals": "fixture-value-42",
+          "markers": ["ValueBox", "fixture-value-42"]
+        }
+      ]
+    },
+    {
+      "id": "tcp-banner",
+      "backend": "network",
+      "title": "TCP banner on the fixture listener",
+      "ask": "Connect to 127.0.0.1:18773 over raw TCP, read the first line the server sends, and assert it is exactly \"HELLO ui-probe\".",
+      "checks": [
+        {
+          "id": "banner",
+          "op": "tcp_banner",
+          "host": "127.0.0.1",
+          "port": 18773,
+          "equals": "HELLO ui-probe",
+          "markers": ["18773", "HELLO ui-probe"]
+        }
+      ]
+    }
+  ]
+}

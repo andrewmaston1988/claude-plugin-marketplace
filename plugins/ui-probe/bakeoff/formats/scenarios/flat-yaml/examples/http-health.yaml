@@ -1,0 +1,8 @@
+id: http-health
+task: http-health
+backend: network
+steps:
+  - expect_json:
+      url: "http://127.0.0.1:18772/health"
+      path: ok
+      equals: true

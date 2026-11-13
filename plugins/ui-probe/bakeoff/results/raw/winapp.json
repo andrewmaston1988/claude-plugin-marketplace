@@ -1,0 +1,442 @@
+{
+  "contender": "winapp ui 0.8.0 (CLI)",
+  "contender_id": "winapp",
+  "mode": "per-call",
+  "notes": "No CacheRequest and no event subscription surface; tree via inspect --json.",
+  "repeats": 10,
+  "warmups": 2,
+  "latency": [
+    {
+      "fixture": "WinForms",
+      "action": "find",
+      "contender": "winapp",
+      "cold": {
+        "n": 10,
+        "p50": 156,
+        "p95": 168.9,
+        "min": 153,
+        "max": 177,
+        "samples": [
+          177,
+          156,
+          157,
+          157,
+          159,
+          153,
+          155,
+          153,
+          154,
+          156
+        ],
+        "ok": 10,
+        "n_expected": 10,
+        "verified": 10,
+        "verified_known": 10,
+        "bytes_p50": 233,
+        "errors": []
+      },
+      "warm": {
+        "n": 10,
+        "p50": 165,
+        "p95": 192.2,
+        "min": 149,
+        "max": 203,
+        "samples": [
+          156,
+          164,
+          162,
+          179,
+          168,
+          149,
+          203,
+          166,
+          159,
+          179
+        ],
+        "ok": 10,
+        "n_expected": 10,
+        "verified": 10,
+        "verified_known": 10,
+        "bytes_p50": 233,
+        "errors": []
+      },
+      "unsupported": false,
+      "notes": null
+    },
+    {
+      "fixture": "WinForms",
+      "action": "tree",
+      "contender": "winapp",
+      "cold": {
+        "n": 10,
+        "p50": 283,
+        "p95": 372.8,
+        "min": 264,
+        "max": 421,
+        "samples": [
+          287,
+          269,
+          278,
+          264,
+          265,
+          288,
+          421,
+          279,
+          314,
+          308
+        ],
+        "ok": 10,
+        "n_expected": 10,
+        "verified": 10,
+        "verified_known": 10,
+        "bytes_p50": 8090,
+        "errors": []
+      },
+      "warm": {
+        "n": 10,
+        "p50": 259,
+        "p95": 363.3,
+        "min": 234,
+        "max": 402,
+        "samples": [
+          316,
+          274,
+          274,
+          402,
+          255,
+          239,
+          234,
+          263,
+          253,
+          237
+        ],
+        "ok": 10,
+        "n_expected": 10,
+        "verified": 10,
+        "verified_known": 10,
+        "bytes_p50": 8090,
+        "errors": []
+      },
+      "unsupported": false,
+      "notes": null
+    },
+    {
+      "fixture": "WinForms",
+      "action": "tree_cached",
+      "contender": "winapp",
+      "cold": null,
+      "warm": null,
+      "unsupported": true,
+      "notes": "winapp ui has no CacheRequest surface"
+    },
+    {
+      "fixture": "WinForms",
+      "action": "get",
+      "contender": "winapp",
+      "cold": {
+        "n": 10,
+        "p50": 243.5,
+        "p95": 340.2,
+        "min": 217,
+        "max": 360,
+        "samples": [
+          360,
+          234,
+          231,
+          237,
+          231,
+          217,
+          257,
+          250,
+          316,
+          264
+        ],
+        "ok": 10,
+        "n_expected": 10,
+        "verified": 10,
+        "verified_known": 10,
+        "bytes_p50": 76,
+        "errors": []
+      },
+      "warm": {
+        "n": 10,
+        "p50": 229.5,
+        "p95": 260.8,
+        "min": 216,
+        "max": 272,
+        "samples": [
+          216,
+          226,
+          247,
+          244,
+          272,
+          234,
+          222,
+          233,
+          224,
+          225
+        ],
+        "ok": 10,
+        "n_expected": 10,
+        "verified": 10,
+        "verified_known": 10,
+        "bytes_p50": 76,
+        "errors": []
+      },
+      "unsupported": false,
+      "notes": null
+    },
+    {
+      "fixture": "WinForms",
+      "action": "click",
+      "contender": "winapp",
+      "cold": {
+        "n": 10,
+        "p50": 305.5,
+        "p95": 331.3,
+        "min": 276,
+        "max": 334,
+        "samples": [
+          321,
+          300,
+          276,
+          280,
+          303,
+          297,
+          308,
+          334,
+          328,
+          309
+        ],
+        "ok": 10,
+        "n_expected": 10,
+        "verified": 10,
+        "verified_known": 10,
+        "bytes_p50": 151,
+        "errors": []
+      },
+      "warm": {
+        "n": 10,
+        "p50": 316.5,
+        "p95": 350.7,
+        "min": 300,
+        "max": 361,
+        "samples": [
+          323,
+          320,
+          304,
+          313,
+          300,
+          304,
+          307,
+          332,
+          338,
+          361
+        ],
+        "ok": 10,
+        "n_expected": 10,
+        "verified": 10,
+        "verified_known": 10,
+        "bytes_p50": 151,
+        "errors": []
+      },
+      "unsupported": false,
+      "notes": null
+    },
+    {
+      "fixture": "WinForms",
+      "action": "list",
+      "contender": "winapp",
+      "cold": {
+        "n": 10,
+        "p50": 275,
+        "p95": 289.2,
+        "min": 249,
+        "max": 291,
+        "samples": [
+          287,
+          275,
+          273,
+          283,
+          267,
+          258,
+          275,
+          287,
+          249,
+          291
+        ],
+        "ok": 10,
+        "n_expected": 10,
+        "verified": 10,
+        "verified_known": 10,
+        "bytes_p50": 1590,
+        "errors": []
+      },
+      "warm": {
+        "n": 10,
+        "p50": 270.5,
+        "p95": 315.3,
+        "min": 237,
+        "max": 341,
+        "samples": [
+          341,
+          283,
+          284,
+          237,
+          278,
+          254,
+          268,
+          273,
+          260,
+          262
+        ],
+        "ok": 10,
+        "n_expected": 10,
+        "verified": 10,
+        "verified_known": 10,
+        "bytes_p50": 1590,
+        "errors": []
+      },
+      "unsupported": false,
+      "notes": null
+    }
+  ],
+  "exposure": [
+    {
+      "fixture": "Wpf",
+      "action": "find",
+      "ok": true,
+      "count": null,
+      "value": null,
+      "contains_reference": null,
+      "bytes": 234,
+      "error": null
+    },
+    {
+      "fixture": "Wpf",
+      "action": "tree",
+      "ok": true,
+      "count": 25,
+      "value": null,
+      "contains_reference": null,
+      "bytes": 12298,
+      "error": null
+    },
+    {
+      "fixture": "Wpf",
+      "action": "get",
+      "ok": true,
+      "count": null,
+      "value": "fixture-value-42",
+      "contains_reference": true,
+      "bytes": 76,
+      "error": null
+    },
+    {
+      "fixture": "Wpf",
+      "action": "list",
+      "ok": true,
+      "count": 5,
+      "value": null,
+      "contains_reference": null,
+      "bytes": 1645,
+      "error": null
+    },
+    {
+      "fixture": "OwnerDrawn",
+      "action": "find",
+      "ok": true,
+      "count": null,
+      "value": null,
+      "contains_reference": null,
+      "bytes": 235,
+      "error": null
+    },
+    {
+      "fixture": "OwnerDrawn",
+      "action": "tree",
+      "ok": true,
+      "count": 8,
+      "value": null,
+      "contains_reference": null,
+      "bytes": 4043,
+      "error": null
+    },
+    {
+      "fixture": "OwnerDrawn",
+      "action": "get",
+      "ok": false,
+      "count": null,
+      "value": null,
+      "contains_reference": null,
+      "bytes": 0,
+      "error": "{\"error\":{\"code\":\"element_not_found\",\"message\":\"No element found matching \\u0027Alpha 17\\u0027\",\"selector\":\"Alpha 17\"}}"
+    },
+    {
+      "fixture": "Notepad",
+      "action": "find",
+      "ok": true,
+      "count": null,
+      "value": null,
+      "contains_reference": null,
+      "bytes": 243,
+      "error": null
+    },
+    {
+      "fixture": "Notepad",
+      "action": "tree",
+      "ok": true,
+      "count": 126,
+      "value": null,
+      "contains_reference": null,
+      "bytes": 79875,
+      "error": null
+    },
+    {
+      "fixture": "Notepad",
+      "action": "get",
+      "ok": true,
+      "count": null,
+      "value": "fixture-value-42\rsecond line\r",
+      "contains_reference": true,
+      "bytes": 87,
+      "error": null
+    }
+  ],
+  "events": {
+    "supported": false,
+    "note": "no UIA event subscription in this contender"
+  },
+  "failures": {
+    "element_gone": {
+      "setup_ok": true,
+      "ok": false,
+      "error": "{\"error\":{\"code\":\"element_not_found\",\"message\":\"No element found matching \\u0027Enable sync\\u0027\",\"selector\":\"Enable sync\"}}",
+      "ms": 209
+    },
+    "window_closed": {
+      "before_ok": true,
+      "after_ok": false,
+      "after_error": "{\"error\":{\"code\":\"internal_error\",\"message\":\"No running app found matching \\u0027ui-probe fixture (WinForms)\\u0027.\",\"details\":\"AppNotFoundException\"}}",
+      "after_ms": 165,
+      "tree_ok": false,
+      "tree_error": "{\"error\":{\"code\":\"internal_error\",\"message\":\"No running app found matching \\u0027ui-probe fixture (WinForms)\\u0027.\",\"details\":\"AppNotFoundException\"}}",
+      "tree_ms": 162
+    }
+  },
+  "fixture": {
+    "winforms_pid": 54328,
+    "wpf_pid": 30036,
+    "owner_pid": 47084,
+    "notepad_pid": 34388,
+    "notepad_title": "ui-probe-notepad.txt - Notepad",
+    "titles": {
+      "WinForms": "ui-probe fixture (WinForms)",
+      "Wpf": "ui-probe fixture (WPF)",
+      "OwnerDrawn": "ui-probe fixture (OwnerDrawn)",
+      "Notepad": "ui-probe-notepad.txt - Notepad"
+    }
+  },
+  "started_at": "2026-11-13T04:06:14.791Z",
+  "finished_at": "2026-11-13T04:06:21.952Z"
+}

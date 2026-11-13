@@ -1,0 +1,2667 @@
+{
+  "generatedAt": "2026-11-13T03:11:20.837Z",
+  "fixture": "http://127.0.0.1:57795",
+  "repeats": 3,
+  "contenders": [
+    {
+      "name": "playwright",
+      "version": "1.66.0-alpha-2026-11-09",
+      "install": {
+        "kind": "npm library (no CLI, no MCP server)",
+        "package": "@playwright/mcp/node_modules/playwright",
+        "version": "1.66.0-alpha-2026-11-09",
+        "browsersPath": "C:\\Users\\Andrew\\AppData\\Local\\ui-probe\\ms-playwright",
+        "browsers": "chromium_headless_shell only",
+        "dependencyCount": 2
+      }
+    },
+    {
+      "name": "cdp",
+      "version": "swarm/lib/cdp.mjs (99 lines, zero npm dependencies)",
+      "install": {
+        "kind": "no dependency: node:child_process + global WebSocket + a system Chrome/Edge",
+        "package": null,
+        "version": "swarm/lib/cdp.mjs (99 lines, zero npm dependencies)",
+        "browsersPath": "(system browser)",
+        "browsers": "the operator's installed Chrome/Edge",
+        "dependencyCount": 0
+      }
+    }
+  ],
+  "t1": [
+    {
+      "contender": "playwright",
+      "viewport": "390x844",
+      "launchMs": 349.17,
+      "runs": [
+        {
+          "layout": {
+            "sheet": {
+              "x": 0,
+              "y": 132,
+              "w": 390,
+              "h": 712,
+              "right": 390,
+              "bottom": 844
+            },
+            "open": true,
+            "top": {
+              "x": 0,
+              "y": 132,
+              "w": 390,
+              "h": 56,
+              "right": 390,
+              "bottom": 188
+            },
+            "handle": {
+              "x": 175,
+              "y": 142,
+              "w": 40,
+              "h": 5,
+              "right": 215,
+              "bottom": 147
+            },
+            "close": {
+              "x": 326,
+              "y": 142,
+              "w": 44,
+              "h": 44,
+              "right": 370,
+              "bottom": 186
+            },
+            "poster": {
+              "x": 20,
+              "y": 200,
+              "w": 104,
+              "h": 156,
+              "right": 124,
+              "bottom": 356
+            },
+            "head": {
+              "x": 140,
+              "y": 200,
+              "w": 230,
+              "h": 49.4,
+              "right": 370,
+              "bottom": 249.4
+            },
+            "grid": {
+              "x": 0,
+              "y": 188,
+              "w": 390,
+              "h": 519,
+              "right": 390,
+              "bottom": 707
+            },
+            "gridCols": "104px 230px",
+            "acts": [
+              {
+                "x": 20,
+                "y": 430,
+                "w": 54.3,
+                "h": 64,
+                "right": 74.3,
+                "bottom": 494
+              },
+              {
+                "x": 139.3,
+                "y": 430,
+                "w": 55.1,
+                "h": 64,
+                "right": 194.4,
+                "bottom": 494
+              },
+              {
+                "x": 258.7,
+                "y": 430,
+                "w": 78.1,
+                "h": 64,
+                "right": 336.7,
+                "bottom": 494
+              }
+            ],
+            "actLabels": [
+              "My list",
+              "Seen it",
+              "Not for me"
+            ],
+            "stars": {
+              "x": 20,
+              "y": 623,
+              "w": 350,
+              "h": 66,
+              "right": 370,
+              "bottom": 689
+            },
+            "chips": [
+              {
+                "x": 20,
+                "y": 395,
+                "w": 78.7,
+                "h": 23,
+                "right": 98.7,
+                "bottom": 418
+              },
+              {
+                "x": 104.7,
+                "y": 395,
+                "w": 66.7,
+                "h": 23,
+                "right": 171.3,
+                "bottom": 418
+              },
+              {
+                "x": 177.3,
+                "y": 395,
+                "w": 53.5,
+                "h": 23,
+                "right": 230.8,
+                "bottom": 418
+              }
+            ],
+            "foot": [
+              {
+                "x": 20,
+                "y": 722,
+                "w": 350,
+                "h": 52,
+                "right": 370,
+                "bottom": 774
+              },
+              {
+                "x": 20,
+                "y": 784,
+                "w": 191.2,
+                "h": 46,
+                "right": 211.2,
+                "bottom": 830
+              }
+            ],
+            "footLabels": [
+              "Find torrent",
+              "Upload .torrent"
+            ],
+            "find": {
+              "x": 20,
+              "y": 722,
+              "w": 350,
+              "h": 52,
+              "right": 370,
+              "bottom": 774
+            },
+            "synopsis": {
+              "x": 20,
+              "y": 512,
+              "w": 350,
+              "h": 93,
+              "right": 370,
+              "bottom": 605
+            },
+            "scrollTop": 0,
+            "docOverflow": 0,
+            "vw": 390,
+            "vh": 844
+          },
+          "env": {
+            "hover_hover": false,
+            "hover_none": true,
+            "pointer_fine": false,
+            "pointer_coarse": true,
+            "any_hover": false,
+            "any_pointer_fine": false,
+            "maxTouchPoints": 1,
+            "touchEvent": true,
+            "innerWidth": 390,
+            "innerHeight": 844,
+            "dpr": 1,
+            "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/158.0.8127.18 Safari/537.36"
+          },
+          "steps": [
+            {
+              "step": "goto+sheet",
+              "ms": 64.54,
+              "observeBytes": 1232,
+              "observeChars": 1219
+            }
+          ],
+          "observeBytes": 1232,
+          "observation": "- main:\n  - link \"No image Harbour Lights\":\n    - /url: /media/900001?media_type=movie&rec_row=row-quiet-drama\n  - link \"No image The Long Static\":\n    - /url: /media/900002?media_type=movie&rec_row=row-quiet-drama\n  - link \"No image Winter Ferry\":\n    - /url: /media/900003?media_type=movie&rec_row=row-quiet-drama\n- dialog \"Title details\":\n  - button \"Close\": ×\n  - heading \"Harbour Lights\" [level=1]\n  - paragraph: 2019 movie ★ 7.4\n  - button \"My list\"\n  - button \"Seen it\"\n  - button \"Not for me\"\n  - group \"Your rating\":\n    - text: Your rating ☆\n    - button \"0.5 stars\"\n    - button \"1 star\"\n    - text: ☆\n    - button \"1.5 stars\"\n    - button \"2 stars\"\n    - text: ☆\n    - button \"2.5 stars\"\n    - button \"3 stars\"\n    - text: ☆\n    - button \"3.5 stars\"\n    - button \"4 stars\"\n    - text: ☆\n    - button \"4.5 stars\"\n    - button \"5 stars\"\n    - text: Tap to rate\n  - heading \"Why it's here\" [level=4]\n  - text: Quiet drama Slow burn Coastal\n  - paragraph: A lighthouse keeper trades weather reports with a radio operator she has never met. Over one winter the two build a map of each other out of shipping forecasts and static.\n  - button \"Find torrent\"\n  - text: Upload .torrent\n  - button \"Add to qBittorrent\"",
+          "viewport": "390x844",
+          "totalMs": 98.45
+        },
+        {
+          "layout": {
+            "sheet": {
+              "x": 0,
+              "y": 132,
+              "w": 390,
+              "h": 712,
+              "right": 390,
+              "bottom": 844
+            },
+            "open": true,
+            "top": {
+              "x": 0,
+              "y": 132,
+              "w": 390,
+              "h": 56,
+              "right": 390,
+              "bottom": 188
+            },
+            "handle": {
+              "x": 175,
+              "y": 142,
+              "w": 40,
+              "h": 5,
+              "right": 215,
+              "bottom": 147
+            },
+            "close": {
+              "x": 326,
+              "y": 142,
+              "w": 44,
+              "h": 44,
+              "right": 370,
+              "bottom": 186
+            },
+            "poster": {
+              "x": 20,
+              "y": 200,
+              "w": 104,
+              "h": 156,
+              "right": 124,
+              "bottom": 356
+            },
+            "head": {
+              "x": 140,
+              "y": 200,
+              "w": 230,
+              "h": 49.4,
+              "right": 370,
+              "bottom": 249.4
+            },
+            "grid": {
+              "x": 0,
+              "y": 188,
+              "w": 390,
+              "h": 519,
+              "right": 390,
+              "bottom": 707
+            },
+            "gridCols": "104px 230px",
+            "acts": [
+              {
+                "x": 20,
+                "y": 430,
+                "w": 54.3,
+                "h": 64,
+                "right": 74.3,
+                "bottom": 494
+              },
+              {
+                "x": 139.3,
+                "y": 430,
+                "w": 55.1,
+                "h": 64,
+                "right": 194.4,
+                "bottom": 494
+              },
+              {
+                "x": 258.7,
+                "y": 430,
+                "w": 78.1,
+                "h": 64,
+                "right": 336.7,
+                "bottom": 494
+              }
+            ],
+            "actLabels": [
+              "My list",
+              "Seen it",
+              "Not for me"
+            ],
+            "stars": {
+              "x": 20,
+              "y": 623,
+              "w": 350,
+              "h": 66,
+              "right": 370,
+              "bottom": 689
+            },
+            "chips": [
+              {
+                "x": 20,
+                "y": 395,
+                "w": 78.7,
+                "h": 23,
+                "right": 98.7,
+                "bottom": 418
+              },
+              {
+                "x": 104.7,
+                "y": 395,
+                "w": 66.7,
+                "h": 23,
+                "right": 171.3,
+                "bottom": 418
+              },
+              {
+                "x": 177.3,
+                "y": 395,
+                "w": 53.5,
+                "h": 23,
+                "right": 230.8,
+                "bottom": 418
+              }
+            ],
+            "foot": [
+              {
+                "x": 20,
+                "y": 722,
+                "w": 350,
+                "h": 52,
+                "right": 370,
+                "bottom": 774
+              },
+              {
+                "x": 20,
+                "y": 784,
+                "w": 191.2,
+                "h": 46,
+                "right": 211.2,
+                "bottom": 830
+              }
+            ],
+            "footLabels": [
+              "Find torrent",
+              "Upload .torrent"
+            ],
+            "find": {
+              "x": 20,
+              "y": 722,
+              "w": 350,
+              "h": 52,
+              "right": 370,
+              "bottom": 774
+            },
+            "synopsis": {
+              "x": 20,
+              "y": 512,
+              "w": 350,
+              "h": 93,
+              "right": 370,
+              "bottom": 605
+            },
+            "scrollTop": 0,
+            "docOverflow": 0,
+            "vw": 390,
+            "vh": 844
+          },
+          "env": {
+            "hover_hover": false,
+            "hover_none": true,
+            "pointer_fine": false,
+            "pointer_coarse": true,
+            "any_hover": false,
+            "any_pointer_fine": false,
+            "maxTouchPoints": 1,
+            "touchEvent": true,
+            "innerWidth": 390,
+            "innerHeight": 844,
+            "dpr": 1,
+            "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/158.0.8127.18 Safari/537.36"
+          },
+          "steps": [
+            {
+              "step": "goto+sheet",
+              "ms": 16.59,
+              "observeBytes": 1232,
+              "observeChars": 1219
+            }
+          ],
+          "observeBytes": 1232,
+          "observation": "- main:\n  - link \"No image Harbour Lights\":\n    - /url: /media/900001?media_type=movie&rec_row=row-quiet-drama\n  - link \"No image The Long Static\":\n    - /url: /media/900002?media_type=movie&rec_row=row-quiet-drama\n  - link \"No image Winter Ferry\":\n    - /url: /media/900003?media_type=movie&rec_row=row-quiet-drama\n- dialog \"Title details\":\n  - button \"Close\": ×\n  - heading \"Harbour Lights\" [level=1]\n  - paragraph: 2019 movie ★ 7.4\n  - button \"My list\"\n  - button \"Seen it\"\n  - button \"Not for me\"\n  - group \"Your rating\":\n    - text: Your rating ☆\n    - button \"0.5 stars\"\n    - button \"1 star\"\n    - text: ☆\n    - button \"1.5 stars\"\n    - button \"2 stars\"\n    - text: ☆\n    - button \"2.5 stars\"\n    - button \"3 stars\"\n    - text: ☆\n    - button \"3.5 stars\"\n    - button \"4 stars\"\n    - text: ☆\n    - button \"4.5 stars\"\n    - button \"5 stars\"\n    - text: Tap to rate\n  - heading \"Why it's here\" [level=4]\n  - text: Quiet drama Slow burn Coastal\n  - paragraph: A lighthouse keeper trades weather reports with a radio operator she has never met. Over one winter the two build a map of each other out of shipping forecasts and static.\n  - button \"Find torrent\"\n  - text: Upload .torrent\n  - button \"Add to qBittorrent\"",
+          "viewport": "390x844",
+          "totalMs": 42.6
+        },
+        {
+          "layout": {
+            "sheet": {
+              "x": 0,
+              "y": 132,
+              "w": 390,
+              "h": 712,
+              "right": 390,
+              "bottom": 844
+            },
+            "open": true,
+            "top": {
+              "x": 0,
+              "y": 132,
+              "w": 390,
+              "h": 56,
+              "right": 390,
+              "bottom": 188
+            },
+            "handle": {
+              "x": 175,
+              "y": 142,
+              "w": 40,
+              "h": 5,
+              "right": 215,
+              "bottom": 147
+            },
+            "close": {
+              "x": 326,
+              "y": 142,
+              "w": 44,
+              "h": 44,
+              "right": 370,
+              "bottom": 186
+            },
+            "poster": {
+              "x": 20,
+              "y": 200,
+              "w": 104,
+              "h": 156,
+              "right": 124,
+              "bottom": 356
+            },
+            "head": {
+              "x": 140,
+              "y": 200,
+              "w": 230,
+              "h": 49.4,
+              "right": 370,
+              "bottom": 249.4
+            },
+            "grid": {
+              "x": 0,
+              "y": 188,
+              "w": 390,
+              "h": 519,
+              "right": 390,
+              "bottom": 707
+            },
+            "gridCols": "104px 230px",
+            "acts": [
+              {
+                "x": 20,
+                "y": 430,
+                "w": 54.3,
+                "h": 64,
+                "right": 74.3,
+                "bottom": 494
+              },
+              {
+                "x": 139.3,
+                "y": 430,
+                "w": 55.1,
+                "h": 64,
+                "right": 194.4,
+                "bottom": 494
+              },
+              {
+                "x": 258.7,
+                "y": 430,
+                "w": 78.1,
+                "h": 64,
+                "right": 336.7,
+                "bottom": 494
+              }
+            ],
+            "actLabels": [
+              "My list",
+              "Seen it",
+              "Not for me"
+            ],
+            "stars": {
+              "x": 20,
+              "y": 623,
+              "w": 350,
+              "h": 66,
+              "right": 370,
+              "bottom": 689
+            },
+            "chips": [
+              {
+                "x": 20,
+                "y": 395,
+                "w": 78.7,
+                "h": 23,
+                "right": 98.7,
+                "bottom": 418
+              },
+              {
+                "x": 104.7,
+                "y": 395,
+                "w": 66.7,
+                "h": 23,
+                "right": 171.3,
+                "bottom": 418
+              },
+              {
+                "x": 177.3,
+                "y": 395,
+                "w": 53.5,
+                "h": 23,
+                "right": 230.8,
+                "bottom": 418
+              }
+            ],
+            "foot": [
+              {
+                "x": 20,
+                "y": 722,
+                "w": 350,
+                "h": 52,
+                "right": 370,
+                "bottom": 774
+              },
+              {
+                "x": 20,
+                "y": 784,
+                "w": 191.2,
+                "h": 46,
+                "right": 211.2,
+                "bottom": 830
+              }
+            ],
+            "footLabels": [
+              "Find torrent",
+              "Upload .torrent"
+            ],
+            "find": {
+              "x": 20,
+              "y": 722,
+              "w": 350,
+              "h": 52,
+              "right": 370,
+              "bottom": 774
+            },
+            "synopsis": {
+              "x": 20,
+              "y": 512,
+              "w": 350,
+              "h": 93,
+              "right": 370,
+              "bottom": 605
+            },
+            "scrollTop": 0,
+            "docOverflow": 0,
+            "vw": 390,
+            "vh": 844
+          },
+          "env": {
+            "hover_hover": false,
+            "hover_none": true,
+            "pointer_fine": false,
+            "pointer_coarse": true,
+            "any_hover": false,
+            "any_pointer_fine": false,
+            "maxTouchPoints": 1,
+            "touchEvent": true,
+            "innerWidth": 390,
+            "innerHeight": 844,
+            "dpr": 1,
+            "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/158.0.8127.18 Safari/537.36"
+          },
+          "steps": [
+            {
+              "step": "goto+sheet",
+              "ms": 15.51,
+              "observeBytes": 1232,
+              "observeChars": 1219
+            }
+          ],
+          "observeBytes": 1232,
+          "observation": "- main:\n  - link \"No image Harbour Lights\":\n    - /url: /media/900001?media_type=movie&rec_row=row-quiet-drama\n  - link \"No image The Long Static\":\n    - /url: /media/900002?media_type=movie&rec_row=row-quiet-drama\n  - link \"No image Winter Ferry\":\n    - /url: /media/900003?media_type=movie&rec_row=row-quiet-drama\n- dialog \"Title details\":\n  - button \"Close\": ×\n  - heading \"Harbour Lights\" [level=1]\n  - paragraph: 2019 movie ★ 7.4\n  - button \"My list\"\n  - button \"Seen it\"\n  - button \"Not for me\"\n  - group \"Your rating\":\n    - text: Your rating ☆\n    - button \"0.5 stars\"\n    - button \"1 star\"\n    - text: ☆\n    - button \"1.5 stars\"\n    - button \"2 stars\"\n    - text: ☆\n    - button \"2.5 stars\"\n    - button \"3 stars\"\n    - text: ☆\n    - button \"3.5 stars\"\n    - button \"4 stars\"\n    - text: ☆\n    - button \"4.5 stars\"\n    - button \"5 stars\"\n    - text: Tap to rate\n  - heading \"Why it's here\" [level=4]\n  - text: Quiet drama Slow burn Coastal\n  - paragraph: A lighthouse keeper trades weather reports with a radio operator she has never met. Over one winter the two build a map of each other out of shipping forecasts and static.\n  - button \"Find torrent\"\n  - text: Upload .torrent\n  - button \"Add to qBittorrent\"",
+          "viewport": "390x844",
+          "totalMs": 39.42
+        }
+      ]
+    },
+    {
+      "contender": "playwright",
+      "viewport": "1280x900",
+      "launchMs": 118.39,
+      "runs": [
+        {
+          "layout": {
+            "sheet": {
+              "x": 230,
+              "y": 139,
+              "w": 820,
+              "h": 622,
+              "right": 1050,
+              "bottom": 761
+            },
+            "open": true,
+            "top": {
+              "x": 230,
+              "y": 139,
+              "w": 820,
+              "h": 52,
+              "right": 1050,
+              "bottom": 191
+            },
+            "handle": {
+              "x": 620,
+              "y": 149,
+              "w": 40,
+              "h": 5,
+              "right": 660,
+              "bottom": 154
+            },
+            "close": {
+              "x": 996,
+              "y": 151,
+              "w": 40,
+              "h": 40,
+              "right": 1036,
+              "bottom": 191
+            },
+            "poster": {
+              "x": 258,
+              "y": 219,
+              "w": 232,
+              "h": 348,
+              "right": 490,
+              "bottom": 567
+            },
+            "head": {
+              "x": 534,
+              "y": 219,
+              "w": 488,
+              "h": 56.6,
+              "right": 1022,
+              "bottom": 275.6
+            },
+            "grid": {
+              "x": 230,
+              "y": 191,
+              "w": 820,
+              "h": 493,
+              "right": 1050,
+              "bottom": 684
+            },
+            "gridCols": "260px 488px",
+            "acts": [
+              {
+                "x": 534,
+                "y": 349.6,
+                "w": 90.3,
+                "h": 40,
+                "right": 624.3,
+                "bottom": 389.6
+              },
+              {
+                "x": 634.3,
+                "y": 349.6,
+                "w": 91.2,
+                "h": 40,
+                "right": 725.5,
+                "bottom": 389.6
+              },
+              {
+                "x": 735.5,
+                "y": 349.6,
+                "w": 116.1,
+                "h": 40,
+                "right": 851.5,
+                "bottom": 389.6
+              }
+            ],
+            "actLabels": [
+              "My list",
+              "Seen it",
+              "Not for me"
+            ],
+            "stars": {
+              "x": 258,
+              "y": 583,
+              "w": 232,
+              "h": 73,
+              "right": 490,
+              "bottom": 656
+            },
+            "chips": [
+              {
+                "x": 534,
+                "y": 314.6,
+                "w": 78.7,
+                "h": 23,
+                "right": 612.7,
+                "bottom": 337.6
+              },
+              {
+                "x": 618.7,
+                "y": 314.6,
+                "w": 66.7,
+                "h": 23,
+                "right": 685.3,
+                "bottom": 337.6
+              },
+              {
+                "x": 691.3,
+                "y": 314.6,
+                "w": 53.5,
+                "h": 23,
+                "right": 744.8,
+                "bottom": 337.6
+              }
+            ],
+            "foot": [
+              {
+                "x": 258,
+                "y": 699,
+                "w": 374,
+                "h": 48,
+                "right": 632,
+                "bottom": 747
+              },
+              {
+                "x": 648,
+                "y": 714.5,
+                "w": 90.4,
+                "h": 17,
+                "right": 738.4,
+                "bottom": 731.5
+              }
+            ],
+            "footLabels": [
+              "Find torrent",
+              "Upload .torrent"
+            ],
+            "find": {
+              "x": 258,
+              "y": 699,
+              "w": 374,
+              "h": 48,
+              "right": 632,
+              "bottom": 747
+            },
+            "synopsis": {
+              "x": 534,
+              "y": 407.6,
+              "w": 488,
+              "h": 72,
+              "right": 1022,
+              "bottom": 479.6
+            },
+            "scrollTop": 0,
+            "docOverflow": 0,
+            "vw": 1280,
+            "vh": 900
+          },
+          "env": {
+            "hover_hover": true,
+            "hover_none": false,
+            "pointer_fine": true,
+            "pointer_coarse": false,
+            "any_hover": true,
+            "any_pointer_fine": true,
+            "maxTouchPoints": 0,
+            "touchEvent": false,
+            "innerWidth": 1280,
+            "innerHeight": 900,
+            "dpr": 1,
+            "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/158.0.8127.18 Safari/537.36"
+          },
+          "steps": [
+            {
+              "step": "goto+sheet",
+              "ms": 55.33,
+              "observeBytes": 1232,
+              "observeChars": 1219
+            }
+          ],
+          "observeBytes": 1232,
+          "observation": "- main:\n  - link \"No image Harbour Lights\":\n    - /url: /media/900001?media_type=movie&rec_row=row-quiet-drama\n  - link \"No image The Long Static\":\n    - /url: /media/900002?media_type=movie&rec_row=row-quiet-drama\n  - link \"No image Winter Ferry\":\n    - /url: /media/900003?media_type=movie&rec_row=row-quiet-drama\n- dialog \"Title details\":\n  - button \"Close\": ×\n  - heading \"Harbour Lights\" [level=1]\n  - paragraph: 2019 movie ★ 7.4\n  - button \"My list\"\n  - button \"Seen it\"\n  - button \"Not for me\"\n  - group \"Your rating\":\n    - text: Your rating ☆\n    - button \"0.5 stars\"\n    - button \"1 star\"\n    - text: ☆\n    - button \"1.5 stars\"\n    - button \"2 stars\"\n    - text: ☆\n    - button \"2.5 stars\"\n    - button \"3 stars\"\n    - text: ☆\n    - button \"3.5 stars\"\n    - button \"4 stars\"\n    - text: ☆\n    - button \"4.5 stars\"\n    - button \"5 stars\"\n    - text: Tap to rate\n  - heading \"Why it's here\" [level=4]\n  - text: Quiet drama Slow burn Coastal\n  - paragraph: A lighthouse keeper trades weather reports with a radio operator she has never met. Over one winter the two build a map of each other out of shipping forecasts and static.\n  - button \"Find torrent\"\n  - text: Upload .torrent\n  - button \"Add to qBittorrent\"",
+          "viewport": "1280x900",
+          "totalMs": 83.47
+        },
+        {
+          "layout": {
+            "sheet": {
+              "x": 230,
+              "y": 139,
+              "w": 820,
+              "h": 622,
+              "right": 1050,
+              "bottom": 761
+            },
+            "open": true,
+            "top": {
+              "x": 230,
+              "y": 139,
+              "w": 820,
+              "h": 52,
+              "right": 1050,
+              "bottom": 191
+            },
+            "handle": {
+              "x": 620,
+              "y": 149,
+              "w": 40,
+              "h": 5,
+              "right": 660,
+              "bottom": 154
+            },
+            "close": {
+              "x": 996,
+              "y": 151,
+              "w": 40,
+              "h": 40,
+              "right": 1036,
+              "bottom": 191
+            },
+            "poster": {
+              "x": 258,
+              "y": 219,
+              "w": 232,
+              "h": 348,
+              "right": 490,
+              "bottom": 567
+            },
+            "head": {
+              "x": 534,
+              "y": 219,
+              "w": 488,
+              "h": 56.6,
+              "right": 1022,
+              "bottom": 275.6
+            },
+            "grid": {
+              "x": 230,
+              "y": 191,
+              "w": 820,
+              "h": 493,
+              "right": 1050,
+              "bottom": 684
+            },
+            "gridCols": "260px 488px",
+            "acts": [
+              {
+                "x": 534,
+                "y": 349.6,
+                "w": 90.3,
+                "h": 40,
+                "right": 624.3,
+                "bottom": 389.6
+              },
+              {
+                "x": 634.3,
+                "y": 349.6,
+                "w": 91.2,
+                "h": 40,
+                "right": 725.5,
+                "bottom": 389.6
+              },
+              {
+                "x": 735.5,
+                "y": 349.6,
+                "w": 116.1,
+                "h": 40,
+                "right": 851.5,
+                "bottom": 389.6
+              }
+            ],
+            "actLabels": [
+              "My list",
+              "Seen it",
+              "Not for me"
+            ],
+            "stars": {
+              "x": 258,
+              "y": 583,
+              "w": 232,
+              "h": 73,
+              "right": 490,
+              "bottom": 656
+            },
+            "chips": [
+              {
+                "x": 534,
+                "y": 314.6,
+                "w": 78.7,
+                "h": 23,
+                "right": 612.7,
+                "bottom": 337.6
+              },
+              {
+                "x": 618.7,
+                "y": 314.6,
+                "w": 66.7,
+                "h": 23,
+                "right": 685.3,
+                "bottom": 337.6
+              },
+              {
+                "x": 691.3,
+                "y": 314.6,
+                "w": 53.5,
+                "h": 23,
+                "right": 744.8,
+                "bottom": 337.6
+              }
+            ],
+            "foot": [
+              {
+                "x": 258,
+                "y": 699,
+                "w": 374,
+                "h": 48,
+                "right": 632,
+                "bottom": 747
+              },
+              {
+                "x": 648,
+                "y": 714.5,
+                "w": 90.4,
+                "h": 17,
+                "right": 738.4,
+                "bottom": 731.5
+              }
+            ],
+            "footLabels": [
+              "Find torrent",
+              "Upload .torrent"
+            ],
+            "find": {
+              "x": 258,
+              "y": 699,
+              "w": 374,
+              "h": 48,
+              "right": 632,
+              "bottom": 747
+            },
+            "synopsis": {
+              "x": 534,
+              "y": 407.6,
+              "w": 488,
+              "h": 72,
+              "right": 1022,
+              "bottom": 479.6
+            },
+            "scrollTop": 0,
+            "docOverflow": 0,
+            "vw": 1280,
+            "vh": 900
+          },
+          "env": {
+            "hover_hover": true,
+            "hover_none": false,
+            "pointer_fine": true,
+            "pointer_coarse": false,
+            "any_hover": true,
+            "any_pointer_fine": true,
+            "maxTouchPoints": 0,
+            "touchEvent": false,
+            "innerWidth": 1280,
+            "innerHeight": 900,
+            "dpr": 1,
+            "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/158.0.8127.18 Safari/537.36"
+          },
+          "steps": [
+            {
+              "step": "goto+sheet",
+              "ms": 16.89,
+              "observeBytes": 1232,
+              "observeChars": 1219
+            }
+          ],
+          "observeBytes": 1232,
+          "observation": "- main:\n  - link \"No image Harbour Lights\":\n    - /url: /media/900001?media_type=movie&rec_row=row-quiet-drama\n  - link \"No image The Long Static\":\n    - /url: /media/900002?media_type=movie&rec_row=row-quiet-drama\n  - link \"No image Winter Ferry\":\n    - /url: /media/900003?media_type=movie&rec_row=row-quiet-drama\n- dialog \"Title details\":\n  - button \"Close\": ×\n  - heading \"Harbour Lights\" [level=1]\n  - paragraph: 2019 movie ★ 7.4\n  - button \"My list\"\n  - button \"Seen it\"\n  - button \"Not for me\"\n  - group \"Your rating\":\n    - text: Your rating ☆\n    - button \"0.5 stars\"\n    - button \"1 star\"\n    - text: ☆\n    - button \"1.5 stars\"\n    - button \"2 stars\"\n    - text: ☆\n    - button \"2.5 stars\"\n    - button \"3 stars\"\n    - text: ☆\n    - button \"3.5 stars\"\n    - button \"4 stars\"\n    - text: ☆\n    - button \"4.5 stars\"\n    - button \"5 stars\"\n    - text: Tap to rate\n  - heading \"Why it's here\" [level=4]\n  - text: Quiet drama Slow burn Coastal\n  - paragraph: A lighthouse keeper trades weather reports with a radio operator she has never met. Over one winter the two build a map of each other out of shipping forecasts and static.\n  - button \"Find torrent\"\n  - text: Upload .torrent\n  - button \"Add to qBittorrent\"",
+          "viewport": "1280x900",
+          "totalMs": 38.92
+        },
+        {
+          "layout": {
+            "sheet": {
+              "x": 230,
+              "y": 139,
+              "w": 820,
+              "h": 622,
+              "right": 1050,
+              "bottom": 761
+            },
+            "open": true,
+            "top": {
+              "x": 230,
+              "y": 139,
+              "w": 820,
+              "h": 52,
+              "right": 1050,
+              "bottom": 191
+            },
+            "handle": {
+              "x": 620,
+              "y": 149,
+              "w": 40,
+              "h": 5,
+              "right": 660,
+              "bottom": 154
+            },
+            "close": {
+              "x": 996,
+              "y": 151,
+              "w": 40,
+              "h": 40,
+              "right": 1036,
+              "bottom": 191
+            },
+            "poster": {
+              "x": 258,
+              "y": 219,
+              "w": 232,
+              "h": 348,
+              "right": 490,
+              "bottom": 567
+            },
+            "head": {
+              "x": 534,
+              "y": 219,
+              "w": 488,
+              "h": 56.6,
+              "right": 1022,
+              "bottom": 275.6
+            },
+            "grid": {
+              "x": 230,
+              "y": 191,
+              "w": 820,
+              "h": 493,
+              "right": 1050,
+              "bottom": 684
+            },
+            "gridCols": "260px 488px",
+            "acts": [
+              {
+                "x": 534,
+                "y": 349.6,
+                "w": 90.3,
+                "h": 40,
+                "right": 624.3,
+                "bottom": 389.6
+              },
+              {
+                "x": 634.3,
+                "y": 349.6,
+                "w": 91.2,
+                "h": 40,
+                "right": 725.5,
+                "bottom": 389.6
+              },
+              {
+                "x": 735.5,
+                "y": 349.6,
+                "w": 116.1,
+                "h": 40,
+                "right": 851.5,
+                "bottom": 389.6
+              }
+            ],
+            "actLabels": [
+              "My list",
+              "Seen it",
+              "Not for me"
+            ],
+            "stars": {
+              "x": 258,
+              "y": 583,
+              "w": 232,
+              "h": 73,
+              "right": 490,
+              "bottom": 656
+            },
+            "chips": [
+              {
+                "x": 534,
+                "y": 314.6,
+                "w": 78.7,
+                "h": 23,
+                "right": 612.7,
+                "bottom": 337.6
+              },
+              {
+                "x": 618.7,
+                "y": 314.6,
+                "w": 66.7,
+                "h": 23,
+                "right": 685.3,
+                "bottom": 337.6
+              },
+              {
+                "x": 691.3,
+                "y": 314.6,
+                "w": 53.5,
+                "h": 23,
+                "right": 744.8,
+                "bottom": 337.6
+              }
+            ],
+            "foot": [
+              {
+                "x": 258,
+                "y": 699,
+                "w": 374,
+                "h": 48,
+                "right": 632,
+                "bottom": 747
+              },
+              {
+                "x": 648,
+                "y": 714.5,
+                "w": 90.4,
+                "h": 17,
+                "right": 738.4,
+                "bottom": 731.5
+              }
+            ],
+            "footLabels": [
+              "Find torrent",
+              "Upload .torrent"
+            ],
+            "find": {
+              "x": 258,
+              "y": 699,
+              "w": 374,
+              "h": 48,
+              "right": 632,
+              "bottom": 747
+            },
+            "synopsis": {
+              "x": 534,
+              "y": 407.6,
+              "w": 488,
+              "h": 72,
+              "right": 1022,
+              "bottom": 479.6
+            },
+            "scrollTop": 0,
+            "docOverflow": 0,
+            "vw": 1280,
+            "vh": 900
+          },
+          "env": {
+            "hover_hover": true,
+            "hover_none": false,
+            "pointer_fine": true,
+            "pointer_coarse": false,
+            "any_hover": true,
+            "any_pointer_fine": true,
+            "maxTouchPoints": 0,
+            "touchEvent": false,
+            "innerWidth": 1280,
+            "innerHeight": 900,
+            "dpr": 1,
+            "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/158.0.8127.18 Safari/537.36"
+          },
+          "steps": [
+            {
+              "step": "goto+sheet",
+              "ms": 15.8,
+              "observeBytes": 1232,
+              "observeChars": 1219
+            }
+          ],
+          "observeBytes": 1232,
+          "observation": "- main:\n  - link \"No image Harbour Lights\":\n    - /url: /media/900001?media_type=movie&rec_row=row-quiet-drama\n  - link \"No image The Long Static\":\n    - /url: /media/900002?media_type=movie&rec_row=row-quiet-drama\n  - link \"No image Winter Ferry\":\n    - /url: /media/900003?media_type=movie&rec_row=row-quiet-drama\n- dialog \"Title details\":\n  - button \"Close\": ×\n  - heading \"Harbour Lights\" [level=1]\n  - paragraph: 2019 movie ★ 7.4\n  - button \"My list\"\n  - button \"Seen it\"\n  - button \"Not for me\"\n  - group \"Your rating\":\n    - text: Your rating ☆\n    - button \"0.5 stars\"\n    - button \"1 star\"\n    - text: ☆\n    - button \"1.5 stars\"\n    - button \"2 stars\"\n    - text: ☆\n    - button \"2.5 stars\"\n    - button \"3 stars\"\n    - text: ☆\n    - button \"3.5 stars\"\n    - button \"4 stars\"\n    - text: ☆\n    - button \"4.5 stars\"\n    - button \"5 stars\"\n    - text: Tap to rate\n  - heading \"Why it's here\" [level=4]\n  - text: Quiet drama Slow burn Coastal\n  - paragraph: A lighthouse keeper trades weather reports with a radio operator she has never met. Over one winter the two build a map of each other out of shipping forecasts and static.\n  - button \"Find torrent\"\n  - text: Upload .torrent\n  - button \"Add to qBittorrent\"",
+          "viewport": "1280x900",
+          "totalMs": 37.45
+        }
+      ]
+    },
+    {
+      "contender": "cdp",
+      "viewport": "390x844",
+      "launchMs": 488.11,
+      "runs": [
+        {
+          "layout": {
+            "sheet": {
+              "x": 0,
+              "y": 132,
+              "w": 390,
+              "h": 712,
+              "right": 390,
+              "bottom": 844
+            },
+            "open": true,
+            "top": {
+              "x": 0,
+              "y": 132,
+              "w": 390,
+              "h": 56,
+              "right": 390,
+              "bottom": 188
+            },
+            "handle": {
+              "x": 175,
+              "y": 142,
+              "w": 40,
+              "h": 5,
+              "right": 215,
+              "bottom": 147
+            },
+            "close": {
+              "x": 326,
+              "y": 142,
+              "w": 44,
+              "h": 44,
+              "right": 370,
+              "bottom": 186
+            },
+            "poster": {
+              "x": 20,
+              "y": 200,
+              "w": 104,
+              "h": 156,
+              "right": 124,
+              "bottom": 356
+            },
+            "head": {
+              "x": 140,
+              "y": 200,
+              "w": 230,
+              "h": 49.4,
+              "right": 370,
+              "bottom": 249.4
+            },
+            "grid": {
+              "x": 0,
+              "y": 188,
+              "w": 390,
+              "h": 519,
+              "right": 390,
+              "bottom": 707
+            },
+            "gridCols": "104px 230px",
+            "acts": [
+              {
+                "x": 20,
+                "y": 430,
+                "w": 54.3,
+                "h": 64,
+                "right": 74.3,
+                "bottom": 494
+              },
+              {
+                "x": 139.3,
+                "y": 430,
+                "w": 55.1,
+                "h": 64,
+                "right": 194.4,
+                "bottom": 494
+              },
+              {
+                "x": 258.7,
+                "y": 430,
+                "w": 78.1,
+                "h": 64,
+                "right": 336.7,
+                "bottom": 494
+              }
+            ],
+            "actLabels": [
+              "My list",
+              "Seen it",
+              "Not for me"
+            ],
+            "stars": {
+              "x": 20,
+              "y": 623,
+              "w": 350,
+              "h": 66,
+              "right": 370,
+              "bottom": 689
+            },
+            "chips": [
+              {
+                "x": 20,
+                "y": 395,
+                "w": 78.7,
+                "h": 23,
+                "right": 98.7,
+                "bottom": 418
+              },
+              {
+                "x": 104.7,
+                "y": 395,
+                "w": 66.7,
+                "h": 23,
+                "right": 171.3,
+                "bottom": 418
+              },
+              {
+                "x": 177.3,
+                "y": 395,
+                "w": 53.5,
+                "h": 23,
+                "right": 230.8,
+                "bottom": 418
+              }
+            ],
+            "foot": [
+              {
+                "x": 20,
+                "y": 722,
+                "w": 350,
+                "h": 52,
+                "right": 370,
+                "bottom": 774
+              },
+              {
+                "x": 20,
+                "y": 784,
+                "w": 191.2,
+                "h": 46,
+                "right": 211.2,
+                "bottom": 830
+              }
+            ],
+            "footLabels": [
+              "Find torrent",
+              "Upload .torrent"
+            ],
+            "find": {
+              "x": 20,
+              "y": 722,
+              "w": 350,
+              "h": 52,
+              "right": 370,
+              "bottom": 774
+            },
+            "synopsis": {
+              "x": 20,
+              "y": 512,
+              "w": 350,
+              "h": 93,
+              "right": 370,
+              "bottom": 605
+            },
+            "scrollTop": 0,
+            "docOverflow": 0,
+            "vw": 390,
+            "vh": 844
+          },
+          "env": {
+            "hover_hover": false,
+            "hover_none": true,
+            "pointer_fine": false,
+            "pointer_coarse": true,
+            "any_hover": false,
+            "any_pointer_fine": false,
+            "maxTouchPoints": 1,
+            "touchEvent": true,
+            "innerWidth": 390,
+            "innerHeight": 844,
+            "dpr": 1,
+            "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/157.0.0.0 Safari/537.36 Edg/157.0.0.0"
+          },
+          "steps": [
+            {
+              "step": "goto+sheet",
+              "ms": 198.14,
+              "observeBytes": 1416,
+              "observeChars": 1401
+            }
+          ],
+          "observeBytes": 1416,
+          "observation": "RootWebArea \"ui-probe fixture — detail sheet\"\n  dialog \"Title details\"\n    button \"Close\"\n      StaticText \"×\"\n    heading \"Harbour Lights\"\n      StaticText \"Harbour Lights\"\n    StaticText \"2019\"\n    StaticText \"movie\"\n    StaticText \"★ 7.4\"\n    form\n      button \"My list\"\n        StaticText \"My list\"\n    form\n      button \"Seen it\"\n        StaticText \"Seen it\"\n    form\n      button \"Not for me\"\n        StaticText \"Not for me\"\n    group \"Your rating\"\n      StaticText \"Your rating\"\n      StaticText \"☆\"\n      button \"0.5 stars\"\n      button \"1 star\"\n      StaticText \"☆\"\n      button \"1.5 stars\"\n      button \"2 stars\"\n      StaticText \"☆\"\n      button \"2.5 stars\"\n      button \"3 stars\"\n      StaticText \"☆\"\n      button \"3.5 stars\"\n      button \"4 stars\"\n      StaticText \"☆\"\n      button \"4.5 stars\"\n      button \"5 stars\"\n      StaticText \"Tap to rate\"\n    heading \"WHY IT'S HERE\"\n      StaticText \"WHY IT'S HERE\"\n    StaticText \"Quiet drama\"\n    StaticText \"Slow burn\"\n    StaticText \"Coastal\"\n    paragraph\n      StaticText \"A lighthouse keeper trades weather reports with a radio operator she has never met. Over one winter the two build a map of each other out of shipping forecasts and static.\"\n    button \"Find torrent\"\n      StaticText \"Find torrent\"\n    form\n      LabelText\n        StaticText \"Upload .torrent\"\n      button \"Add to qBittorrent\"\n        StaticText \"Add to qBittorrent\"",
+          "viewport": "390x844",
+          "totalMs": 216.15
+        },
+        {
+          "layout": {
+            "sheet": {
+              "x": 0,
+              "y": 132,
+              "w": 390,
+              "h": 712,
+              "right": 390,
+              "bottom": 844
+            },
+            "open": true,
+            "top": {
+              "x": 0,
+              "y": 132,
+              "w": 390,
+              "h": 56,
+              "right": 390,
+              "bottom": 188
+            },
+            "handle": {
+              "x": 175,
+              "y": 142,
+              "w": 40,
+              "h": 5,
+              "right": 215,
+              "bottom": 147
+            },
+            "close": {
+              "x": 326,
+              "y": 142,
+              "w": 44,
+              "h": 44,
+              "right": 370,
+              "bottom": 186
+            },
+            "poster": {
+              "x": 20,
+              "y": 200,
+              "w": 104,
+              "h": 156,
+              "right": 124,
+              "bottom": 356
+            },
+            "head": {
+              "x": 140,
+              "y": 200,
+              "w": 230,
+              "h": 49.4,
+              "right": 370,
+              "bottom": 249.4
+            },
+            "grid": {
+              "x": 0,
+              "y": 188,
+              "w": 390,
+              "h": 519,
+              "right": 390,
+              "bottom": 707
+            },
+            "gridCols": "104px 230px",
+            "acts": [
+              {
+                "x": 20,
+                "y": 430,
+                "w": 54.3,
+                "h": 64,
+                "right": 74.3,
+                "bottom": 494
+              },
+              {
+                "x": 139.3,
+                "y": 430,
+                "w": 55.1,
+                "h": 64,
+                "right": 194.4,
+                "bottom": 494
+              },
+              {
+                "x": 258.7,
+                "y": 430,
+                "w": 78.1,
+                "h": 64,
+                "right": 336.7,
+                "bottom": 494
+              }
+            ],
+            "actLabels": [
+              "My list",
+              "Seen it",
+              "Not for me"
+            ],
+            "stars": {
+              "x": 20,
+              "y": 623,
+              "w": 350,
+              "h": 66,
+              "right": 370,
+              "bottom": 689
+            },
+            "chips": [
+              {
+                "x": 20,
+                "y": 395,
+                "w": 78.7,
+                "h": 23,
+                "right": 98.7,
+                "bottom": 418
+              },
+              {
+                "x": 104.7,
+                "y": 395,
+                "w": 66.7,
+                "h": 23,
+                "right": 171.3,
+                "bottom": 418
+              },
+              {
+                "x": 177.3,
+                "y": 395,
+                "w": 53.5,
+                "h": 23,
+                "right": 230.8,
+                "bottom": 418
+              }
+            ],
+            "foot": [
+              {
+                "x": 20,
+                "y": 722,
+                "w": 350,
+                "h": 52,
+                "right": 370,
+                "bottom": 774
+              },
+              {
+                "x": 20,
+                "y": 784,
+                "w": 191.2,
+                "h": 46,
+                "right": 211.2,
+                "bottom": 830
+              }
+            ],
+            "footLabels": [
+              "Find torrent",
+              "Upload .torrent"
+            ],
+            "find": {
+              "x": 20,
+              "y": 722,
+              "w": 350,
+              "h": 52,
+              "right": 370,
+              "bottom": 774
+            },
+            "synopsis": {
+              "x": 20,
+              "y": 512,
+              "w": 350,
+              "h": 93,
+              "right": 370,
+              "bottom": 605
+            },
+            "scrollTop": 0,
+            "docOverflow": 0,
+            "vw": 390,
+            "vh": 844
+          },
+          "env": {
+            "hover_hover": false,
+            "hover_none": true,
+            "pointer_fine": false,
+            "pointer_coarse": true,
+            "any_hover": false,
+            "any_pointer_fine": false,
+            "maxTouchPoints": 1,
+            "touchEvent": true,
+            "innerWidth": 390,
+            "innerHeight": 844,
+            "dpr": 1,
+            "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/157.0.0.0 Safari/537.36 Edg/157.0.0.0"
+          },
+          "steps": [
+            {
+              "step": "goto+sheet",
+              "ms": 24.85,
+              "observeBytes": 1416,
+              "observeChars": 1401
+            }
+          ],
+          "observeBytes": 1416,
+          "observation": "RootWebArea \"ui-probe fixture — detail sheet\"\n  dialog \"Title details\"\n    button \"Close\"\n      StaticText \"×\"\n    heading \"Harbour Lights\"\n      StaticText \"Harbour Lights\"\n    StaticText \"2019\"\n    StaticText \"movie\"\n    StaticText \"★ 7.4\"\n    form\n      button \"My list\"\n        StaticText \"My list\"\n    form\n      button \"Seen it\"\n        StaticText \"Seen it\"\n    form\n      button \"Not for me\"\n        StaticText \"Not for me\"\n    group \"Your rating\"\n      StaticText \"Your rating\"\n      StaticText \"☆\"\n      button \"0.5 stars\"\n      button \"1 star\"\n      StaticText \"☆\"\n      button \"1.5 stars\"\n      button \"2 stars\"\n      StaticText \"☆\"\n      button \"2.5 stars\"\n      button \"3 stars\"\n      StaticText \"☆\"\n      button \"3.5 stars\"\n      button \"4 stars\"\n      StaticText \"☆\"\n      button \"4.5 stars\"\n      button \"5 stars\"\n      StaticText \"Tap to rate\"\n    heading \"WHY IT'S HERE\"\n      StaticText \"WHY IT'S HERE\"\n    StaticText \"Quiet drama\"\n    StaticText \"Slow burn\"\n    StaticText \"Coastal\"\n    paragraph\n      StaticText \"A lighthouse keeper trades weather reports with a radio operator she has never met. Over one winter the two build a map of each other out of shipping forecasts and static.\"\n    button \"Find torrent\"\n      StaticText \"Find torrent\"\n    form\n      LabelText\n        StaticText \"Upload .torrent\"\n      button \"Add to qBittorrent\"\n        StaticText \"Add to qBittorrent\"",
+          "viewport": "390x844",
+          "totalMs": 38.66
+        },
+        {
+          "layout": {
+            "sheet": {
+              "x": 0,
+              "y": 132,
+              "w": 390,
+              "h": 712,
+              "right": 390,
+              "bottom": 844
+            },
+            "open": true,
+            "top": {
+              "x": 0,
+              "y": 132,
+              "w": 390,
+              "h": 56,
+              "right": 390,
+              "bottom": 188
+            },
+            "handle": {
+              "x": 175,
+              "y": 142,
+              "w": 40,
+              "h": 5,
+              "right": 215,
+              "bottom": 147
+            },
+            "close": {
+              "x": 326,
+              "y": 142,
+              "w": 44,
+              "h": 44,
+              "right": 370,
+              "bottom": 186
+            },
+            "poster": {
+              "x": 20,
+              "y": 200,
+              "w": 104,
+              "h": 156,
+              "right": 124,
+              "bottom": 356
+            },
+            "head": {
+              "x": 140,
+              "y": 200,
+              "w": 230,
+              "h": 49.4,
+              "right": 370,
+              "bottom": 249.4
+            },
+            "grid": {
+              "x": 0,
+              "y": 188,
+              "w": 390,
+              "h": 519,
+              "right": 390,
+              "bottom": 707
+            },
+            "gridCols": "104px 230px",
+            "acts": [
+              {
+                "x": 20,
+                "y": 430,
+                "w": 54.3,
+                "h": 64,
+                "right": 74.3,
+                "bottom": 494
+              },
+              {
+                "x": 139.3,
+                "y": 430,
+                "w": 55.1,
+                "h": 64,
+                "right": 194.4,
+                "bottom": 494
+              },
+              {
+                "x": 258.7,
+                "y": 430,
+                "w": 78.1,
+                "h": 64,
+                "right": 336.7,
+                "bottom": 494
+              }
+            ],
+            "actLabels": [
+              "My list",
+              "Seen it",
+              "Not for me"
+            ],
+            "stars": {
+              "x": 20,
+              "y": 623,
+              "w": 350,
+              "h": 66,
+              "right": 370,
+              "bottom": 689
+            },
+            "chips": [
+              {
+                "x": 20,
+                "y": 395,
+                "w": 78.7,
+                "h": 23,
+                "right": 98.7,
+                "bottom": 418
+              },
+              {
+                "x": 104.7,
+                "y": 395,
+                "w": 66.7,
+                "h": 23,
+                "right": 171.3,
+                "bottom": 418
+              },
+              {
+                "x": 177.3,
+                "y": 395,
+                "w": 53.5,
+                "h": 23,
+                "right": 230.8,
+                "bottom": 418
+              }
+            ],
+            "foot": [
+              {
+                "x": 20,
+                "y": 722,
+                "w": 350,
+                "h": 52,
+                "right": 370,
+                "bottom": 774
+              },
+              {
+                "x": 20,
+                "y": 784,
+                "w": 191.2,
+                "h": 46,
+                "right": 211.2,
+                "bottom": 830
+              }
+            ],
+            "footLabels": [
+              "Find torrent",
+              "Upload .torrent"
+            ],
+            "find": {
+              "x": 20,
+              "y": 722,
+              "w": 350,
+              "h": 52,
+              "right": 370,
+              "bottom": 774
+            },
+            "synopsis": {
+              "x": 20,
+              "y": 512,
+              "w": 350,
+              "h": 93,
+              "right": 370,
+              "bottom": 605
+            },
+            "scrollTop": 0,
+            "docOverflow": 0,
+            "vw": 390,
+            "vh": 844
+          },
+          "env": {
+            "hover_hover": false,
+            "hover_none": true,
+            "pointer_fine": false,
+            "pointer_coarse": true,
+            "any_hover": false,
+            "any_pointer_fine": false,
+            "maxTouchPoints": 1,
+            "touchEvent": true,
+            "innerWidth": 390,
+            "innerHeight": 844,
+            "dpr": 1,
+            "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/157.0.0.0 Safari/537.36 Edg/157.0.0.0"
+          },
+          "steps": [
+            {
+              "step": "goto+sheet",
+              "ms": 24.87,
+              "observeBytes": 1416,
+              "observeChars": 1401
+            }
+          ],
+          "observeBytes": 1416,
+          "observation": "RootWebArea \"ui-probe fixture — detail sheet\"\n  dialog \"Title details\"\n    button \"Close\"\n      StaticText \"×\"\n    heading \"Harbour Lights\"\n      StaticText \"Harbour Lights\"\n    StaticText \"2019\"\n    StaticText \"movie\"\n    StaticText \"★ 7.4\"\n    form\n      button \"My list\"\n        StaticText \"My list\"\n    form\n      button \"Seen it\"\n        StaticText \"Seen it\"\n    form\n      button \"Not for me\"\n        StaticText \"Not for me\"\n    group \"Your rating\"\n      StaticText \"Your rating\"\n      StaticText \"☆\"\n      button \"0.5 stars\"\n      button \"1 star\"\n      StaticText \"☆\"\n      button \"1.5 stars\"\n      button \"2 stars\"\n      StaticText \"☆\"\n      button \"2.5 stars\"\n      button \"3 stars\"\n      StaticText \"☆\"\n      button \"3.5 stars\"\n      button \"4 stars\"\n      StaticText \"☆\"\n      button \"4.5 stars\"\n      button \"5 stars\"\n      StaticText \"Tap to rate\"\n    heading \"WHY IT'S HERE\"\n      StaticText \"WHY IT'S HERE\"\n    StaticText \"Quiet drama\"\n    StaticText \"Slow burn\"\n    StaticText \"Coastal\"\n    paragraph\n      StaticText \"A lighthouse keeper trades weather reports with a radio operator she has never met. Over one winter the two build a map of each other out of shipping forecasts and static.\"\n    button \"Find torrent\"\n      StaticText \"Find torrent\"\n    form\n      LabelText\n        StaticText \"Upload .torrent\"\n      button \"Add to qBittorrent\"\n        StaticText \"Add to qBittorrent\"",
+          "viewport": "390x844",
+          "totalMs": 35.75
+        }
+      ]
+    },
+    {
+      "contender": "cdp",
+      "viewport": "1280x900",
+      "launchMs": 489.87,
+      "runs": [
+        {
+          "layout": {
+            "sheet": {
+              "x": 230,
+              "y": 139,
+              "w": 820,
+              "h": 622,
+              "right": 1050,
+              "bottom": 761
+            },
+            "open": true,
+            "top": {
+              "x": 230,
+              "y": 139,
+              "w": 820,
+              "h": 52,
+              "right": 1050,
+              "bottom": 191
+            },
+            "handle": {
+              "x": 620,
+              "y": 149,
+              "w": 40,
+              "h": 5,
+              "right": 660,
+              "bottom": 154
+            },
+            "close": {
+              "x": 996,
+              "y": 151,
+              "w": 40,
+              "h": 40,
+              "right": 1036,
+              "bottom": 191
+            },
+            "poster": {
+              "x": 258,
+              "y": 219,
+              "w": 232,
+              "h": 348,
+              "right": 490,
+              "bottom": 567
+            },
+            "head": {
+              "x": 534,
+              "y": 219,
+              "w": 488,
+              "h": 56.6,
+              "right": 1022,
+              "bottom": 275.6
+            },
+            "grid": {
+              "x": 230,
+              "y": 191,
+              "w": 820,
+              "h": 493,
+              "right": 1050,
+              "bottom": 684
+            },
+            "gridCols": "260px 488px",
+            "acts": [
+              {
+                "x": 534,
+                "y": 349.6,
+                "w": 90.3,
+                "h": 40,
+                "right": 624.3,
+                "bottom": 389.6
+              },
+              {
+                "x": 634.3,
+                "y": 349.6,
+                "w": 91.2,
+                "h": 40,
+                "right": 725.5,
+                "bottom": 389.6
+              },
+              {
+                "x": 735.5,
+                "y": 349.6,
+                "w": 116.1,
+                "h": 40,
+                "right": 851.5,
+                "bottom": 389.6
+              }
+            ],
+            "actLabels": [
+              "My list",
+              "Seen it",
+              "Not for me"
+            ],
+            "stars": {
+              "x": 258,
+              "y": 583,
+              "w": 232,
+              "h": 73,
+              "right": 490,
+              "bottom": 656
+            },
+            "chips": [
+              {
+                "x": 534,
+                "y": 314.6,
+                "w": 78.7,
+                "h": 23,
+                "right": 612.7,
+                "bottom": 337.6
+              },
+              {
+                "x": 618.7,
+                "y": 314.6,
+                "w": 66.7,
+                "h": 23,
+                "right": 685.3,
+                "bottom": 337.6
+              },
+              {
+                "x": 691.3,
+                "y": 314.6,
+                "w": 53.5,
+                "h": 23,
+                "right": 744.8,
+                "bottom": 337.6
+              }
+            ],
+            "foot": [
+              {
+                "x": 258,
+                "y": 699,
+                "w": 374,
+                "h": 48,
+                "right": 632,
+                "bottom": 747
+              },
+              {
+                "x": 648,
+                "y": 714.5,
+                "w": 90.4,
+                "h": 17,
+                "right": 738.4,
+                "bottom": 731.5
+              }
+            ],
+            "footLabels": [
+              "Find torrent",
+              "Upload .torrent"
+            ],
+            "find": {
+              "x": 258,
+              "y": 699,
+              "w": 374,
+              "h": 48,
+              "right": 632,
+              "bottom": 747
+            },
+            "synopsis": {
+              "x": 534,
+              "y": 407.6,
+              "w": 488,
+              "h": 72,
+              "right": 1022,
+              "bottom": 479.6
+            },
+            "scrollTop": 0,
+            "docOverflow": 0,
+            "vw": 1280,
+            "vh": 900
+          },
+          "env": {
+            "hover_hover": true,
+            "hover_none": false,
+            "pointer_fine": true,
+            "pointer_coarse": false,
+            "any_hover": true,
+            "any_pointer_fine": true,
+            "maxTouchPoints": 0,
+            "touchEvent": false,
+            "innerWidth": 1280,
+            "innerHeight": 900,
+            "dpr": 1,
+            "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/157.0.0.0 Safari/537.36 Edg/157.0.0.0"
+          },
+          "steps": [
+            {
+              "step": "goto+sheet",
+              "ms": 189.56,
+              "observeBytes": 1416,
+              "observeChars": 1401
+            }
+          ],
+          "observeBytes": 1416,
+          "observation": "RootWebArea \"ui-probe fixture — detail sheet\"\n  dialog \"Title details\"\n    button \"Close\"\n      StaticText \"×\"\n    heading \"Harbour Lights\"\n      StaticText \"Harbour Lights\"\n    StaticText \"2019\"\n    StaticText \"movie\"\n    StaticText \"★ 7.4\"\n    form\n      button \"My list\"\n        StaticText \"My list\"\n    form\n      button \"Seen it\"\n        StaticText \"Seen it\"\n    form\n      button \"Not for me\"\n        StaticText \"Not for me\"\n    group \"Your rating\"\n      StaticText \"Your rating\"\n      StaticText \"☆\"\n      button \"0.5 stars\"\n      button \"1 star\"\n      StaticText \"☆\"\n      button \"1.5 stars\"\n      button \"2 stars\"\n      StaticText \"☆\"\n      button \"2.5 stars\"\n      button \"3 stars\"\n      StaticText \"☆\"\n      button \"3.5 stars\"\n      button \"4 stars\"\n      StaticText \"☆\"\n      button \"4.5 stars\"\n      button \"5 stars\"\n      StaticText \"Tap to rate\"\n    heading \"WHY IT'S HERE\"\n      StaticText \"WHY IT'S HERE\"\n    StaticText \"Quiet drama\"\n    StaticText \"Slow burn\"\n    StaticText \"Coastal\"\n    paragraph\n      StaticText \"A lighthouse keeper trades weather reports with a radio operator she has never met. Over one winter the two build a map of each other out of shipping forecasts and static.\"\n    button \"Find torrent\"\n      StaticText \"Find torrent\"\n    form\n      LabelText\n        StaticText \"Upload .torrent\"\n      button \"Add to qBittorrent\"\n        StaticText \"Add to qBittorrent\"",
+          "viewport": "1280x900",
+          "totalMs": 203.6
+        },
+        {
+          "layout": {
+            "sheet": {
+              "x": 230,
+              "y": 139,
+              "w": 820,
+              "h": 622,
+              "right": 1050,
+              "bottom": 761
+            },
+            "open": true,
+            "top": {
+              "x": 230,
+              "y": 139,
+              "w": 820,
+              "h": 52,
+              "right": 1050,
+              "bottom": 191
+            },
+            "handle": {
+              "x": 620,
+              "y": 149,
+              "w": 40,
+              "h": 5,
+              "right": 660,
+              "bottom": 154
+            },
+            "close": {
+              "x": 996,
+              "y": 151,
+              "w": 40,
+              "h": 40,
+              "right": 1036,
+              "bottom": 191
+            },
+            "poster": {
+              "x": 258,
+              "y": 219,
+              "w": 232,
+              "h": 348,
+              "right": 490,
+              "bottom": 567
+            },
+            "head": {
+              "x": 534,
+              "y": 219,
+              "w": 488,
+              "h": 56.6,
+              "right": 1022,
+              "bottom": 275.6
+            },
+            "grid": {
+              "x": 230,
+              "y": 191,
+              "w": 820,
+              "h": 493,
+              "right": 1050,
+              "bottom": 684
+            },
+            "gridCols": "260px 488px",
+            "acts": [
+              {
+                "x": 534,
+                "y": 349.6,
+                "w": 90.3,
+                "h": 40,
+                "right": 624.3,
+                "bottom": 389.6
+              },
+              {
+                "x": 634.3,
+                "y": 349.6,
+                "w": 91.2,
+                "h": 40,
+                "right": 725.5,
+                "bottom": 389.6
+              },
+              {
+                "x": 735.5,
+                "y": 349.6,
+                "w": 116.1,
+                "h": 40,
+                "right": 851.5,
+                "bottom": 389.6
+              }
+            ],
+            "actLabels": [
+              "My list",
+              "Seen it",
+              "Not for me"
+            ],
+            "stars": {
+              "x": 258,
+              "y": 583,
+              "w": 232,
+              "h": 73,
+              "right": 490,
+              "bottom": 656
+            },
+            "chips": [
+              {
+                "x": 534,
+                "y": 314.6,
+                "w": 78.7,
+                "h": 23,
+                "right": 612.7,
+                "bottom": 337.6
+              },
+              {
+                "x": 618.7,
+                "y": 314.6,
+                "w": 66.7,
+                "h": 23,
+                "right": 685.3,
+                "bottom": 337.6
+              },
+              {
+                "x": 691.3,
+                "y": 314.6,
+                "w": 53.5,
+                "h": 23,
+                "right": 744.8,
+                "bottom": 337.6
+              }
+            ],
+            "foot": [
+              {
+                "x": 258,
+                "y": 699,
+                "w": 374,
+                "h": 48,
+                "right": 632,
+                "bottom": 747
+              },
+              {
+                "x": 648,
+                "y": 714.5,
+                "w": 90.4,
+                "h": 17,
+                "right": 738.4,
+                "bottom": 731.5
+              }
+            ],
+            "footLabels": [
+              "Find torrent",
+              "Upload .torrent"
+            ],
+            "find": {
+              "x": 258,
+              "y": 699,
+              "w": 374,
+              "h": 48,
+              "right": 632,
+              "bottom": 747
+            },
+            "synopsis": {
+              "x": 534,
+              "y": 407.6,
+              "w": 488,
+              "h": 72,
+              "right": 1022,
+              "bottom": 479.6
+            },
+            "scrollTop": 0,
+            "docOverflow": 0,
+            "vw": 1280,
+            "vh": 900
+          },
+          "env": {
+            "hover_hover": true,
+            "hover_none": false,
+            "pointer_fine": true,
+            "pointer_coarse": false,
+            "any_hover": true,
+            "any_pointer_fine": true,
+            "maxTouchPoints": 0,
+            "touchEvent": false,
+            "innerWidth": 1280,
+            "innerHeight": 900,
+            "dpr": 1,
+            "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/157.0.0.0 Safari/537.36 Edg/157.0.0.0"
+          },
+          "steps": [
+            {
+              "step": "goto+sheet",
+              "ms": 24.72,
+              "observeBytes": 1416,
+              "observeChars": 1401
+            }
+          ],
+          "observeBytes": 1416,
+          "observation": "RootWebArea \"ui-probe fixture — detail sheet\"\n  dialog \"Title details\"\n    button \"Close\"\n      StaticText \"×\"\n    heading \"Harbour Lights\"\n      StaticText \"Harbour Lights\"\n    StaticText \"2019\"\n    StaticText \"movie\"\n    StaticText \"★ 7.4\"\n    form\n      button \"My list\"\n        StaticText \"My list\"\n    form\n      button \"Seen it\"\n        StaticText \"Seen it\"\n    form\n      button \"Not for me\"\n        StaticText \"Not for me\"\n    group \"Your rating\"\n      StaticText \"Your rating\"\n      StaticText \"☆\"\n      button \"0.5 stars\"\n      button \"1 star\"\n      StaticText \"☆\"\n      button \"1.5 stars\"\n      button \"2 stars\"\n      StaticText \"☆\"\n      button \"2.5 stars\"\n      button \"3 stars\"\n      StaticText \"☆\"\n      button \"3.5 stars\"\n      button \"4 stars\"\n      StaticText \"☆\"\n      button \"4.5 stars\"\n      button \"5 stars\"\n      StaticText \"Tap to rate\"\n    heading \"WHY IT'S HERE\"\n      StaticText \"WHY IT'S HERE\"\n    StaticText \"Quiet drama\"\n    StaticText \"Slow burn\"\n    StaticText \"Coastal\"\n    paragraph\n      StaticText \"A lighthouse keeper trades weather reports with a radio operator she has never met. Over one winter the two build a map of each other out of shipping forecasts and static.\"\n    button \"Find torrent\"\n      StaticText \"Find torrent\"\n    form\n      LabelText\n        StaticText \"Upload .torrent\"\n      button \"Add to qBittorrent\"\n        StaticText \"Add to qBittorrent\"",
+          "viewport": "1280x900",
+          "totalMs": 38.96
+        },
+        {
+          "layout": {
+            "sheet": {
+              "x": 230,
+              "y": 139,
+              "w": 820,
+              "h": 622,
+              "right": 1050,
+              "bottom": 761
+            },
+            "open": true,
+            "top": {
+              "x": 230,
+              "y": 139,
+              "w": 820,
+              "h": 52,
+              "right": 1050,
+              "bottom": 191
+            },
+            "handle": {
+              "x": 620,
+              "y": 149,
+              "w": 40,
+              "h": 5,
+              "right": 660,
+              "bottom": 154
+            },
+            "close": {
+              "x": 996,
+              "y": 151,
+              "w": 40,
+              "h": 40,
+              "right": 1036,
+              "bottom": 191
+            },
+            "poster": {
+              "x": 258,
+              "y": 219,
+              "w": 232,
+              "h": 348,
+              "right": 490,
+              "bottom": 567
+            },
+            "head": {
+              "x": 534,
+              "y": 219,
+              "w": 488,
+              "h": 56.6,
+              "right": 1022,
+              "bottom": 275.6
+            },
+            "grid": {
+              "x": 230,
+              "y": 191,
+              "w": 820,
+              "h": 493,
+              "right": 1050,
+              "bottom": 684
+            },
+            "gridCols": "260px 488px",
+            "acts": [
+              {
+                "x": 534,
+                "y": 349.6,
+                "w": 90.3,
+                "h": 40,
+                "right": 624.3,
+                "bottom": 389.6
+              },
+              {
+                "x": 634.3,
+                "y": 349.6,
+                "w": 91.2,
+                "h": 40,
+                "right": 725.5,
+                "bottom": 389.6
+              },
+              {
+                "x": 735.5,
+                "y": 349.6,
+                "w": 116.1,
+                "h": 40,
+                "right": 851.5,
+                "bottom": 389.6
+              }
+            ],
+            "actLabels": [
+              "My list",
+              "Seen it",
+              "Not for me"
+            ],
+            "stars": {
+              "x": 258,
+              "y": 583,
+              "w": 232,
+              "h": 73,
+              "right": 490,
+              "bottom": 656
+            },
+            "chips": [
+              {
+                "x": 534,
+                "y": 314.6,
+                "w": 78.7,
+                "h": 23,
+                "right": 612.7,
+                "bottom": 337.6
+              },
+              {
+                "x": 618.7,
+                "y": 314.6,
+                "w": 66.7,
+                "h": 23,
+                "right": 685.3,
+                "bottom": 337.6
+              },
+              {
+                "x": 691.3,
+                "y": 314.6,
+                "w": 53.5,
+                "h": 23,
+                "right": 744.8,
+                "bottom": 337.6
+              }
+            ],
+            "foot": [
+              {
+                "x": 258,
+                "y": 699,
+                "w": 374,
+                "h": 48,
+                "right": 632,
+                "bottom": 747
+              },
+              {
+                "x": 648,
+                "y": 714.5,
+                "w": 90.4,
+                "h": 17,
+                "right": 738.4,
+                "bottom": 731.5
+              }
+            ],
+            "footLabels": [
+              "Find torrent",
+              "Upload .torrent"
+            ],
+            "find": {
+              "x": 258,
+              "y": 699,
+              "w": 374,
+              "h": 48,
+              "right": 632,
+              "bottom": 747
+            },
+            "synopsis": {
+              "x": 534,
+              "y": 407.6,
+              "w": 488,
+              "h": 72,
+              "right": 1022,
+              "bottom": 479.6
+            },
+            "scrollTop": 0,
+            "docOverflow": 0,
+            "vw": 1280,
+            "vh": 900
+          },
+          "env": {
+            "hover_hover": true,
+            "hover_none": false,
+            "pointer_fine": true,
+            "pointer_coarse": false,
+            "any_hover": true,
+            "any_pointer_fine": true,
+            "maxTouchPoints": 0,
+            "touchEvent": false,
+            "innerWidth": 1280,
+            "innerHeight": 900,
+            "dpr": 1,
+            "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/157.0.0.0 Safari/537.36 Edg/157.0.0.0"
+          },
+          "steps": [
+            {
+              "step": "goto+sheet",
+              "ms": 23.6,
+              "observeBytes": 1416,
+              "observeChars": 1401
+            }
+          ],
+          "observeBytes": 1416,
+          "observation": "RootWebArea \"ui-probe fixture — detail sheet\"\n  dialog \"Title details\"\n    button \"Close\"\n      StaticText \"×\"\n    heading \"Harbour Lights\"\n      StaticText \"Harbour Lights\"\n    StaticText \"2019\"\n    StaticText \"movie\"\n    StaticText \"★ 7.4\"\n    form\n      button \"My list\"\n        StaticText \"My list\"\n    form\n      button \"Seen it\"\n        StaticText \"Seen it\"\n    form\n      button \"Not for me\"\n        StaticText \"Not for me\"\n    group \"Your rating\"\n      StaticText \"Your rating\"\n      StaticText \"☆\"\n      button \"0.5 stars\"\n      button \"1 star\"\n      StaticText \"☆\"\n      button \"1.5 stars\"\n      button \"2 stars\"\n      StaticText \"☆\"\n      button \"2.5 stars\"\n      button \"3 stars\"\n      StaticText \"☆\"\n      button \"3.5 stars\"\n      button \"4 stars\"\n      StaticText \"☆\"\n      button \"4.5 stars\"\n      button \"5 stars\"\n      StaticText \"Tap to rate\"\n    heading \"WHY IT'S HERE\"\n      StaticText \"WHY IT'S HERE\"\n    StaticText \"Quiet drama\"\n    StaticText \"Slow burn\"\n    StaticText \"Coastal\"\n    paragraph\n      StaticText \"A lighthouse keeper trades weather reports with a radio operator she has never met. Over one winter the two build a map of each other out of shipping forecasts and static.\"\n    button \"Find torrent\"\n      StaticText \"Find torrent\"\n    form\n      LabelText\n        StaticText \"Upload .torrent\"\n      button \"Add to qBittorrent\"\n        StaticText \"Add to qBittorrent\"",
+          "viewport": "1280x900",
+          "totalMs": 35.49
+        }
+      ]
+    }
+  ],
+  "t2": [
+    {
+      "contender": "playwright",
+      "before": {
+        "tileClass": "carousel-card rec-card rec-tile",
+        "mouseOver": false,
+        "display": "none",
+        "visibility": "visible",
+        "opacity": "1",
+        "transform": "none",
+        "pointerEvents": "none",
+        "barW": 0,
+        "barH": 0,
+        "buttons": 3,
+        "buttonVisible": 0,
+        "pointer": {
+          "fine": true,
+          "hover": true
+        }
+      },
+      "after": {
+        "tileClass": "carousel-card rec-card rec-tile mouse-over",
+        "mouseOver": true,
+        "display": "flex",
+        "visibility": "visible",
+        "opacity": "1",
+        "transform": "none",
+        "pointerEvents": "none",
+        "barW": 30.4,
+        "barH": 99.2,
+        "buttons": 3,
+        "buttonVisible": 3,
+        "pointer": {
+          "fine": true,
+          "hover": true
+        }
+      },
+      "env": {
+        "hover_hover": true,
+        "hover_none": false,
+        "pointer_fine": true,
+        "pointer_coarse": false,
+        "any_hover": true,
+        "any_pointer_fine": true,
+        "maxTouchPoints": 0,
+        "touchEvent": false,
+        "innerWidth": 1280,
+        "innerHeight": 900,
+        "dpr": 1,
+        "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/158.0.8127.18 Safari/537.36"
+      },
+      "anim": {
+        "supported": true,
+        "count": 0,
+        "animations": []
+      },
+      "viewport": "1280x900",
+      "revealed": true,
+      "observeBytes": 394,
+      "observation": "- main:\n  - link \"No image Harbour Lights\":\n    - /url: /media/900001?media_type=movie&rec_row=row-quiet-drama\n  - button \"My list\": +\n  - button \"Seen it\": ✓\n  - button \"Not for me\": ✕\n  - link \"No image The Long Static\":\n    - /url: /media/900002?media_type=movie&rec_row=row-quiet-drama\n  - link \"No image Winter Ferry\":\n    - /url: /media/900003?media_type=movie&rec_row=row-quiet-drama",
+      "steps": [
+        {
+          "step": "mouse-to-tile",
+          "ms": 130.86
+        }
+      ]
+    },
+    {
+      "contender": "playwright",
+      "before": {
+        "tileClass": "carousel-card rec-card rec-tile",
+        "mouseOver": false,
+        "display": "none",
+        "visibility": "visible",
+        "opacity": "1",
+        "transform": "none",
+        "pointerEvents": "none",
+        "barW": 0,
+        "barH": 0,
+        "buttons": 3,
+        "buttonVisible": 0,
+        "pointer": {
+          "fine": false,
+          "hover": false
+        }
+      },
+      "after": {
+        "tileClass": "carousel-card rec-card rec-tile",
+        "mouseOver": false,
+        "display": "none",
+        "visibility": "visible",
+        "opacity": "1",
+        "transform": "none",
+        "pointerEvents": "none",
+        "barW": 0,
+        "barH": 0,
+        "buttons": 3,
+        "buttonVisible": 0,
+        "pointer": {
+          "fine": false,
+          "hover": false
+        }
+      },
+      "env": {
+        "hover_hover": false,
+        "hover_none": true,
+        "pointer_fine": false,
+        "pointer_coarse": true,
+        "any_hover": false,
+        "any_pointer_fine": false,
+        "maxTouchPoints": 1,
+        "touchEvent": true,
+        "innerWidth": 390,
+        "innerHeight": 844,
+        "dpr": 1,
+        "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/158.0.8127.18 Safari/537.36"
+      },
+      "anim": {
+        "supported": true,
+        "count": 0,
+        "animations": []
+      },
+      "viewport": "390x844",
+      "revealed": false,
+      "observeBytes": 315,
+      "observation": "- main:\n  - link \"No image Harbour Lights\":\n    - /url: /media/900001?media_type=movie&rec_row=row-quiet-drama\n  - link \"No image The Long Static\":\n    - /url: /media/900002?media_type=movie&rec_row=row-quiet-drama\n  - link \"No image Winter Ferry\":\n    - /url: /media/900003?media_type=movie&rec_row=row-quiet-drama",
+      "steps": [
+        {
+          "step": "tap",
+          "ms": 183.97
+        }
+      ]
+    },
+    {
+      "contender": "cdp",
+      "before": {
+        "tileClass": "carousel-card rec-card rec-tile",
+        "mouseOver": false,
+        "display": "none",
+        "visibility": "visible",
+        "opacity": "1",
+        "transform": "none",
+        "pointerEvents": "none",
+        "barW": 0,
+        "barH": 0,
+        "buttons": 3,
+        "buttonVisible": 0,
+        "pointer": {
+          "fine": true,
+          "hover": true
+        }
+      },
+      "after": {
+        "tileClass": "carousel-card rec-card rec-tile mouse-over",
+        "mouseOver": true,
+        "display": "flex",
+        "visibility": "visible",
+        "opacity": "1",
+        "transform": "none",
+        "pointerEvents": "none",
+        "barW": 30.4,
+        "barH": 99.2,
+        "buttons": 3,
+        "buttonVisible": 3,
+        "pointer": {
+          "fine": true,
+          "hover": true
+        }
+      },
+      "env": {
+        "hover_hover": true,
+        "hover_none": false,
+        "pointer_fine": true,
+        "pointer_coarse": false,
+        "any_hover": true,
+        "any_pointer_fine": true,
+        "maxTouchPoints": 0,
+        "touchEvent": false,
+        "innerWidth": 1280,
+        "innerHeight": 900,
+        "dpr": 1,
+        "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/157.0.0.0 Safari/537.36 Edg/157.0.0.0"
+      },
+      "anim": {
+        "supported": true,
+        "count": 0,
+        "animations": []
+      },
+      "viewport": "1280x900",
+      "revealed": true,
+      "observeBytes": 476,
+      "observation": "RootWebArea \"ui-probe fixture — detail sheet\"\n  main\n    link \"No image Harbour Lights\"\n      StaticText \"No image\"\n      StaticText \"Harbour Lights\"\n    button \"My list\"\n      StaticText \"+\"\n    button \"Seen it\"\n      StaticText \"✓\"\n    button \"Not for me\"\n      StaticText \"✕\"\n    link \"No image The Long Static\"\n      StaticText \"No image\"\n      StaticText \"The Long Static\"\n    link \"No image Winter Ferry\"\n      StaticText \"No image\"\n      StaticText \"Winter Ferry\"",
+      "steps": [
+        {
+          "step": "mouse-to-tile",
+          "ms": 307.54
+        }
+      ]
+    },
+    {
+      "contender": "cdp",
+      "before": {
+        "tileClass": "carousel-card rec-card rec-tile",
+        "mouseOver": false,
+        "display": "none",
+        "visibility": "visible",
+        "opacity": "1",
+        "transform": "none",
+        "pointerEvents": "none",
+        "barW": 0,
+        "barH": 0,
+        "buttons": 3,
+        "buttonVisible": 0,
+        "pointer": {
+          "fine": false,
+          "hover": false
+        }
+      },
+      "after": {
+        "tileClass": "carousel-card rec-card rec-tile",
+        "mouseOver": false,
+        "display": "none",
+        "visibility": "visible",
+        "opacity": "1",
+        "transform": "none",
+        "pointerEvents": "none",
+        "barW": 0,
+        "barH": 0,
+        "buttons": 3,
+        "buttonVisible": 0,
+        "pointer": {
+          "fine": false,
+          "hover": false
+        }
+      },
+      "env": {
+        "hover_hover": false,
+        "hover_none": true,
+        "pointer_fine": false,
+        "pointer_coarse": true,
+        "any_hover": false,
+        "any_pointer_fine": false,
+        "maxTouchPoints": 1,
+        "touchEvent": true,
+        "innerWidth": 390,
+        "innerHeight": 844,
+        "dpr": 1,
+        "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/157.0.0.0 Safari/537.36 Edg/157.0.0.0"
+      },
+      "anim": {
+        "supported": true,
+        "count": 0,
+        "animations": []
+      },
+      "viewport": "390x844",
+      "revealed": false,
+      "observeBytes": 343,
+      "observation": "RootWebArea \"ui-probe fixture — detail sheet\"\n  main\n    link \"No image Harbour Lights\"\n      StaticText \"No image\"\n      StaticText \"Harbour Lights\"\n    link \"No image The Long Static\"\n      StaticText \"No image\"\n      StaticText \"The Long Static\"\n    link \"No image Winter Ferry\"\n      StaticText \"No image\"\n      StaticText \"Winter Ferry\"",
+      "steps": [
+        {
+          "step": "tap",
+          "ms": 399.64
+        }
+      ]
+    }
+  ]
+}
