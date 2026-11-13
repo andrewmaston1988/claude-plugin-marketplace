@@ -5,7 +5,7 @@ import { boxOf, queryIds } from "./interaction.mjs";
 import {
   ASSERT_TIMEOUT_MS, StepFailure, inconclusive, matches, near, pollUntil, q,
 } from "./common.mjs";
-import { expectCssOver } from "./over.mjs";
+import { expectCssOver, expectTextOver } from "./over.mjs";
 
 const VISIBLE_JS = (selector) => `(() => {
   const el = document.querySelector(${q(selector)});
@@ -101,6 +101,7 @@ export async function expectCss(args, state) {
 }
 
 export async function expectText(args, state) {
+  if (args.over) return expectTextOver(args, state);
   const timeout = args.timeoutMs ?? ASSERT_TIMEOUT_MS;
   const result = await pollUntil(async () => {
     const read = await evaluate(state.cdp, TEXT_JS(args.target));

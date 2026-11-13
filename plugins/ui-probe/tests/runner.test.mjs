@@ -218,6 +218,34 @@ test("row 25: expect_json bounds its fetch, and an abort is inconclusive", { tim
   assert.equal(aborted.exitCode, 2);
 });
 
+test("row 8: a key op dispatches the table's keyDown and keyUp with repeat and autoRepeat", async () => {
+  const cdp = stubCdp({ nodeIds: [] });
+  const sleeps = [];
+  const result = await run({ id: "k", backend: "tv", steps: [{ key: { key: "Down", repeat: 2, gapMs: 40, autoRepeat: true } }] }, {
+    cdp, requireAssertion: false, _sleep: async (ms) => { sleeps.push(ms); },
+  });
+  assert.equal(result.outcome, "passed", JSON.stringify(result.steps));
+  const keys = cdp.calls.filter((call) => call.method === "Input.dispatchKeyEvent").map((call) => call.params);
+  assert.deepEqual(keys.map((params) => params.type), ["rawKeyDown", "keyUp", "rawKeyDown", "keyUp"]);
+  assert.deepEqual(keys.map((params) => params.windowsVirtualKeyCode), [40, 40, 40, 40]);
+  assert.equal(keys[0].autoRepeat, undefined);
+  assert.equal(keys[2].autoRepeat, true);
+  assert.deepEqual(sleeps, [40]);
+});
+
+test("a tv run installs Network interception when the protocol has no Fetch domain", async () => {
+  const cdp = stubCdp({ nodeIds: [] });
+  const protocol = {
+    domains: [{ domain: "Network", commands: [{ name: "setRequestInterception" }, { name: "continueInterceptedRequest" }] }],
+  };
+  const result = await run({ id: "k", backend: "tv", steps: [{ key: { key: "Left" } }] }, {
+    cdp, requireAssertion: false, protocol,
+  });
+  assert.equal(result.outcome, "passed", JSON.stringify(result.steps));
+  assert.ok(cdp.methods().includes("Network.setRequestInterception"), cdp.methods().join(","));
+  assert.equal(cdp.methods().includes("Fetch.enable"), false, cdp.methods().join(","));
+});
+
 test("a step's source is the scenario name and its 1-based index", async () => {
   const cdp = stubCdp({ nodeIds: [2] });
   const result = await run(doc({ open: { url: URL } }, { expect_text: { target: "h1", equals: "hello" } }), { cdp, source: "t2-hover.yaml" });

@@ -2,13 +2,15 @@
 
 import { sleep } from "./cdp.mjs";
 import { setCookies } from "./auth.mjs";
-import { installFetchGuard } from "./guard.mjs";
-import { assertsNothing, validate } from "./ir.mjs";
+import { installGuard } from "./guard.mjs";
+import { assertsNothing, expandIncludes, validate } from "./ir.mjs";
 import { StepFailure, absolute, inconclusive, q } from "./ops/common.mjs";
 import { OPS } from "./ops/index.mjs";
 
 const LOAD_TIMEOUT_MS = 15000;
 const FETCH_TIMEOUT_MS = 10000;
+// A TV journey on the desktop device runs at the set's viewport, so one file serves both.
+const DESKTOP_TV = { width: 1920, height: 1080, dpr: 1 };
 
 const EXIT_CODES = { passed: 0, failed: 1, inconclusive: 2, needs_review: 3, invalid: 64 };
 
@@ -59,6 +61,16 @@ const STEPS = {
   ...OPS,
 };
 
+// The set is 1920x1080 at dpr 1 with no touch. A desktop device stands in for it exactly, so a
+// journey that passes here has the same geometry and the same key events as on the TV.
+async function emulateDesktopTv(cdp) {
+  await cdp.send("Emulation.setDeviceMetricsOverride", {
+    width: DESKTOP_TV.width, height: DESKTOP_TV.height,
+    deviceScaleFactor: DESKTOP_TV.dpr, mobile: false,
+  });
+  await cdp.send("Emulation.setTouchEmulationEnabled", { enabled: false });
+}
+
 async function execStep(op, args, state) {
   const step = STEPS[op];
   if (!step) throw new StepFailure("inconclusive", null, `unsupported op ${q(op)}`);
@@ -71,13 +83,19 @@ async function execStep(op, args, state) {
  * caller own the Fetch guard so capture and the scenario share one interception.
  */
 export async function run(doc, ctx = {}) {
-  const problems = validate(doc);
+  const { doc: scenario, problems: includeProblems } = expandIncludes(doc, { baseDir: ctx.baseDir, file: ctx.file });
+  if (includeProblems.length) {
+    return { outcome: "invalid", steps: [], exitCode: EXIT_CODES.invalid, problems: includeProblems };
+  }
+  const problems = validate(scenario);
   if (problems.length) return { outcome: "invalid", steps: [], exitCode: EXIT_CODES.invalid, problems };
 
-  const idle = ctx.requireAssertion === false ? [] : assertsNothing(doc);
+  const idle = ctx.requireAssertion === false ? [] : assertsNothing(scenario);
   if (idle.length) return { outcome: "needs_review", steps: [], exitCode: EXIT_CODES.needs_review, problems: idle };
 
-  const browser = (doc.backend ?? "browser") === "browser";
+  const backend = scenario.backend ?? "browser";
+  const device = ctx.device ?? "desktop";
+  const browser = backend !== "http";
   const state = {
     baseUrl: ctx.baseUrl ?? null,
     allowWrites: Boolean(ctx.allowWrites),
@@ -86,7 +104,7 @@ export async function run(doc, ctx = {}) {
     _fetch: ctx._fetch ?? fetch,
     _sleep: ctx._sleep ?? sleep,
     now: ctx.now ?? Date.now,
-    source: ctx.source ?? doc.id,
+    source: ctx.source ?? scenario.id,
     cdp: null,
     guard: ctx.guard ?? null,
     blocked: ctx.blocked ?? [],
@@ -96,20 +114,26 @@ export async function run(doc, ctx = {}) {
     state.cdp = typeof ctx.cdp === "function" ? await ctx.cdp() : ctx.cdp;
     if (!state.cdp) throw new Error("run() needs ctx.cdp (a connected CDP client) for a browser scenario");
     await state.cdp.send("Page.enable");
+    if (backend === "tv" && device === "desktop") await emulateDesktopTv(state.cdp);
     if (ctx.cookies?.length) {
-      const open = doc.steps.map((step) => step.open).find(Boolean);
+      const open = scenario.steps.map((step) => step.open).find(Boolean);
       const cookieUrl = open && /^https?:\/\//.test(open.url) ? open.url : state.baseUrl;
       if (cookieUrl) await setCookies(state.cdp, ctx.cookies, cookieUrl);
     }
     if (!state.guard) {
-      state.guard = await installFetchGuard(state.cdp, { allowWrites: state.allowWrites, blocked: state.blocked });
+      state.guard = await installGuard(state.cdp, ctx.protocol ?? null, {
+        allowWrites: state.allowWrites,
+        blocked: state.blocked,
+        testOrigin: ctx.testOrigin ?? null,
+        backend,
+      });
     }
   }
 
   const records = [];
   let stopped = false;
   try {
-    for (const [index, step] of doc.steps.entries()) {
+    for (const [index, step] of scenario.steps.entries()) {
       const op = Object.keys(step)[0];
       const args = step[op];
       const base = { source: `${state.source}:${index + 1}`, op };

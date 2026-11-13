@@ -1,6 +1,7 @@
 // Fixture server for the integration rows. One node:http listener on port 0 serves every page the
 // tests need and records each request, so a guard test can prove the server never saw a write.
 
+import { readFileSync } from "node:fs";
 import { createServer } from "node:http";
 
 const page = (body) => `<!doctype html>
@@ -103,6 +104,9 @@ const PAGES = {
     <div style="height:1500px"></div>
     <button id="deep" style="display:block;width:120px;height:40px">Deep target</button>
     <div id="overlay" style="position:fixed;inset:0;background:rgba(0,0,0,.1)"></div>`),
+
+  // The TV journey target keeps its own file so a reader can see the page the row names.
+  "/tv-grid.html": readFileSync(new URL("./tv-grid.html", import.meta.url), "utf8"),
 };
 
 const DONE = page('<div id="done">saved</div>');

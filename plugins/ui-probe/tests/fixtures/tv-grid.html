@@ -16,6 +16,16 @@
   .tv-card.focused { border-color: #6cc4ff; background: #2d3a4c; }
   #player, #exit-popup { position: fixed; inset: 12%; display: none; padding: 32px; background: #000; }
   #player.open, #exit-popup.open { display: block; }
+
+  /* Probe geometry is absolute against the viewport, so the safe box is exact at 1920x1080:
+     its edges are 96/54/1824/1026. */
+  .probe { position: absolute; pointer-events: none; }
+  #probe-safe { left: 96px; top: 54px; width: 1728px; height: 972px; }
+  #probe-past { left: 1500px; top: 200px; width: 330px; height: 40px; background: rgba(255, 96, 96, .12); }
+  #scaler { left: 1490px; top: 300px; width: 320px; height: 100px; background: rgba(96, 255, 160, .1); }
+  #scaler.grow { width: 340px; }
+  #timed-text { position: absolute; left: 96px; top: 960px; margin: 0; }
+  #clip { position: absolute; left: 120px; top: 820px; width: 160px; height: 90px; }
 </style>
 </head>
 <body>
@@ -34,6 +44,12 @@
 
   <div id="player"><h2 id="player-title"></h2></div>
   <div id="exit-popup" role="dialog" aria-label="Exit"><p id="exit-question">Exit the app?</p></div>
+
+  <div id="probe-safe" class="probe"></div>
+  <div id="probe-past" class="probe"></div>
+  <div id="scaler" class="probe"></div>
+  <p id="timed-text">before</p>
+  <video id="clip" muted playsinline></video>
 
   <script>
     // Focus is a class on the tile: nothing is focusable, so document.activeElement stays body,
@@ -106,6 +122,28 @@
       });
 
       showFocus();
+
+      // Probe fixtures. Digit1 arms a 100ms scale past the safe edge; Digit2 changes the text at
+      // 250ms, both timed from a key so a journey can assert around the change.
+      const scaler = document.getElementById("scaler");
+      const timedText = document.getElementById("timed-text");
+      window.addEventListener("keydown", (event) => {
+        if (event.keyCode === 49) setTimeout(() => scaler.classList.add("grow"), 100);
+        if (event.keyCode === 50) setTimeout(() => { timedText.textContent = "after"; }, 250);
+      });
+
+      // A generated clip: nothing to ship, and a muted stream may autoplay.
+      const clip = document.getElementById("clip");
+      const canvas = document.createElement("canvas");
+      canvas.width = 64;
+      canvas.height = 64;
+      const paint = canvas.getContext("2d");
+      setInterval(() => {
+        paint.fillStyle = `hsl(${(Date.now() / 20) % 360}, 60%, 45%)`;
+        paint.fillRect(0, 0, 64, 64);
+      }, 50);
+      clip.srcObject = canvas.captureStream(10);
+      clip.play().catch(() => {});
     })();
   </script>
 </body>

@@ -1,9 +1,22 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { parseScenario, validate, assertsNothing, OPS } from '../src/ir.mjs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { expandIncludes, parseScenario, validate, assertsNothing, OPS } from '../src/ir.mjs';
 import { scenarios } from './fixtures/scenarios.mjs';
 
 const fixture = (name) => scenarios[name];
+
+function tempDir() {
+  return mkdtempSync(join(tmpdir(), 'ui-probe-ir-'));
+}
+
+const yamlAt = (dir, name, text) => {
+  const file = join(dir, name);
+  writeFileSync(file, text);
+  return file;
+};
 
 test('row 1: validation teaches the fix for missing expect_css property and unknown ops', () => {
   const result = validate({
@@ -51,6 +64,79 @@ test('row 24: a viewport step carries an optional dpr and rejects a non-positive
   for (const dpr of [0, -1, 'x']) {
     const problems = validate({ id: 'valid-id', steps: [{ viewport: { width: 390, height: 844, dpr } }] });
     assert.ok(problems.some((item) => item.field === 'steps[0].viewport.dpr' && item.problem && item.fix && item.example), String(dpr));
+  }
+});
+
+test('row 8: validate accepts table keys and rejects Exit and unknown names', () => {
+  assert.deepEqual(validate({
+    id: 'tv-keys',
+    backend: 'tv',
+    steps: [{ key: { key: 'Left' } }, { key: { key: 'MediaPlay', repeat: 3, gapMs: 50, autoRepeat: true } }],
+  }), []);
+  for (const name of ['Exit', 'VolumeUp']) {
+    const problems = validate({ id: 'tv-keys', backend: 'tv', steps: [{ key: { key: name } }] });
+    const hit = problems.find((item) => item.field === 'steps[0].key.key');
+    assert.ok(hit && hit.problem.includes(name) && hit.fix && hit.example, `${name}: ${JSON.stringify(problems)}`);
+  }
+  const badRepeat = validate({ id: 'tv-keys', backend: 'tv', steps: [{ key: { key: 'Left', repeat: 0 } }] });
+  assert.ok(badRepeat.some((item) => item.field === 'steps[0].key.repeat'));
+  const badAuto = validate({ id: 'tv-keys', backend: 'tv', steps: [{ key: { key: 'Left', autoRepeat: 'yes' } }] });
+  assert.ok(badAuto.some((item) => item.field === 'steps[0].key.autoRepeat'));
+});
+
+test('row 9: a tv backend is valid and rejects the pointer ops naming why', () => {
+  assert.deepEqual(validate({ id: 'tv-journey', backend: 'tv', steps: [{ key: { key: 'Down' } }] }), []);
+  for (const op of ['hover', 'tap', 'click']) {
+    const problems = validate({ id: 'tv-journey', backend: 'tv', steps: [{ [op]: { target: '.tile' } }] });
+    const hit = problems.find((item) => item.field === `steps[0].${op}`);
+    assert.ok(hit && /remote|pointer/i.test(hit.problem), `${op}: ${JSON.stringify(problems)}`);
+    assert.ok(hit.fix && hit.example, `${op} teaches no fix`);
+  }
+  assert.deepEqual(validate({ id: 'browser-case', steps: [{ click: { target: '.tile' } }] }), []);
+  assert.ok(validate({ id: 'bad-backend', backend: 'watch', steps: [] }).some((item) => item.field === 'backend'));
+});
+
+test('row 13: include splices the named file steps in order', () => {
+  const dir = tempDir();
+  try {
+    yamlAt(dir, 'prefix.yaml', 'steps:\n  - open: { url: "/home" }\n  - expect_visible: { target: "#greeting" }\n');
+    const root = yamlAt(dir, 'root.yaml', [
+      'id: root', 'steps:', '  - viewport: { width: 1920, height: 1080 }',
+      '  - include: prefix.yaml', '  - expect_text: { target: "h1", equals: "Hi" }', '',
+    ].join('\n'));
+    const doc = parseScenario(readFileSync(root, 'utf8'), { format: 'yaml' });
+    const { doc: expanded, problems } = expandIncludes(doc, { baseDir: dir, file: root });
+    assert.deepEqual(problems, []);
+    assert.deepEqual(expanded.steps.map((step) => Object.keys(step)[0]), ['viewport', 'open', 'expect_visible', 'expect_text']);
+    assert.deepEqual(validate(doc, { baseDir: dir, file: root }), []);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('row 13: a missing include, a second-level include and a cycle are validate errors naming the file', () => {
+  const dir = tempDir();
+  try {
+    const root = join(dir, 'root.yaml');
+    const check = () => validate(parseScenario(readFileSync(root, 'utf8'), { format: 'yaml' }), { baseDir: dir, file: root });
+
+    yamlAt(dir, 'root.yaml', 'id: root\nsteps:\n  - include: missing.yaml\n  - expect_visible: { target: "body" }\n');
+    const missing = check();
+    assert.ok(missing.some((item) => item.problem.includes('missing.yaml')), JSON.stringify(missing));
+
+    yamlAt(dir, 'a.yaml', 'steps:\n  - include: b.yaml\n');
+    yamlAt(dir, 'b.yaml', 'steps:\n  - expect_visible: { target: "body" }\n');
+    yamlAt(dir, 'root.yaml', 'id: root\nsteps:\n  - include: a.yaml\n  - expect_visible: { target: "body" }\n');
+    const nested = check();
+    assert.ok(nested.some((item) => /second-level/i.test(item.problem) && item.problem.includes('b.yaml')), JSON.stringify(nested));
+
+    yamlAt(dir, 'a.yaml', 'steps:\n  - include: root.yaml\n');
+    yamlAt(dir, 'root.yaml', 'id: root\nsteps:\n  - include: a.yaml\n  - expect_visible: { target: "body" }\n');
+    const cycle = check();
+    assert.ok(cycle.some((item) => /cycle/i.test(item.problem)
+      && item.problem.includes('root.yaml') && item.problem.includes('a.yaml')), JSON.stringify(cycle));
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
   }
 });
 

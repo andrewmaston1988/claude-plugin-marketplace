@@ -15,8 +15,10 @@ import { startFixtureServer, AUTH_COOKIE } from "./fixtures/server.mjs";
 import { BUILTIN_VIEWPORTS } from "../src/config.mjs";
 import { findBrowser, launch } from "../src/browser.mjs";
 import { connect } from "../src/cdp.mjs";
+import { observe } from "../src/observe.mjs";
 import { run } from "../src/runner.mjs";
 import { capture } from "../src/capture.mjs";
+import { dispatchKey } from "../src/tv/keys.mjs";
 
 const REQUIRED = process.env.UI_PROBE_REQUIRE_BROWSER === "1";
 const OVERRIDE = process.env.UI_PROBE_BROWSER || undefined;
@@ -47,6 +49,11 @@ function runOn(steps, ctx = {}) {
 }
 
 const steps = (path, ...rest) => [{ open: { url: path } }, ...rest];
+
+// A TV journey on the desktop device: 1920x1080, dpr 1, no touch, the same key dispatch.
+const runTv = (journey, ctx = {}) => run({ id: "tv", backend: "tv", steps: journey }, {
+  cdp: client, baseUrl: server.origin, ...ctx,
+});
 
 function filesUnder(dir) {
   const found = [];
@@ -373,4 +380,90 @@ test("row 21: UI_PROBE_REQUIRE_BROWSER=1 fails naming the missing browser instea
   });
   assert.equal(relaxed.status, 0, `${relaxed.stdout}${relaxed.stderr}`);
   assert.match(`${relaxed.stdout}${relaxed.stderr}`, /skipping|no browser/);
+});
+
+test("row 10: expect_within safe passes inside, fails 6px past, and the hold catches a late scale", { skip: SKIP }, async () => {
+  const inside = await runTv(steps("/tv-grid.html", { expect_within: { target: "#probe-safe", box: "safe", timeoutMs: 1000 } }));
+  assert.equal(inside.outcome, "passed", JSON.stringify(inside.steps));
+  assert.equal(inside.steps[1].measured.left, 96);
+  assert.equal(inside.steps[1].measured.right, 1824);
+
+  const past = await runTv(steps("/tv-grid.html", { expect_within: { target: "#probe-past", box: "safe", timeoutMs: 0 } }));
+  assert.equal(past.outcome, "failed");
+  assert.ok(past.steps[1].measured.right > 1824, JSON.stringify(past.steps[1]));
+
+  const caught = await runTv(steps("/tv-grid.html", { key: { key: "Digit1" } }, { expect_within: { target: "#scaler", box: "safe" } }));
+  assert.equal(caught.outcome, "failed", JSON.stringify(caught.steps));
+  assert.ok(caught.steps[2].measured.right > 1824, JSON.stringify(caught.steps[2]));
+
+  // RED control: without the hold, the first in-bounds sample is the whole assertion.
+  const loose = await runTv(steps("/tv-grid.html", { key: { key: "Digit1" } }, { expect_within: { target: "#scaler", box: "safe", holdMs: 0 } }));
+  assert.equal(loose.outcome, "passed", JSON.stringify(loose.steps));
+});
+
+test("row 11: expect_prop reads paused/currentTime and expect_count counts video elements", { skip: SKIP }, async () => {
+  const playing = await runTv(steps("/tv-grid.html", { expect_prop: { target: "#clip", property: "paused", equals: false } }));
+  assert.equal(playing.outcome, "passed", JSON.stringify(playing.steps));
+  assert.equal(playing.steps[1].measured, false);
+
+  const advancing = await runTv(steps("/tv-grid.html", { expect_prop: { target: "#clip", property: "currentTime", gt: 0 } }));
+  assert.equal(advancing.outcome, "passed", JSON.stringify(advancing.steps));
+
+  const wrong = await runTv(steps("/tv-grid.html", { expect_prop: { target: "#clip", property: "paused", equals: true, timeoutMs: 0 } }));
+  assert.equal(wrong.outcome, "failed");
+  assert.equal(wrong.steps[1].measured, false);
+
+  const count = await runTv(steps("/tv-grid.html", { expect_count: { target: "video", equals: 1 } }));
+  assert.equal(count.outcome, "passed", JSON.stringify(count.steps));
+  const wrongCount = await runTv(steps("/tv-grid.html", { expect_count: { target: "video", equals: 2, timeoutMs: 0 } }));
+  assert.equal(wrongCount.outcome, "failed");
+  assert.equal(wrongCount.steps[1].measured, 1);
+});
+
+test("row 12: over mode all fails when the text changes mid-window and passes when the window closes first", { skip: SKIP }, async () => {
+  const late = await runTv(steps("/tv-grid.html", { key: { key: "Digit2" } }, { expect_text: { target: "#timed-text", equals: "before", over: 400, mode: "all" } }));
+  assert.equal(late.outcome, "failed");
+  assert.equal(late.steps[2].measured, "after");
+
+  const early = await runTv(steps("/tv-grid.html", { key: { key: "Digit2" } }, { expect_text: { target: "#timed-text", equals: "before", over: 200, mode: "all" } }));
+  assert.equal(early.outcome, "passed", JSON.stringify(early.steps));
+
+  // mode any keeps phase 1's rule: one matching frame is enough.
+  const any = await runTv(steps("/tv-grid.html", { key: { key: "Digit2" } }, { expect_text: { target: "#timed-text", equals: "before", over: 400, mode: "any" } }));
+  assert.equal(any.outcome, "passed", JSON.stringify(any.steps));
+});
+
+test("row 14: the grid journey moves focus, opens, closes and exits; repeat 20 stops at the row end", { skip: SKIP }, async () => {
+  const journey = await runTv(steps("/tv-grid.html",
+    { key: { key: "Right" } }, { key: { key: "Right" } }, { key: { key: "Down" } },
+    { expect_text: { target: "#focus-label", equals: "Six" } },
+    { key: { key: "Enter" } },
+    { expect_css: { target: "#player", property: "display", equals: "block" } },
+    { expect_text: { target: "#player-title", equals: "Six" } },
+    { key: { key: "Back" } },
+    { expect_css: { target: "#player", property: "display", equals: "none" } },
+    { key: { key: "Back" } },
+    { expect_css: { target: "#exit-popup", property: "display", equals: "block" } }));
+  assert.equal(journey.outcome, "passed", JSON.stringify(journey.steps));
+
+  const held = await runTv(steps("/tv-grid.html",
+    { key: { key: "Right", repeat: 20, gapMs: 5 } },
+    { expect_text: { target: "#focus-label", equals: "Three" } },
+    { expect_count: { target: ".focused", equals: 1 } }));
+  assert.equal(held.outcome, "passed", JSON.stringify(held.steps));
+});
+
+test("row 18: the DOM walk marks the focus selector, and a key Down moves the mark", { skip: SKIP }, async () => {
+  await runTv(steps("/tv-grid.html"), { requireAssertion: false });
+  // The M69 protocol has no getFullAXTree; that, not the device name, picks the walk.
+  const protocol = { domains: [{ domain: "Accessibility", commands: [{ name: "getPartialAXTree" }] }] };
+  const focusedLine = (text) => text.split("\n").find((line) => line.includes("[focused]")) ?? "";
+
+  const before = focusedLine(await observe(client, { protocol }));
+  assert.match(before, /#tile-one/, before);
+
+  await dispatchKey(client, "Down");
+  const after = focusedLine(await observe(client, { protocol }));
+  assert.match(after, /#tile-four/, after);
+  assert.notEqual(after, before);
 });
