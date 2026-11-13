@@ -4,7 +4,7 @@ import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { evaluate, sleep } from "./cdp.mjs";
 import { resolveCookies, setCookies } from "./auth.mjs";
-import { installGuard } from "./guard.mjs";
+import { installGuard, NO_PROTOCOL } from "./guard.mjs";
 import { observe } from "./observe.mjs";
 import { navigate, run } from "./runner.mjs";
 import { digestLine } from "./digest.mjs";
@@ -367,7 +367,9 @@ export async function capture(screen, ctx = {}) {
   const events = { requests: new Map(), console: [] };
   const offs = listen(cdp, events);
   const blocked = [];
-  const guard = await installGuard(cdp, ctx.protocol ?? null, {
+  // A protocol the set would not serve is unknown, not a modern browser: no interception.
+  const protocol = ctx.device === "tv" && ctx.protocol == null ? NO_PROTOCOL : (ctx.protocol ?? null);
+  const guard = await installGuard(cdp, protocol, {
     allowWrites,
     blocked,
     ...(ctx.device === "tv" ? { testOrigin: config.tv?.testOrigin ?? null, tvScope: true } : {}),

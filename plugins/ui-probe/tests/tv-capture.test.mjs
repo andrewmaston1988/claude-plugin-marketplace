@@ -105,7 +105,19 @@ test('capture on the TV writes the attach timings into env.json', async () => {
   }
 });
 
-// Row 17
+test('capture on the TV with an unreadable protocol writes its outputs and installs no interception', async () => {
+  const run = await captureTv({ ctx: { protocol: null } });
+  try {
+    for (const name of ['dom.html', 'observation.txt', 'network.json']) {
+      assert.equal(existsSync(join(run.out, name)), true, `${name} is written`);
+    }
+    assert.equal(run.cdp.sent('Fetch.enable').length, 0, 'no Fetch on a target that served no protocol');
+    assert.equal(run.cdp.sent('Network.setRequestInterception').length, 0);
+  } finally {
+    rmSync(run.dir, { recursive: true, force: true });
+  }
+});
+
 test('capture on the TV leaves platform out of env.json when platform.json is absent', async () => {
   const appid = `uiprobe.noplatform${process.pid}`;
   const run = await captureTv({ appid });
