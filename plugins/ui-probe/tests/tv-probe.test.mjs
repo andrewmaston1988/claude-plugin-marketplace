@@ -1,54 +1,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync, existsSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { FEATURES_JS, platformPath, platformSummary, tvProbe, verdictLine } from '../src/tv/probe.mjs';
-import { capture } from '../src/capture.mjs';
-
-// The set's 39-domain protocol: Network interception exists, Fetch does not.
-const TV_PROTOCOL = {
-  domains: [
-    { domain: 'Input', commands: [{ name: 'dispatchKeyEvent' }] },
-    { domain: 'Network', commands: [{ name: 'enable' }, { name: 'setRequestInterception' }, { name: 'continueInterceptedRequest' }] },
-  ],
-};
-
-const noSleep = async () => {};
-
-function stubCdp({ replies = [], onSend = null } = {}) {
-  const calls = [];
-  const handlers = new Map();
-  const queue = replies.map((reply) => ({ ...reply, used: false }));
-  const api = {
-    calls,
-    methods: () => calls.map((call) => call.method),
-    sent: (method) => calls.filter((call) => call.method === method),
-    on(method, fn) {
-      handlers.set(method, [...(handlers.get(method) || []), fn]);
-      return () => handlers.set(method, (handlers.get(method) || []).filter((f) => f !== fn));
-    },
-    async fire(method, params) {
-      for (const fn of handlers.get(method) || []) await fn(params);
-    },
-    async send(method, params = {}) {
-      calls.push({ method, params });
-      if (onSend) {
-        const custom = onSend(method, params, api);
-        if (custom !== undefined) return custom;
-      }
-      if (method === 'Runtime.evaluate') {
-        const reply = queue.find((entry) => !entry.used && entry.match(params.expression));
-        if (!reply) return { result: { value: null } };
-        if (!reply.sticky) reply.used = true;
-        if (reply.error) throw reply.error;
-        return { result: { value: reply.value } };
-      }
-      return {};
-    },
-  };
-  return api;
-}
+import { noSleep, stubCdp } from './tv-support.mjs';
 
 const PAGE = { href: 'http://192.0.2.30:8000/tv?tizen=1', origin: 'http://192.0.2.30:8000' };
 const pageReply = (value = PAGE) => ({ match: (e) => e.includes('location.origin'), value, sticky: true });
@@ -77,6 +32,7 @@ const readReply = (value) => ({ match: (e) => e.includes('__uiProbeKey.read()'),
 const cleanupReply = { match: (e) => e.includes('removeEventListener'), value: true };
 
 const plainRun = (overrides = {}) => [
+  pageReply(PAGE),
   featuresReply(),
   registerReply('returned'),
   currentReply('object'),
@@ -351,28 +307,60 @@ test('without --exit the probe never calls exit()', async () => {
 });
 
 // Row 16
-test('verdictLine names plan A, plan B and no tizen from the platform evidence', () => {
-  const platform = (features) => ({ features });
+const HUB_PAGE = { href: 'http://192.0.2.30:8000/tv', origin: 'http://192.0.2.30:8000' };
+const LOCAL_PAGE = { href: 'file:///opt/usr/app/index.html', origin: 'null' };
+const working = {
+  tizen: 'object',
+  registerKey: { outcome: 'returned' },
+  getCurrentApplication: { outcome: 'returned', returnsObject: true },
+};
+const platformOn = (page, features, extra = {}) => ({ features: { ...features, page }, ...extra });
 
-  assert.match(verdictLine(platform({
-    tizen: 'object',
-    registerKey: { outcome: 'returned' },
-    getCurrentApplication: { outcome: 'returned', returnsObject: true },
-  })), /^shell: plan A/);
+test('verdictLine calls a widget-local page with both calls working plan B, its fetch and exit beside it', () => {
+  const line = verdictLine(platformOn(LOCAL_PAGE, working, {
+    fetch: { status: 'measured', url: 'http://192.168.1.135:8001/session', httpStatus: 200, allowOrigin: 'http://192.168.1.135:8001', allowCredentials: 'true' },
+    exit: { status: 'measured', called: 'returned', closed: true, ms: 900 },
+  }));
 
-  assert.match(verdictLine(platform({
-    tizen: 'object',
-    registerKey: { outcome: 'returned' },
-    getCurrentApplication: { outcome: 'absent' },
-  })), /^shell: plan B/);
+  assert.match(line, /^shell: plan B/);
+  assert.match(line, /file:\/\/\/opt\/usr\/app\/index\.html/, 'the line names the page it measured');
+  assert.match(line, /--fetch 200/, 'plan B carries the transport evidence beside it');
+  assert.match(line, /--exit closed true/, 'plan B carries the exit evidence beside it');
+});
 
-  assert.match(verdictLine(platform({
-    tizen: 'object',
+test('verdictLine calls a hub page with both calls working plan A and names the page', () => {
+  const line = verdictLine(platformOn(HUB_PAGE, working));
+  assert.match(line, /^shell: plan A/);
+  assert.match(line, /http:\/\/192\.0\.2\.30:8000\/tv/);
+});
+
+// torrent-hub-7c's bar: presence is NOT enough — a page that has tizen but whose calls threw is
+// neither plan, whatever the widget's shape.
+test('verdictLine never calls presence without working calls plan A or B', () => {
+  const hub = verdictLine(platformOn(HUB_PAGE, {
+    ...working,
     registerKey: { outcome: 'threw', error: 'NotSupportedError' },
-    getCurrentApplication: { outcome: 'returned', returnsObject: true },
-  })), /^shell: plan B/);
+  }));
+  assert.match(hub, /^shell: no tizen/);
+  assert.match(hub, /registerKey\("1"\) threw \(NotSupportedError\)/);
+  assert.match(hub, /http:\/\/192\.0\.2\.30:8000\/tv/, 'the line still names the page it measured');
 
-  assert.match(verdictLine(platform({ tizen: 'undefined' })), /^shell: no tizen/);
+  const local = verdictLine(platformOn(LOCAL_PAGE, {
+    ...working,
+    getCurrentApplication: { outcome: 'absent' },
+  }));
+  assert.match(local, /^shell: no tizen/);
+  assert.doesNotMatch(local, /^shell: plan B/);
+
+  const bare = verdictLine(platformOn(HUB_PAGE, { tizen: 'undefined' }));
+  assert.match(bare, /^shell: no tizen/);
+  assert.match(bare, /typeof tizen is "undefined"/);
+});
+
+test('verdictLine leaves an unread page undetermined rather than guessing a plan', () => {
+  const line = verdictLine(platformOn({ href: null, origin: null }, working));
+  assert.match(line, /^shell: undetermined/);
+  assert.doesNotMatch(line, /^shell: plan/);
 });
 
 test('platformPath puts the platform file under the temp ui-probe directory', () => {
@@ -382,208 +370,10 @@ test('platformPath puts the platform file under the temp ui-probe directory', ()
 test('platformSummary keeps the verdict and the evidence a reader acts on', () => {
   const summary = platformSummary({
     generatedAt: '2026-11-13T00:00:00.000Z',
-    features: { tizen: 'object', registerKey: { outcome: 'returned' }, getCurrentApplication: { outcome: 'returned', returnsObject: true } },
+    features: { ...working, page: HUB_PAGE },
   });
   assert.equal(summary.generatedAt, '2026-11-13T00:00:00.000Z');
   assert.match(summary.verdict, /^shell: plan A/);
   assert.equal(summary.registerKey, 'returned');
 });
 
-const tvConfig = (appid) => ({
-  baseUrl: 'http://192.0.2.30:8000',
-  outDir: 'out',
-  configDir: 'C:\\cfg',
-  viewports: {},
-  tv: { host: '192.0.2.10:26101', appid, focusSelector: '.focused', testOrigin: 'http://127.0.0.1:8001' },
-});
-
-const captureReplies = () => [
-  { match: (e) => e.includes('outerHTML'), value: '<html></html>' },
-  { match: (e) => e.includes('matchMedia'), value: { hover_none: true, pointer_coarse: true, innerWidth: 1920, innerHeight: 1080, dpr: 1, ua: 'TV' } },
-  { match: (e) => e.trim() === 'location.href', value: 'http://192.0.2.30:8000/tv?tizen=1' },
-  { match: (e) => e.includes('SKIP'), value: 'body [focused]' },
-];
-
-const LAYERS = [
-  { layerId: '1', parentLayerId: null, offsetX: 0, offsetY: 0, width: 1920, height: 1080, drawsContent: false, transform: [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1] },
-  { layerId: '2', parentLayerId: '1', offsetX: 10, offsetY: 20, width: 600, height: 400, drawsContent: true, transform: [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 5, 6, 0, 1] },
-  { layerId: '3', parentLayerId: '1', offsetX: 0, offsetY: 60, width: 1920, height: 2000, drawsContent: true, transform: [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1] },
-];
-
-const layerOnSend = (layers = LAYERS) => (method, params, api) => {
-  if (method === 'LayerTree.enable') {
-    api.fire('LayerTree.layerTreeDidChange', { layers });
-    return {};
-  }
-  if (method === 'LayerTree.makeSnapshot') return { snapshotId: `snap-${params.layerId}` };
-  if (method === 'LayerTree.replaySnapshot') return { dataURL: 'data:image/png;base64,QUJD' };
-  return undefined;
-};
-
-const compositeReply = { match: (e) => e.includes('createImageBitmap'), value: { dataUrl: 'data:image/png;base64,REVG', drawn: 2, width: 960, height: 540 } };
-
-function tvCaptureCdp({ replies = captureReplies(), onSend = layerOnSend() } = {}) {
-  return stubCdp({ replies: [...replies, compositeReply], onSend });
-}
-
-async function captureTv(overrides = {}) {
-  const appid = overrides.appid ?? `uiprobe.capture${process.pid}`;
-  const dir = mkdtempSync(join(tmpdir(), 'ui-probe-tv-capture-'));
-  const cdp = overrides.cdp ?? tvCaptureCdp();
-  try {
-    const result = await capture(
-      overrides.screen ?? { url: '/tv' },
-      {
-        config: tvConfig(appid),
-        cdp,
-        outDir: dir,
-        device: 'tv',
-        protocol: TV_PROTOCOL,
-        _sleep: noSleep,
-        ...(overrides.ctx ?? {}),
-      },
-    );
-    return { cdp, dir, result, out: join(dir, 'tv') };
-  } catch (error) {
-    rmSync(dir, { recursive: true, force: true });
-    throw error;
-  }
-}
-
-const readEnv = (out) => JSON.parse(readFileSync(join(out, 'env.json'), 'utf8'));
-
-// Row 17
-test('capture on the TV writes the platform.json summary into env.json when the file exists', async () => {
-  const appid = `uiprobe.summary${process.pid}`;
-  const file = platformPath(appid);
-  mkdirSync(dirname(file), { recursive: true });
-  writeFileSync(file, JSON.stringify({
-    generatedAt: '2026-11-13T00:00:00.000Z',
-    verdict: 'shell: plan A — evidence',
-    features: { tizen: 'object', registerKey: { outcome: 'returned' }, getCurrentApplication: { outcome: 'returned', returnsObject: true } },
-  }));
-  const run = await captureTv({ appid });
-  try {
-    const env = readEnv(run.out);
-    assert.equal(env.platform.verdict, 'shell: plan A — evidence');
-    assert.equal(env.platform.generatedAt, '2026-11-13T00:00:00.000Z');
-    assert.equal(env.url, 'http://192.0.2.30:8000/tv?tizen=1');
-  } finally {
-    rmSync(run.dir, { recursive: true, force: true });
-    rmSync(file, { force: true });
-  }
-});
-
-// Row 22
-test('capture on the TV writes the attach timings into env.json', async () => {
-  const timings = { attachMs: 4200, relaunchMs: 3800 };
-  const run = await captureTv({ ctx: { timings } });
-  try {
-    assert.deepEqual(readEnv(run.out).timings, timings);
-  } finally {
-    rmSync(run.dir, { recursive: true, force: true });
-  }
-});
-
-// Row 17
-test('capture on the TV leaves platform out of env.json when platform.json is absent', async () => {
-  const appid = `uiprobe.noplatform${process.pid}`;
-  const run = await captureTv({ appid });
-  try {
-    const env = readEnv(run.out);
-    assert.equal('platform' in env, false);
-    assert.equal(env.url, 'http://192.0.2.30:8000/tv?tizen=1');
-  } finally {
-    rmSync(run.dir, { recursive: true, force: true });
-  }
-});
-
-// Row 17
-test('capture on the TV never screenshots, never screencasts and never runs the probe', async () => {
-  const run = await captureTv();
-  try {
-    const methods = run.cdp.methods();
-    assert.equal(methods.includes('Page.captureScreenshot'), false);
-    assert.equal(methods.includes('Page.startScreencast'), false);
-    assert.equal(methods.includes('Page.navigate'), false, 'the attached app is already on its page');
-    const expressions = run.cdp.sent('Runtime.evaluate').map((call) => call.params.expression);
-    assert.equal(expressions.some((e) => e.includes('registerKey')), false);
-    assert.equal(expressions.some((e) => e.includes('IntersectionObserver')), false);
-
-    const guard = run.cdp.sent('Network.setRequestInterception');
-    assert.equal(guard.length, 2, 'the M69 Network guard is installed and uninstalled');
-    assert.equal(run.cdp.sent('Fetch.enable').length, 0);
-  } finally {
-    rmSync(run.dir, { recursive: true, force: true });
-  }
-});
-
-// Row 17
-test('without --screenshot capture sends no LayerTree call and writes no screenshot.png', async () => {
-  const run = await captureTv();
-  try {
-    assert.equal(run.cdp.methods().some((method) => method.startsWith('LayerTree.')), false);
-    assert.equal(existsSync(join(run.out, 'screenshot.png')), false);
-    assert.equal(readEnv(run.out).screenshot.status, 'skipped');
-  } finally {
-    rmSync(run.dir, { recursive: true, force: true });
-  }
-});
-
-// Row 17
-test('with --screenshot capture replays every painting layer at half scale and composites in-page', async () => {
-  const run = await captureTv({ ctx: { screenshot: true } });
-  try {
-    const snapshots = run.cdp.sent('LayerTree.makeSnapshot').map((call) => call.params.layerId);
-    assert.deepEqual(snapshots, ['2', '3']);
-    const replays = run.cdp.sent('LayerTree.replaySnapshot');
-    assert.equal(replays.length, 2);
-    for (const call of replays) assert.equal(call.params.scale, 0.5);
-
-    const composite = run.cdp.sent('Runtime.evaluate').find((call) => call.params.expression.includes('createImageBitmap'));
-    assert.ok(composite, 'the layers are composited in the page');
-    const js = composite.params.expression;
-    assert.match(js, /new Blob/);
-    assert.match(js, /toDataURL/);
-    assert.match(js, /drawImage/);
-    assert.match(js, /scrollX/);
-    assert.match(js, /"offsetX":10/);
-    assert.match(js, /"transform":\[1,0,0,0,0,1,0,0,0,0,1,0,5,6,0,1\]/);
-    assert.doesNotMatch(js, /new Image\(/);
-    assert.doesNotMatch(js, /\.src\s*=/);
-
-    const env = readEnv(run.out);
-    assert.equal(env.screenshot.status, 'written');
-    assert.equal(env.screenshot.layers, 3);
-    assert.equal(env.screenshot.drawn, 2);
-    assert.equal(typeof env.screenshot.ms, 'number');
-    assert.equal(readFileSync(join(run.out, 'screenshot.png')).toString('base64'), 'REVG');
-  } finally {
-    rmSync(run.dir, { recursive: true, force: true });
-  }
-});
-
-// Row 17
-test('a replay that overruns its bound leaves no screenshot.png and says why in env.json', async () => {
-  const cdp = tvCaptureCdp({
-    onSend: (method, params, api) => {
-      if (method === 'LayerTree.enable') {
-        api.fire('LayerTree.layerTreeDidChange', { layers: LAYERS });
-        return {};
-      }
-      if (method === 'LayerTree.makeSnapshot') return { snapshotId: 'snap-1' };
-      if (method === 'LayerTree.replaySnapshot') return new Promise(() => {});
-      return undefined;
-    },
-  });
-  const run = await captureTv({ cdp, ctx: { screenshot: true, _replayTimeoutMs: 25 } });
-  try {
-    assert.equal(existsSync(join(run.out, 'screenshot.png')), false);
-    const env = readEnv(run.out);
-    assert.equal(env.screenshot.status, 'timeout');
-    assert.match(env.screenshot.reason, /exceeded 25 ms/);
-    assert.equal(env.screenshot.layers, 3);
-  } finally {
-    rmSync(run.dir, { recursive: true, force: true });
-  }
-});

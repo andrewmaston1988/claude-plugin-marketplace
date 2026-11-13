@@ -3,6 +3,8 @@
 
 import { execFile as execFileCallback } from "node:child_process";
 import { promisify } from "node:util";
+import { createHash } from "node:crypto";
+import { createServer } from "node:http";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -50,4 +52,116 @@ export function scratchConfig(dir, config) {
 
 export function scratchDir(prefix) {
   return mkdtempSync(path.join(os.tmpdir(), `${prefix}-`));
+}
+
+// A CDP target the CLI can attach to with --attach-port: /json/list, /json/protocol and a
+// WebSocket that answers CDP calls. Only reachable over loopback, never the set.
+export async function startCdpStub({ protocol, evaluate = () => null, onEvaluated = null } = {}) {
+  const sockets = new Set();
+  const server = createServer((req, res) => {
+    const json = (body) => {
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(JSON.stringify(body));
+    };
+    if (req.url === "/json/list") {
+      const { port } = server.address();
+      return json([{ id: "p1", type: "page", webSocketDebuggerUrl: `ws://127.0.0.1:${port}/devtools/page/p1` }]);
+    }
+    if (req.url === "/json/protocol") return json(protocol ?? { domains: [] });
+    res.writeHead(404);
+    res.end();
+  });
+
+  server.on("upgrade", (req, socket) => {
+    const accept = createHash("sha1")
+      .update(`${req.headers["sec-websocket-key"]}258EAFA5-E914-47DA-95CA-C5AB0DC85B11`)
+      .digest("base64");
+    socket.write([
+      "HTTP/1.1 101 Switching Protocols",
+      "Upgrade: websocket",
+      "Connection: Upgrade",
+      `Sec-WebSocket-Accept: ${accept}`,
+      "",
+      "",
+    ].join("\r\n"));
+    sockets.add(socket);
+    socket.on("close", () => sockets.delete(socket));
+    let pending = Buffer.alloc(0);
+    socket.on("data", (chunk) => {
+      pending = Buffer.concat([pending, chunk]);
+      for (;;) {
+        const frame = readFrame(pending);
+        if (!frame) return;
+        pending = frame.rest;
+        if (frame.opcode === 0x8) { socket.end(); return; }
+        if (frame.opcode !== 0x1) continue;
+        const message = JSON.parse(frame.text);
+        if (message.id == null) continue;
+        const expression = message.params?.expression ?? "";
+        const value = message.method === "Runtime.evaluate"
+          ? { result: { result: { value: evaluate(expression) } } }
+          : { result: {} };
+        socket.write(encodeFrame(JSON.stringify({ id: message.id, ...value })));
+        if (message.method === "Runtime.evaluate" && onEvaluated?.(expression) === "close") {
+          socket.end();
+          return;
+        }
+      }
+    });
+  });
+
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  return {
+    port: server.address().port,
+    close: () => new Promise((resolve) => {
+      for (const socket of sockets) socket.destroy();
+      server.closeAllConnections?.();
+      server.close(resolve);
+    }),
+  };
+}
+
+function readFrame(buffer) {
+  if (buffer.length < 2) return null;
+  const opcode = buffer[0] & 0x0f;
+  const masked = (buffer[1] & 0x80) !== 0;
+  let length = buffer[1] & 0x7f;
+  let offset = 2;
+  if (length === 126) {
+    if (buffer.length < 4) return null;
+    length = buffer.readUInt16BE(2);
+    offset = 4;
+  } else if (length === 127) {
+    if (buffer.length < 10) return null;
+    length = Number(buffer.readBigUInt64BE(2));
+    offset = 10;
+  }
+  const maskAt = offset;
+  if (masked) offset += 4;
+  if (buffer.length < offset + length) return null;
+  const payload = Buffer.from(buffer.subarray(offset, offset + length));
+  if (masked) {
+    const mask = buffer.subarray(maskAt, maskAt + 4);
+    for (let i = 0; i < payload.length; i += 1) payload[i] ^= mask[i % 4];
+  }
+  return { opcode, text: payload.toString("utf8"), rest: buffer.subarray(offset + length) };
+}
+
+function encodeFrame(text) {
+  const payload = Buffer.from(text, "utf8");
+  let header;
+  if (payload.length < 126) {
+    header = Buffer.from([0x81, payload.length]);
+  } else if (payload.length < 65536) {
+    header = Buffer.alloc(4);
+    header[0] = 0x81;
+    header[1] = 126;
+    header.writeUInt16BE(payload.length, 2);
+  } else {
+    header = Buffer.alloc(10);
+    header[0] = 0x81;
+    header[1] = 127;
+    header.writeBigUInt64BE(BigInt(payload.length), 2);
+  }
+  return Buffer.concat([header, payload]);
 }
