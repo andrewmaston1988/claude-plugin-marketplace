@@ -132,7 +132,10 @@ export async function installNetworkGuard(cdp, {
  * Fetch guard is known to work.
  */
 export async function installGuard(cdp, protocol, options = {}) {
-  if (interceptionKind(protocol) === "fetch") return installFetchGuard(cdp, options);
+  const kind = interceptionKind(protocol);
+  if (kind === "fetch") return installFetchGuard(cdp, options);
+  // Neither domain: the caller's policy decides whether the run may proceed at all.
+  if (kind === null) return { blocked: options.blocked ?? [], uninstall: async () => {} };
   return installNetworkGuard(cdp, options);
 }
 

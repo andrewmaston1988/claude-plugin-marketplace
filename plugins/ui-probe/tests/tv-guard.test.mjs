@@ -138,6 +138,20 @@ test("a failed Network interception setup leaves no listener behind", async () =
   assert.equal((cdp.handlers.get("Network.requestIntercepted") || []).length, 0);
 });
 
+// Row 7: neither interception means the guard must not pretend to intercept.
+test("a protocol with neither Fetch nor Network interception installs nothing", async () => {
+  const cdp = stubCdp();
+  const guard = await installGuard(cdp, { domains: [{ domain: "Page", commands: [{ name: "navigate" }] }] }, {
+    allowWrites: true,
+    testOrigin,
+    tvScope: true,
+  });
+  assert.deepEqual(cdp.calls, []);
+  assert.deepEqual(guard.blocked, []);
+  await guard.uninstall();
+  assert.deepEqual(cdp.calls, []);
+});
+
 // Row 6 (the guard half)
 test("with --allow-writes a TV write to tv.testOrigin continues and one elsewhere is still blocked", async () => {
   const cdp = stubCdp();
