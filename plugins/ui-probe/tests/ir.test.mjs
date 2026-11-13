@@ -1,9 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFile } from 'node:fs/promises';
 import { parseScenario, validate, assertsNothing, OPS } from '../src/ir.mjs';
+import { scenarios } from './fixtures/scenarios.mjs';
 
-const fixture = (name) => readFile(new URL(`./fixtures/scenarios/${name}.yaml`, import.meta.url), 'utf8');
+const fixture = (name) => scenarios[name];
 
 test('row 1: validation teaches the fix for missing expect_css property and unknown ops', () => {
   const result = validate({
@@ -20,9 +20,9 @@ test('row 1: validation teaches the fix for missing expect_css property and unkn
   assert.ok(result.every((item) => ['field', 'problem', 'fix', 'example'].every((key) => key in item)));
 });
 
-test('row 2: YAML examples compile after removing bake-off task metadata', async () => {
+test('row 2: YAML examples compile after removing bake-off task metadata', () => {
   for (const name of ['t1-layout', 't2-hover', 'http-health']) {
-    const doc = parseScenario(await fixture(name), { format: 'yaml' });
+    const doc = parseScenario(fixture(name), { format: 'yaml' });
     assert.equal(doc.id, name);
     assert.deepEqual(validate(doc), []);
   }
