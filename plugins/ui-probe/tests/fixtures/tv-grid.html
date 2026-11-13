@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>ui-probe TV grid fixture</title>
+<style>
+  :root { color-scheme: dark; }
+  body { margin: 0; padding: 40px; background: #101318; color: #e8edf5; font: 20px/1.3 system-ui, sans-serif; }
+  h1 { margin: 0 0 24px; font-size: 24px; font-weight: 600; }
+  .tv-row { display: flex; gap: 16px; margin-bottom: 16px; }
+  .tv-card {
+    box-sizing: border-box; width: 240px; height: 135px; display: flex;
+    align-items: center; justify-content: center; background: #232a35;
+    border: 4px solid transparent;
+  }
+  .tv-card.focused { border-color: #6cc4ff; background: #2d3a4c; }
+  #player, #exit-popup { position: fixed; inset: 12%; display: none; padding: 32px; background: #000; }
+  #player.open, #exit-popup.open { display: block; }
+</style>
+</head>
+<body>
+  <h1 id="focus-label">One</h1>
+
+  <div class="tv-row">
+    <div class="tv-card" id="tile-one">One</div>
+    <div class="tv-card" id="tile-two">Two</div>
+    <div class="tv-card" id="tile-three">Three</div>
+  </div>
+  <div class="tv-row">
+    <div class="tv-card" id="tile-four">Four</div>
+    <div class="tv-card" id="tile-five">Five</div>
+    <div class="tv-card" id="tile-six">Six</div>
+  </div>
+
+  <div id="player"><h2 id="player-title"></h2></div>
+  <div id="exit-popup" role="dialog" aria-label="Exit"><p id="exit-question">Exit the app?</p></div>
+
+  <script>
+    // Focus is a class on the tile: nothing is focusable, so document.activeElement stays body,
+    // as torrent-hub's remote-driven grid behaves on the set.
+    (() => {
+      "use strict";
+      const grid = Array.from(document.querySelectorAll(".tv-row"))
+        .map((row) => Array.from(row.querySelectorAll(".tv-card")));
+      const position = { row: 0, col: 0 };
+      const player = document.getElementById("player");
+      const playerTitle = document.getElementById("player-title");
+      const focusLabel = document.getElementById("focus-label");
+      const exitPopup = document.getElementById("exit-popup");
+      let opened = null;
+      let exiting = false;
+
+      const showFocus = () => {
+        for (const card of document.querySelectorAll(".focused")) card.classList.remove("focused");
+        const card = grid[position.row] && grid[position.row][position.col];
+        if (!card) return;
+        card.classList.add("focused");
+        focusLabel.textContent = card.textContent;
+      };
+
+      const openItem = () => {
+        const card = grid[position.row] && grid[position.row][position.col];
+        if (!card) return;
+        opened = card;
+        playerTitle.textContent = card.textContent;
+        player.classList.add("open");
+      };
+
+      const closeItem = () => {
+        opened = null;
+        player.classList.remove("open");
+      };
+
+      const MOVE = { 37: [0, -1], 38: [-1, 0], 39: [0, 1], 40: [1, 0] };
+
+      document.addEventListener("keydown", (event) => {
+        const code = event.keyCode;
+        if (code === 10009) {
+          event.preventDefault();
+          if (exiting) {
+            exiting = false;
+            exitPopup.classList.remove("open");
+          } else if (opened) {
+            closeItem();
+          } else {
+            exiting = true;
+            exitPopup.classList.add("open");
+          }
+          return;
+        }
+        if (exiting) return;
+        if (code === 13) {
+          event.preventDefault();
+          if (!opened) openItem();
+          return;
+        }
+        const move = MOVE[code];
+        if (!move) return;
+        event.preventDefault();
+        const [rowStep, colStep] = move;
+        // Clamped, not wrapped: a TV grid stops at the end of a row, as torrent-hub's does.
+        position.row = Math.max(0, Math.min(grid.length - 1, position.row + rowStep));
+        const width = grid[position.row].length;
+        position.col = Math.max(0, Math.min(width - 1, position.col + colStep));
+        showFocus();
+      });
+
+      showFocus();
+    })();
+  </script>
+</body>
+</html>
