@@ -138,6 +138,7 @@ const settle = (code) => { setTimeout(() => process.exit(code), 150); };
     const outDir = resolveOutDir(config, getFlag("--out", rest));
 
     const { run } = await import("../src/runner.mjs");
+    const { digestLine } = await import("../src/digest.mjs");
     const { resolveCookies, AuthError } = await import("../src/auth.mjs");
     let cookies;
     try {
@@ -345,14 +346,6 @@ async function openBrowser(browserPath) {
     client,
     close: () => Promise.resolve(raw.close()).catch((e) => err(`browser close: ${e.message}`)),
   };
-}
-
-function digestLine(step) {
-  const parts = [step.outcome.toUpperCase(), step.source, step.op];
-  if (step.target) parts.push(step.target);
-  if ("measured" in step) parts.push(`measured=${JSON.stringify(step.measured)}`);
-  if ("expected" in step) parts.push(`expected=${JSON.stringify(step.expected)}`);
-  return parts.join(" ");
 }
 
 function writeResults(outDir, steps) {

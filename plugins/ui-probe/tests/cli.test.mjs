@@ -238,6 +238,44 @@ test("capture prints the browser digest and exits 0", async (t) => {
   }
 });
 
+test("row 28: a capture whose screen step fails prints that step's digest line", async (t) => {
+  let browser;
+  try {
+    browser = findBrowser({});
+  } catch (error) {
+    if (process.env.UI_PROBE_REQUIRE_BROWSER === "1") throw error;
+    t.skip(`no Chromium browser found: ${error.message}`);
+    return;
+  }
+
+  const fixture = await startFixtureServer();
+  const dir = scratchDir("ui-probe-capture-failure");
+  const outDir = path.join(dir, "out");
+  scratchConfig(dir, {
+    baseUrl: fixture.origin,
+    browser,
+    viewports: { desktop: { width: 800, height: 600 } },
+    screens: {
+      broken: {
+        url: "/tiles-good.html",
+        steps: [{ expect_widths: { target: "[data-testid=action-tile]", equals: 54, timeoutMs: 0 } }],
+      },
+    },
+  });
+
+  try {
+    const result = await probe(["capture", "broken", "--viewport", "desktop", "--out", outDir], { cwd: dir });
+    assert.match(result.stdout, /^steps: failed$/m, result.stdout);
+    assert.match(
+      result.stdout,
+      /^FAILED broken:1 expect_widths \[data-testid=action-tile\] measured=\[111,111,111\] expected=54$/m,
+      result.stdout,
+    );
+  } finally {
+    await fixture.close();
+  }
+});
+
 test("capture exits 64 and prints AuthError when a cookie variable is missing", async () => {
   const fixture = await startFixtureServer();
   const dir = scratchDir("ui-probe-capture-auth");

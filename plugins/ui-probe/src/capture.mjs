@@ -7,6 +7,7 @@ import { resolveCookies, setCookies } from "./auth.mjs";
 import { installFetchGuard } from "./guard.mjs";
 import { observe } from "./observe.mjs";
 import { navigate, run } from "./runner.mjs";
+import { digestLine } from "./digest.mjs";
 
 const ENV_JS = `(() => {
   const m = (query) => matchMedia(query).matches;
@@ -173,7 +174,12 @@ export async function capture(screen, ctx = {}) {
         const widths = (measure[selector] ?? []).map((box) => round(box.width)).join(",");
         lines.push(`${selector} widths=${widths}`);
       }
-      if (steps && steps.outcome !== "passed") lines.push(`steps: ${steps.outcome}`);
+      if (steps && steps.outcome !== "passed") {
+        lines.push(`steps: ${steps.outcome}`);
+        // The step that stopped the run, so the reader never has to re-run it as a scenario.
+        const broken = steps.steps.find((step) => step.outcome !== "passed");
+        if (broken) lines.push(digestLine(broken));
+      }
       lines.push(`blocked: ${blocked.length}`);
       lines.push(`out: ${dir}`);
     }
