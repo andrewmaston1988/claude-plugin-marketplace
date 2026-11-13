@@ -182,6 +182,31 @@ test('every probe step records the page it ran on', async () => {
   }
 });
 
+// Row 24: step 9's probe1 read tizen on the widget's bootstrap document and the calls on the hub
+// page. The settled page is the only one the probe reads, so its answer decides the verdict.
+test('the settled page decides the verdict, not the bootstrap document the widget ran first', async () => {
+  const cdp = stubCdp({
+    replies: [
+      pageReply(PAGE),
+      featuresReply({
+        tizen: 'undefined',
+        tvinputdevice: 'undefined',
+        application: 'undefined',
+        registerKeyPresent: false,
+        currentAppPresent: false,
+      }),
+      installReply,
+      readReply([]),
+      cleanupReply,
+    ],
+  });
+  const platform = await tvProbe(cdp, { _sleep: noSleep });
+
+  assert.equal(platform.features.page.href, PAGE.href, 'presence was read on the settled page');
+  assert.match(platform.verdict, /^shell: no tizen/);
+  assert.doesNotMatch(platform.verdict, /plan B/);
+});
+
 // Row 24: step 9's probe2 crashed on a document that had no body yet.
 test('the feature script measures nothing on a document with no body instead of throwing', () => {
   const element = () => ({
