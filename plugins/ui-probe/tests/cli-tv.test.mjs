@@ -304,7 +304,7 @@ test("row 22: a TV run prints its attach timings on the digest header", async ()
     ], { cwd: dir, env });
     assert.equal(result.status, 0, `exited ${result.status}: ${result.stdout}${result.stderr}`);
     const header = result.stdout.split("\n")[0];
-    assert.match(header, /^tv attach: \d+ ms, relaunch: n\/a$/, `the header: ${header}`);
+    assert.match(header, /^tv attach: \d+ ms, relaunch: n\/a, settle: \d+ ms$/, `the header: ${header}`);
   } finally {
     await stub.close();
   }
@@ -399,6 +399,7 @@ test("tv probe attaches, writes platform.json to both homes and ends on the verd
     const written = JSON.parse(readFileSync(path.join(outDir, "platform.json"), "utf8"));
     assert.equal(written.schema, "ui-probe-platform@1");
     assert.equal(typeof written.timings.attachMs, "number", "the attach cost is recorded");
+    assert.equal(typeof written.timings.settleMs, "number", "the settle wait is recorded beside it");
     assert.equal(written.timings.relaunchMs, null, "a join has no relaunch to time");
     const cached = path.join(home, "ui-probe", `platform-${appid}.json`);
     assert.equal(JSON.parse(readFileSync(cached, "utf8")).verdict, written.verdict, "capture reads this copy");

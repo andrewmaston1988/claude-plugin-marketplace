@@ -180,8 +180,8 @@ test("detach after launch kills the package id, then removes the forward", async
   assert.equal(sdbStub.calls.length, launched + 2, "a second detach does nothing");
 });
 
-// Row 22: a stub clock, so the split between the relaunch and the whole attach is exact.
-test("attach reports attachMs and the relaunch's share of it", async () => {
+// A stub clock, so the socket's cost, the relaunch's share of it and the settle wait are exact.
+test("attach reports the socket's attachMs, the relaunch's share, and the settle wait apart", async () => {
   let clock = 1000;
   const sdbStub = stubSdb(launchAnswers());
   const fetchStub = stubFetch({ ...LIST, ...PROTOCOL });
@@ -189,11 +189,12 @@ test("attach reports attachMs and the relaunch's share of it", async () => {
     _sdb: async (...args) => { clock += 10; return sdbStub(...args); },
     _fetch: async (...args) => { clock += 5; return fetchStub(...args); },
     _connect: async () => { clock += 100; return { close() {} }; },
-    _sleep: instant,
+    _sleep: async () => { clock += 50; },
+    _evaluate: async () => SETTLED,
     _now: () => clock,
-    ...settledOptions,
+    settleHoldMs: 150,
   });
-  assert.deepEqual(attached.timings, { attachMs: 150, relaunchMs: 40 });
+  assert.deepEqual(attached.timings, { attachMs: 150, relaunchMs: 40, settleMs: 150 });
 });
 
 test("a join has no relaunch to time", async () => {
@@ -207,7 +208,7 @@ test("a join has no relaunch to time", async () => {
     _now: () => clock,
     ...settledOptions,
   });
-  assert.deepEqual(attached.timings, { attachMs: 10, relaunchMs: null });
+  assert.deepEqual(attached.timings, { attachMs: 10, relaunchMs: null, settleMs: 0 });
 });
 
 test("an attach-port join never kills the app and only removes the forward", async () => {

@@ -412,9 +412,9 @@ function printConfigErrors(e) {
   }
 }
 
-function attachLine({ attachMs, relaunchMs }) {
+function attachLine({ attachMs, relaunchMs, settleMs }) {
   const relaunch = relaunchMs == null ? "n/a" : `${relaunchMs} ms`;
-  return `tv attach: ${attachMs} ms, relaunch: ${relaunch}`;
+  return `tv attach: ${attachMs} ms, relaunch: ${relaunch}, settle: ${settleMs} ms`;
 }
 
 function printProblem(problem) {

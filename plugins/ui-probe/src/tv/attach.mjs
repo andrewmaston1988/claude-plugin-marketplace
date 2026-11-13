@@ -76,6 +76,7 @@ export async function attach(config, options = {}) {
     const target = await pageTarget(port, { _fetch, _sleep });
     const protocol = await fetchProtocol(port, _fetch);
     cdp = await _connect(target.webSocketDebuggerUrl);
+    const socketAt = _now();
     const settled = await settlePage(cdp, {
       _evaluate, _sleep, _now,
       timeoutMs: settleTimeoutMs,
@@ -89,7 +90,7 @@ export async function attach(config, options = {}) {
       port,
       protocol,
       settled,
-      timings: { attachMs: _now() - started, relaunchMs },
+      timings: { attachMs: socketAt - started, relaunchMs, settleMs: _now() - socketAt },
       async detach() {
         if (detached) return;
         detached = true;
