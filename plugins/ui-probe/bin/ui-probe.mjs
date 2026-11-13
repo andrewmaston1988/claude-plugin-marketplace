@@ -16,7 +16,9 @@ const HELP = [
   "                                 3 needs_review, 64 invalid scenario/config/arguments",
   "  validate [<file>] [--config]   validate a scenario file and/or the config",
   "  screens                        list the config's screens",
-  "  doctor                         check config, browser and baseUrl",
+  "  doctor                         check config, and then whichever of the tv, browser",
+  "                                 and baseUrl checks the config needs",
+  "  tv probe                       measure the TV platform; see its options below",
   "",
   "options:",
   "  --config <path>        config file (default: .ui-probe.json found walking up from cwd)",
@@ -26,6 +28,12 @@ const HELP = [
   "  --out <dir>            output directory",
   "  --allow-writes         permit writes for this one invocation",
   "  --include-background   observe the page behind a modal dialog",
+  "  --device tv|desktop    where a tv-backend journey or capture runs (default: desktop)",
+  "  --attach-port <n>      join a TV debug forward already running instead of relaunching",
+  "  --screenshot           capture on the TV: also replay a screenshot (slow on the set)",
+  "  --video <url>          tv probe: a same-origin clip for the video checks",
+  "  --navigate <url>       tv probe: test what the app may navigate to",
+  "  --listen <seconds>     tv probe: record physical remote presses for this long",
   "  --help                 this text",
   "",
 ].join("\n");
@@ -34,7 +42,10 @@ const argv = process.argv.slice(2);
 const cmd = argv[0];
 // Above the dispatch: a const at the bottom would still be in its temporal dead zone when
 // the IIFE parses its first flag.
-const VALUE_FLAGS = ["--config", "--url", "--viewport", "--var", "--out"];
+const VALUE_FLAGS = [
+  "--config", "--url", "--viewport", "--var", "--out",
+  "--device", "--attach-port", "--video", "--navigate", "--listen",
+];
 
 const out = (line) => process.stdout.write(line + "\n");
 const err = (line) => process.stderr.write(line + "\n");
@@ -72,6 +83,18 @@ const settle = (code) => { setTimeout(() => process.exit(code), 150); };
     const { vars, problem } = varsFrom(rest);
     if (problem) { err(problem); settle(64); return; }
     const viewports = getFlag("--viewport", rest)?.split(",").map((v) => v.trim()).filter(Boolean);
+
+    const device = deviceFlag(rest);
+    if (device.problem) { err(device.problem); settle(64); return; }
+
+    if (device.value === "tv") {
+      const { captureTvBranch } = await import("../src/tv/cli.mjs");
+      const done = await captureTvBranch({ screen, config, rest, getFlag, source: name ?? url });
+      if (done.stderr) err(done.stderr);
+      if (done.digest) process.stdout.write(done.digest.endsWith("\n") ? done.digest : `${done.digest}\n`);
+      settle(done.exitCode);
+      return;
+    }
 
     const { capture } = await import("../src/capture.mjs");
     const { AuthError } = await import("../src/auth.mjs");
@@ -135,9 +158,10 @@ const settle = (code) => { setTimeout(() => process.exit(code), 150); };
 
     const { vars, problem } = varsFrom(rest);
     if (problem) { err(problem); settle(64); return; }
+    const device = deviceFlag(rest);
+    if (device.problem) { err(device.problem); settle(64); return; }
     const outDir = resolveOutDir(config, getFlag("--out", rest));
 
-    const { run } = await import("../src/runner.mjs");
     const { digestLine } = await import("../src/digest.mjs");
     const { resolveCookies, AuthError } = await import("../src/auth.mjs");
     let cookies;
@@ -149,33 +173,58 @@ const settle = (code) => { setTimeout(() => process.exit(code), 150); };
       throw e;
     }
 
-    let session = null;
-    let launchError = null;
     let result;
-    try {
-      result = await run(doc, {
-        cdp: async () => {
-          try {
-            session = await openBrowser(config?.browser);
-            return session.client;
-          } catch (e) {
-            launchError = e;
-            throw e;
-          }
-        },
-        baseUrl: config?.baseUrl ?? null,
-        allowWrites: hasFlag("--allow-writes", rest),
-        cookies,
-        source: path.basename(file),
+    if (device.value === "tv") {
+      const { runTvBranch } = await import("../src/tv/cli.mjs");
+      const done = await runTvBranch({
+        doc, config, rest, getFlag, cookies,
+        baseUrl: config?.baseUrl ?? null, source: path.basename(file),
       });
-    } catch (e) {
+      if (done.stderr) err(done.stderr);
+      if (done.exitCode !== 0) { settle(done.exitCode); return; }
+      result = done.result;
+    } else {
+      const backend = doc.backend ?? "browser";
+      if (backend === "tv") {
+        // The config-only half of the write policy: refused before a browser launches.
+        const { assertTvPolicy, scenarioOpens, TvRefusal } = await import("../src/tv/cli.mjs");
+        try {
+          assertTvPolicy(config, { backend, allowWrites: hasFlag("--allow-writes", rest), opens: scenarioOpens(doc) });
+        } catch (e) {
+          if (e instanceof TvRefusal) { err(e.message); settle(64); return; }
+          throw e;
+        }
+      }
+
+      const { run } = await import("../src/runner.mjs");
+      let session = null;
+      let launchError = null;
+      try {
+        result = await run(doc, {
+          cdp: async () => {
+            try {
+              session = await openBrowser(config?.browser);
+              return session.client;
+            } catch (e) {
+              launchError = e;
+              throw e;
+            }
+          },
+          baseUrl: config?.baseUrl ?? null,
+          allowWrites: hasFlag("--allow-writes", rest),
+          cookies,
+          device: "desktop",
+          source: path.basename(file),
+        });
+      } catch (e) {
+        if (session) await session.close();
+        if (e instanceof AuthError) { err(e.message); settle(64); return; }
+        // The environment failed the probe, not the app: inconclusive, never "failed".
+        if (launchError) { err(`inconclusive: browser: ${e.message}`); settle(2); return; }
+        throw e;
+      }
       if (session) await session.close();
-      if (e instanceof AuthError) { err(e.message); settle(64); return; }
-      // The environment failed the probe, not the app: inconclusive, never "failed".
-      if (launchError) { err(`inconclusive: browser: ${e.message}`); settle(2); return; }
-      throw e;
     }
-    if (session) await session.close();
 
     for (const problem of result.problems ?? []) printProblem(problem);
     const counts = { passed: 0, failed: 0, inconclusive: 0, not_run: 0 };
@@ -186,6 +235,24 @@ const settle = (code) => { setTimeout(() => process.exit(code), 150); };
     out(`run: ${result.outcome} (${counts.passed} passed, ${counts.failed} failed, ${counts.inconclusive} inconclusive, ${counts.not_run} not run) → ${outDir}`);
     writeResults(outDir, result.steps);
     settle(result.exitCode);
+    return;
+  }
+
+  if (cmd === "tv") {
+    if (argv[1] !== "probe") {
+      err(`unknown tv subcommand: ${argv[1] ?? "(none)"} — the only one is probe`);
+      settle(64);
+      return;
+    }
+    const rest = argv.slice(2);
+    let loaded;
+    try {
+      loaded = await loadConfig(getFlag("--config", rest), true);
+    } catch (e) { if (reportConfigError(e)) return; throw e; }
+    const { tvProbeBranch } = await import("../src/tv/cli.mjs");
+    const done = await tvProbeBranch({ config: loaded.config, rest, getFlag, resolveOutDir, out, err });
+    if (done.stderr) err(done.stderr);
+    settle(done.exitCode);
     return;
   }
 
@@ -255,6 +322,13 @@ const settle = (code) => { setTimeout(() => process.exit(code), 150); };
       loaded = await loadConfig(getFlag("--config", rest), true);
     } catch (e) { if (reportConfigError(e)) return; throw e; }
     out(`ok   config: ${loaded.path}`);
+
+    if (loaded.config.tv) {
+      const { doctorTv } = await import("../src/tv/cli.mjs");
+      if (!doctorTv(loaded.config, { out, err })) { settle(1); return; }
+    } else {
+      out("skip tv: the config has no tv block");
+    }
 
     try {
       const { findBrowser, launch } = await import("../src/browser.mjs");
@@ -379,6 +453,16 @@ function varsFrom(args) {
     vars[pair.slice(0, eq)] = pair.slice(eq + 1);
   }
   return { vars, problem: null };
+}
+
+/** `--device` names where a tv-backend journey runs; the set is opt-in, the stand-in is not. */
+function deviceFlag(args) {
+  const value = getFlag("--device", args);
+  if (value === null) return { value: "desktop", problem: null };
+  if (value !== "tv" && value !== "desktop") {
+    return { value: null, problem: `--device must be tv or desktop, got ${JSON.stringify(value)}` };
+  }
+  return { value, problem: null };
 }
 
 function getFlag(name, args) {
