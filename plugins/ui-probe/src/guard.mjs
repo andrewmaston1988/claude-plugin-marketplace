@@ -10,7 +10,7 @@ export function isWrite(method) {
  * Fail every write the page tries to send, at the request stage. Reads pass through untouched.
  * Returns the shared `blocked` list so a caller can report what was stopped.
  */
-export function installFetchGuard(cdp, { allowWrites = false, blocked = [] } = {}) {
+export async function installFetchGuard(cdp, { allowWrites = false, blocked = [] } = {}) {
   if (allowWrites) return { blocked, uninstall: async () => {} };
 
   const off = cdp.on("Fetch.requestPaused", async ({ requestId, request }) => {
@@ -24,12 +24,18 @@ export function installFetchGuard(cdp, { allowWrites = false, blocked = [] } = {
     } catch { /* the page may have navigated away mid-request */ }
   });
 
-  const enabled = cdp.send("Fetch.enable", { patterns: [{ urlPattern: "*", requestStage: "Request" }] });
+  try {
+    await cdp.send("Fetch.enable", { patterns: [{ urlPattern: "*", requestStage: "Request" }] });
+  } catch (error) {
+    off();
+    throw error;
+  }
+
   return {
     blocked,
     async uninstall() {
       off();
-      try { await enabled; await cdp.send("Fetch.disable"); } catch { /* the socket is already gone */ }
+      try { await cdp.send("Fetch.disable"); } catch { /* the socket is already gone */ }
     },
   };
 }

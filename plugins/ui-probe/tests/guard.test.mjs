@@ -36,7 +36,7 @@ test("isWrite allows reads and refuses everything that can carry a payload", () 
 
 test("the Fetch guard aborts a write and records it, and lets a read through", async () => {
   const cdp = stubCdp();
-  const guard = installFetchGuard(cdp);
+  const guard = await installFetchGuard(cdp);
   assert.deepEqual(cdp.calls[0], {
     method: "Fetch.enable",
     params: { patterns: [{ urlPattern: "*", requestStage: "Request" }] },
@@ -55,7 +55,7 @@ test("the Fetch guard aborts a write and records it, and lets a read through", a
 
 test("allowWrites installs no interception at all", async () => {
   const cdp = stubCdp();
-  const guard = installFetchGuard(cdp, { allowWrites: true });
+  const guard = await installFetchGuard(cdp, { allowWrites: true });
   assert.deepEqual(cdp.calls, []);
   assert.equal(cdp.handlers.size, 0);
   assert.deepEqual(guard.blocked, []);
@@ -64,7 +64,7 @@ test("allowWrites installs no interception at all", async () => {
 
 test("uninstall stops the listener and disables Fetch", async () => {
   const cdp = stubCdp();
-  const guard = installFetchGuard(cdp);
+  const guard = await installFetchGuard(cdp);
   await guard.uninstall();
   assert.equal(cdp.handlers.get("Fetch.requestPaused").length, 0);
   assert.equal(cdp.calls.at(-1).method, "Fetch.disable");
@@ -73,7 +73,7 @@ test("uninstall stops the listener and disables Fetch", async () => {
 test("a blocked list owned by the caller is filled in place", async () => {
   const blocked = [];
   const cdp = stubCdp();
-  installFetchGuard(cdp, { blocked });
+  await installFetchGuard(cdp, { blocked });
   await cdp.fire("Fetch.requestPaused", paused("PATCH"));
   assert.equal(blocked.length, 1);
   assert.equal(blocked[0].method, "PATCH");
@@ -108,4 +108,15 @@ test("the selector reaches the page as a literal, not as code", async () => {
   await actionAllowed(cdp, 'a[href="x\\y"]');
   const expression = cdp.calls.find((call) => call.method === "Runtime.evaluate").params.expression;
   assert.ok(expression.includes('document.querySelector("a[href=\\"x\\\\y\\"]")'), expression);
+});
+
+test("a failed Fetch.enable leaves no listener behind", async () => {
+  const cdp = stubCdp();
+  const send = cdp.send.bind(cdp);
+  cdp.send = async (method, params) => {
+    if (method === "Fetch.enable") throw new Error("Fetch domain unavailable");
+    return send(method, params);
+  };
+  await assert.rejects(installFetchGuard(cdp), /Fetch domain unavailable/);
+  assert.equal((cdp.handlers.get("Fetch.requestPaused") || []).length, 0);
 });
