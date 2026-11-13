@@ -40,6 +40,123 @@ export async function installFetchGuard(cdp, { allowWrites = false, blocked = []
   };
 }
 
+function originOf(url) {
+  try { return new URL(url).origin; } catch { return null; }
+}
+
+function domainsOf(protocol) {
+  if (!protocol) return null;
+  if (Array.isArray(protocol)) return protocol;
+  return Array.isArray(protocol.domains) ? protocol.domains : [];
+}
+
+/**
+ * Which interception this target offers. Chromium 69 on the TV has no Fetch domain, so the guard
+ * falls back to Network interception; null means neither is available and the caller must refuse.
+ */
+export function interceptionKind(protocol) {
+  const domains = domainsOf(protocol);
+  if (!domains) return "fetch";
+  if (domains.some((domain) => domain?.domain === "Fetch")) return "fetch";
+  const network = domains.find((domain) => domain?.domain === "Network");
+  return network?.commands?.some((command) => command?.name === "setRequestInterception") ? "network" : null;
+}
+
+/**
+ * Fail every write at the request stage over Network interception (pre-Fetch Chromium). A `tv`
+ * backend with writes allowed only continues writes to `testOrigin`; every other write is blocked
+ * and recorded, so an allowed run cannot stray to production.
+ */
+export async function installNetworkGuard(cdp, {
+  allowWrites = false,
+  blocked = [],
+  testOrigin = null,
+  backend = null,
+} = {}) {
+  const testOriginValue = testOrigin ? originOf(testOrigin) : null;
+  const allowedWrite = (url) => {
+    if (!allowWrites) return false;
+    if (backend !== "tv") return true;
+    return testOriginValue != null && originOf(url) === testOriginValue;
+  };
+
+  const off = cdp.on("Network.requestIntercepted", async ({ interceptionId, request }) => {
+    try {
+      if (isWrite(request?.method) && !allowedWrite(request?.url)) {
+        blocked.push({ method: request.method, url: request.url, at: Date.now() });
+        await cdp.send("Network.continueInterceptedRequest", { interceptionId, errorReason: "BlockedByClient" });
+      } else {
+        await cdp.send("Network.continueInterceptedRequest", { interceptionId });
+      }
+    } catch { /* the page may have navigated away mid-request */ }
+  });
+
+  try {
+    await cdp.send("Network.enable");
+    await cdp.send("Network.setRequestInterception", {
+      patterns: [{ urlPattern: "*", interceptionStage: "Request" }],
+    });
+  } catch (error) {
+    off();
+    throw error;
+  }
+
+  return {
+    blocked,
+    async uninstall() {
+      off();
+      try { await cdp.send("Network.setRequestInterception", { patterns: [] }); } catch { /* the socket is already gone */ }
+    },
+  };
+}
+
+/**
+ * Pick the guard the target's protocol can run. A null protocol means the browser path, where the
+ * Fetch guard is known to work.
+ */
+export async function installGuard(cdp, protocol, options = {}) {
+  if (interceptionKind(protocol) === "fetch") return installFetchGuard(cdp, options);
+  return installNetworkGuard(cdp, options);
+}
+
+function openUrl(step) {
+  if (typeof step === "string") return step;
+  if (!step || typeof step !== "object") return null;
+  const inner = step.open ?? step;
+  if (typeof inner === "string") return inner;
+  return inner?.url ?? null;
+}
+
+/**
+ * Why a TV run cannot start, or null when it can. Without interception the only safe shape is a
+ * fully allowed run pinned to the test origin; with it, writes are still scoped there.
+ */
+export function tvWritePolicy({
+  backend = null,
+  allowWrites = false,
+  testOrigin = null,
+  hasInterception = false,
+  opens = [],
+} = {}) {
+  if (backend !== "tv") return null;
+
+  const testOriginValue = testOrigin ? originOf(testOrigin) : null;
+  if (allowWrites && testOriginValue == null) {
+    return "--allow-writes needs tv.testOrigin set: on the TV it only lets through writes to the test origin";
+  }
+  if (hasInterception) return null;
+  if (!allowWrites) {
+    return "this TV target offers no request interception, so a run needs --allow-writes";
+  }
+  for (const step of opens) {
+    const url = openUrl(step);
+    if (originOf(url) !== testOriginValue) {
+      return `open ${url ?? "(none)"} is outside tv.testOrigin ${testOriginValue}: this TV target offers no request interception, so every open must be on the test origin`;
+    }
+  }
+  return null;
+}
+
 // The element's own htmx verb beats its formmethod, which beats the form's htmx verb, which beats
 // the form's method. A link navigates, so it is never a write whatever form encloses it.
 const ACTION_JS = (selector) => `(() => {
