@@ -190,6 +190,22 @@ test("an attach-port join never kills the app and only removes the forward", asy
   assert.deepEqual(sdbStub.text(), [`forward --remove tcp:${PORT}`]);
 });
 
+test("a failed forward still closes the app it launched", async () => {
+  const sdbStub = stubSdb(
+    launchAnswers({
+      [`forward tcp:${PORT} tcp:${PORT}`]: () => {
+        throw new Error("sdb died");
+      },
+    }),
+  );
+
+  await assert.rejects(
+    attach(CONFIG, { _sdb: sdbStub, _fetch: stubFetch({ ...LIST, ...PROTOCOL }), _connect: stubConnect(), _sleep: instant }),
+    /sdb died/,
+  );
+  assert.deepEqual(sdbStub.text().slice(-2), [`shell 0 kill ${PKGID}`, `forward --remove tcp:${PORT}`]);
+});
+
 test("a failure after the forward cleans up the forward and the app it launched", async () => {
   const sdbStub = stubSdb(launchAnswers());
   const fetchStub = stubFetch({ "/json/list": [], ...PROTOCOL });

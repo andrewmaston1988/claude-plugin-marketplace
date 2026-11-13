@@ -35,22 +35,22 @@ export async function attach(config, options = {}) {
   let port = joined;
   let launched = false;
 
-  if (joined === null) {
-    await ensureDevice(tv.host, callSdb, timeoutMs);
-    await closeApp(pkgid, callSdb, timeoutMs);
-
-    const debug = await callSdb(["shell", "0", "debug", tv.appid], { timeoutMs });
-    port = parseDebugPort(`${debug.stdout ?? ""}${debug.stderr ?? ""}`);
-    if (port === null) {
-      throw new AttachInconclusive(
-        `sdb shell 0 debug ${tv.appid} printed no port — the app may still be running: press EXIT on the remote, then re-run`,
-      );
-    }
-    launched = true;
-    await callSdb(["forward", `tcp:${port}`, `tcp:${port}`], { timeoutMs });
-  }
-
   try {
+    if (joined === null) {
+      await ensureDevice(tv.host, callSdb, timeoutMs);
+      await closeApp(pkgid, callSdb, timeoutMs);
+
+      const debug = await callSdb(["shell", "0", "debug", tv.appid], { timeoutMs });
+      port = parseDebugPort(`${debug.stdout ?? ""}${debug.stderr ?? ""}`);
+      if (port === null) {
+        throw new AttachInconclusive(
+          `sdb shell 0 debug ${tv.appid} printed no port — the app may still be running: press EXIT on the remote, then re-run`,
+        );
+      }
+      launched = true;
+      await callSdb(["forward", `tcp:${port}`, `tcp:${port}`], { timeoutMs });
+    }
+
     const target = await pageTarget(port, { _fetch, _sleep });
     const protocol = await fetchProtocol(port, _fetch);
     const cdp = await _connect(target.webSocketDebuggerUrl);
@@ -70,7 +70,7 @@ export async function attach(config, options = {}) {
     };
   } catch (error) {
     if (launched) await quietly(() => callSdb(["shell", "0", "kill", pkgid], { timeoutMs }));
-    await quietly(() => callSdb(["forward", "--remove", `tcp:${port}`], { timeoutMs }));
+    if (port !== null) await quietly(() => callSdb(["forward", "--remove", `tcp:${port}`], { timeoutMs }));
     throw error;
   }
 }
