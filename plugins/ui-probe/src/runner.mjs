@@ -45,9 +45,15 @@ function matches(actual, expected, tolerance = 0) {
 const VISIBLE_JS = (selector) => `(() => {
   const el = document.querySelector(${q(selector)});
   if (!el) return { found: false };
-  const style = getComputedStyle(el);
-  const box = el.getBoundingClientRect();
-  return { found: true, display: style.display, visibility: style.visibility, width: box.width, height: box.height };
+  // display: contents has no box of its own, so a child's box is the only evidence it renders.
+  const visible = (node) => {
+    const style = getComputedStyle(node);
+    if (style.display === "none" || style.visibility === "hidden") return false;
+    const box = node.getBoundingClientRect();
+    if (box.width > 0 && box.height > 0) return true;
+    return style.display === "contents" && Array.from(node.children).some(visible);
+  };
+  return { found: true, visible: visible(el) };
 })()`;
 
 // getBoundingClientRect and elementFromPoint are viewport-relative, so a target below the fold
@@ -266,8 +272,7 @@ async function expectVisible(args, state) {
   const result = await pollUntil(async () => {
     const seen = await evaluate(state.cdp, VISIBLE_JS(args.target));
     if (!seen.found) return { ok: false, found: false, measured: null };
-    const visible = seen.display !== "none" && seen.visibility !== "hidden" && seen.width > 0 && seen.height > 0;
-    return { ok: visible, found: true, measured: visible };
+    return { ok: seen.visible, found: true, measured: seen.visible };
   }, timeout, state);
   if (result.ok) return { measured: true, expected: true };
   if (result.error) throw inconclusive(result.error);
@@ -280,8 +285,7 @@ async function expectHidden(args, state) {
   const result = await pollUntil(async () => {
     const seen = await evaluate(state.cdp, VISIBLE_JS(args.target));
     if (!seen.found) return { ok: true, measured: false };
-    const visible = seen.display !== "none" && seen.visibility !== "hidden" && seen.width > 0 && seen.height > 0;
-    return { ok: !visible, measured: !visible };
+    return { ok: !seen.visible, measured: !seen.visible };
   }, timeout, state);
   if (result.ok) return { measured: true, expected: true };
   if (result.error) throw inconclusive(result.error);

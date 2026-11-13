@@ -15,7 +15,7 @@ function stubCdp({ nodeIds = [], widths = [], connected = true, obscured = { fou
     if (expression.includes("getPropertyValue")) return { found: true, value: "flex" };
     if (expression.includes("textContent")) return { found: true, value: "hello" };
     if (expression.includes("getBoundingClientRect")) {
-      return nodeIds.length ? { found: true, display: "block", visibility: "visible", width: 111, height: 40 } : { found: false };
+      return nodeIds.length ? { found: true, visible: true } : { found: false };
     }
     return null;
   };

@@ -77,6 +77,14 @@ const PAGES = {
     <button id="covered">Covered</button>
     <div id="overlay" style="position:fixed;inset:0;background:rgba(0,0,0,.1)"></div>`),
 
+  // display: contents owns no box, so its visibility can only come from its children.
+  "/contents.html": page(`
+    <div id="wraps-button" style="display:contents"><button id="inside">Visible</button></div>
+    <div id="wraps-hidden" style="display:contents">
+      <span style="display:none">gone</span>
+      <span style="display:none">also gone</span>
+    </div>`),
+
   // 10 CSS px that triples on a 2dppx screen: one page, a width that proves which density ran.
   "/density.html": page(`
     <style>

@@ -345,6 +345,15 @@ test("row 20: the observation carries pressed, checked, expanded and disabled", 
   assert.match(observation, /\[disabled=true\]/);
 });
 
+test("row 28: a display:contents wrapper is visible through a visible child, hidden with only hidden children", { skip: SKIP }, async () => {
+  const shown = await runOn(steps("/contents.html", { expect_visible: { target: "#wraps-button", timeoutMs: 0 } }));
+  assert.equal(shown.outcome, "passed", JSON.stringify(shown.steps));
+  assert.equal(shown.steps[1].measured, true);
+
+  const hidden = await runOn(steps("/contents.html", { expect_hidden: { target: "#wraps-hidden", timeoutMs: 0 } }));
+  assert.equal(hidden.outcome, "passed", JSON.stringify(hidden.steps));
+});
+
 test("row 21: UI_PROBE_REQUIRE_BROWSER=1 fails naming the missing browser instead of skipping", { skip: IS_CHILD }, () => {
   const missing = join(tmpdir(), "ui-probe-no-such-browser.exe");
   const file = fileURLToPath(import.meta.url);
