@@ -385,12 +385,15 @@ manifest seeding the same `into` no longer collide.
 
 `worktreesKept` in `summary.json` carries one entry per shared group. A branch counts as landed
 when destroying it loses nothing: some ref outside `swarm/` still contains its tip, or merging it
-into the default branch or the live checkout changes no file — which covers squash, rebase and
-traditional merges alike. When the engine reuses or resets one of its own worktrees, a branch that
+into the default branch or the live checkout changes no file at the base's tip or in the newest 20
+first-parent commits that touched the branch's files — which covers squash, rebase and traditional
+merges alike; telling a squash apart needs git 2.38 or later, and below that only reachability and
+patch matching answer. When the engine reuses or resets one of its own worktrees, a branch that
 has not landed is never force-reset — it refuses rather than lose the work. `swarm prune <resultsDir>` is
-not that path: it removes each kept tree and its branch together with `git branch -D`, so push or
-merge before pruning. It never destroys results. There is no detach option; push a branch to
-preserve its remote copy. It refuses a live run, and any tree with unlanded commits or uncommitted
+not that path: it removes each kept tree and its branch together with `git branch -D`, so push
+under a name outside `swarm/`, or merge, before pruning. It never destroys results. There is no
+detach option; push a branch under a name outside `swarm/` to preserve its remote copy, because
+`origin/swarm/…` is never a landing place. It refuses a live run, and any tree with unlanded commits or uncommitted
 changes, printing every tree first, `--dry-run` for a no-op preview; `--discard-unlanded`
 explicitly destroys that blocked work, whether or not the branch landed. `swarm status --mine`
 lists this session's finished runs still
