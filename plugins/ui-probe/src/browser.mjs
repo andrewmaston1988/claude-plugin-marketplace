@@ -39,15 +39,20 @@ const CLOSE_CALL_TIMEOUT_MS = 5000;
 const PROFILE_REMOVE_TRIES = 5;
 const PROFILE_REMOVE_RETRY_MS = 200;
 
-export function findBrowser({ browser, _exists = existsSync, _spawnSync = spawnSync } = {}) {
+export function findBrowser({
+  browser,
+  _exists = existsSync,
+  _spawnSync = spawnSync,
+  _platform = process.platform,
+} = {}) {
   if (browser) {
     if (_exists(browser)) return browser;
     throw new Error(`browser not found: ${browser} (check the "browser" path in .ui-probe.json)`);
   }
-  for (const candidate of CANDIDATES[process.platform] || []) {
+  for (const candidate of CANDIDATES[_platform] || []) {
     if (_exists(candidate)) return candidate;
   }
-  const command = process.platform === "win32" ? "where" : "which";
+  const command = _platform === "win32" ? "where" : "which";
   for (const name of PATH_NAMES) {
     const result = _spawnSync(command, [name], { encoding: "utf8" });
     const first = (result.stdout || "").split(/\r?\n/).map((line) => line.trim()).filter(Boolean)[0];

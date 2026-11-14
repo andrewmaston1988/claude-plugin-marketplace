@@ -136,8 +136,10 @@ test("an explicit browser wins, and a missing one is named rather than silently 
 });
 
 test("discovery falls back to the platform candidates and then to PATH", () => {
+  // Pin the platform each half exercises: the host's own would decide which half can pass.
   const looked = [];
   const found = findBrowser({
+    _platform: "win32",
     _exists: (path) => path.endsWith("msedge.exe") && path.includes("Program Files"),
     _spawnSync: (command, args) => {
       looked.push([command, args[0]]);
@@ -147,6 +149,7 @@ test("discovery falls back to the platform candidates and then to PATH", () => {
   assert.match(found, /msedge\.exe$/);
 
   const viaPath = findBrowser({
+    _platform: "linux",
     _exists: (path) => path === "/usr/bin/google-chrome",
     _spawnSync: (command, [name]) => {
       looked.push([command, name]);
@@ -155,6 +158,7 @@ test("discovery falls back to the platform candidates and then to PATH", () => {
   });
   assert.equal(viaPath, "/usr/bin/google-chrome");
   assert.ok(looked.some(([, name]) => name === "google-chrome"));
+  assert.ok(looked.some(([command]) => command === "which"), "the linux half looks up via which");
 });
 
 test("no browser found is an actionable error", () => {
