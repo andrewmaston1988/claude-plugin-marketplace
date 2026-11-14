@@ -1,4 +1,6 @@
-<!doctype html>
+// The TV journey target: a focus grid keyed by keyCode, served at /tv-grid.html.
+// Kept as a string because every file the plugin ships must be .mjs, .md or .json.
+export const TV_GRID_HTML = `<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
@@ -139,7 +141,7 @@
       canvas.height = 64;
       const paint = canvas.getContext("2d");
       setInterval(() => {
-        paint.fillStyle = `hsl(${(Date.now() / 20) % 360}, 60%, 45%)`;
+        paint.fillStyle = \`hsl(\${(Date.now() / 20) % 360}, 60%, 45%)\`;
         paint.fillRect(0, 0, 64, 64);
       }, 50);
       clip.srcObject = canvas.captureStream(10);
@@ -148,3 +150,4 @@
   </script>
 </body>
 </html>
+`;
