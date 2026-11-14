@@ -8,10 +8,7 @@ import { basename } from "node:path";
 import { checkoutToplevel, treeRootFor } from "./worktree.mjs";
 import { swarmHome } from "./config.mjs";
 import { mcpTools } from "./manifest-task-policy.mjs";
-
-function namesEqual(a, b) {
-  return process.platform === "win32" ? a.toLowerCase() === b.toLowerCase() : a === b;
-}
+import { namesEqual } from "./leaf-mcp.mjs";
 
 // The MAIN worktree of the repo containing cwd, an explicit non-repo answer, or a
 // failed lookup. A spawn failure must stay distinct from git's "not a repository" answer.
@@ -41,21 +38,26 @@ export function repoLookup(cwd, spawn) {
 export function realRepoToplevel(cwd, spawn) {
   return repoLookup(cwd, spawn).repo || null;
 }
-// The leaf guard governing a task's cwd, or undefined if none applies. The
-// task matches the project whose name equals the basename of its repo root
-// (via the injectable io.repoToplevel seam so tests need no real git),
-// falling back to the basename of originalCwd itself when git fails —
-// case-insensitive on Windows, same as isUnderRoot.
-export function guardFor(originalCwd, cfg, io = defaultManifestIo()) {
+// The project whose name matches a task's repo MAIN-worktree basename (via the
+// injectable io.repoToplevel seam so tests need no real git), falling back to the
+// basename of originalCwd itself when git fails — case-insensitive on Windows,
+// same as isUnderRoot. One git lookup answers both the guard and the MCP set.
+export function projectFor(originalCwd, cfg, io = defaultManifestIo()) {
   const projects = cfg?.projects;
-  if (!Array.isArray(projects) || !projects.length) return undefined;
+  if (!Array.isArray(projects) || !projects.length) return { project: undefined, repoName: basename(originalCwd) };
   const toplevel = io.repoToplevel(originalCwd);
-  const name = basename(toplevel || originalCwd);
-  const project = projects.find((p) => namesEqual(p.name, name));
-  if (!project) return undefined;
-  const command = project.hooks?.preToolUse;
+  const repoName = basename(toplevel || originalCwd);
+  return { project: projects.find((p) => namesEqual(p.name, repoName)), repoName };
+}
+
+export function guardOf(project) {
+  const command = project?.hooks?.preToolUse;
   if (!command) return undefined;
   return { name: project.name, command };
+}
+
+export function guardFor(originalCwd, cfg, io = defaultManifestIo()) {
+  return guardOf(projectFor(originalCwd, cfg, io).project);
 }
 
 export function defaultManifestIo(cfg) {

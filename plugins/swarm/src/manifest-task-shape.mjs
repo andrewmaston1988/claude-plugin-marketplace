@@ -174,6 +174,15 @@ export function validateTaskShapes(rawTasks, errors, label) {
         }
       }
     }
+    // Its own check, NOT inside the env branch above: the denied list needs no `env`
+    // key to reach the leaf, and the engine owns which servers a leaf starts.
+    if (t.settings && typeof t.settings === "object" && !Array.isArray(t.settings) && Object.hasOwn(t.settings, "deniedMcpServers")) {
+      errors.push(
+        `${l}: settings.deniedMcpServers is engine-controlled — give this leaf a server by naming its tool in allowedTools ` +
+        `(e.g. "mcp__blender"), or turn it on for a repo's leaves with ` +
+        `"projects": [{"name": "<repo>", "mcp": {"on": ["<server>"]}}] (swarm mcp set does this for you)`
+      );
+    }
     // leafGuard is otherwise engine-computed (from ~/.swarm/config.json's
     // projects) — the only thing an author may write here is opting out.
     if (t.leafGuard !== undefined && t.leafGuard !== false) {

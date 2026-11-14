@@ -219,7 +219,7 @@ The red flags above are about a *healthy* run. The other failure class (2026-07-
     "prompt": "…",
     "provider": "ollama", "model": "glm-5.2:cloud",                  // required; the full model id (claude-opus-5, never "opus")
     "effort": "medium",                        // optional; defaults to the model's declared default or medium; validated when the provider declares levels
-    "allowedTools": "Read,Grep,Glob",          // allow-list only; see manifest-fields.md for limits. Default: Claude/Ollama get Read,Grep,Glob,Skill plus machine MCP; Codex gets Read,Grep,Glob.
+    "allowedTools": "Read,Grep,Glob",          // allow-list only; see manifest-fields.md for limits. Default: Claude/Ollama get Read,Grep,Glob,Skill plus the machine's MCP servers, minus `mcp.off` unless the repo's `projects[].mcp.on` or the task's own allowedTools turns one back on; Codex gets Read,Grep,Glob.
                                                // Explicit lists replace the default (name MCP servers literally, e.g. mcp__scout); returns always adds StructuredOutput.
     "cwd": "C:/code/somerepo",                 // default: the top-level cwd; relative resolves against it
     "workspace": "feat",                       // optional, writers only: the name of a tree SHARED with

@@ -27,10 +27,11 @@ function isPlainObject(v) {
 
 const KNOWN_PROJECT_HOOK_KEYS = new Set(["preToolUse"]);
 const PROJECTS_EXAMPLE = '"projects": [{"name": "myrepo", "hooks": {"preToolUse": "cmd"}}]';
+const PROJECT_MCP_EXAMPLE = '{"name": "rts-mobile", "mcp": {"on": ["blender"]}}';
 
-// Each entry: name (required, non-empty, unique) + hooks (required object;
-// only preToolUse recognised today — the shape is reserved for later hook
-// events, so an unknown key is a hard error naming the known ones).
+// Each entry: name (required, non-empty, unique) + hooks and/or mcp. `hooks` is
+// reserved for later hook events, so an unknown key there is a hard error naming
+// the known ones. `mcp.on` names the servers this repo's leaves get back.
 function validateProjects(projects) {
   if (!Array.isArray(projects)) {
     throw new Error(`projects must be an array — e.g. ${PROJECTS_EXAMPLE} in ~/.swarm/config.json`);
@@ -44,18 +45,53 @@ function validateProjects(projects) {
       throw new Error(`projects[${i}].name '${p.name}' is a duplicate — project names must be unique`);
     }
     seen.add(p.name);
-    if (!isPlainObject(p.hooks)) {
-      throw new Error(`projects[${i}].hooks must be an object — e.g. ${PROJECTS_EXAMPLE}`);
+    if (p.hooks === undefined && p.mcp === undefined) {
+      throw new Error(`projects[${i}] '${p.name}' sets neither hooks nor mcp — e.g. ${PROJECT_MCP_EXAMPLE} in ~/.swarm/config.json`);
     }
-    for (const k of Object.keys(p.hooks)) {
-      if (!KNOWN_PROJECT_HOOK_KEYS.has(k)) {
-        throw new Error(`projects[${i}].hooks has unknown key '${k}' — known keys: ${[...KNOWN_PROJECT_HOOK_KEYS].join(", ")}`);
+    if (p.hooks !== undefined) {
+      if (!isPlainObject(p.hooks)) {
+        throw new Error(`projects[${i}].hooks must be an object — e.g. ${PROJECTS_EXAMPLE}`);
+      }
+      for (const k of Object.keys(p.hooks)) {
+        if (!KNOWN_PROJECT_HOOK_KEYS.has(k)) {
+          throw new Error(`projects[${i}].hooks has unknown key '${k}' — known keys: ${[...KNOWN_PROJECT_HOOK_KEYS].join(", ")}`);
+        }
+      }
+      if (p.hooks.preToolUse !== undefined && typeof p.hooks.preToolUse !== "string") {
+        throw new Error(`projects[${i}].hooks.preToolUse must be a command string — e.g. ${PROJECTS_EXAMPLE}`);
       }
     }
-    if (p.hooks.preToolUse !== undefined && typeof p.hooks.preToolUse !== "string") {
-      throw new Error(`projects[${i}].hooks.preToolUse must be a command string — e.g. ${PROJECTS_EXAMPLE}`);
+    if (p.mcp !== undefined) {
+      if (!isPlainObject(p.mcp)) {
+        throw new Error(`projects[${i}].mcp must be an object — e.g. ${PROJECT_MCP_EXAMPLE}`);
+      }
+      for (const k of Object.keys(p.mcp)) {
+        if (k !== "on") {
+          throw new Error(`projects[${i}].mcp has unknown key '${k}' — known keys: on — e.g. ${PROJECT_MCP_EXAMPLE}`);
+        }
+      }
+      if (p.mcp.on !== undefined && (!Array.isArray(p.mcp.on) || p.mcp.on.some((s) => typeof s !== "string" || !s))) {
+        throw new Error(`projects[${i}].mcp.on must be an array of non-empty server names — e.g. ${PROJECT_MCP_EXAMPLE}`);
+      }
     }
   });
+}
+
+// The machine-wide off list: servers every leaf skips unless a repo or a task
+// turns one back on. Absent (or an empty `off`) means every server is on.
+function validateMcp(value, path) {
+  if (value === undefined) return;
+  if (!isPlainObject(value)) {
+    throw new Error(`mcp in ${path} must be an object — e.g. "mcp": {"off": ["blender"]}`);
+  }
+  for (const k of Object.keys(value)) {
+    if (k !== "off") {
+      throw new Error(`mcp in ${path} has unknown key '${k}' — known keys: off — e.g. "mcp": {"off": ["blender"]}`);
+    }
+  }
+  if (value.off !== undefined && (!Array.isArray(value.off) || value.off.some((s) => typeof s !== "string" || !s))) {
+    throw new Error(`mcp.off in ${path} must be an array of non-empty server names — e.g. "mcp": {"off": ["blender", "plugin:slack-bridge:slack-bridge-remote"]}`);
+  }
 }
 
 // minFreeMemMb (spawn floor) and valveFreeMemMb (kill-newest-running valve) are
@@ -182,6 +218,7 @@ function validateConfig(cfg, configPath) {
     throw new Error('display.money must be true or false — e.g. "display": {"money": true} in ~/.swarm/config.json shows dollar figures beside the work tokens; leave it out to show none');
   }
   validateProjects(cfg.projects);
+  validateMcp(cfg.mcp, configPath);
   validateMemFloor(cfg, "minFreeMemMb");
   validateMemFloor(cfg, "valveFreeMemMb");
   // minFreeMemMb: 0 is the documented "disabled" sentinel for the spawn floor —
@@ -343,25 +380,36 @@ export function initConfig(overridePath, env = process.env) {
   return { path, created, migrated: migratedKeys.length > 0, migratedKeys, added };
 }
 
-// Set ONE key, leaving every other line as it was: `config init` is the command that
-// materialises the defaults, and a verb asked to change one setting must not decide the
-// rest. Validation judges the MERGED view of the object ABOUT to be written — the new
-// value included, since that is what the next loadConfig reads. Judging the pre-change
-// view instead passes every value and persists a file the next command refuses.
-// `changed: false` when the value was already there, so a caller can re-run safely.
-export function setConfigValue(key, value, overridePath, env = process.env) {
+// The one read-validate-write sequence for the user's config file. `mutate` gets a
+// clone of the RAW file and returns the object to write; validation judges the
+// defaults-merged view, since that is what the next loadConfig reads. Judging the
+// raw file alone would refuse every minimal config; writing the merged view would
+// bake every shipped default into the operator's file.
+export function updateUserConfig(mutate, overridePath, env = process.env) {
   const path = userConfigPath(overridePath, env);
   const raw = existsSync(path) ? parseUser(path) : {};
-  const before = getPath(raw, key);
-  if (before.found && before.value === value) return { path, key, changed: false, previous: value };
-  const next = structuredClone(raw);
-  setPath(next, key, value);
+  const next = mutate(structuredClone(raw));
   try {
     validateConfig(deepMerge(readDefaults(), normalizeConfigInput(next)), path);
   } catch (e) {
     throw new Error(refuseToWrite(raw, path, false, e));
   }
   writeAtomic(path, next);
+  return { path, config: next };
+}
+
+// Set ONE key, leaving every other line as it was: `config init` is the command that
+// materialises the defaults, and a verb asked to change one setting must not decide the
+// rest. `changed: false` when the value was already there, so a caller can re-run safely.
+export function setConfigValue(key, value, overridePath, env = process.env) {
+  const path = userConfigPath(overridePath, env);
+  const raw = existsSync(path) ? parseUser(path) : {};
+  const before = getPath(raw, key);
+  if (before.found && before.value === value) return { path, key, changed: false, previous: value };
+  updateUserConfig((next) => {
+    setPath(next, key, value);
+    return next;
+  }, path, env);
   return { path, key, changed: true, previous: before.found ? before.value : undefined };
 }
 

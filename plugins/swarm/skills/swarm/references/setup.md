@@ -30,9 +30,11 @@ for it.
 2. **Read** the file (`Read` on the printed path). You need the current values for every stage.
 3. **Walk the stages below, one at a time.** For each: explain, state the current value, one
    `AskUserQuestion` with concrete options. Then the next stage. Never batch the stages into one
-   question call, and never ask about a key you have not just explained.
+   question call, and never ask about a key you have not just explained. A stage may declare an
+   ordered sequence of asks (Stage 7e does): walk that sequence in order, one ask at a time.
 4. **Edit** the file with the `Edit` tool as each answer lands, keeping JSON types (arrays stay
-   arrays, numbers stay numbers, `null` is a real value for `token` / `notifyCmd`).
+   arrays, numbers stay numbers, `null` is a real value for `token` / `notifyCmd`). A stage that
+   names its own write command uses it instead of `Edit` — Stage 7e's `swarm mcp set`.
 5. **Close** with what takes effect when: CLI keys on the next call; `swarm.*` at the next
    session start; `dashboard.*` after `serve stop` then `serve --daemon`. If the dashboard
    daemon is running and a `dashboard.*` or `grading.*` key changed, offer to restart it.
@@ -315,11 +317,16 @@ also denies, naming the failure (fail-closed — a guard that silently stops app
 than one that blocks). Each distinct guard is probed once at `validate`, so a broken script
 fails the manifest before anything spends.
 
-One entry per repo, named and matched by that repo's directory name:
+One entry per repo, named and matched by that repo's directory name. Each entry is
+`{ name, hooks?, mcp? }` — at least one of the two keys:
 
 ```json
 { "projects": [{ "name": "myrepo", "hooks": { "preToolUse": "python scripts/leaf_guard.py" } }] }
 ```
+
+`mcp` is the other key: `{"name": "rts-mobile", "mcp": {"on": ["blender"]}}` gives that repo's
+leaves a server back from the machine-wide off list. Stage 7e writes it and nothing here does;
+an entry with neither `hooks` nor `mcp` is refused.
 
 Uses are whatever a PreToolUse hook can express over the payload — keep builds out of lanes,
 fence writes to a directory, block installs or pushes, require a marker on edits to certain
@@ -335,6 +342,44 @@ leaf as a `% of week` share, which needs no setting. `display.money` adds dollar
 leaf billed on a real API key (on the run's closing `tokens:` line; the roster and dashboard show
 it as `≈$… api-eq`), `≈$… api-eq` for a rate-card estimate — never a subscription charge. Off (the shipped default): no `$` anywhere. Ask; write `"display": {"money": true}` only
 on a yes, and leave the key out on a no.
+
+### Stage 7e — leaf MCP servers (`mcp`)
+
+Every Claude and Ollama leaf starts every MCP server this machine knows, and each one is a
+process tree the leaf owns: `blender` alone is five processes (`uvx` → `uv` → `mcp-for-blender`
+→ `python` → `python`), and the slack-bridge server registers every leaf with the operator's
+Slack daemon. Nothing is off unless it is put on this list — the shipped default starts
+everything. This stage asks what leaves should NOT start, then which repos get one back.
+
+1. `swarm mcp list --json`. It health-checks each server — briefly starting the stdio ones —
+   so it takes a second or two. `servers[].off` is today's state; `repos[]` is the repos leaves
+   have run in, newest first, each already carrying the servers it turns back on.
+2. **"Leaves start every server below unless you turn it off here — which should they NOT
+   start? Anything you turn off can be turned back on for specific repos in the next step."**
+   One `AskUserQuestion`, `multiSelect: true`, one option per server: the label is the server
+   name, the description its target and "on today"/"off today". Four options per question, up
+   to four questions in the call; past 16 servers, list them in prose and take names as text.
+   **An empty answer is a real answer: everything stays on.**
+3. **Only if something is off**, one question — **"Do any other repos get the turned-off tools?"**
+   — naming the servers just turned off. No → step 6.
+4. **Yes → which repos.** One `multiSelect` over the listing's `repos`: label is the repo name,
+   description is what it turns on today, or "defaults only". Four per question; the automatic
+   "Other" takes any repo name the listing does not carry.
+5. **Per chosen repo:** **"Which of the turned-off tools do `<repo>`'s leaves get?"** One
+   `multiSelect` per repo, listing only the servers turned off in step 2 — up to four repos per
+   call.
+6. `swarm mcp set --off <the complete off set> --repo <repo>=<servers>` — one `--repo` per
+   chosen repo, e.g.
+
+   ```
+   swarm mcp set --off "blender,plugin:slack-bridge:slack-bridge-remote" --repo "rts-mobile=blender"
+   ```
+
+   The command is authoritative: a repo you do not pass loses what it had, and an off name you
+   do not pass is turned back on — always pass the complete answer, which the listing just gave
+   you. It prints the table of what each repo's leaves start; show it. A manifest task can still
+   name a tool (`mcp__blender__execute_blender_code`) to give one leaf that server without
+   touching config, so no repo needs `mcp.on` just to unblock a single leaf.
 
 ### Stage 8 — advanced, only on request
 
@@ -389,7 +434,8 @@ from the appendix. If no, close.
 | `swarm.workflowNudge` | `true` | One-time "consider swarm" on the first `Workflow` call of a session on an armed machine. |
 | `grading.enabled` | `false` | Stage 7. |
 | `display.money` | *(unset = off)* | Stage 7d. `true` adds dollar figures (`$` billed, `≈$… api-eq` estimate) beside the work tokens; a non-boolean fails the config load. |
-| `projects` | `[]` | Stage 7c. Array of `{ name, hooks: { preToolUse } }`: the repo's own PreToolUse hook for leaves whose repo root basename matches `name`; payload on stdin, exit 0 allows, exit 2 denies with stderr, anything else denies (fail-closed); probed once at `validate`; `"leafGuard": false` opts a task out. |
+| `mcp` | `{ "off": [] }` | Stage 7e. Machine-wide servers leaves do not start; absent or empty = every server on. `projects[].mcp.on` turns one back on for a repo's leaves, and a task naming a server's tool turns it on for that one leaf. Names are the CLI's own (`blender`, `plugin:<plugin>:<server>`). |
+| `projects` | `[]` | Stages 7c and 7e. Array of `{ name, hooks?, mcp? }`, at least one key: `hooks.preToolUse` is the repo's own PreToolUse hook for leaves whose repo root basename matches `name` (payload on stdin, exit 0 allows, exit 2 denies with stderr, anything else denies — fail-closed; probed once at `validate`; `"leafGuard": false` opts a task out); `mcp.on` lists the servers that repo's leaves get back. |
 
 ## Common mistakes
 

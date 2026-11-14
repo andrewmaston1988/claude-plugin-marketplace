@@ -262,6 +262,8 @@ export function createLaunch(ctx) {
       result.originalCwd = task.originalCwd;
       if (task.checkoutToplevel) result.checkoutToplevel = task.checkoutToplevel;
       result.allowedTools = task.allowedTools;
+      // An ask reads this to tell an authored list from a defaulted one.
+      if (task.toolsAuthored) result.toolsAuthored = true;
 
       // Semantic contract failures bypass transcript classification; a stray 429 cannot retry them.
       // A memory stop is checked first because the valve may kill without a classifiable message.

@@ -55,7 +55,7 @@ warns instead, since the window may have since reset.
 
 ### Per-repo leaf guard (`projects`)
 
-A Claude or Ollama task with no `allowedTools` gets `Read,Grep,Glob,Skill` plus the machine's MCP servers; a Codex task gets `Read,Grep,Glob`. An explicit `allowedTools` replaces that default completely (name MCP servers literally, such as `mcp__scout`), and every task with `returns` also gets `StructuredOutput`. `allowedTools` scopes tool *names*, not what a tool is asked to do. `projects` wires a **repo-owned PreToolUse hook** into every
+A Claude or Ollama task with no `allowedTools` gets `Read,Grep,Glob,Skill` plus the machine's MCP servers, minus `mcp.off` unless the repo's `projects[].mcp.on` or the task's own `allowedTools` turns one back on; a Codex task gets `Read,Grep,Glob`. An explicit `allowedTools` replaces that default completely (name MCP servers literally, such as `mcp__scout`), and every task with `returns` also gets `StructuredOutput`. `allowedTools` scopes tool *names*, not what a tool is asked to do. `projects` wires a **repo-owned PreToolUse hook** into every
 leaf that runs under that repo:
 
 ```json
@@ -74,6 +74,35 @@ case-insensitive on Windows); an unmatched repo runs unguarded, interactive sess
 see it. Each guard is probed once at `validate` with a harmless payload, so a broken script
 fails the manifest before any leaf spends. A task opts out with `"leafGuard": false`
 only — nothing in `env`/`settings.env` can forge or clear the guard.
+
+### Leaf MCP servers (`mcp`)
+
+A leaf starts every MCP server the machine knows unless the config turns one off, and a server
+turned off is never spawned rather than merely hidden: swarm passes it as `deniedMcpServers`
+in the leaf's own `--settings`, so `permissions.defaultMode: "bypassPermissions"` cannot bring
+it back. One block, the same shape machine-wide and per repo:
+
+```json
+{
+  "mcp": { "off": ["blender", "plugin:slack-bridge:slack-bridge-remote"] },
+  "projects": [
+    { "name": "rts-mobile", "mcp": { "on": ["blender"] } }
+  ]
+}
+```
+
+A leaf's off set is `mcp.off`, minus its repo's `projects[].mcp.on`, minus every server its own
+`allowedTools` names — `mcp__blender` or any `mcp__blender__*` tool turns `blender` on for that
+one leaf, with no config edit. No `mcp` block, or an empty `off`, starts everything: that is the
+shipped default. Names are the CLI's own — `blender`, and plugin servers as
+`plugin:<plugin>:<server>`.
+
+`swarm mcp list [--json]` prints the roster with today's on/off state and the repos that turn
+one back on; `swarm mcp set --off <a,b> [--repo <repo>=<servers>]…` writes the answers and prints
+what each repo's leaves start. `/swarm:swarm setup` (Stage 7e) walks both for you. `set` is
+authoritative — the flags it is given ARE the new state, so a repo not passed loses its `on`.
+
+**Codex leaves are unaffected** — they load their servers from `~/.codex/config.toml`.
 
 **Requirements:** Node and `claude` on PATH for Claude leaves. Ollama `:cloud` rows need a
 recent Ollama with `/api/experimental/model-recommendations` (~v0.23+); Codex rows are opt-in

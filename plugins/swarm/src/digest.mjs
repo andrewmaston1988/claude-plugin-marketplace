@@ -149,6 +149,7 @@ export function buildDigestTask(plan) {
     timeoutMs,
     after: plan.tasks.map((t) => t.id),
     isDigest: true,
+    ...(plan.mcpOff?.length && { mcpOff: plan.mcpOff }),
     ...(writeRoots && { writeRoots }),
   };
 }
