@@ -14,6 +14,9 @@ do the observing: `capture` records the state of a page, `run` judges a claim ag
 Every command goes through `/ui-probe`. The command file resolves the plugin's own location, so never build
 a path to the binary yourself — a relative path resolves against the user's cwd and breaks.
 
+A flag the subcommand does not take exits 64 naming it, before any config or device is touched; `--help` or `-h`
+anywhere in the arguments prints usage.
+
 ## The Iron Law
 
 ```
