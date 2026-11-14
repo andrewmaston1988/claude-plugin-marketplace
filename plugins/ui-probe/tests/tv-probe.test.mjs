@@ -377,10 +377,10 @@ test('row 27: --listen prompts each key in order and records the fields that arr
   assert.deepEqual(stub.prompts, ['Left', 'Right', '1', 'Play'], 'the overlay names every key, in order');
   assert.deepEqual(platform.listen.keys, ['Left', 'Right', 'Digit1', 'MediaPlay']);
   assert.deepEqual(platform.listen.results, [
-    { key: 'Left', received: true, event: left },
-    { key: 'Right', received: false },
-    { key: 'Digit1', received: false },
-    { key: 'MediaPlay', received: false },
+    { key: 'Left', received: true, event: left, register: 'not-needed' },
+    { key: 'Right', received: false, register: 'not-needed' },
+    { key: 'Digit1', received: false, register: 'absent' },
+    { key: 'MediaPlay', received: false, register: 'absent' },
   ]);
   assert.equal(platform.listen.waitSeconds, 8);
 });
@@ -400,7 +400,7 @@ test('row 27: a key counts only when its keyCode arrives as a keydown', async ()
   });
   const platform = await tvProbe(stub.cdp, { listenKeys: ['Right'], listenWaitSeconds: 8, _sleep: noSleep });
 
-  assert.deepEqual(platform.listen.results, [{ key: 'Right', received: true, event: right }]);
+  assert.deepEqual(platform.listen.results, [{ key: 'Right', received: true, event: right, register: 'not-needed' }]);
 });
 
 test('row 27: a key that never arrives is not received after the whole wait', async () => {
@@ -413,7 +413,7 @@ test('row 27: a key that never arrives is not received after the whole wait', as
     _now: () => clock,
   });
 
-  assert.deepEqual(platform.listen.results, [{ key: 'Digit1', received: false }]);
+  assert.deepEqual(platform.listen.results, [{ key: 'Digit1', received: false, register: 'absent' }]);
   assert.ok(clock >= 2000, `waited the whole 2 s before giving up: ${clock} ms`);
 });
 

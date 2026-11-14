@@ -6,7 +6,7 @@ import { dirname, join } from 'node:path';
 import { attach, AttachInconclusive } from './attach.mjs';
 import { findSdb, listedDevices, sdb } from './sdb.mjs';
 import { platformPath, tvProbe } from './probe.mjs';
-import { DEFAULT_LISTEN_WAIT_SECONDS, listenLabel, parseListenKeys } from './listen.mjs';
+import { DEFAULT_LISTEN_WAIT_SECONDS, listenLabel, parseListenKeys, registerNote } from './listen.mjs';
 import { interceptionKind, inTvScope, NO_PROTOCOL, tvWritePolicy } from '../guard.mjs';
 import { expandIncludes } from '../ir.mjs';
 
@@ -238,7 +238,8 @@ function probeLines(platform, dir) {
   if (listen.status === 'measured') {
     const results = listen.results ?? [];
     const got = results.filter((entry) => entry.received).length;
-    const missed = results.filter((entry) => !entry.received).map((entry) => listenLabel(entry.key));
+    const missed = results.filter((entry) => !entry.received)
+      .map((entry) => `${listenLabel(entry.key)}${registerNote(entry.register)}`);
     lines.push(`listen: ${got}/${results.length} keys received in ${listen.waitSeconds}s each`
       + (missed.length ? ` — not received: ${missed.join(', ')}` : ''));
   } else if (listen.status === 'error') {

@@ -58,8 +58,18 @@ export const FEATURES_JS = `(() => {
   };
 })()`;
 
-const REGISTER_KEY_JS = `(() => { window.tizen.tvinputdevice.registerKey('1'); return 'returned'; })()`;
-const UNREGISTER_KEY_JS = `(() => { window.tizen.tvinputdevice.unregisterKey('1'); return 'returned'; })()`;
+// The register script answers 'absent' itself, so a caller never records a missing API as a return.
+export const registerKeyJs = (name) => `(() => {
+  const device = window.tizen && window.tizen.tvinputdevice;
+  if (!device || typeof device.registerKey !== 'function') return 'absent';
+  device.registerKey(${JSON.stringify(name)});
+  return 'returned';
+})()`;
+// Only sent after a register returned, so a missing API here is a throw rather than an absence.
+export const unregisterKeyJs = (name) => `(() => {
+  window.tizen.tvinputdevice.unregisterKey(${JSON.stringify(name)});
+  return 'returned';
+})()`;
 const CURRENT_APP_JS = `(() => {
   const app = window.tizen.application.getCurrentApplication();
   return app && typeof app === 'object' ? 'object' : typeof app;
@@ -187,8 +197,7 @@ export async function readFeatures(cdp) {
   const registerKey = { present: Boolean(raw.registerKeyPresent), outcome: 'absent' };
   if (registerKey.present) {
     try {
-      await evaluate(cdp, REGISTER_KEY_JS);
-      registerKey.outcome = 'returned';
+      registerKey.outcome = (await evaluate(cdp, registerKeyJs('1'))) === 'returned' ? 'returned' : 'absent';
     } catch (error) {
       registerKey.outcome = 'threw';
       registerKey.error = messageOf(error);
@@ -286,16 +295,14 @@ export async function keysStep(cdp, { features, onFixture }) {
     if (features?.registerKey?.outcome === 'returned') {
       registered = { key: 'Digit1' };
       try {
-        await evaluate(cdp, REGISTER_KEY_JS);
-        registered.register = 'returned';
+        registered.register = (await evaluate(cdp, registerKeyJs('1'))) === 'returned' ? 'returned' : 'absent';
       } catch (error) {
         registered.register = 'threw';
         registered.error = messageOf(error);
       }
       await dispatchKey(cdp, 'Digit1');
       try {
-        await evaluate(cdp, UNREGISTER_KEY_JS);
-        registered.unregister = 'returned';
+        registered.unregister = (await evaluate(cdp, unregisterKeyJs('1'))) === 'returned' ? 'returned' : 'absent';
       } catch {
         registered.unregister = 'threw';
       }
