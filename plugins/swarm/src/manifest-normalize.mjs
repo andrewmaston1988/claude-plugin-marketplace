@@ -27,17 +27,21 @@ export function normalizeTasks(rawTasks, { cwd, resultsDir, cfg, defaultTimeoutM
   const mcpNames = () => (mcpRoster ??= io.mcpTools());
   // A name the config lists that is not a user-scope server and not a plugin server
   // is a typo. Warn once per name: a child manifest shares this array with its parent.
-  const knownServers = new Set(mcpNames().map((tool) => tool.replace(/^mcp__/, "")));
-  const warnUnknown = (name, key) => {
-    if (name.startsWith("plugin:") || knownServers.has(name)) return;
-    const message = `${key} names '${name}', which is not a configured MCP server — check \`claude mcp list\``;
-    if (!warnings.includes(message)) warnings.push(message);
-  };
-  for (const name of cfg?.mcp?.off || []) warnUnknown(name, "mcp.off");
-  for (const project of cfg?.projects || []) for (const name of project?.mcp?.on || []) warnUnknown(name, "projects[].mcp.on");
+  const offNames = cfg?.mcp?.off || [];
+  const onNames = (cfg?.projects || []).flatMap((project) => project?.mcp?.on || []);
+  if (offNames.length || onNames.length) {
+    const knownServers = new Set(mcpNames().map((tool) => tool.replace(/^mcp__/, "")));
+    const warnUnknown = (name, key) => {
+      if (name.startsWith("plugin:") || knownServers.has(name)) return;
+      const message = `${key} names '${name}', which is not a configured MCP server — check \`claude mcp list\``;
+      if (!warnings.includes(message)) warnings.push(message);
+    };
+    for (const name of offNames) warnUnknown(name, "mcp.off");
+    for (const name of onNames) warnUnknown(name, "projects[].mcp.on");
+  }
   const mcpLines = new Set();
   const reportMcp = (repoName, project, taskId, off, allowedTools) => {
-    const machineOff = cfg?.mcp?.off || [];
+    const machineOff = offNames;
     if (!machineOff.length) return;
     const key = `${repoName}|${off.join(",")}`;
     if (mcpLines.has(key)) return;
