@@ -34,6 +34,9 @@
   "minFreeMemMb": 2048,
   "valveFreeMemMb": 1024,
   "disable1mContext": true,
+  "mcp": {
+    "off": []
+  },
   "projects": [],
   "heartbeatSecs": 15,
   "quietWarnSecs": 60,
