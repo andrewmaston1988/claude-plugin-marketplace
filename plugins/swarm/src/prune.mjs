@@ -60,10 +60,10 @@ export function reposOfTrees(fs, dir, spawnSync, { cfg } = {}) {
 }
 
 // A git runner behind an injected spawnSync — the closure production code and
-// tests both build over the raw module.
+// tests both build over the raw module. `input` feeds a path list on stdin.
 export function makeGit(spawnSync) {
-  return (args, cwd) => {
-    const r = spawnSync("git", args, { cwd, encoding: "utf8", windowsHide: true, timeout: 60000 });
+  return (args, cwd, { input } = {}) => {
+    const r = spawnSync("git", args, { cwd, encoding: "utf8", windowsHide: true, timeout: 60000, input });
     return { status: r.status, stdout: (r.stdout || "").trim(), stderr: (r.stderr || "").trim() };
   };
 }

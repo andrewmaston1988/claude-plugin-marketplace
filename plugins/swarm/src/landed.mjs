@@ -5,8 +5,29 @@ const TIMEOUT = 60000;
 const TOUCHING_SCAN_CAP = 20;
 const MERGE_TREE_MIN_VERSION = [2, 38];
 
-function gitOf(gitRunner, args, repo) {
-  return gitRunner(args, repo, { timeout: TIMEOUT });
+function gitOf(gitRunner, args, repo, opts = {}) {
+  return gitRunner(args, repo, { timeout: TIMEOUT, ...opts });
+}
+
+// Windows caps a command line near 32k characters, so a repo-wide rename would overflow
+// it and read as Infinity. Path lists travel on stdin, or the pathspec in budgeted chunks.
+const ARGV_PATH_BUDGET = 8000;
+
+function pathChunks(paths) {
+  const chunks = [];
+  let cur = [];
+  let used = 0;
+  for (const path of paths) {
+    if (cur.length && used + path.length + 1 > ARGV_PATH_BUDGET) {
+      chunks.push(cur);
+      cur = [];
+      used = 0;
+    }
+    cur.push(path);
+    used += path.length + 1;
+  }
+  if (cur.length) chunks.push(cur);
+  return chunks;
 }
 
 function fail(what, r) {
@@ -104,7 +125,7 @@ export function absorbedAt(commit, branch, repo, gitRunner) {
 // equality worthless as evidence.
 function hasMergeDriver(files, repo, gitRunner) {
   if (!files.length) return false;
-  const r = gitOf(gitRunner, ["check-attr", "-z", "merge", "--", ...files], repo);
+  const r = gitOf(gitRunner, ["check-attr", "--stdin", "-z", "merge"], repo, { input: `${files.join("\0")}\0` });
   if (r.status !== 0) fail("check-attr merge", r);
   const parts = r.stdout.split("\0");
   for (let i = 0; i + 2 < parts.length; i += 3) {
@@ -116,6 +137,26 @@ function hasMergeDriver(files, repo, gitRunner) {
 function absorbedByTree(commit, branch, repo, gitRunner, files) {
   if (!absorbedAt(commit, branch, repo, gitRunner)) return false;
   return !hasMergeDriver(files, repo, gitRunner);
+}
+
+// `log` takes no pathspec-from-file, so the list arrives in chunks; one pathless
+// rev-list restores the newest-first order, which a single chunk already has.
+function touchingCommits(fork, base, files, repo, gitRunner) {
+  const chunks = pathChunks(files);
+  const found = new Set();
+  const fromLog = [];
+  for (const chunk of chunks) {
+    const log = gitOf(gitRunner, ["log", "--first-parent", "--format=%H", `${fork}..${base}`, "--", ...chunk], repo);
+    if (log.status !== 0) fail(`log ${fork}..${base}`, log);
+    for (const sha of lines(log.stdout)) {
+      found.add(sha);
+      fromLog.push(sha);
+    }
+  }
+  if (chunks.length === 1) return fromLog.slice(0, TOUCHING_SCAN_CAP);
+  const rev = gitOf(gitRunner, ["rev-list", "--first-parent", `${fork}..${base}`], repo);
+  if (rev.status !== 0) fail(`rev-list ${fork}..${base}`, rev);
+  return lines(rev.stdout).filter((sha) => found.has(sha)).slice(0, TOUCHING_SCAN_CAP);
 }
 
 // Absorption tries the base's tip first, then each first-parent commit that
@@ -132,9 +173,7 @@ export function absorbed(base, branch, repo, gitRunner) {
 
   if (absorbedByTree(base, branch, repo, gitRunner, files)) return true;
   if (!files.length) return false;
-  const log = gitOf(gitRunner, ["log", "--first-parent", "--format=%H", `${mb.stdout}..${base}`, "--", ...files], repo);
-  if (log.status !== 0) fail(`log ${mb.stdout}..${base}`, log);
-  const touching = lines(log.stdout).slice(0, TOUCHING_SCAN_CAP);
+  const touching = touchingCommits(mb.stdout, base, files, repo, gitRunner);
   return touching.some((commit) => absorbedByTree(commit, branch, repo, gitRunner, files));
 }
 

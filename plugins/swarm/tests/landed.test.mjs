@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import { equal, ok } from "node:assert/strict";
-import { mkdtempSync, rmSync, writeFileSync, existsSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { spawnSync } from "node:child_process";
@@ -11,9 +11,9 @@ import { initRepo, commitAll, cleanup, dropWorktree } from "./helpers/worktree-f
 
 const PREFIX = "swarm/";
 
-function git(args, cwd) {
+function git(args, cwd, opts = {}) {
   const r = spawnSync("git", ["-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false", ...args],
-    { cwd, encoding: "utf8", windowsHide: true });
+    { cwd, encoding: "utf8", windowsHide: true, input: opts.input });
   return { status: r.status, stdout: (r.stdout || "").trim(), stderr: (r.stderr || "").trim() };
 }
 
@@ -281,6 +281,65 @@ test("row 11: cost is bounded and the cap reports unlanded, never 0", () => with
   equal(rec.calls.filter((args) => args[0] === "for-each-ref").length, 1);
   ok(rec.calls.filter((args) => args[0] === "merge-base").length <= 3, "at most three candidate bases");
   equal(rec.calls.filter((args) => args[0] === "merge-tree").length, 21, "the tip plus at most 20 touching commits");
+}));
+
+test("row 16: below git 2.38 absorption is skipped, so an old git reports the cherry count, not Infinity", () => {
+  const calls = [];
+  const oldGit = (args, cwd, opts) => {
+    calls.push(args);
+    if (args[0] === "version") return { status: 0, stdout: "git version 2.34.1", stderr: "" };
+    if (args[0] === "merge-tree") return { status: 129, stdout: "", stderr: "error: unknown option `write-tree'" };
+    return git(args, cwd, opts);
+  };
+
+  withRepo((repo) => {
+    newBranch(repo, "swarm/leaf", "main");
+    writeCommit(repo, "a.txt", "leaf one\n", "leaf one");
+    writeCommit(repo, "b.txt", "leaf two\n", "leaf two");
+    checkout(repo, "main");
+    must(["merge", "-q", "--squash", "swarm/leaf"], repo);
+    must(["commit", "-qm", "squash leaf"], repo);
+
+    const n = unlandedCount("swarm/leaf", repo, { prefix: PREFIX, gitRunner: oldGit });
+    ok(Number.isFinite(n) && n >= 1, `an old git answers with the cherry count, never Infinity: ${n}`);
+    equal(calls.filter((args) => args[0] === "merge-tree").length, 0, "merge-tree must not be attempted below the floor");
+  });
+
+  withRepo((repo) => {
+    newBranch(repo, "other");
+    newBranch(repo, "swarm/leaf", "main");
+    writeCommit(repo, "leaf.txt", "leaf work\n", "leaf work");
+    newBranch(repo, "feat", "main");
+    must(["merge", "-q", "--ff-only", "swarm/leaf"], repo);
+    checkout(repo, "other");
+
+    equal(unlandedCount("swarm/leaf", repo, { prefix: PREFIX, gitRunner: oldGit }), 0, "reachability needs no merge-tree");
+  });
+});
+
+test("row 17: a branch touching 1,000 files measures landed, and no git argv nears the platform limit", () => withRepo((repo) => {
+  newBranch(repo, "swarm/leaf", "main");
+  mkdirSync(join(repo, "a"), { recursive: true });
+  // Long enough that the 1,000 names do not fit on a Windows command line.
+  const name = (i) => `a/${String(i).padStart(4, "0")}-a-name-long-enough-to-overflow-a-command-line.txt`;
+  for (let i = 1; i <= 1000; i += 1) {
+    writeFileSync(join(repo, name(i)), `file ${i}\n`);
+  }
+  must(["add", "."], repo);
+  must(["commit", "-qm", "a thousand files"], repo);
+  checkout(repo, "main");
+  must(["merge", "-q", "--squash", "swarm/leaf"], repo);
+  must(["commit", "-qm", "squash a thousand files"], repo);
+  // A later edit moves the tip off the squash, so the touching-commit scan runs with
+  // the full path list in play.
+  writeCommit(repo, name(500), "later\n", "later edit");
+
+  const rec = recording();
+  const n = unlandedCount("swarm/leaf", repo, { prefix: PREFIX, gitRunner: rec.run });
+  equal(n, 0);
+  const longest = Math.max(...rec.calls.map((args) => args.join(" ").length));
+  ok(longest < 30000, `a path list on argv overflows a Windows command line: ${longest} chars`);
+  ok(rec.calls.some((args) => args[0] === "check-attr" && args.includes("--stdin")), "the path list travels on stdin");
 }));
 
 test("row 12: collect destroys a tree whose branch the squash absorbed, and keeps one it did not", () => {

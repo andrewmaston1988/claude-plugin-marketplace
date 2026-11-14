@@ -9,10 +9,11 @@ import { isUnderRoot } from "./roots.mjs";
 export const WORKTREE_ADD_TIMEOUT_MS = 180000;
 
 // `timeout` is required: snapshot calls pass a long one, and a silent timeout
-// mid-checkout would leave a locked, half-populated tree. `env` merges over process.env.
-function git(args, cwd, { timeout, env }) {
+// mid-checkout would leave a locked, half-populated tree. `env` merges over process.env;
+// `input` feeds a path list on stdin.
+function git(args, cwd, { timeout, env, input }) {
   const r = spawnSync("git", args, {
-    cwd, encoding: "utf8", windowsHide: true, timeout,
+    cwd, encoding: "utf8", windowsHide: true, timeout, input,
     env: env ? { ...process.env, ...env } : process.env,
   });
   return { status: r.status, stdout: (r.stdout || "").trim(), stderr: (r.stderr || "").trim(), timedOut: r.error?.code === "ETIMEDOUT" };
