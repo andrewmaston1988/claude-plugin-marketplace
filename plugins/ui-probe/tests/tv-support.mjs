@@ -38,7 +38,17 @@ const featuresValue = (overrides = {}) => ({
 });
 
 export const featuresReply = (overrides) => ({ match: (e) => e.includes('IntersectionObserver'), value: featuresValue(overrides) });
-export const registerReply = (value) => ({ match: (e) => e.includes('registerKey'), value });
+// `unregisterKey(` contains `registerKey(`: a plain substring match answers both calls.
+export const registerReply = (value, { sticky = false } = {}) => ({
+  match: (e) => e.includes('registerKey(') && !e.includes('unregisterKey('),
+  value,
+  ...(sticky ? { sticky: true } : {}),
+});
+export const unregisterReply = (value, { sticky = false } = {}) => ({
+  match: (e) => e.includes('unregisterKey('),
+  value,
+  ...(sticky ? { sticky: true } : {}),
+});
 export const currentReply = (value) => ({ match: (e) => e.includes('getCurrentApplication'), value });
 export const installReply = { match: (e) => e.includes('__uiProbeKey ='), value: { active: 'BODY' } };
 export const readReply = (value) => ({ match: (e) => e.includes('__uiProbeKey.read()'), value });
