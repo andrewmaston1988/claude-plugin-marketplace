@@ -15,7 +15,7 @@ import { defaultProviderRegistry } from "./default-providers.mjs";
 import { runPlan, makeDefaultIo } from "./scheduler.mjs";
 import { claimEngine, lockRefusal } from "./engine-lock.mjs";
 import { defaultManifestIo, projectFor } from "./manifest-leaf-guard.mjs";
-import { leafMcpOff } from "./leaf-mcp.mjs";
+import { leafMcpOff, toolUsesServer } from "./leaf-mcp.mjs";
 
 const PROVIDERS = defaultProviderRegistry();
 
@@ -90,8 +90,14 @@ export async function askLeaf({ resultsDir, taskId, question, model, provider, c
   const fallbackTools = defaultToolsFor(identity.provider, _mcpTools());
   // An ask is a new dispatch: it starts what the CURRENT config gives the leaf's repo.
   // askLeaf's io has no repoToplevel, so the derivation goes through its own seam.
-  const askTools = prior.allowedTools || fallbackTools;
-  const mcpOff = leafMcpOff({ project: _projectFor(prior.originalCwd || cwd).project, cfg, allowedTools: askTools });
+  // Tool naming credits only an AUTHORED list: a defaulted one names every user-scope
+  // server, so crediting it would resurrect each server the config turned off.
+  const mcpOff = leafMcpOff({ project: _projectFor(prior.originalCwd || cwd).project, cfg, allowedTools: prior.toolsAuthored ? prior.allowedTools : "" });
+  const recordedTools = prior.allowedTools || fallbackTools;
+  // Allow and deny must agree: a tool whose server is off cannot ride in on the record.
+  const askTools = mcpOff.length
+    ? recordedTools.split(",").map((t) => t.trim()).filter((t) => t && !mcpOff.some((s) => toolUsesServer(t, s))).join(",")
+    : recordedTools;
   const tasks = isTopLevel
     ? manifest.tasks.map((t) => (t.id === taskId
         ? { ...t, ...(treeName !== undefined && { worktreeName: treeName }), after: t.after || [], provider: identity.provider, allowedTools: askTools, timeoutMs: cfg.timeoutMs ?? DEFAULT_TIMEOUT_MS, ...(mcpOff.length && { mcpOff }) }

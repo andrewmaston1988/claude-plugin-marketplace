@@ -13,7 +13,8 @@ import { loadManifest } from "./helpers/repo-io.mjs";
 import { buildDispatch } from "../src/dispatch.mjs";
 import { buildDigestTask } from "../src/digest.mjs";
 import { askLeaf } from "../src/ask.mjs";
-import { initResultsDir, writeManifestSnapshot, writeResult } from "../src/results.mjs";
+import { runPlan } from "../src/scheduler.mjs";
+import { initResultsDir, readResult, writeManifestSnapshot, writeResult } from "../src/results.mjs";
 import { fakeSpawnFactory, makeIo, STREAM } from "./helpers/fake-io.mjs";
 import { CFG, claudeTask, errorsOf, tmp, writeManifest } from "./helpers/manifest-fixtures.mjs";
 
@@ -183,12 +184,42 @@ test("a typo'd off or on name warns once, in a top-level and in a child manifest
     const top = planFor(dir, { tasks: [claudeTask()] }, { cfg });
     equal(top.warnings.filter((w) => w.includes("blendr")).length, 1);
     ok(top.warnings.find((w) => w.includes("blendr")).includes("mcp.off"));
+    ok(top.warnings.find((w) => w.includes("blendr")).includes("not a user-scope MCP server in ~/.claude.json"));
 
     writeFileSync(join(dir, "child.json"), JSON.stringify({ tasks: [claudeTask({ id: "child" })] }));
     const onCfg = { ...CFG, mcp: { off: ["blender"] }, projects: [{ name: "plain-repo", mcp: { on: ["blendr"] } }] };
     const parent = planFor(dir, { tasks: [{ id: "node", manifest: "child.json" }] }, { cfg: onCfg });
     equal(parent.warnings.filter((w) => w.includes("blendr")).length, 1);
     ok(parent.warnings.find((w) => w.includes("blendr")).includes("projects[].mcp.on"));
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("an empty MCP roster read suppresses the typo warning entirely", () => {
+  const dir = tmp();
+  try {
+    const plan = planFor(dir, { tasks: [claudeTask()] }, { cfg: { ...CFG, mcp: { off: ["blendr"] } }, mcpTools: () => [] });
+    deepEqual((plan.warnings || []).filter((w) => w.includes("blendr")), []);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("an authored tool list is stamped on the leaf and recorded on its result", async () => {
+  const dir = tmp();
+  try {
+    const plan = planFor(dir, {
+      tasks: [claudeTask({ id: "authored", allowedTools: "Read,mcp__blender__execute_blender_code" }), claudeTask({ id: "defaulted" })],
+    }, { cfg: { ...CFG, mcp: { off: ["blender"] } } });
+    const byId = (id) => plan.tasks.find((t) => t.id === id);
+    equal(byId("authored").toolsAuthored, true);
+    ok(!("toolsAuthored" in byId("defaulted")));
+
+    const resultsDir = join(dir, "run");
+    const spawn = fakeSpawnFactory(() => ({ output: STREAM }));
+    await runPlan({ cwd: dir, resultsDir, concurrency: 1, tasks: [byId("authored")] }, CFG, makeIo(spawn));
+    equal(readResult(resultsDir, "authored").toolsAuthored, true);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -335,4 +366,43 @@ test("swarm ask rebuilds mcpOff from the current config through _projectFor", as
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+// A recorded result carries either the DEFAULTED list normalize filled in (naming
+// every user-scope server) or an AUTHORED one. Only the authored list may credit
+// tool naming — a defaulted `mcp__blender` would otherwise turn blender back on.
+async function askWithRecordedTools(record) {
+  const dir = mkdtempSync(join(tmpdir(), "swarm-mcp-ask-"));
+  try {
+    initResultsDir(dir);
+    writeResult(dir, "leaf", {
+      id: "leaf", provider: "claude", model: "claude-haiku-4-5-20251001", ok: true, exit: 0, durationMs: 5,
+      output: "x", sessionId: "s-1", cwd: tmpdir(), originalCwd: tmpdir(), ...record,
+    });
+    writeManifestSnapshot(dir, { cwd: tmpdir(), resultsDir: dir, tasks: [{ id: "leaf", provider: "claude", model: "claude-haiku-4-5-20251001" }] });
+    const spawn = fakeSpawnFactory(() => ({ output: STREAM }));
+    await askLeaf({
+      resultsDir: dir, taskId: "leaf", question: "q",
+      cfg: { ...CFG, mcp: { off: ["blender", SLACK] } }, io: makeIo(spawn),
+      _projectFor: () => ({ project: undefined, repoName: "plain-repo" }),
+    });
+    const args = spawn.calls[0].args;
+    return {
+      tools: args[args.indexOf("--allowedTools") + 1].split(","),
+      denied: JSON.parse(args[args.indexOf("--settings") + 1]).deniedMcpServers,
+    };
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+test("swarm ask credits tool naming only for an authored list", async () => {
+  const defaulted = await askWithRecordedTools({ allowedTools: "Read,Grep,Glob,Skill,mcp__scout,mcp__blender" });
+  deepEqual(defaulted.denied, [{ serverName: "blender" }, { serverName: SLACK }]);
+  ok(!defaulted.tools.includes("mcp__blender"), `defaulted list kept mcp__blender: ${defaulted.tools}`);
+  ok(defaulted.tools.includes("mcp__scout"), `defaulted list dropped mcp__scout: ${defaulted.tools}`);
+
+  const authored = await askWithRecordedTools({ allowedTools: "Read,mcp__blender__execute_blender_code", toolsAuthored: true });
+  deepEqual(authored.denied, [{ serverName: SLACK }]);
+  ok(authored.tools.includes("mcp__blender__execute_blender_code"), `authored list lost its tool: ${authored.tools}`);
 });

@@ -8,10 +8,7 @@ import { basename } from "node:path";
 import { checkoutToplevel, treeRootFor } from "./worktree.mjs";
 import { swarmHome } from "./config.mjs";
 import { mcpTools } from "./manifest-task-policy.mjs";
-
-function namesEqual(a, b) {
-  return process.platform === "win32" ? a.toLowerCase() === b.toLowerCase() : a === b;
-}
+import { namesEqual } from "./leaf-mcp.mjs";
 
 // The MAIN worktree of the repo containing cwd, an explicit non-repo answer, or a
 // failed lookup. A spawn failure must stay distinct from git's "not a repository" answer.

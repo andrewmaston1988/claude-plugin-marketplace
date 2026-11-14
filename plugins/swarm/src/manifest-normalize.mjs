@@ -27,13 +27,15 @@ export function normalizeTasks(rawTasks, { cwd, resultsDir, cfg, defaultTimeoutM
   const mcpNames = () => (mcpRoster ??= io.mcpTools());
   // A name the config lists that is not a user-scope server and not a plugin server
   // is a typo. Warn once per name: a child manifest shares this array with its parent.
+  // An unreadable roster is not evidence of a typo — warn only against a real read.
   const offNames = cfg?.mcp?.off || [];
   const onNames = (cfg?.projects || []).flatMap((project) => project?.mcp?.on || []);
-  if (offNames.length || onNames.length) {
-    const knownServers = new Set(mcpNames().map((tool) => tool.replace(/^mcp__/, "")));
+  const roster = offNames.length || onNames.length ? mcpNames() : [];
+  if ((offNames.length || onNames.length) && roster.length) {
+    const knownServers = new Set(roster.map((tool) => tool.replace(/^mcp__/, "")));
     const warnUnknown = (name, key) => {
       if (name.startsWith("plugin:") || knownServers.has(name)) return;
-      const message = `${key} names '${name}', which is not a configured MCP server — check \`claude mcp list\``;
+      const message = `${key} names '${name}', which is not a user-scope MCP server in ~/.claude.json`;
       if (!warnings.includes(message)) warnings.push(message);
     };
     for (const name of offNames) warnUnknown(name, "mcp.off");
@@ -208,6 +210,9 @@ export function normalizeTasks(rawTasks, { cwd, resultsDir, cfg, defaultTimeoutM
       // Stamped whatever the primary provider is: a Codex task with a Claude
       // fallback becomes a Claude-CLI leaf at quota time, and only that runner reads it.
       ...(mcpOff.length && { mcpOff }),
+      // Only an authored list may credit tool naming later: a defaulted one names every
+      // user-scope server, so crediting it would turn every off server back on.
+      ...(!isCompute && !isManifest && !isIntegrate && t.allowedTools && { toolsAuthored: true }),
     };
   });
 }
