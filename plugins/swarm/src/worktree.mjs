@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { swarmHome } from "./config.mjs";
+import { unlandedCount } from "./landed.mjs";
 import { isUnderRoot } from "./roots.mjs";
 
 export const WORKTREE_ADD_TIMEOUT_MS = 180000;
@@ -15,18 +16,6 @@ function git(args, cwd, { timeout, env }) {
     env: env ? { ...process.env, ...env } : process.env,
   });
   return { status: r.status, stdout: (r.stdout || "").trim(), stderr: (r.stderr || "").trim(), timedOut: r.error?.code === "ETIMEDOUT" };
-}
-
-// Commits on `branch` not already landed on `base`, compared by PATCH (`git
-// cherry`) rather than commit identity or ancestry: squash-merge — the
-// documented landing path — rewrites commits, and ancestry says nothing once
-// HEAD has moved sideways. Returns Infinity when git cannot answer, so callers
-// FAIL CLOSED: an unresolvable question must block a destructive path, not
-// waive it.
-export function unlandedCount(base, branch, repo, gitRunner = git) {
-  const c = gitRunner(["cherry", base, branch], repo, { timeout: 60000 });
-  if (c.status !== 0) return Infinity;
-  return c.stdout.split(/\r?\n/).filter((l) => l.trim().startsWith("+")).length;
 }
 
 // Maps every ref-illegal sequence to "-". expandManifest names a child's tree `<node>~<child>`,
@@ -243,10 +232,10 @@ export function prepareIsolation(task, cfg, resultsDir, { reset = false, addTime
   if (add.status !== 0 && /already exists/i.test(add.stderr)) {
     // Stale branch (path was cleaned but the branch lingered): force it to the base.
     // But -B RESETS the branch, so refuse when it still carries unlanded work.
-    // "Unlanded" is measured against the LIVE tip — the base is only where this
-    // run's trees start, and squashing onto it would hide work already merged on.
-    const tip = repoHead(repo);
-    const unlanded = tip ? unlandedCount(tip, branch, repo) : Infinity;
+    // "Unlanded" is measured against the landing places a run can see — the
+    // default branch and the live checkout — never this run's pinned base, which
+    // predates work already merged on.
+    const unlanded = unlandedCount(branch, repo, { prefix: cfg.worktreeBranchPrefix || "swarm/", gitRunner: git });
     if (unlanded > 0 && !reset) {
       throw new Error(
         `worktree branch '${branch}' carries ${unlanded === Infinity ? "an unknown number of" : unlanded} unlanded commit(s) — refusing to reset it ` +
@@ -286,7 +275,7 @@ export function prepareIsolation(task, cfg, resultsDir, { reset = false, addTime
 }
 
 // The live HEAD of `repo`'s checkout — the commit a run PINS at dispatch
-// (run-bases.mjs) and the tip `unlandedCount` measures against. Null outside git.
+// (run-bases.mjs). Null outside git.
 export function repoHead(repo) {
   const r = git(["rev-parse", "HEAD"], repo, { timeout: 60000 });
   return r.status === 0 && r.stdout ? r.stdout : null;
@@ -314,8 +303,7 @@ export function collect(task, cfg, wt, { isChainFollower = false, isIntegrateSou
   // may still sit on a branch holding earlier phases' commits (or an integrate node's
   // merges), and `branch -D` would take them with it. `isChainFollower` only sees THIS
   // plan's group, so ask git as well.
-  const repoHead = git(["rev-parse", "HEAD"], wt.repo, { timeout: 60000 });
-  const carriesWork = repoHead.status !== 0 || unlandedCount(repoHead.stdout, wt.branch, wt.repo) > 0;
+  const carriesWork = unlandedCount(wt.branch, wt.repo, { prefix: cfg.worktreeBranchPrefix || "swarm/", gitRunner: git }) > 0;
 
   if (!changed && !(wt.reused && isChainFollower) && !carriesWork) {
     git(["worktree", "remove", "--force", wt.path], wt.repo, { timeout: 60000 });
@@ -339,8 +327,8 @@ export function collect(task, cfg, wt, { isChainFollower = false, isIntegrateSou
 }
 
 // What the leaf left outside git history. `--untracked-files=all` so a new directory
-// counts its files, not one path. Commits ahead is a plain rev-list count, not
-// `unlandedCount`'s patch cherry, which answers Infinity when git fails.
+// counts its files, not one path. Commits ahead is a plain rev-list count, not the
+// landed check, which answers Infinity when git fails.
 function measureUncommitted(wt) {
   const dirty = git(["status", "--porcelain", "--untracked-files=all"], wt.path, { timeout: 60000 });
   const ahead = git(["rev-list", "--count", `${wt.head}..HEAD`], wt.path, { timeout: 60000 });

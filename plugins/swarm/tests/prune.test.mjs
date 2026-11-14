@@ -140,8 +140,24 @@ test("formatPrune labels a branchless row", () => {
 
 test("plan measures unlanded commits and dirty porcelain; blockers include unknown measurements", () => {
   const calls = [];
+  // Not reachable, and the tip adds a file the base lacks — so the landed check
+  // falls through to the cherry count. Without these answers every command fails
+  // and the row measures Infinity.
   const git = (args, cwd) => {
     calls.push({ args, cwd });
+    if (args[0] === "for-each-ref") return { status: 0, stdout: "", stderr: "" };
+    if (args[0] === "symbolic-ref") {
+      return args[1] === "-q" ? { status: 0, stdout: "refs/heads/main", stderr: "" } : { status: 1, stdout: "", stderr: "" };
+    }
+    if (args[0] === "rev-parse") {
+      return args[1] === "--verify"
+        ? { status: 0, stdout: "base-sha", stderr: "" }
+        : { status: 0, stdout: "base-tree", stderr: "" };
+    }
+    if (args[0] === "merge-base") return { status: 0, stdout: "fork-sha", stderr: "" };
+    if (args[0] === "diff") return { status: 0, stdout: "a.txt", stderr: "" };
+    if (args[0] === "merge-tree") return { status: 0, stdout: "other-tree", stderr: "" };
+    if (args[0] === "log") return { status: 0, stdout: "", stderr: "" };
     if (args[0] === "cherry") return { status: 0, stdout: "+ abc commit", stderr: "" };
     if (args[0] === "status") return { status: 0, stdout: " M tracked\n?? new file", stderr: "" };
     return { status: 1, stdout: "", stderr: "" };
