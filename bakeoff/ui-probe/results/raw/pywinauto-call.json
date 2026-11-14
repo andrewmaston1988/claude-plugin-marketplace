@@ -1,0 +1,442 @@
+{
+  "contender": "pywinauto per call (uia backend)",
+  "contender_id": "pywinauto-call",
+  "mode": "per-call",
+  "notes": "python + pywinauto import and desktop search on every call.",
+  "repeats": 10,
+  "warmups": 2,
+  "latency": [
+    {
+      "fixture": "WinForms",
+      "action": "find",
+      "contender": "pywinauto-call",
+      "cold": {
+        "n": 10,
+        "p50": 11992.5,
+        "p95": 12206.7,
+        "min": 11896,
+        "max": 12303,
+        "samples": [
+          12089,
+          12303,
+          12010,
+          11909,
+          11896,
+          12004,
+          11903,
+          11981,
+          12032,
+          11969
+        ],
+        "ok": 10,
+        "n_expected": 10,
+        "verified": 10,
+        "verified_known": 10,
+        "bytes_p50": 191,
+        "errors": []
+      },
+      "warm": {
+        "n": 10,
+        "p50": 11947.5,
+        "p95": 12490.2,
+        "min": 11899,
+        "max": 12658,
+        "samples": [
+          11917,
+          12658,
+          12046,
+          12285,
+          11955,
+          11899,
+          11940,
+          12027,
+          11933,
+          11905
+        ],
+        "ok": 10,
+        "n_expected": 10,
+        "verified": 10,
+        "verified_known": 10,
+        "bytes_p50": 191,
+        "errors": []
+      },
+      "unsupported": false,
+      "notes": null
+    },
+    {
+      "fixture": "WinForms",
+      "action": "tree",
+      "contender": "pywinauto-call",
+      "cold": {
+        "n": 10,
+        "p50": 7352.5,
+        "p95": 7449.2,
+        "min": 7273,
+        "max": 7473,
+        "samples": [
+          7473,
+          7295,
+          7367,
+          7273,
+          7310,
+          7358,
+          7318,
+          7375,
+          7347,
+          7420
+        ],
+        "ok": 10,
+        "n_expected": 10,
+        "verified": 10,
+        "verified_known": 10,
+        "bytes_p50": 2135,
+        "errors": []
+      },
+      "warm": {
+        "n": 10,
+        "p50": 7403.5,
+        "p95": 8435.9,
+        "min": 7284,
+        "max": 8926,
+        "samples": [
+          7297,
+          7284,
+          7322,
+          7837,
+          7469,
+          7368,
+          7423,
+          7384,
+          8926,
+          7586
+        ],
+        "ok": 10,
+        "n_expected": 10,
+        "verified": 10,
+        "verified_known": 10,
+        "bytes_p50": 2135,
+        "errors": []
+      },
+      "unsupported": false,
+      "notes": null
+    },
+    {
+      "fixture": "WinForms",
+      "action": "tree_cached",
+      "contender": "pywinauto-call",
+      "cold": null,
+      "warm": null,
+      "unsupported": true,
+      "notes": "pywinauto has no CacheRequest API"
+    },
+    {
+      "fixture": "WinForms",
+      "action": "get",
+      "contender": "pywinauto-call",
+      "cold": {
+        "n": 10,
+        "p50": 10306.5,
+        "p95": 15637.2,
+        "min": 9726,
+        "max": 18362,
+        "samples": [
+          10058,
+          9887,
+          9842,
+          10422,
+          11926,
+          10617,
+          18362,
+          12307,
+          10191,
+          9726
+        ],
+        "ok": 10,
+        "n_expected": 10,
+        "verified": 10,
+        "verified_known": 10,
+        "bytes_p50": 84,
+        "errors": []
+      },
+      "warm": {
+        "n": 10,
+        "p50": 10142,
+        "p95": 11052.1,
+        "min": 9597,
+        "max": 11242,
+        "samples": [
+          9822,
+          10820,
+          10623,
+          9857,
+          9597,
+          11242,
+          10230,
+          10389,
+          9971,
+          10054
+        ],
+        "ok": 10,
+        "n_expected": 10,
+        "verified": 10,
+        "verified_known": 10,
+        "bytes_p50": 84,
+        "errors": []
+      },
+      "unsupported": false,
+      "notes": null
+    },
+    {
+      "fixture": "WinForms",
+      "action": "click",
+      "contender": "pywinauto-call",
+      "cold": {
+        "n": 10,
+        "p50": 7666,
+        "p95": 8255.8,
+        "min": 7425,
+        "max": 8330,
+        "samples": [
+          7700,
+          8330,
+          8165,
+          7884,
+          7632,
+          7485,
+          7897,
+          7466,
+          7425,
+          7454
+        ],
+        "ok": 10,
+        "n_expected": 10,
+        "verified": 10,
+        "verified_known": 10,
+        "bytes_p50": 59,
+        "errors": []
+      },
+      "warm": {
+        "n": 10,
+        "p50": 7709.5,
+        "p95": 8137.8,
+        "min": 7354,
+        "max": 8176,
+        "samples": [
+          7849,
+          8091,
+          8176,
+          7947,
+          7491,
+          7354,
+          7609,
+          7730,
+          7663,
+          7689
+        ],
+        "ok": 10,
+        "n_expected": 10,
+        "verified": 10,
+        "verified_known": 10,
+        "bytes_p50": 59,
+        "errors": []
+      },
+      "unsupported": false,
+      "notes": null
+    },
+    {
+      "fixture": "WinForms",
+      "action": "list",
+      "contender": "pywinauto-call",
+      "cold": {
+        "n": 10,
+        "p50": 10266.5,
+        "p95": 10449.5,
+        "min": 10066,
+        "max": 10481,
+        "samples": [
+          10185,
+          10066,
+          10396,
+          10279,
+          10150,
+          10194,
+          10481,
+          10335,
+          10411,
+          10254
+        ],
+        "ok": 10,
+        "n_expected": 10,
+        "verified": 10,
+        "verified_known": 10,
+        "bytes_p50": 127,
+        "errors": []
+      },
+      "warm": {
+        "n": 10,
+        "p50": 10030,
+        "p95": 10384.3,
+        "min": 9894,
+        "max": 10544,
+        "samples": [
+          10098,
+          10097,
+          10544,
+          9894,
+          9977,
+          9934,
+          10083,
+          9968,
+          10189,
+          9959
+        ],
+        "ok": 10,
+        "n_expected": 10,
+        "verified": 10,
+        "verified_known": 10,
+        "bytes_p50": 127,
+        "errors": []
+      },
+      "unsupported": false,
+      "notes": null
+    }
+  ],
+  "exposure": [
+    {
+      "fixture": "Wpf",
+      "action": "find",
+      "ok": true,
+      "count": null,
+      "value": null,
+      "contains_reference": null,
+      "bytes": 147,
+      "error": null
+    },
+    {
+      "fixture": "Wpf",
+      "action": "tree",
+      "ok": true,
+      "count": 25,
+      "value": null,
+      "contains_reference": null,
+      "bytes": 3026,
+      "error": null
+    },
+    {
+      "fixture": "Wpf",
+      "action": "get",
+      "ok": true,
+      "count": null,
+      "value": "fixture-value-42",
+      "contains_reference": true,
+      "bytes": 84,
+      "error": null
+    },
+    {
+      "fixture": "Wpf",
+      "action": "list",
+      "ok": true,
+      "count": 5,
+      "value": null,
+      "contains_reference": null,
+      "bytes": 127,
+      "error": null
+    },
+    {
+      "fixture": "OwnerDrawn",
+      "action": "find",
+      "ok": true,
+      "count": null,
+      "value": null,
+      "contains_reference": null,
+      "bytes": 193,
+      "error": null
+    },
+    {
+      "fixture": "OwnerDrawn",
+      "action": "tree",
+      "ok": true,
+      "count": 8,
+      "value": null,
+      "contains_reference": null,
+      "bytes": 1006,
+      "error": null
+    },
+    {
+      "fixture": "OwnerDrawn",
+      "action": "get",
+      "ok": false,
+      "count": null,
+      "value": null,
+      "contains_reference": null,
+      "bytes": 72,
+      "error": "element not found"
+    },
+    {
+      "fixture": "Notepad",
+      "action": "find",
+      "ok": true,
+      "count": null,
+      "value": null,
+      "contains_reference": null,
+      "bytes": 157,
+      "error": null
+    },
+    {
+      "fixture": "Notepad",
+      "action": "tree",
+      "ok": true,
+      "count": 130,
+      "value": null,
+      "contains_reference": null,
+      "bytes": 16306,
+      "error": null
+    },
+    {
+      "fixture": "Notepad",
+      "action": "get",
+      "ok": true,
+      "count": null,
+      "value": "Text editor",
+      "contains_reference": false,
+      "bytes": 83,
+      "error": null
+    }
+  ],
+  "events": {
+    "supported": false,
+    "note": "no UIA event subscription in this contender"
+  },
+  "failures": {
+    "element_gone": {
+      "setup_ok": true,
+      "ok": false,
+      "error": "element not found",
+      "ms": 9767
+    },
+    "window_closed": {
+      "before_ok": true,
+      "after_ok": false,
+      "after_error": "window not found",
+      "after_ms": 2639,
+      "tree_ok": false,
+      "tree_error": "window not found",
+      "tree_ms": 2638
+    }
+  },
+  "fixture": {
+    "winforms_pid": 39948,
+    "wpf_pid": 46440,
+    "owner_pid": 51092,
+    "notepad_pid": 52772,
+    "notepad_title": "ui-probe-notepad.txt - Notepad",
+    "titles": {
+      "WinForms": "ui-probe fixture (WinForms)",
+      "Wpf": "ui-probe fixture (WPF)",
+      "OwnerDrawn": "ui-probe fixture (OwnerDrawn)",
+      "Notepad": "ui-probe-notepad.txt - Notepad"
+    }
+  },
+  "started_at": "2026-11-13T04:08:54.196Z",
+  "finished_at": "2026-11-13T04:11:10.808Z"
+}

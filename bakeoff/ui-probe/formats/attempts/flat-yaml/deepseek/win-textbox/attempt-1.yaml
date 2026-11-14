@@ -1,0 +1,8 @@
+id: win-textbox
+task: win-textbox
+backend: desktop
+steps:
+  - uia_text:
+      window: ui-probe-fixture
+      control: ValueBox
+      equals: "fixture-value-42"

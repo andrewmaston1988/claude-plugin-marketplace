@@ -1,0 +1,306 @@
+{
+  "schema": "ui-probe-bakeoff/row@1",
+  "generatedAt": "2026-11-13T02:53:37.211Z",
+  "node": "v24.15.0",
+  "platform": "win32 x64",
+  "repeats": 5,
+  "target": {
+    "kind": "fixture",
+    "origin": "http://127.0.0.1:53871",
+    "fixtureWrites": 0
+  },
+  "rows": [
+    {
+      "schema": "ui-probe-bakeoff/row@1",
+      "contender": "http-fetch",
+      "contenderLabel": "fetch (Node 24 global)",
+      "task": "http.scan-status",
+      "taskTitle": "HTTP GET /api/scan-status (authenticated)",
+      "status": "PASS",
+      "verified": true,
+      "ms": {
+        "n": 5,
+        "median": 1.54,
+        "min": 1.39,
+        "max": 20.44
+      },
+      "bytes": 453,
+      "tokens": 114,
+      "lines": 11,
+      "transcript": "GET http://127.0.0.1:53871/api/scan-status\n> cookie: <redacted>\n< HTTP 200 OK\n< cache-control: no-store\n< content-length: 204\n< content-type: application/json\n< date: Fri, 13 Nov 2026 02:53:34 GMT\n< set-cookie: <redacted>\n< body 204 chars:\n{\"tv_running\":false,\"movies_running\":false,\"any_running\":false,\"recommend_running\":false,\"recommend_profile\":null,\"recommend_stage\":null,\"recommend_done\":null,\"recommend_total\":null,\"recommend_queued\":[]}\n# 1.4 ms",
+      "open": null,
+      "guard": "method/host/port/path allowlist + redirect:manual, enforced before fetch()",
+      "command": "node plugins/ui-probe/bakeoff/protocols/run.mjs --only http --repeats 5  # target http://127.0.0.1:53871",
+      "note": null
+    },
+    {
+      "schema": "ui-probe-bakeoff/row@1",
+      "contender": "http-fetch",
+      "contenderLabel": "fetch (Node 24 global)",
+      "task": "http.scan-status-anon",
+      "taskTitle": "HTTP GET /api/scan-status (no session cookie)",
+      "status": "PASS",
+      "verified": true,
+      "ms": {
+        "n": 5,
+        "median": 1.01,
+        "min": 0.92,
+        "max": 1.27
+      },
+      "bytes": 192,
+      "tokens": 48,
+      "lines": 9,
+      "transcript": "GET http://127.0.0.1:53871/api/scan-status\n< HTTP 302 Found\n< content-type: text/plain\n< date: Fri, 13 Nov 2026 02:53:34 GMT\n< location: /pin\n< set-cookie: <redacted>\n< body 0 chars:\n\n# 1.1 ms",
+      "open": null,
+      "guard": "method/host/port/path allowlist + redirect:manual, enforced before fetch()",
+      "command": "node plugins/ui-probe/bakeoff/protocols/run.mjs --only http --repeats 5  # target http://127.0.0.1:53871",
+      "note": null
+    },
+    {
+      "schema": "ui-probe-bakeoff/row@1",
+      "contender": "http-fetch",
+      "contenderLabel": "fetch (Node 24 global)",
+      "task": "http.missing",
+      "taskTitle": "HTTP GET /api/does-not-exist (404 path)",
+      "status": "PASS",
+      "verified": true,
+      "ms": {
+        "n": 5,
+        "median": 0.91,
+        "min": 0.59,
+        "max": 1.4
+      },
+      "bytes": 186,
+      "tokens": 47,
+      "lines": 7,
+      "transcript": "GET http://127.0.0.1:53871/api/does-not-exist\n< HTTP 404 Not Found\n< content-type: application/json\n< date: Fri, 13 Nov 2026 02:53:34 GMT\n< body 22 chars:\n{\"detail\":\"Not Found\"}\n# 0.5 ms",
+      "open": null,
+      "guard": "method/host/port/path allowlist + redirect:manual, enforced before fetch()",
+      "command": "node plugins/ui-probe/bakeoff/protocols/run.mjs --only http --repeats 5  # target http://127.0.0.1:53871",
+      "note": null
+    },
+    {
+      "schema": "ui-probe-bakeoff/row@1",
+      "contender": "tcp-net",
+      "contenderLabel": "node:net (raw TCP)",
+      "task": "tcp.banner",
+      "taskTitle": "TCP connect + banner read",
+      "status": "PASS",
+      "verified": true,
+      "ms": {
+        "n": 5,
+        "median": 0.59,
+        "min": 0.56,
+        "max": 1.49
+      },
+      "bytes": 86,
+      "tokens": 22,
+      "lines": 3,
+      "transcript": "CONNECT 127.0.0.1:53872\n< 220 ui-probe-bakeoff fixture ready\n# closed by probe, 0.5 ms",
+      "open": null,
+      "guard": "exact write-allowlist on the socket, enforced before connect()",
+      "command": "node plugins/ui-probe/bakeoff/protocols/run.mjs --only tcp --repeats 5  # fixture 127.0.0.1:53872",
+      "note": null
+    },
+    {
+      "schema": "ui-probe-bakeoff/row@1",
+      "contender": "tcp-net",
+      "contenderLabel": "node:net (raw TCP)",
+      "task": "tcp.echo",
+      "taskTitle": "TCP allowlisted write + echo read",
+      "status": "PASS",
+      "verified": true,
+      "ms": {
+        "n": 5,
+        "median": 0.7,
+        "min": 0.62,
+        "max": 0.95
+      },
+      "bytes": 124,
+      "tokens": 31,
+      "lines": 5,
+      "transcript": "CONNECT 127.0.0.1:53872\n< 220 ui-probe-bakeoff fixture ready\n> HELLO ui-probe\n< 250 HELLO ui-probe\n# closed by probe, 0.8 ms",
+      "open": null,
+      "guard": "exact write-allowlist on the socket, enforced before connect()",
+      "command": "node plugins/ui-probe/bakeoff/protocols/run.mjs --only tcp --repeats 5  # fixture 127.0.0.1:53872",
+      "note": null
+    },
+    {
+      "schema": "ui-probe-bakeoff/row@1",
+      "contender": "ssh-batch",
+      "contenderLabel": "ssh.exe -o BatchMode=yes (in-box OpenSSH)",
+      "task": "ssh.df",
+      "taskTitle": "SSH BatchMode `df -h` on localhost",
+      "status": "OPEN",
+      "verified": null,
+      "ms": {
+        "n": 0,
+        "median": null,
+        "min": null,
+        "max": null
+      },
+      "bytes": 0,
+      "tokens": 0,
+      "lines": 0,
+      "transcript": "",
+      "open": {
+        "reason": "no sshd listening on 127.0.0.1:22 — nothing to authenticate against",
+        "probe": "$ ssh -F NUL -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=NUL -o ConnectTimeout=5 -o NumberOfPasswordPrompts=0 localhost df -h",
+        "evidence": "$ ssh -F NUL -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=NUL -o ConnectTimeout=5 -o NumberOfPasswordPrompts=0 localhost df -h\nexit 255 (2082.8 ms)\nstderr:\nbanner exchange: Connection to UNKNOWN port -1: Connection refused"
+      },
+      "guard": "argv allowlist: BatchMode forced, localhost only, exact remote command, no forwards",
+      "command": "node plugins/ui-probe/bakeoff/protocols/run.mjs --only ssh --repeats 5",
+      "note": null
+    },
+    {
+      "schema": "ui-probe-bakeoff/row@1",
+      "contender": "hurl",
+      "contenderLabel": "Hurl (not installed, not approved)",
+      "task": "http.scan-status",
+      "taskTitle": "HTTP GET /api/scan-status (authenticated)",
+      "status": "OPEN",
+      "verified": null,
+      "ms": {
+        "n": 0,
+        "median": null,
+        "min": null,
+        "max": null
+      },
+      "bytes": 0,
+      "tokens": 0,
+      "lines": 0,
+      "transcript": "",
+      "open": {
+        "reason": "Hurl is not installed and was not on the operator's approved install list",
+        "probe": "hurl --version && hurl --test --variable host=http://127.0.0.1:<fixture-port> plugins/ui-probe/bakeoff/protocols/hurl/http.scan-status.hurl"
+      },
+      "guard": "not applicable — Hurl's own request grammar plus `[Asserts]` would need its read-only story measured",
+      "command": "node plugins/ui-probe/bakeoff/protocols/run.mjs --only http --repeats 5  # target http://127.0.0.1:53871",
+      "note": null
+    },
+    {
+      "schema": "ui-probe-bakeoff/row@1",
+      "contender": "hurl",
+      "contenderLabel": "Hurl (not installed, not approved)",
+      "task": "http.scan-status-anon",
+      "taskTitle": "HTTP GET /api/scan-status (no session cookie)",
+      "status": "OPEN",
+      "verified": null,
+      "ms": {
+        "n": 0,
+        "median": null,
+        "min": null,
+        "max": null
+      },
+      "bytes": 0,
+      "tokens": 0,
+      "lines": 0,
+      "transcript": "",
+      "open": {
+        "reason": "Hurl is not installed and was not on the operator's approved install list",
+        "probe": "hurl --version && hurl --test --variable host=http://127.0.0.1:<fixture-port> plugins/ui-probe/bakeoff/protocols/hurl/http.scan-status-anon.hurl"
+      },
+      "guard": "not applicable — Hurl's own request grammar plus `[Asserts]` would need its read-only story measured",
+      "command": "node plugins/ui-probe/bakeoff/protocols/run.mjs --only http --repeats 5  # target http://127.0.0.1:53871",
+      "note": null
+    },
+    {
+      "schema": "ui-probe-bakeoff/row@1",
+      "contender": "hurl",
+      "contenderLabel": "Hurl (not installed, not approved)",
+      "task": "http.missing",
+      "taskTitle": "HTTP GET /api/does-not-exist (404 path)",
+      "status": "OPEN",
+      "verified": null,
+      "ms": {
+        "n": 0,
+        "median": null,
+        "min": null,
+        "max": null
+      },
+      "bytes": 0,
+      "tokens": 0,
+      "lines": 0,
+      "transcript": "",
+      "open": {
+        "reason": "Hurl is not installed and was not on the operator's approved install list",
+        "probe": "hurl --version && hurl --test --variable host=http://127.0.0.1:<fixture-port> plugins/ui-probe/bakeoff/protocols/hurl/http.missing.hurl"
+      },
+      "guard": "not applicable — Hurl's own request grammar plus `[Asserts]` would need its read-only story measured",
+      "command": "node plugins/ui-probe/bakeoff/protocols/run.mjs --only http --repeats 5  # target http://127.0.0.1:53871",
+      "note": null
+    },
+    {
+      "schema": "ui-probe-bakeoff/row@1",
+      "contender": "qbittorrent",
+      "contenderLabel": "qBittorrent Web API (not contacted)",
+      "task": "qbittorrent.version",
+      "taskTitle": "qBittorrent GET /api/v2/app/version",
+      "status": "OPEN",
+      "verified": null,
+      "ms": {
+        "n": 0,
+        "median": null,
+        "min": null,
+        "max": null
+      },
+      "bytes": 0,
+      "tokens": 0,
+      "lines": 0,
+      "transcript": "",
+      "open": {
+        "reason": "qBittorrent was deliberately not contacted: the probe needs QB_* credentials and no credential may enter the bake-off",
+        "probe": "QB_USER/QB_PASS from the environment → POST /api/v2/auth/login (SID cookie) → GET http://127.0.0.1:<qb-port>/api/v2/app/version with `Cookie: SID=<redacted>`"
+      },
+      "guard": "not exercised — the probe was never run (credentials stay out of the bake-off)",
+      "command": "never run — needs QB_* credentials",
+      "note": null
+    }
+  ],
+  "guards": [
+    {
+      "contender": "http-fetch",
+      "mechanism": "method/host/port/path allowlist + redirect:manual, enforced before fetch()",
+      "allowlist": "GET http://127.0.0.1:{53871} /api/scan-status, /api/does-not-exist",
+      "attempt": "POST /api/scan-status",
+      "blocked": true,
+      "message": "http: POST http://127.0.0.1:53871/api/scan-status is off the allowlist (GET http://127.0.0.1:{53871} /api/scan-status, /api/does-not-exist)"
+    },
+    {
+      "contender": "tcp-net",
+      "mechanism": "exact write-allowlist on the socket, enforced before connect()",
+      "allowlist": "connect 127.0.0.1:53872; write \"\" | \"HELLO ui-probe\\r\\n\"",
+      "attempt": "write QUIT",
+      "blocked": true,
+      "message": "tcp: write \"QUIT\\r\\n\" is off the allowlist (connect 127.0.0.1:53872; write \"\" | \"HELLO ui-probe\\r\\n\")"
+    },
+    {
+      "contender": "ssh-batch",
+      "mechanism": "argv allowlist: BatchMode forced, localhost only, exact remote command, no forwards",
+      "allowlist": "ssh -o BatchMode=yes {localhost,127.0.0.1} df -h",
+      "attempt": "-o BatchMode=yes localhost rm -rf /",
+      "blocked": true,
+      "message": "ssh: -o BatchMode=yes localhost rm -rf / is off the allowlist (ssh -o BatchMode=yes {localhost,127.0.0.1} df -h)"
+    },
+    {
+      "contender": "hurl",
+      "mechanism": "not applicable — Hurl's own request grammar plus `[Asserts]` would need its read-only story measured",
+      "allowlist": "hurl --test <file.hurl>",
+      "attempt": "hurl --test scan-status.hurl",
+      "blocked": false,
+      "message": "not attempted: Hurl is not installed and was not approved"
+    },
+    {
+      "contender": "qbittorrent",
+      "mechanism": "not exercised — the probe was never run (credentials stay out of the bake-off)",
+      "allowlist": "GET http://127.0.0.1:<qb-port>/api/v2/app/version with the SID cookie",
+      "attempt": "GET /api/v2/app/version",
+      "blocked": false,
+      "message": "not attempted: qBittorrent credentials are out of scope for the bake-off"
+    }
+  ],
+  "notes": [
+    "No hub fixture was listening on :8001; the HTTP probe ran against the local node:http fixture.",
+    "qBittorrent and Hurl are OPEN rows: neither was contacted/installed."
+  ]
+}

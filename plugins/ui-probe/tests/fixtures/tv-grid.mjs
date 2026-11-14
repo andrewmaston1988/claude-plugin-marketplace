@@ -1,0 +1,153 @@
+// The TV journey target: a focus grid keyed by keyCode, served at /tv-grid.html.
+// Kept as a string because every file the plugin ships must be .mjs, .md or .json.
+export const TV_GRID_HTML = `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>ui-probe TV grid fixture</title>
+<style>
+  :root { color-scheme: dark; }
+  body { margin: 0; padding: 40px; background: #101318; color: #e8edf5; font: 20px/1.3 system-ui, sans-serif; }
+  h1 { margin: 0 0 24px; font-size: 24px; font-weight: 600; }
+  .tv-row { display: flex; gap: 16px; margin-bottom: 16px; }
+  .tv-card {
+    box-sizing: border-box; width: 240px; height: 135px; display: flex;
+    align-items: center; justify-content: center; background: #232a35;
+    border: 4px solid transparent;
+  }
+  .tv-card.focused { border-color: #6cc4ff; background: #2d3a4c; }
+  #player, #exit-popup { position: fixed; inset: 12%; display: none; padding: 32px; background: #000; }
+  #player.open, #exit-popup.open { display: block; }
+
+  /* Probe geometry is absolute against the viewport, so the safe box is exact at 1920x1080:
+     its edges are 96/54/1824/1026. */
+  .probe { position: absolute; pointer-events: none; }
+  #probe-safe { left: 96px; top: 54px; width: 1728px; height: 972px; }
+  #probe-past { left: 1500px; top: 200px; width: 330px; height: 40px; background: rgba(255, 96, 96, .12); }
+  #scaler { left: 1490px; top: 300px; width: 320px; height: 100px; background: rgba(96, 255, 160, .1); }
+  #scaler.grow { width: 340px; }
+  #timed-text { position: absolute; left: 96px; top: 960px; margin: 0; }
+  #clip { position: absolute; left: 120px; top: 820px; width: 160px; height: 90px; }
+</style>
+</head>
+<body>
+  <h1 id="focus-label">One</h1>
+
+  <div class="tv-row">
+    <div class="tv-card" id="tile-one">One</div>
+    <div class="tv-card" id="tile-two">Two</div>
+    <div class="tv-card" id="tile-three">Three</div>
+  </div>
+  <div class="tv-row">
+    <div class="tv-card" id="tile-four">Four</div>
+    <div class="tv-card" id="tile-five">Five</div>
+    <div class="tv-card" id="tile-six">Six</div>
+  </div>
+
+  <div id="player"><h2 id="player-title"></h2></div>
+  <div id="exit-popup" role="dialog" aria-label="Exit"><p id="exit-question">Exit the app?</p></div>
+
+  <div id="probe-safe" class="probe"></div>
+  <div id="probe-past" class="probe"></div>
+  <div id="scaler" class="probe"></div>
+  <p id="timed-text">before</p>
+  <video id="clip" muted playsinline></video>
+
+  <script>
+    // Focus is a class on the tile: nothing is focusable, so document.activeElement stays body,
+    // as torrent-hub's remote-driven grid behaves on the set.
+    (() => {
+      "use strict";
+      const grid = Array.from(document.querySelectorAll(".tv-row"))
+        .map((row) => Array.from(row.querySelectorAll(".tv-card")));
+      const position = { row: 0, col: 0 };
+      const player = document.getElementById("player");
+      const playerTitle = document.getElementById("player-title");
+      const focusLabel = document.getElementById("focus-label");
+      const exitPopup = document.getElementById("exit-popup");
+      let opened = null;
+      let exiting = false;
+
+      const showFocus = () => {
+        for (const card of document.querySelectorAll(".focused")) card.classList.remove("focused");
+        const card = grid[position.row] && grid[position.row][position.col];
+        if (!card) return;
+        card.classList.add("focused");
+        focusLabel.textContent = card.textContent;
+      };
+
+      const openItem = () => {
+        const card = grid[position.row] && grid[position.row][position.col];
+        if (!card) return;
+        opened = card;
+        playerTitle.textContent = card.textContent;
+        player.classList.add("open");
+      };
+
+      const closeItem = () => {
+        opened = null;
+        player.classList.remove("open");
+      };
+
+      const MOVE = { 37: [0, -1], 38: [-1, 0], 39: [0, 1], 40: [1, 0] };
+
+      document.addEventListener("keydown", (event) => {
+        const code = event.keyCode;
+        if (code === 10009) {
+          event.preventDefault();
+          if (exiting) {
+            exiting = false;
+            exitPopup.classList.remove("open");
+          } else if (opened) {
+            closeItem();
+          } else {
+            exiting = true;
+            exitPopup.classList.add("open");
+          }
+          return;
+        }
+        if (exiting) return;
+        if (code === 13) {
+          event.preventDefault();
+          if (!opened) openItem();
+          return;
+        }
+        const move = MOVE[code];
+        if (!move) return;
+        event.preventDefault();
+        const [rowStep, colStep] = move;
+        // Clamped, not wrapped: a TV grid stops at the end of a row, as torrent-hub's does.
+        position.row = Math.max(0, Math.min(grid.length - 1, position.row + rowStep));
+        const width = grid[position.row].length;
+        position.col = Math.max(0, Math.min(width - 1, position.col + colStep));
+        showFocus();
+      });
+
+      showFocus();
+
+      // Probe fixtures. Digit1 arms a 100ms scale past the safe edge; Digit2 changes the text at
+      // 250ms, both timed from a key so a journey can assert around the change.
+      const scaler = document.getElementById("scaler");
+      const timedText = document.getElementById("timed-text");
+      window.addEventListener("keydown", (event) => {
+        if (event.keyCode === 49) setTimeout(() => scaler.classList.add("grow"), 100);
+        if (event.keyCode === 50) setTimeout(() => { timedText.textContent = "after"; }, 250);
+      });
+
+      // A generated clip: nothing to ship, and a muted stream may autoplay.
+      const clip = document.getElementById("clip");
+      const canvas = document.createElement("canvas");
+      canvas.width = 64;
+      canvas.height = 64;
+      const paint = canvas.getContext("2d");
+      setInterval(() => {
+        paint.fillStyle = \`hsl(\${(Date.now() / 20) % 360}, 60%, 45%)\`;
+        paint.fillRect(0, 0, 64, 64);
+      }, 50);
+      clip.srcObject = canvas.captureStream(10);
+      clip.play().catch(() => {});
+    })();
+  </script>
+</body>
+</html>
+`;

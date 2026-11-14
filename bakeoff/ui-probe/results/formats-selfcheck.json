@@ -1,0 +1,319 @@
+{
+  "generatedAt": "2026-11-13T03:03:31.066Z",
+  "mode": "self",
+  "validateOnly": false,
+  "fixtures": {
+    "sheet": "http://127.0.0.1:18771/sheet.html",
+    "health": "http://127.0.0.1:18772/health",
+    "tcpHost": "127.0.0.1",
+    "tcpPort": 18773,
+    "tcpBanner": "HELLO ui-probe",
+    "windows": {
+      "window": "ui-probe-fixture",
+      "control": "ValueBox",
+      "value": "fixture-value-42"
+    }
+  },
+  "rows": [
+    {
+      "format": "playwright-test",
+      "model": "shipped-example",
+      "task": "http-health",
+      "file": "scenarios\\playwright-test\\examples\\http-health.spec.ts",
+      "bucket": "examples",
+      "harnessError": false,
+      "valid": true,
+      "validErrors": [],
+      "coverage": [],
+      "ran": true,
+      "correct": true,
+      "failure": null,
+      "ms": 2016
+    },
+    {
+      "format": "playwright-test",
+      "model": "shipped-example",
+      "task": "t1-layout",
+      "file": "scenarios\\playwright-test\\examples\\t1-layout.spec.ts",
+      "bucket": "examples",
+      "harnessError": false,
+      "valid": true,
+      "validErrors": [],
+      "coverage": [],
+      "ran": true,
+      "correct": true,
+      "failure": null,
+      "ms": 2216
+    },
+    {
+      "format": "playwright-test",
+      "model": "shipped-example",
+      "task": "t2-hover",
+      "file": "scenarios\\playwright-test\\examples\\t2-hover.spec.ts",
+      "bucket": "examples",
+      "harnessError": false,
+      "valid": true,
+      "validErrors": [],
+      "coverage": [],
+      "ran": true,
+      "correct": true,
+      "failure": null,
+      "ms": 2659
+    },
+    {
+      "format": "playwright-test",
+      "model": "shipped-example",
+      "task": "tcp-banner",
+      "file": "scenarios\\playwright-test\\examples\\tcp-banner.spec.ts",
+      "bucket": "examples",
+      "harnessError": false,
+      "valid": true,
+      "validErrors": [],
+      "coverage": [],
+      "ran": true,
+      "correct": true,
+      "failure": null,
+      "ms": 2002
+    },
+    {
+      "format": "playwright-test",
+      "model": "shipped-example",
+      "task": "win-textbox",
+      "file": "scenarios\\playwright-test\\examples\\win-textbox.spec.ts",
+      "bucket": "examples",
+      "harnessError": false,
+      "valid": true,
+      "validErrors": [],
+      "coverage": [],
+      "ran": true,
+      "correct": true,
+      "failure": null,
+      "ms": 2453
+    },
+    {
+      "format": "playwright-test",
+      "model": "shipped-example",
+      "task": "t2-hover",
+      "file": "scenarios\\playwright-test\\broken\\broken-t2-hover.spec.ts",
+      "bucket": "broken",
+      "harnessError": false,
+      "valid": false,
+      "validErrors": [
+        "no expect(...) assertion — a scenario that asserts nothing is not a scenario"
+      ],
+      "coverage": [
+        "missing required marker \"hover-bar\"",
+        "missing required marker \"opacity\""
+      ],
+      "ran": false,
+      "correct": false,
+      "failure": null,
+      "ms": 0
+    },
+    {
+      "format": "flat-yaml",
+      "model": "shipped-example",
+      "task": "http-health",
+      "file": "scenarios\\flat-yaml\\examples\\http-health.yaml",
+      "bucket": "examples",
+      "harnessError": false,
+      "valid": true,
+      "validErrors": [],
+      "coverage": [],
+      "ran": true,
+      "correct": true,
+      "failure": null,
+      "ms": 23
+    },
+    {
+      "format": "flat-yaml",
+      "model": "shipped-example",
+      "task": "t1-layout",
+      "file": "scenarios\\flat-yaml\\examples\\t1-layout.yaml",
+      "bucket": "examples",
+      "harnessError": false,
+      "valid": true,
+      "validErrors": [],
+      "coverage": [],
+      "ran": true,
+      "correct": true,
+      "failure": null,
+      "ms": 778
+    },
+    {
+      "format": "flat-yaml",
+      "model": "shipped-example",
+      "task": "t2-hover",
+      "file": "scenarios\\flat-yaml\\examples\\t2-hover.yaml",
+      "bucket": "examples",
+      "harnessError": false,
+      "valid": true,
+      "validErrors": [],
+      "coverage": [],
+      "ran": true,
+      "correct": true,
+      "failure": null,
+      "ms": 726
+    },
+    {
+      "format": "flat-yaml",
+      "model": "shipped-example",
+      "task": "tcp-banner",
+      "file": "scenarios\\flat-yaml\\examples\\tcp-banner.yaml",
+      "bucket": "examples",
+      "harnessError": false,
+      "valid": true,
+      "validErrors": [],
+      "coverage": [],
+      "ran": true,
+      "correct": true,
+      "failure": null,
+      "ms": 2
+    },
+    {
+      "format": "flat-yaml",
+      "model": "shipped-example",
+      "task": "win-textbox",
+      "file": "scenarios\\flat-yaml\\examples\\win-textbox.yaml",
+      "bucket": "examples",
+      "harnessError": false,
+      "valid": true,
+      "validErrors": [],
+      "coverage": [],
+      "ran": true,
+      "correct": true,
+      "failure": null,
+      "ms": 382
+    },
+    {
+      "format": "flat-yaml",
+      "model": "shipped-example",
+      "task": "t2-hover",
+      "file": "scenarios\\flat-yaml\\broken\\broken-t2-hover.yaml",
+      "bucket": "broken",
+      "harnessError": false,
+      "valid": false,
+      "validErrors": [
+        "steps[2]: unknown op \"action\"; allowed: open, viewport, hover, tap, click, expect_visible, expect_hidden, expect_widths, expect_css, expect_text, expect_json, tcp_banner, uia_text"
+      ],
+      "coverage": [
+        "no step asserts reference check \"hoverbar_touch\" (expected expect_css on [data-testid=hover-bar] = \"0\")"
+      ],
+      "ran": false,
+      "correct": false,
+      "failure": null,
+      "ms": 0
+    },
+    {
+      "format": "gherkin",
+      "model": "shipped-example",
+      "task": "http-health",
+      "file": "scenarios\\gherkin\\examples\\http-health.feature",
+      "bucket": "examples",
+      "harnessError": false,
+      "valid": true,
+      "validErrors": [],
+      "coverage": [],
+      "ran": true,
+      "correct": true,
+      "failure": null,
+      "ms": 3
+    },
+    {
+      "format": "gherkin",
+      "model": "shipped-example",
+      "task": "t1-layout",
+      "file": "scenarios\\gherkin\\examples\\t1-layout.feature",
+      "bucket": "examples",
+      "harnessError": false,
+      "valid": true,
+      "validErrors": [],
+      "coverage": [],
+      "ran": true,
+      "correct": true,
+      "failure": null,
+      "ms": 426
+    },
+    {
+      "format": "gherkin",
+      "model": "shipped-example",
+      "task": "t2-hover",
+      "file": "scenarios\\gherkin\\examples\\t2-hover.feature",
+      "bucket": "examples",
+      "harnessError": false,
+      "valid": true,
+      "validErrors": [],
+      "coverage": [],
+      "ran": true,
+      "correct": true,
+      "failure": null,
+      "ms": 742
+    },
+    {
+      "format": "gherkin",
+      "model": "shipped-example",
+      "task": "tcp-banner",
+      "file": "scenarios\\gherkin\\examples\\tcp-banner.feature",
+      "bucket": "examples",
+      "harnessError": false,
+      "valid": true,
+      "validErrors": [],
+      "coverage": [],
+      "ran": true,
+      "correct": true,
+      "failure": null,
+      "ms": 1
+    },
+    {
+      "format": "gherkin",
+      "model": "shipped-example",
+      "task": "win-textbox",
+      "file": "scenarios\\gherkin\\examples\\win-textbox.feature",
+      "bucket": "examples",
+      "harnessError": false,
+      "valid": true,
+      "validErrors": [],
+      "coverage": [],
+      "ran": true,
+      "correct": true,
+      "failure": null,
+      "ms": 394
+    },
+    {
+      "format": "gherkin",
+      "model": "shipped-example",
+      "task": "t2-hover",
+      "file": "scenarios\\gherkin\\broken\\broken-t2-hover.feature",
+      "bucket": "broken",
+      "harnessError": false,
+      "valid": false,
+      "validErrors": [
+        "line 7: no binding for step \"the user hovers the first recommendation tile\""
+      ],
+      "coverage": [
+        "no step asserts reference check \"hoverbar_touch\" (expected expect_css on [data-testid=hover-bar] = \"0\")"
+      ],
+      "ran": false,
+      "correct": false,
+      "failure": null,
+      "ms": 0
+    }
+  ],
+  "counts": {
+    "playwright-test/shipped-example": {
+      "valid": 5,
+      "correct": 5,
+      "total": 6
+    },
+    "flat-yaml/shipped-example": {
+      "valid": 5,
+      "correct": 5,
+      "total": 6
+    },
+    "gherkin/shipped-example": {
+      "valid": 5,
+      "correct": 5,
+      "total": 6
+    }
+  }
+}

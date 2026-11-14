@@ -1,0 +1,73 @@
+{
+  "schema": "ui-probe-bakeoff/tv@1",
+  "generatedAt": "2026-11-13T02:56:50.413Z",
+  "appid": "torrenthub.tizen",
+  "host": "192.168.1.110:26101",
+  "verdict": "FAIL",
+  "steps": [
+    {
+      "id": "sdb.locate",
+      "title": "locate sdb.exe",
+      "command": "where sdb  (or %SDB_PATH%)",
+      "status": "PASS",
+      "ms": null,
+      "evidence": "C:/Users/Andrew/.tizen-extension-platform/server/sdktools/data/tools/sdb.exe"
+    },
+    {
+      "id": "sdb.devices",
+      "title": "sdb devices",
+      "command": "C:/Users/Andrew/.tizen-extension-platform/server/sdktools/data/tools/sdb.exe devices",
+      "status": "PASS",
+      "ms": 37.82,
+      "evidence": "List of devices attached \r\n192.168.1.110:26101 \tdevice    \tUE50TU7020KXXU"
+    },
+    {
+      "id": "sdb.debug",
+      "title": "sdb shell 0 debug <appid>",
+      "command": "C:/Users/Andrew/.tizen-extension-platform/server/sdktools/data/tools/sdb.exe shell 0 debug torrenthub.tizen",
+      "status": "FAIL",
+      "ms": 30007.41,
+      "evidence": "\n(no port printed: app still running, or the cert/DUID is wrong)"
+    },
+    {
+      "id": "sdb.forward",
+      "title": "sdb forward tcp:<port> tcp:<port>",
+      "command": "sdb forward tcp:<port> tcp:<port>",
+      "status": "OPEN",
+      "ms": null,
+      "evidence": "blocked: `sdb shell 0 debug` printed no port"
+    },
+    {
+      "id": "cdp.version",
+      "title": "GET /json/version",
+      "command": "curl http://127.0.0.1:<port>/json/version",
+      "status": "OPEN",
+      "ms": null,
+      "evidence": "blocked: `sdb shell 0 debug` printed no port"
+    },
+    {
+      "id": "cdp.list",
+      "title": "GET /json/list",
+      "command": "curl http://127.0.0.1:<port>/json/list",
+      "status": "OPEN",
+      "ms": null,
+      "evidence": "blocked: `sdb shell 0 debug` printed no port"
+    },
+    {
+      "id": "cdp.protocol",
+      "title": "GET /json/protocol (domain check)",
+      "command": "curl http://127.0.0.1:<port>/json/protocol",
+      "status": "OPEN",
+      "ms": null,
+      "evidence": "blocked: `sdb shell 0 debug` printed no port"
+    },
+    {
+      "id": "cdp.attach",
+      "title": "cdp.mjs attach + Runtime.evaluate",
+      "command": "node plugins/swarm/scripts/lib/cdp.mjs --port <port>",
+      "status": "OPEN",
+      "ms": null,
+      "evidence": "blocked: `sdb shell 0 debug` printed no port"
+    }
+  ]
+}

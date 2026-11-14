@@ -1,0 +1,499 @@
+{
+  "contender": "FlaUI 4.0 UIA3 helper, one process per call",
+  "contender_id": "flaui-cold",
+  "mode": "per-call",
+  "notes": "Same helper invoked with the command as argv; pays .NET process start per call.",
+  "repeats": 10,
+  "warmups": 2,
+  "latency": [
+    {
+      "fixture": "WinForms",
+      "action": "find",
+      "contender": "flaui-cold",
+      "cold": {
+        "n": 10,
+        "p50": 215,
+        "p95": 258.2,
+        "min": 199,
+        "max": 269,
+        "samples": [
+          269,
+          221,
+          214,
+          199,
+          201,
+          215,
+          218,
+          215,
+          205,
+          245
+        ],
+        "ok": 10,
+        "n_expected": 10,
+        "verified": 10,
+        "verified_known": 10,
+        "bytes_p50": 170,
+        "errors": []
+      },
+      "warm": {
+        "n": 10,
+        "p50": 201,
+        "p95": 260.8,
+        "min": 185,
+        "max": 272,
+        "samples": [
+          272,
+          214,
+          212,
+          196,
+          247,
+          206,
+          195,
+          189,
+          185,
+          185
+        ],
+        "ok": 10,
+        "n_expected": 10,
+        "verified": 10,
+        "verified_known": 10,
+        "bytes_p50": 169.5,
+        "errors": []
+      },
+      "unsupported": false,
+      "notes": null
+    },
+    {
+      "fixture": "WinForms",
+      "action": "tree",
+      "contender": "flaui-cold",
+      "cold": {
+        "n": 10,
+        "p50": 226.5,
+        "p95": 230.1,
+        "min": 220,
+        "max": 231,
+        "samples": [
+          220,
+          231,
+          229,
+          227,
+          224,
+          227,
+          229,
+          226,
+          220,
+          225
+        ],
+        "ok": 10,
+        "n_expected": 10,
+        "verified": 10,
+        "verified_known": 10,
+        "bytes_p50": 1871,
+        "errors": []
+      },
+      "warm": {
+        "n": 10,
+        "p50": 226.5,
+        "p95": 256.8,
+        "min": 218,
+        "max": 259,
+        "samples": [
+          232,
+          223,
+          229,
+          224,
+          220,
+          254,
+          218,
+          224,
+          259,
+          239
+        ],
+        "ok": 10,
+        "n_expected": 10,
+        "verified": 10,
+        "verified_known": 10,
+        "bytes_p50": 1871,
+        "errors": []
+      },
+      "unsupported": false,
+      "notes": null
+    },
+    {
+      "fixture": "WinForms",
+      "action": "tree_cached",
+      "contender": "flaui-cold",
+      "cold": {
+        "n": 10,
+        "p50": 217.5,
+        "p95": 255.2,
+        "min": 211,
+        "max": 257,
+        "samples": [
+          257,
+          236,
+          212,
+          216,
+          253,
+          211,
+          231,
+          217,
+          216,
+          218
+        ],
+        "ok": 10,
+        "n_expected": 10,
+        "verified": 10,
+        "verified_known": 10,
+        "bytes_p50": 1776,
+        "errors": []
+      },
+      "warm": {
+        "n": 10,
+        "p50": 214,
+        "p95": 251.6,
+        "min": 210,
+        "max": 252,
+        "samples": [
+          251,
+          214,
+          220,
+          214,
+          217,
+          210,
+          211,
+          211,
+          252,
+          213
+        ],
+        "ok": 10,
+        "n_expected": 10,
+        "verified": 10,
+        "verified_known": 10,
+        "bytes_p50": 1776,
+        "errors": []
+      },
+      "unsupported": false,
+      "notes": null
+    },
+    {
+      "fixture": "WinForms",
+      "action": "get",
+      "contender": "flaui-cold",
+      "cold": {
+        "n": 10,
+        "p50": 186.5,
+        "p95": 208.6,
+        "min": 183,
+        "max": 223,
+        "samples": [
+          186,
+          186,
+          187,
+          191,
+          183,
+          189,
+          223,
+          186,
+          190,
+          184
+        ],
+        "ok": 10,
+        "n_expected": 10,
+        "verified": 10,
+        "verified_known": 10,
+        "bytes_p50": 59,
+        "errors": []
+      },
+      "warm": {
+        "n": 10,
+        "p50": 185.5,
+        "p95": 217.2,
+        "min": 183,
+        "max": 219,
+        "samples": [
+          185,
+          215,
+          186,
+          194,
+          183,
+          185,
+          219,
+          184,
+          186,
+          185
+        ],
+        "ok": 10,
+        "n_expected": 10,
+        "verified": 10,
+        "verified_known": 10,
+        "bytes_p50": 59,
+        "errors": []
+      },
+      "unsupported": false,
+      "notes": null
+    },
+    {
+      "fixture": "WinForms",
+      "action": "click",
+      "contender": "flaui-cold",
+      "cold": {
+        "n": 10,
+        "p50": 203,
+        "p95": 239,
+        "min": 200,
+        "max": 243,
+        "samples": [
+          218,
+          201,
+          243,
+          202,
+          201,
+          200,
+          202,
+          204,
+          234,
+          204
+        ],
+        "ok": 10,
+        "n_expected": 10,
+        "verified": 10,
+        "verified_known": 10,
+        "bytes_p50": 51,
+        "errors": []
+      },
+      "warm": {
+        "n": 10,
+        "p50": 197.5,
+        "p95": 250.8,
+        "min": 188,
+        "max": 267,
+        "samples": [
+          228,
+          192,
+          189,
+          196,
+          231,
+          267,
+          197,
+          188,
+          205,
+          198
+        ],
+        "ok": 10,
+        "n_expected": 10,
+        "verified": 10,
+        "verified_known": 10,
+        "bytes_p50": 51,
+        "errors": []
+      },
+      "unsupported": false,
+      "notes": null
+    },
+    {
+      "fixture": "WinForms",
+      "action": "list",
+      "contender": "flaui-cold",
+      "cold": {
+        "n": 10,
+        "p50": 215,
+        "p95": 249.4,
+        "min": 212,
+        "max": 253,
+        "samples": [
+          245,
+          221,
+          213,
+          214,
+          212,
+          212,
+          215,
+          220,
+          215,
+          253
+        ],
+        "ok": 10,
+        "n_expected": 10,
+        "verified": 10,
+        "verified_known": 10,
+        "bytes_p50": 113,
+        "errors": []
+      },
+      "warm": {
+        "n": 10,
+        "p50": 215,
+        "p95": 236.4,
+        "min": 210,
+        "max": 249,
+        "samples": [
+          219,
+          216,
+          210,
+          211,
+          212,
+          214,
+          221,
+          249,
+          215,
+          215
+        ],
+        "ok": 10,
+        "n_expected": 10,
+        "verified": 10,
+        "verified_known": 10,
+        "bytes_p50": 113,
+        "errors": []
+      },
+      "unsupported": false,
+      "notes": null
+    }
+  ],
+  "exposure": [
+    {
+      "fixture": "Wpf",
+      "action": "find",
+      "ok": true,
+      "count": null,
+      "value": null,
+      "contains_reference": null,
+      "bytes": 125,
+      "error": null
+    },
+    {
+      "fixture": "Wpf",
+      "action": "tree",
+      "ok": true,
+      "count": 25,
+      "value": null,
+      "contains_reference": null,
+      "bytes": 2616,
+      "error": null
+    },
+    {
+      "fixture": "Wpf",
+      "action": "get",
+      "ok": true,
+      "count": null,
+      "value": "fixture-value-42",
+      "contains_reference": true,
+      "bytes": 59,
+      "error": null
+    },
+    {
+      "fixture": "Wpf",
+      "action": "list",
+      "ok": true,
+      "count": 5,
+      "value": null,
+      "contains_reference": null,
+      "bytes": 112,
+      "error": null
+    },
+    {
+      "fixture": "OwnerDrawn",
+      "action": "find",
+      "ok": true,
+      "count": null,
+      "value": null,
+      "contains_reference": null,
+      "bytes": 170,
+      "error": null
+    },
+    {
+      "fixture": "OwnerDrawn",
+      "action": "tree",
+      "ok": true,
+      "count": 8,
+      "value": null,
+      "contains_reference": null,
+      "bytes": 903,
+      "error": null
+    },
+    {
+      "fixture": "OwnerDrawn",
+      "action": "get",
+      "ok": false,
+      "count": null,
+      "value": null,
+      "contains_reference": null,
+      "bytes": 63,
+      "error": "element not found"
+    },
+    {
+      "fixture": "Notepad",
+      "action": "find",
+      "ok": true,
+      "count": null,
+      "value": null,
+      "contains_reference": null,
+      "bytes": 135,
+      "error": null
+    },
+    {
+      "fixture": "Notepad",
+      "action": "tree",
+      "ok": true,
+      "count": 122,
+      "value": null,
+      "contains_reference": null,
+      "bytes": 13121,
+      "error": null
+    },
+    {
+      "fixture": "Notepad",
+      "action": "get",
+      "ok": true,
+      "count": null,
+      "value": "fixture-value-42\rsecond line\r",
+      "contains_reference": true,
+      "bytes": 74,
+      "error": null
+    }
+  ],
+  "events": {
+    "supported": true,
+    "structure": {
+      "count": 0,
+      "first_ms": null,
+      "note": "click ok=true; no structure event within 2s"
+    },
+    "property": {
+      "count": 0,
+      "first_ms": null,
+      "note": "set ok=true (4243ms); no property event within 2s"
+    }
+  },
+  "failures": {
+    "element_gone": {
+      "setup_ok": true,
+      "ok": false,
+      "error": "element not found",
+      "ms": 152
+    },
+    "window_closed": {
+      "before_ok": true,
+      "after_ok": false,
+      "after_error": "window not found",
+      "after_ms": 2530,
+      "tree_ok": false,
+      "tree_error": "window not found",
+      "tree_ms": 2423
+    }
+  },
+  "fixture": {
+    "winforms_pid": 51052,
+    "wpf_pid": 44488,
+    "owner_pid": 47712,
+    "notepad_pid": 54236,
+    "notepad_title": "ui-probe-notepad.txt - Notepad",
+    "titles": {
+      "WinForms": "ui-probe fixture (WinForms)",
+      "Wpf": "ui-probe fixture (WPF)",
+      "OwnerDrawn": "ui-probe fixture (OwnerDrawn)",
+      "Notepad": "ui-probe-notepad.txt - Notepad"
+    }
+  },
+  "started_at": "2026-11-13T04:05:38.843Z",
+  "finished_at": "2026-11-13T04:05:58.372Z"
+}

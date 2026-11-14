@@ -1,0 +1,1799 @@
+{
+  "generatedAt": "2026-11-13T02:59:44.684Z",
+  "repeats": 3,
+  "runs": [
+    {
+      "contender": "playwright",
+      "runs": [
+        {
+          "realSample": {
+            "samples": [
+              {
+                "t": -0.9,
+                "display": "none",
+                "opacity": "1",
+                "transform": "none",
+                "mouseOver": false
+              },
+              {
+                "t": 15.8,
+                "display": "none",
+                "opacity": "1",
+                "transform": "none",
+                "mouseOver": false
+              },
+              {
+                "t": 32.5,
+                "display": "none",
+                "opacity": "1",
+                "transform": "none",
+                "mouseOver": false
+              },
+              {
+                "t": 49.1,
+                "display": "none",
+                "opacity": "1",
+                "transform": "none",
+                "mouseOver": false
+              },
+              {
+                "t": 65.8,
+                "display": "none",
+                "opacity": "1",
+                "transform": "none",
+                "mouseOver": false
+              },
+              {
+                "t": 82.5,
+                "display": "none",
+                "opacity": "1",
+                "transform": "none",
+                "mouseOver": false
+              },
+              {
+                "t": 99.1,
+                "display": "flex",
+                "opacity": "1",
+                "transform": "none",
+                "mouseOver": true
+              },
+              {
+                "t": 115.8,
+                "display": "flex",
+                "opacity": "1",
+                "transform": "none",
+                "mouseOver": true
+              },
+              {
+                "t": 132.5,
+                "display": "flex",
+                "opacity": "1",
+                "transform": "none",
+                "mouseOver": true
+              },
+              {
+                "t": 149.1,
+                "display": "flex",
+                "opacity": "1",
+                "transform": "none",
+                "mouseOver": true
+              },
+              {
+                "t": 165.8,
+                "display": "flex",
+                "opacity": "1",
+                "transform": "none",
+                "mouseOver": true
+              },
+              {
+                "t": 182.5,
+                "display": "flex",
+                "opacity": "1",
+                "transform": "none",
+                "mouseOver": true
+              },
+              {
+                "t": 199.1,
+                "display": "flex",
+                "opacity": "1",
+                "transform": "none",
+                "mouseOver": true
+              },
+              {
+                "t": 215.8,
+                "display": "flex",
+                "opacity": "1",
+                "transform": "none",
+                "mouseOver": true
+              },
+              {
+                "t": 232.5,
+                "display": "flex",
+                "opacity": "1",
+                "transform": "none",
+                "mouseOver": true
+              },
+              {
+                "t": 249.1,
+                "display": "flex",
+                "opacity": "1",
+                "transform": "none",
+                "mouseOver": true
+              },
+              {
+                "t": 265.8,
+                "display": "flex",
+                "opacity": "1",
+                "transform": "none",
+                "mouseOver": true
+              }
+            ],
+            "n": 17,
+            "elapsed": 267.3
+          },
+          "realAnims": {
+            "supported": true,
+            "count": 0,
+            "animations": []
+          },
+          "animSample": {
+            "samples": [
+              {
+                "t": 10,
+                "display": "flex",
+                "opacity": "1",
+                "transform": "none",
+                "mouseOver": true
+              },
+              {
+                "t": 26.6,
+                "display": "flex",
+                "opacity": "1",
+                "transform": "none",
+                "mouseOver": true
+              },
+              {
+                "t": 43.3,
+                "display": "flex",
+                "opacity": "1",
+                "transform": "none",
+                "mouseOver": true
+              },
+              {
+                "t": 59.9,
+                "display": "flex",
+                "opacity": "1",
+                "transform": "none",
+                "mouseOver": true
+              },
+              {
+                "t": 76.6,
+                "display": "flex",
+                "opacity": "1",
+                "transform": "none",
+                "mouseOver": true
+              },
+              {
+                "t": 93.3,
+                "display": "flex",
+                "opacity": "0",
+                "transform": "matrix(1, 0, 0, 1, 0, -6)",
+                "mouseOver": true
+              },
+              {
+                "t": 110,
+                "display": "flex",
+                "opacity": "0.113317",
+                "transform": "matrix(1, 0, 0, 1, 0, -5.3201)",
+                "mouseOver": true
+              },
+              {
+                "t": 126.7,
+                "display": "flex",
+                "opacity": "0.219804",
+                "transform": "matrix(1, 0, 0, 1, 0, -4.68118)",
+                "mouseOver": true
+              },
+              {
+                "t": 143.3,
+                "display": "flex",
+                "opacity": "0.320189",
+                "transform": "matrix(1, 0, 0, 1, 0, -4.07887)",
+                "mouseOver": true
+              },
+              {
+                "t": 160,
+                "display": "flex",
+                "opacity": "0.415917",
+                "transform": "matrix(1, 0, 0, 1, 0, -3.5045)",
+                "mouseOver": true
+              },
+              {
+                "t": 176.7,
+                "display": "flex",
+                "opacity": "0.50632",
+                "transform": "matrix(1, 0, 0, 1, 0, -2.96208)",
+                "mouseOver": true
+              },
+              {
+                "t": 193.3,
+                "display": "flex",
+                "opacity": "0.590704",
+                "transform": "matrix(1, 0, 0, 1, 0, -2.45578)",
+                "mouseOver": true
+              },
+              {
+                "t": 210,
+                "display": "flex",
+                "opacity": "0.669756",
+                "transform": "matrix(1, 0, 0, 1, 0, -1.98146)",
+                "mouseOver": true
+              },
+              {
+                "t": 226.6,
+                "display": "flex",
+                "opacity": "0.742086",
+                "transform": "matrix(1, 0, 0, 1, 0, -1.54748)",
+                "mouseOver": true
+              },
+              {
+                "t": 243.3,
+                "display": "flex",
+                "opacity": "0.807982",
+                "transform": "matrix(1, 0, 0, 1, 0, -1.15211)",
+                "mouseOver": true
+              },
+              {
+                "t": 259.9,
+                "display": "flex",
+                "opacity": "0.865914",
+                "transform": "matrix(1, 0, 0, 1, 0, -0.804517)",
+                "mouseOver": true
+              },
+              {
+                "t": 276.6,
+                "display": "flex",
+                "opacity": "0.915626",
+                "transform": "matrix(1, 0, 0, 1, 0, -0.506244)",
+                "mouseOver": true
+              },
+              {
+                "t": 293.3,
+                "display": "flex",
+                "opacity": "0.955504",
+                "transform": "matrix(1, 0, 0, 1, 0, -0.266977)",
+                "mouseOver": true
+              },
+              {
+                "t": 310,
+                "display": "flex",
+                "opacity": "0.983908",
+                "transform": "matrix(1, 0, 0, 1, 0, -0.0965501)",
+                "mouseOver": true
+              }
+            ],
+            "n": 19,
+            "elapsed": 311.8
+          },
+          "animMeta": {
+            "supported": true,
+            "count": 1,
+            "animations": [
+              {
+                "id": null,
+                "playState": "running",
+                "currentTime": 216.7,
+                "duration": 240,
+                "target": "DIV.rec-hover",
+                "properties": [
+                  "transform",
+                  "opacity"
+                ]
+              }
+            ]
+          },
+          "box": {
+            "x": 276,
+            "y": 160.296875
+          }
+        },
+        {
+          "realSample": {
+            "samples": [
+              {
+                "t": -6.7,
+                "display": "none",
+                "opacity": "1",
+                "transform": "none",
+                "mouseOver": false
+              },
+              {
+                "t": 10,
+                "display": "none",
+                "opacity": "1",
+                "transform": "none",
+                "mouseOver": false
+              },
+              {
+                "t": 26.7,
+                "display": "none",
+                "opacity": "1",
+                "transform": "none",
+                "mouseOver": false
+              },
+              {
+                "t": 43.3,
+                "display": "none",
+                "opacity": "1",
+                "transform": "none",
+                "mouseOver": false
+              },
+              {
+                "t": 60,
+                "display": "none",
+                "opacity": "1",
+                "transform": "none",
+                "mouseOver": false
+              },
+              {
+                "t": 76.6,
+                "display": "none",
+                "opacity": "1",
+                "transform": "none",
+                "mouseOver": false
+              },
+              {
+                "t": 93.3,
+                "display": "flex",
+                "opacity": "1",
+                "transform": "none",
+                "mouseOver": true
+              },
+              {
+                "t": 109.9,
+                "display": "flex",
+                "opacity": "1",
+                "transform": "none",
+                "mouseOver": true
+              },
+              {
+                "t": 126.6,
+                "display": "flex",
+                "opacity": "1",
+                "transform": "none",
+                "mouseOver": true
+              },
+              {
+                "t": 143.3,
+                "display": "flex",
+                "opacity": "1",
+                "transform": "none",
+                "mouseOver": true
+              },
+              {
+                "t": 159.9,
+                "display": "flex",
+                "opacity": "1",
+                "transform": "none",
+                "mouseOver": true
+              },
+              {
+                "t": 176.6,
+                "display": "flex",
+                "opacity": "1",
+                "transform": "none",
+                "mouseOver": true
+              },
+              {
+                "t": 193.3,
+                "display": "flex",
+                "opacity": "1",
+                "transform": "none",
+                "mouseOver": true
+              },
+              {
+                "t": 210,
+                "display": "flex",
+                "opacity": "1",
+                "transform": "none",
+                "mouseOver": true
+              },
+              {
+                "t": 226.7,
+                "display": "flex",
+                "opacity": "1",
+                "transform": "none",
+                "mouseOver": true
+              },
+              {
+                "t": 243.2,
+                "display": "flex",
+                "opacity": "1",
+                "transform": "none",
+                "mouseOver": true
+              },
+              {
+                "t": 259.9,
+                "display": "flex",
+                "opacity": "1",
+                "transform": "none",
+                "mouseOver": true
+              }
+            ],
+            "n": 17,
+            "elapsed": 261.7
+          },
+          "realAnims": {
+            "supported": true,
+            "count": 0,
+            "animations": []
+          },
+          "animSample": {
+            "samples": [
+              {
+                "t": 11.6,
+                "display": "flex",
+                "opacity": "1",
+                "transform": "none",
+                "mouseOver": true
+              },
+              {
+                "t": 28.3,
+                "display": "flex",
+                "opacity": "1",
+                "transform": "none",
+                "mouseOver": true
+              },
+              {
+                "t": 45,
+                "display": "flex",
+                "opacity": "1",
+                "transform": "none",
+                "mouseOver": true
+              },
+              {
+                "t": 61.6,
+                "display": "flex",
+                "opacity": "1",
+                "transform": "none",
+                "mouseOver": true
+              },
+              {
+                "t": 78.3,
+                "display": "flex",
+                "opacity": "1",
+                "transform": "none",
+                "mouseOver": true
+              },
+              {
+                "t": 95,
+                "display": "flex",
+                "opacity": "0",
+                "transform": "matrix(1, 0, 0, 1, 0, -6)",
+                "mouseOver": true
+              },
+              {
+                "t": 111.7,
+                "display": "flex",
+                "opacity": "0.113664",
+                "transform": "matrix(1, 0, 0, 1, 0, -5.31802)",
+                "mouseOver": true
+              },
+              {
+                "t": 128.2,
+                "display": "flex",
+                "opacity": "0.218891",
+                "transform": "matrix(1, 0, 0, 1, 0, -4.68665)",
+                "mouseOver": true
+              },
+              {
+                "t": 144.9,
+                "display": "flex",
+                "opacity": "0.319912",
+                "transform": "matrix(1, 0, 0, 1, 0, -4.08053)",
+                "mouseOver": true
+              },
+              {
+                "t": 161.6,
+                "display": "flex",
+                "opacity": "0.415655",
+                "transform": "matrix(1, 0, 0, 1, 0, -3.50607)",
+                "mouseOver": true
+              },
+              {
+                "t": 178.3,
+                "display": "flex",
+                "opacity": "0.506073",
+                "transform": "matrix(1, 0, 0, 1, 0, -2.96356)",
+                "mouseOver": true
+              },
+              {
+                "t": 195,
+                "display": "flex",
+                "opacity": "0.590964",
+                "transform": "matrix(1, 0, 0, 1, 0, -2.45422)",
+                "mouseOver": true
+              },
+              {
+                "t": 211.6,
+                "display": "flex",
+                "opacity": "0.669542",
+                "transform": "matrix(1, 0, 0, 1, 0, -1.98275)",
+                "mouseOver": true
+              },
+              {
+                "t": 228.3,
+                "display": "flex",
+                "opacity": "0.742307",
+                "transform": "matrix(1, 0, 0, 1, 0, -1.54616)",
+                "mouseOver": true
+              },
+              {
+                "t": 244.9,
+                "display": "flex",
+                "opacity": "0.807807",
+                "transform": "matrix(1, 0, 0, 1, 0, -1.15316)",
+                "mouseOver": true
+              },
+              {
+                "t": 261.6,
+                "display": "flex",
+                "opacity": "0.866086",
+                "transform": "matrix(1, 0, 0, 1, 0, -0.803485)",
+                "mouseOver": true
+              },
+              {
+                "t": 278.3,
+                "display": "flex",
+                "opacity": "0.915769",
+                "transform": "matrix(1, 0, 0, 1, 0, -0.505387)",
+                "mouseOver": true
+              },
+              {
+                "t": 295,
+                "display": "flex",
+                "opacity": "0.955613",
+                "transform": "matrix(1, 0, 0, 1, 0, -0.266322)",
+                "mouseOver": true
+              },
+              {
+                "t": 311.6,
+                "display": "flex",
+                "opacity": "0.983846",
+                "transform": "matrix(1, 0, 0, 1, 0, -0.0969218)",
+                "mouseOver": true
+              }
+            ],
+            "n": 19,
+            "elapsed": 312.6
+          },
+          "animMeta": {
+            "supported": true,
+            "count": 1,
+            "animations": [
+              {
+                "id": null,
+                "playState": "running",
+                "currentTime": 216.7,
+                "duration": 240,
+                "target": "DIV.rec-hover",
+                "properties": [
+                  "transform",
+                  "opacity"
+                ]
+              }
+            ]
+          },
+          "box": {
+            "x": 276,
+            "y": 160.296875
+          }
+        },
+        {
+          "realSample": {
+            "samples": [
+              {
+                "t": -1.3,
+                "display": "none",
+                "opacity": "1",
+                "transform": "none",
+                "mouseOver": false
+              },
+              {
+                "t": 15.4,
+                "display": "none",
+                "opacity": "1",
+                "transform": "none",
+                "mouseOver": false
+              },
+              {
+                "t": 32,
+                "display": "none",
+                "opacity": "1",
+                "transform": "none",
+                "mouseOver": false
+              },
+              {
+                "t": 48.7,
+                "display": "none",
+                "opacity": "1",
+                "transform": "none",
+                "mouseOver": false
+              },
+              {
+                "t": 65.4,
+                "display": "none",
+                "opacity": "1",
+                "transform": "none",
+                "mouseOver": false
+              },
+              {
+                "t": 82.1,
+                "display": "none",
+                "opacity": "1",
+                "transform": "none",
+                "mouseOver": false
+              },
+              {
+                "t": 98.7,
+                "display": "flex",
+                "opacity": "1",
+                "transform": "none",
+                "mouseOver": true
+              },
+              {
+                "t": 115.4,
+                "display": "flex",
+                "opacity": "1",
+                "transform": "none",
+                "mouseOver": true
+              },
+              {
+                "t": 132.1,
+                "display": "flex",
+                "opacity": "1",
+                "transform": "none",
+                "mouseOver": true
+              },
+              {
+                "t": 148.7,
+                "display": "flex",
+                "opacity": "1",
+                "transform": "none",
+                "mouseOver": true
+              },
+              {
+                "t": 165.4,
+                "display": "flex",
+                "opacity": "1",
+                "transform": "none",
+                "mouseOver": true
+              },
+              {
+                "t": 182,
+                "display": "flex",
+                "opacity": "1",
+                "transform": "none",
+                "mouseOver": true
+              },
+              {
+                "t": 198.7,
+                "display": "flex",
+                "opacity": "1",
+                "transform": "none",
+                "mouseOver": true
+              },
+              {
+                "t": 215.3,
+                "display": "flex",
+                "opacity": "1",
+                "transform": "none",
+                "mouseOver": true
+              },
+              {
+                "t": 232,
+                "display": "flex",
+                "opacity": "1",
+                "transform": "none",
+                "mouseOver": true
+              },
+              {
+                "t": 248.7,
+                "display": "flex",
+                "opacity": "1",
+                "transform": "none",
+                "mouseOver": true
+              },
+              {
+                "t": 265.3,
+                "display": "flex",
+                "opacity": "1",
+                "transform": "none",
+                "mouseOver": true
+              }
+            ],
+            "n": 17,
+            "elapsed": 267.4
+          },
+          "realAnims": {
+            "supported": true,
+            "count": 0,
+            "animations": []
+          },
+          "animSample": {
+            "samples": [
+              {
+                "t": 10.7,
+                "display": "flex",
+                "opacity": "1",
+                "transform": "none",
+                "mouseOver": true
+              },
+              {
+                "t": 27.4,
+                "display": "flex",
+                "opacity": "1",
+                "transform": "none",
+                "mouseOver": true
+              },
+              {
+                "t": 44.1,
+                "display": "flex",
+                "opacity": "1",
+                "transform": "none",
+                "mouseOver": true
+              },
+              {
+                "t": 60.7,
+                "display": "flex",
+                "opacity": "1",
+                "transform": "none",
+                "mouseOver": true
+              },
+              {
+                "t": 77.4,
+                "display": "flex",
+                "opacity": "1",
+                "transform": "none",
+                "mouseOver": true
+              },
+              {
+                "t": 94.1,
+                "display": "flex",
+                "opacity": "0",
+                "transform": "matrix(1, 0, 0, 1, 0, -6)",
+                "mouseOver": true
+              },
+              {
+                "t": 110.7,
+                "display": "flex",
+                "opacity": "0.11293",
+                "transform": "matrix(1, 0, 0, 1, 0, -5.32242)",
+                "mouseOver": true
+              },
+              {
+                "t": 127.4,
+                "display": "flex",
+                "opacity": "0.219437",
+                "transform": "matrix(1, 0, 0, 1, 0, -4.68338)",
+                "mouseOver": true
+              },
+              {
+                "t": 144.1,
+                "display": "flex",
+                "opacity": "0.320431",
+                "transform": "matrix(1, 0, 0, 1, 0, -4.07742)",
+                "mouseOver": true
+              },
+              {
+                "t": 160.7,
+                "display": "flex",
+                "opacity": "0.415588",
+                "transform": "matrix(1, 0, 0, 1, 0, -3.50647)",
+                "mouseOver": true
+              },
+              {
+                "t": 177.4,
+                "display": "flex",
+                "opacity": "0.50601",
+                "transform": "matrix(1, 0, 0, 1, 0, -2.96394)",
+                "mouseOver": true
+              },
+              {
+                "t": 194,
+                "display": "flex",
+                "opacity": "0.590414",
+                "transform": "matrix(1, 0, 0, 1, 0, -2.45752)",
+                "mouseOver": true
+              },
+              {
+                "t": 210.7,
+                "display": "flex",
+                "opacity": "0.669488",
+                "transform": "matrix(1, 0, 0, 1, 0, -1.98307)",
+                "mouseOver": true
+              },
+              {
+                "t": 227.4,
+                "display": "flex",
+                "opacity": "0.742257",
+                "transform": "matrix(1, 0, 0, 1, 0, -1.54646)",
+                "mouseOver": true
+              },
+              {
+                "t": 244,
+                "display": "flex",
+                "opacity": "0.807762",
+                "transform": "matrix(1, 0, 0, 1, 0, -1.15343)",
+                "mouseOver": true
+              },
+              {
+                "t": 260.7,
+                "display": "flex",
+                "opacity": "0.866047",
+                "transform": "matrix(1, 0, 0, 1, 0, -0.803719)",
+                "mouseOver": true
+              },
+              {
+                "t": 277.4,
+                "display": "flex",
+                "opacity": "0.915736",
+                "transform": "matrix(1, 0, 0, 1, 0, -0.505581)",
+                "mouseOver": true
+              },
+              {
+                "t": 294,
+                "display": "flex",
+                "opacity": "0.955382",
+                "transform": "matrix(1, 0, 0, 1, 0, -0.267708)",
+                "mouseOver": true
+              },
+              {
+                "t": 310.8,
+                "display": "flex",
+                "opacity": "0.983962",
+                "transform": "matrix(1, 0, 0, 1, 0, -0.0962265)",
+                "mouseOver": true
+              }
+            ],
+            "n": 19,
+            "elapsed": 312.2
+          },
+          "animMeta": {
+            "supported": true,
+            "count": 1,
+            "animations": [
+              {
+                "id": null,
+                "playState": "running",
+                "currentTime": 216.7,
+                "duration": 240,
+                "target": "DIV.rec-hover",
+                "properties": [
+                  "transform",
+                  "opacity"
+                ]
+              }
+            ]
+          },
+          "box": {
+            "x": 276,
+            "y": 160.296875
+          }
+        }
+      ],
+      "film": {
+        "kind": "Playwright tracing (screenshots: true)",
+        "frames": 17,
+        "bytes": 93598,
+        "ms": 445.33,
+        "artifact": "C:\\Users\\Andrew\\.swarm\\worktrees\\C--code-claude-plugin-marketplace\\ui-probe-bakeoff-harness-1\\build-web\\plugins\\ui-probe\\bakeoff\\results\\artifacts\\rq3-trace-playwright.zip",
+        "framesMedian": 17,
+        "bytesMedian": 93597,
+        "msMedian": 444.52,
+        "msSamples": [
+          445.33,
+          444.52,
+          437.03
+        ]
+      },
+      "repeats": 3
+    },
+    {
+      "contender": "cdp",
+      "runs": [
+        {
+          "realSample": {
+            "samples": [
+              {
+                "t": -6,
+                "display": "none",
+                "opacity": "1",
+                "transform": "none",
+                "mouseOver": false
+              },
+              {
+                "t": 10.8,
+                "display": "none",
+                "opacity": "1",
+                "transform": "none",
+                "mouseOver": false
+              },
+              {
+                "t": 27.4,
+                "display": "none",
+                "opacity": "1",
+                "transform": "none",
+                "mouseOver": false
+              },
+              {
+                "t": 44,
+                "display": "none",
+                "opacity": "1",
+                "transform": "none",
+                "mouseOver": false
+              },
+              {
+                "t": 60.7,
+                "display": "none",
+                "opacity": "1",
+                "transform": "none",
+                "mouseOver": false
+              },
+              {
+                "t": 77.4,
+                "display": "none",
+                "opacity": "1",
+                "transform": "none",
+                "mouseOver": false
+              },
+              {
+                "t": 94.1,
+                "display": "flex",
+                "opacity": "1",
+                "transform": "none",
+                "mouseOver": true
+              },
+              {
+                "t": 110.7,
+                "display": "flex",
+                "opacity": "1",
+                "transform": "none",
+                "mouseOver": true
+              },
+              {
+                "t": 127.3,
+                "display": "flex",
+                "opacity": "1",
+                "transform": "none",
+                "mouseOver": true
+              },
+              {
+                "t": 144,
+                "display": "flex",
+                "opacity": "1",
+                "transform": "none",
+                "mouseOver": true
+              },
+              {
+                "t": 160.7,
+                "display": "flex",
+                "opacity": "1",
+                "transform": "none",
+                "mouseOver": true
+              },
+              {
+                "t": 177.4,
+                "display": "flex",
+                "opacity": "1",
+                "transform": "none",
+                "mouseOver": true
+              },
+              {
+                "t": 194,
+                "display": "flex",
+                "opacity": "1",
+                "transform": "none",
+                "mouseOver": true
+              },
+              {
+                "t": 210.7,
+                "display": "flex",
+                "opacity": "1",
+                "transform": "none",
+                "mouseOver": true
+              },
+              {
+                "t": 227.4,
+                "display": "flex",
+                "opacity": "1",
+                "transform": "none",
+                "mouseOver": true
+              },
+              {
+                "t": 244,
+                "display": "flex",
+                "opacity": "1",
+                "transform": "none",
+                "mouseOver": true
+              },
+              {
+                "t": 260.7,
+                "display": "flex",
+                "opacity": "1",
+                "transform": "none",
+                "mouseOver": true
+              }
+            ],
+            "n": 17,
+            "elapsed": 261.3
+          },
+          "realAnims": {
+            "supported": true,
+            "count": 0,
+            "animations": []
+          },
+          "animSample": {
+            "samples": [
+              {
+                "t": 14.5,
+                "display": "flex",
+                "opacity": "1",
+                "transform": "none",
+                "mouseOver": true
+              },
+              {
+                "t": 31.2,
+                "display": "flex",
+                "opacity": "1",
+                "transform": "none",
+                "mouseOver": true
+              },
+              {
+                "t": 47.9,
+                "display": "flex",
+                "opacity": "1",
+                "transform": "none",
+                "mouseOver": true
+              },
+              {
+                "t": 64.5,
+                "display": "flex",
+                "opacity": "1",
+                "transform": "none",
+                "mouseOver": true
+              },
+              {
+                "t": 81.1,
+                "display": "flex",
+                "opacity": "1",
+                "transform": "none",
+                "mouseOver": true
+              },
+              {
+                "t": 97.8,
+                "display": "flex",
+                "opacity": "0",
+                "transform": "matrix(1, 0, 0, 1, 0, -6)",
+                "mouseOver": true
+              },
+              {
+                "t": 114.5,
+                "display": "flex",
+                "opacity": "0.11329",
+                "transform": "matrix(1, 0, 0, 1, 0, -5.32026)",
+                "mouseOver": true
+              },
+              {
+                "t": 131.1,
+                "display": "flex",
+                "opacity": "0.219158",
+                "transform": "matrix(1, 0, 0, 1, 0, -4.68505)",
+                "mouseOver": true
+              },
+              {
+                "t": 147.8,
+                "display": "flex",
+                "opacity": "0.320166",
+                "transform": "matrix(1, 0, 0, 1, 0, -4.07901)",
+                "mouseOver": true
+              },
+              {
+                "t": 164.4,
+                "display": "flex",
+                "opacity": "0.415337",
+                "transform": "matrix(1, 0, 0, 1, 0, -3.50798)",
+                "mouseOver": true
+              },
+              {
+                "t": 181.2,
+                "display": "flex",
+                "opacity": "0.506299",
+                "transform": "matrix(1, 0, 0, 1, 0, -2.9622)",
+                "mouseOver": true
+              },
+              {
+                "t": 197.8,
+                "display": "flex",
+                "opacity": "0.590684",
+                "transform": "matrix(1, 0, 0, 1, 0, -2.4559)",
+                "mouseOver": true
+              },
+              {
+                "t": 214.4,
+                "display": "flex",
+                "opacity": "0.669283",
+                "transform": "matrix(1, 0, 0, 1, 0, -1.9843)",
+                "mouseOver": true
+              },
+              {
+                "t": 231.1,
+                "display": "flex",
+                "opacity": "0.74207",
+                "transform": "matrix(1, 0, 0, 1, 0, -1.54758)",
+                "mouseOver": true
+              },
+              {
+                "t": 247.8,
+                "display": "flex",
+                "opacity": "0.807967",
+                "transform": "matrix(1, 0, 0, 1, 0, -1.1522)",
+                "mouseOver": true
+              },
+              {
+                "t": 264.5,
+                "display": "flex",
+                "opacity": "0.866225",
+                "transform": "matrix(1, 0, 0, 1, 0, -0.802648)",
+                "mouseOver": true
+              },
+              {
+                "t": 281.1,
+                "display": "flex",
+                "opacity": "0.915615",
+                "transform": "matrix(1, 0, 0, 1, 0, -0.506309)",
+                "mouseOver": true
+              },
+              {
+                "t": 297.8,
+                "display": "flex",
+                "opacity": "0.955496",
+                "transform": "matrix(1, 0, 0, 1, 0, -0.267027)",
+                "mouseOver": true
+              },
+              {
+                "t": 314.5,
+                "display": "flex",
+                "opacity": "0.983903",
+                "transform": "matrix(1, 0, 0, 1, 0, -0.0965817)",
+                "mouseOver": true
+              }
+            ],
+            "n": 19,
+            "elapsed": 314.7
+          },
+          "animMeta": {
+            "supported": true,
+            "count": 1,
+            "animations": [
+              {
+                "id": null,
+                "playState": "running",
+                "currentTime": 216.7,
+                "duration": 240,
+                "target": "DIV.rec-hover",
+                "properties": [
+                  "transform",
+                  "opacity"
+                ]
+              }
+            ]
+          },
+          "box": {
+            "x": 276,
+            "y": 160.296875
+          }
+        },
+        {
+          "realSample": {
+            "samples": [
+              {
+                "t": -9.9,
+                "display": "none",
+                "opacity": "1",
+                "transform": "none",
+                "mouseOver": false
+              },
+              {
+                "t": 6.6,
+                "display": "none",
+                "opacity": "1",
+                "transform": "none",
+                "mouseOver": false
+              },
+              {
+                "t": 23.3,
+                "display": "none",
+                "opacity": "1",
+                "transform": "none",
+                "mouseOver": false
+              },
+              {
+                "t": 40,
+                "display": "none",
+                "opacity": "1",
+                "transform": "none",
+                "mouseOver": false
+              },
+              {
+                "t": 56.6,
+                "display": "none",
+                "opacity": "1",
+                "transform": "none",
+                "mouseOver": false
+              },
+              {
+                "t": 73.3,
+                "display": "none",
+                "opacity": "1",
+                "transform": "none",
+                "mouseOver": false
+              },
+              {
+                "t": 90,
+                "display": "none",
+                "opacity": "1",
+                "transform": "none",
+                "mouseOver": false
+              },
+              {
+                "t": 106.7,
+                "display": "flex",
+                "opacity": "1",
+                "transform": "none",
+                "mouseOver": true
+              },
+              {
+                "t": 123.4,
+                "display": "flex",
+                "opacity": "1",
+                "transform": "none",
+                "mouseOver": true
+              },
+              {
+                "t": 140,
+                "display": "flex",
+                "opacity": "1",
+                "transform": "none",
+                "mouseOver": true
+              },
+              {
+                "t": 156.7,
+                "display": "flex",
+                "opacity": "1",
+                "transform": "none",
+                "mouseOver": true
+              },
+              {
+                "t": 173.3,
+                "display": "flex",
+                "opacity": "1",
+                "transform": "none",
+                "mouseOver": true
+              },
+              {
+                "t": 190,
+                "display": "flex",
+                "opacity": "1",
+                "transform": "none",
+                "mouseOver": true
+              },
+              {
+                "t": 206.6,
+                "display": "flex",
+                "opacity": "1",
+                "transform": "none",
+                "mouseOver": true
+              },
+              {
+                "t": 223.3,
+                "display": "flex",
+                "opacity": "1",
+                "transform": "none",
+                "mouseOver": true
+              },
+              {
+                "t": 240,
+                "display": "flex",
+                "opacity": "1",
+                "transform": "none",
+                "mouseOver": true
+              },
+              {
+                "t": 256.7,
+                "display": "flex",
+                "opacity": "1",
+                "transform": "none",
+                "mouseOver": true
+              }
+            ],
+            "n": 17,
+            "elapsed": 257.6
+          },
+          "realAnims": {
+            "supported": true,
+            "count": 0,
+            "animations": []
+          },
+          "animSample": {
+            "samples": [
+              {
+                "t": 14.3,
+                "display": "flex",
+                "opacity": "1",
+                "transform": "none",
+                "mouseOver": true
+              },
+              {
+                "t": 30.9,
+                "display": "flex",
+                "opacity": "1",
+                "transform": "none",
+                "mouseOver": true
+              },
+              {
+                "t": 47.7,
+                "display": "flex",
+                "opacity": "1",
+                "transform": "none",
+                "mouseOver": true
+              },
+              {
+                "t": 64.3,
+                "display": "flex",
+                "opacity": "1",
+                "transform": "none",
+                "mouseOver": true
+              },
+              {
+                "t": 81,
+                "display": "flex",
+                "opacity": "1",
+                "transform": "none",
+                "mouseOver": true
+              },
+              {
+                "t": 97.7,
+                "display": "flex",
+                "opacity": "0",
+                "transform": "matrix(1, 0, 0, 1, 0, -6)",
+                "mouseOver": true
+              },
+              {
+                "t": 114.3,
+                "display": "flex",
+                "opacity": "0.113008",
+                "transform": "matrix(1, 0, 0, 1, 0, -5.32195)",
+                "mouseOver": true
+              },
+              {
+                "t": 131,
+                "display": "flex",
+                "opacity": "0.219512",
+                "transform": "matrix(1, 0, 0, 1, 0, -4.68293)",
+                "mouseOver": true
+              },
+              {
+                "t": 147.6,
+                "display": "flex",
+                "opacity": "0.319912",
+                "transform": "matrix(1, 0, 0, 1, 0, -4.08053)",
+                "mouseOver": true
+              },
+              {
+                "t": 164.3,
+                "display": "flex",
+                "opacity": "0.415655",
+                "transform": "matrix(1, 0, 0, 1, 0, -3.50607)",
+                "mouseOver": true
+              },
+              {
+                "t": 181,
+                "display": "flex",
+                "opacity": "0.506073",
+                "transform": "matrix(1, 0, 0, 1, 0, -2.96356)",
+                "mouseOver": true
+              },
+              {
+                "t": 197.7,
+                "display": "flex",
+                "opacity": "0.590964",
+                "transform": "matrix(1, 0, 0, 1, 0, -2.45422)",
+                "mouseOver": true
+              },
+              {
+                "t": 214.3,
+                "display": "flex",
+                "opacity": "0.669542",
+                "transform": "matrix(1, 0, 0, 1, 0, -1.98275)",
+                "mouseOver": true
+              },
+              {
+                "t": 231,
+                "display": "flex",
+                "opacity": "0.742307",
+                "transform": "matrix(1, 0, 0, 1, 0, -1.54616)",
+                "mouseOver": true
+              },
+              {
+                "t": 247.6,
+                "display": "flex",
+                "opacity": "0.807807",
+                "transform": "matrix(1, 0, 0, 1, 0, -1.15316)",
+                "mouseOver": true
+              },
+              {
+                "t": 264.3,
+                "display": "flex",
+                "opacity": "0.866086",
+                "transform": "matrix(1, 0, 0, 1, 0, -0.803485)",
+                "mouseOver": true
+              },
+              {
+                "t": 281,
+                "display": "flex",
+                "opacity": "0.915769",
+                "transform": "matrix(1, 0, 0, 1, 0, -0.505387)",
+                "mouseOver": true
+              },
+              {
+                "t": 297.6,
+                "display": "flex",
+                "opacity": "0.955407",
+                "transform": "matrix(1, 0, 0, 1, 0, -0.267559)",
+                "mouseOver": true
+              },
+              {
+                "t": 314.3,
+                "display": "flex",
+                "opacity": "0.983846",
+                "transform": "matrix(1, 0, 0, 1, 0, -0.0969218)",
+                "mouseOver": true
+              }
+            ],
+            "n": 19,
+            "elapsed": 316.1
+          },
+          "animMeta": {
+            "supported": true,
+            "count": 1,
+            "animations": [
+              {
+                "id": null,
+                "playState": "running",
+                "currentTime": 216.7,
+                "duration": 240,
+                "target": "DIV.rec-hover",
+                "properties": [
+                  "transform",
+                  "opacity"
+                ]
+              }
+            ]
+          },
+          "box": {
+            "x": 276,
+            "y": 160.296875
+          }
+        },
+        {
+          "realSample": {
+            "samples": [
+              {
+                "t": -0.8,
+                "display": "none",
+                "opacity": "1",
+                "transform": "none",
+                "mouseOver": false
+              },
+              {
+                "t": 15.9,
+                "display": "none",
+                "opacity": "1",
+                "transform": "none",
+                "mouseOver": false
+              },
+              {
+                "t": 32.6,
+                "display": "none",
+                "opacity": "1",
+                "transform": "none",
+                "mouseOver": false
+              },
+              {
+                "t": 49.2,
+                "display": "none",
+                "opacity": "1",
+                "transform": "none",
+                "mouseOver": false
+              },
+              {
+                "t": 65.9,
+                "display": "none",
+                "opacity": "1",
+                "transform": "none",
+                "mouseOver": false
+              },
+              {
+                "t": 82.5,
+                "display": "none",
+                "opacity": "1",
+                "transform": "none",
+                "mouseOver": false
+              },
+              {
+                "t": 99.2,
+                "display": "flex",
+                "opacity": "1",
+                "transform": "none",
+                "mouseOver": true
+              },
+              {
+                "t": 115.8,
+                "display": "flex",
+                "opacity": "1",
+                "transform": "none",
+                "mouseOver": true
+              },
+              {
+                "t": 132.5,
+                "display": "flex",
+                "opacity": "1",
+                "transform": "none",
+                "mouseOver": true
+              },
+              {
+                "t": 149.2,
+                "display": "flex",
+                "opacity": "1",
+                "transform": "none",
+                "mouseOver": true
+              },
+              {
+                "t": 165.8,
+                "display": "flex",
+                "opacity": "1",
+                "transform": "none",
+                "mouseOver": true
+              },
+              {
+                "t": 182.5,
+                "display": "flex",
+                "opacity": "1",
+                "transform": "none",
+                "mouseOver": true
+              },
+              {
+                "t": 199.1,
+                "display": "flex",
+                "opacity": "1",
+                "transform": "none",
+                "mouseOver": true
+              },
+              {
+                "t": 215.9,
+                "display": "flex",
+                "opacity": "1",
+                "transform": "none",
+                "mouseOver": true
+              },
+              {
+                "t": 232.5,
+                "display": "flex",
+                "opacity": "1",
+                "transform": "none",
+                "mouseOver": true
+              },
+              {
+                "t": 249.2,
+                "display": "flex",
+                "opacity": "1",
+                "transform": "none",
+                "mouseOver": true
+              },
+              {
+                "t": 265.8,
+                "display": "flex",
+                "opacity": "1",
+                "transform": "none",
+                "mouseOver": true
+              }
+            ],
+            "n": 17,
+            "elapsed": 266.8
+          },
+          "realAnims": {
+            "supported": true,
+            "count": 0,
+            "animations": []
+          },
+          "animSample": {
+            "samples": [
+              {
+                "t": 14.2,
+                "display": "flex",
+                "opacity": "1",
+                "transform": "none",
+                "mouseOver": true
+              },
+              {
+                "t": 30.9,
+                "display": "flex",
+                "opacity": "1",
+                "transform": "none",
+                "mouseOver": true
+              },
+              {
+                "t": 47.5,
+                "display": "flex",
+                "opacity": "1",
+                "transform": "none",
+                "mouseOver": true
+              },
+              {
+                "t": 64.2,
+                "display": "flex",
+                "opacity": "1",
+                "transform": "none",
+                "mouseOver": true
+              },
+              {
+                "t": 80.8,
+                "display": "flex",
+                "opacity": "1",
+                "transform": "none",
+                "mouseOver": true
+              },
+              {
+                "t": 97.5,
+                "display": "flex",
+                "opacity": "0",
+                "transform": "matrix(1, 0, 0, 1, 0, -6)",
+                "mouseOver": true
+              },
+              {
+                "t": 114.2,
+                "display": "flex",
+                "opacity": "0.112989",
+                "transform": "matrix(1, 0, 0, 1, 0, -5.32207)",
+                "mouseOver": true
+              },
+              {
+                "t": 130.9,
+                "display": "flex",
+                "opacity": "0.219493",
+                "transform": "matrix(1, 0, 0, 1, 0, -4.68304)",
+                "mouseOver": true
+              },
+              {
+                "t": 147.6,
+                "display": "flex",
+                "opacity": "0.320484",
+                "transform": "matrix(1, 0, 0, 1, 0, -4.0771)",
+                "mouseOver": true
+              },
+              {
+                "t": 164.2,
+                "display": "flex",
+                "opacity": "0.415638",
+                "transform": "matrix(1, 0, 0, 1, 0, -3.50617)",
+                "mouseOver": true
+              },
+              {
+                "t": 180.9,
+                "display": "flex",
+                "opacity": "0.506058",
+                "transform": "matrix(1, 0, 0, 1, 0, -2.96365)",
+                "mouseOver": true
+              },
+              {
+                "t": 197.5,
+                "display": "flex",
+                "opacity": "0.590458",
+                "transform": "matrix(1, 0, 0, 1, 0, -2.45725)",
+                "mouseOver": true
+              },
+              {
+                "t": 214.2,
+                "display": "flex",
+                "opacity": "0.669529",
+                "transform": "matrix(1, 0, 0, 1, 0, -1.98283)",
+                "mouseOver": true
+              },
+              {
+                "t": 230.9,
+                "display": "flex",
+                "opacity": "0.742294",
+                "transform": "matrix(1, 0, 0, 1, 0, -1.54623)",
+                "mouseOver": true
+              },
+              {
+                "t": 247.5,
+                "display": "flex",
+                "opacity": "0.807795",
+                "transform": "matrix(1, 0, 0, 1, 0, -1.15323)",
+                "mouseOver": true
+              },
+              {
+                "t": 264.2,
+                "display": "flex",
+                "opacity": "0.866076",
+                "transform": "matrix(1, 0, 0, 1, 0, -0.803543)",
+                "mouseOver": true
+              },
+              {
+                "t": 280.9,
+                "display": "flex",
+                "opacity": "0.915761",
+                "transform": "matrix(1, 0, 0, 1, 0, -0.505436)",
+                "mouseOver": true
+              },
+              {
+                "t": 297.6,
+                "display": "flex",
+                "opacity": "0.955607",
+                "transform": "matrix(1, 0, 0, 1, 0, -0.266359)",
+                "mouseOver": true
+              },
+              {
+                "t": 314.2,
+                "display": "flex",
+                "opacity": "0.983842",
+                "transform": "matrix(1, 0, 0, 1, 0, -0.0969455)",
+                "mouseOver": true
+              }
+            ],
+            "n": 19,
+            "elapsed": 315.3
+          },
+          "animMeta": {
+            "supported": true,
+            "count": 1,
+            "animations": [
+              {
+                "id": null,
+                "playState": "running",
+                "currentTime": 216.7,
+                "duration": 240,
+                "target": "DIV.rec-hover",
+                "properties": [
+                  "transform",
+                  "opacity"
+                ]
+              }
+            ]
+          },
+          "box": {
+            "x": 276,
+            "y": 160.296875
+          }
+        }
+      ],
+      "film": {
+        "kind": "CDP Page.startScreencast (jpeg q60)",
+        "frames": 17,
+        "bytes": 203253,
+        "ms": 414.56,
+        "framesMedian": 17,
+        "bytesMedian": 203253,
+        "msMedian": 410.16,
+        "msSamples": [
+          414.56,
+          407.84,
+          410.16
+        ]
+      },
+      "repeats": 3
+    }
+  ]
+}

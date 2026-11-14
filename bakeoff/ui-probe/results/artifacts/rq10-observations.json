@@ -1,0 +1,774 @@
+[
+  {
+    "contender": "playwright",
+    "journey": "J1 open and inspect",
+    "steps": [
+      {
+        "name": "load /recommend",
+        "delta": "#rec-row-row-quiet-drama",
+        "fullText": "- banner:\n  - link \"Torrent Hub\":\n    - /url: /\n    - text: Torrent\n    - emphasis: Hub\n  - link \"Downloads\":\n    - /url: /downloads\n  - link \"Library\":\n    - /url: /library\n  - link \"Trailers\":\n    - /url: \"#\"\n  - button \"Bakeoff\"\n  - menu:\n    - text: Bakeoff\n    - menuitem \"Profiles\"\n    - menuitem \"Settings\"\n    - menuitem \"Stuffing\"\n    - menuitem \"Seeding\"\n    - menuitem \"Requests\"\n    - menuitem \"Notifications blocked\" [disabled]\n    - menuitem \"Switch Profile\"\n- status\n- main:\n  - heading \"Recommended\" [level=1]\n  - link \"Home\":\n    - /url: /\n  - text: Quiet drama\n  - paragraph: Synthetic fixture row\n  - link \"No image Harbour Lights\":\n    - /url: /media/900001?media_type=movie&rec_row=row-quiet-drama\n  - link \"No image The Long Static\":\n    - /url: /media/900002?media_type=movie&rec_row=row-quiet-drama\n  - link \"No image Winter Ferry\":\n    - /url: /media/900003?media_type=movie&rec_row=row-quiet-drama\n  - text: Coastal\n  - paragraph: Synthetic fixture row\n  - link \"No image Salt Marsh\":\n    - /url: /media/900004?media_type=movie&rec_row=row-coastal\n  - link \"No image Signal House\":\n    - /url: /media/900005?media_type=tv&rec_row=row-coastal\n  - link \"No image Low Tide\":\n    - /url: /media/900006?media_type=movie&rec_row=row-coastal\n  - button \"Get LLM picks\"",
+        "deltaText": "- text: Quiet drama\n- paragraph: Synthetic fixture row\n- link \"No image Harbour Lights\":\n  - /url: /media/900001?media_type=movie&rec_row=row-quiet-drama\n- link \"No image The Long Static\":\n  - /url: /media/900002?media_type=movie&rec_row=row-quiet-drama\n- link \"No image Winter Ferry\":\n  - /url: /media/900003?media_type=movie&rec_row=row-quiet-drama",
+        "full": {
+          "bytes": 1287,
+          "chars": 1287,
+          "tokens": 322
+        },
+        "deltaSize": {
+          "bytes": 350,
+          "chars": 350,
+          "tokens": 88
+        }
+      },
+      {
+        "name": "read the second row",
+        "delta": "#rec-row-row-coastal",
+        "fullText": "- banner:\n  - link \"Torrent Hub\":\n    - /url: /\n    - text: Torrent\n    - emphasis: Hub\n  - link \"Downloads\":\n    - /url: /downloads\n  - link \"Library\":\n    - /url: /library\n  - link \"Trailers\":\n    - /url: \"#\"\n  - button \"Bakeoff\"\n  - menu:\n    - text: Bakeoff\n    - menuitem \"Profiles\"\n    - menuitem \"Settings\"\n    - menuitem \"Stuffing\"\n    - menuitem \"Seeding\"\n    - menuitem \"Requests\"\n    - menuitem \"Notifications blocked\" [disabled]\n    - menuitem \"Switch Profile\"\n- status\n- main:\n  - heading \"Recommended\" [level=1]\n  - link \"Home\":\n    - /url: /\n  - text: Quiet drama\n  - paragraph: Synthetic fixture row\n  - link \"No image Harbour Lights\":\n    - /url: /media/900001?media_type=movie&rec_row=row-quiet-drama\n  - link \"No image The Long Static\":\n    - /url: /media/900002?media_type=movie&rec_row=row-quiet-drama\n  - link \"No image Winter Ferry\":\n    - /url: /media/900003?media_type=movie&rec_row=row-quiet-drama\n  - text: Coastal\n  - paragraph: Synthetic fixture row\n  - link \"No image Salt Marsh\":\n    - /url: /media/900004?media_type=movie&rec_row=row-coastal\n  - link \"No image Signal House\":\n    - /url: /media/900005?media_type=tv&rec_row=row-coastal\n  - link \"No image Low Tide\":\n    - /url: /media/900006?media_type=movie&rec_row=row-coastal\n  - button \"Get LLM picks\"",
+        "deltaText": "- text: Coastal\n- paragraph: Synthetic fixture row\n- link \"No image Salt Marsh\":\n  - /url: /media/900004?media_type=movie&rec_row=row-coastal\n- link \"No image Signal House\":\n  - /url: /media/900005?media_type=tv&rec_row=row-coastal\n- link \"No image Low Tide\":\n  - /url: /media/900006?media_type=movie&rec_row=row-coastal",
+        "full": {
+          "bytes": 1287,
+          "chars": 1287,
+          "tokens": 322
+        },
+        "deltaSize": {
+          "bytes": 320,
+          "chars": 320,
+          "tokens": 80
+        }
+      },
+      {
+        "name": "open the sheet",
+        "delta": "#detail-sheet-body",
+        "fullText": "- banner:\n  - link \"Torrent Hub\":\n    - /url: /\n    - text: Torrent\n    - emphasis: Hub\n  - link \"Downloads\":\n    - /url: /downloads\n  - link \"Library\":\n    - /url: /library\n  - link \"Trailers\":\n    - /url: \"#\"\n  - button \"Bakeoff\"\n  - menu:\n    - text: Bakeoff\n    - menuitem \"Profiles\"\n    - menuitem \"Settings\"\n    - menuitem \"Stuffing\"\n    - menuitem \"Seeding\"\n    - menuitem \"Requests\"\n    - menuitem \"Notifications blocked\" [disabled]\n    - menuitem \"Switch Profile\"\n- main:\n  - heading \"Recommended\" [level=1]\n  - link \"Home\":\n    - /url: /\n  - text: Quiet drama\n  - paragraph: Synthetic fixture row\n  - link \"No image Harbour Lights\":\n    - /url: /media/900001?media_type=movie&rec_row=row-quiet-drama\n  - link \"No image The Long Static\":\n    - /url: /media/900002?media_type=movie&rec_row=row-quiet-drama\n  - link \"No image Winter Ferry\":\n    - /url: /media/900003?media_type=movie&rec_row=row-quiet-drama\n  - text: Coastal\n  - paragraph: Synthetic fixture row\n  - link \"No image Salt Marsh\":\n    - /url: /media/900004?media_type=movie&rec_row=row-coastal\n  - link \"No image Signal House\":\n    - /url: /media/900005?media_type=tv&rec_row=row-coastal\n  - link \"No image Low Tide\":\n    - /url: /media/900006?media_type=movie&rec_row=row-coastal\n  - button \"Get LLM picks\"\n- dialog \"Title details\":\n  - button \"Close\": ×\n  - img \"Sleepless Mom\"\n  - heading \"Sleepless Mom\" [level=1]\n  - paragraph: 2021 movie ★ 10.0\n  - button \"My list\"\n  - button \"Seen it\"\n  - button \"Not for me\"\n  - group \"Your rating\":\n    - text: Your rating ☆\n    - button \"0.5 stars\"\n    - button \"1 star\"\n    - text: ☆\n    - button \"1.5 stars\"\n    - button \"2 stars\"\n    - text: ☆\n    - button \"2.5 stars\"\n    - button \"3 stars\"\n    - text: ☆\n    - button \"3.5 stars\"\n    - button \"4 stars\"\n    - text: ☆\n    - button \"4.5 stars\"\n    - button \"5 stars\"\n    - text: Tap to rate\n  - heading \"Why it's here\" [level=4]\n  - text: Quiet drama Slow burn Coastal\n  - paragraph: In order to celebrate Father’s Day, Gogor gets homework from school to write about his father. But, Gogor never knew his father, so he questions his mother. However, his mother refuses to answer because she has so much work to do. Gogor becomes worried that he won't be able to complete his homework.\n  - button \"Find torrent\"\n  - text: Upload .torrent\n  - status",
+        "deltaText": "- button \"Close\": ×\n- img \"Sleepless Mom\"\n- heading \"Sleepless Mom\" [level=1]\n- paragraph: 2021 movie ★ 10.0\n- button \"My list\"\n- button \"Seen it\"\n- button \"Not for me\"\n- group \"Your rating\":\n  - text: Your rating ☆\n  - button \"0.5 stars\"\n  - button \"1 star\"\n  - text: ☆\n  - button \"1.5 stars\"\n  - button \"2 stars\"\n  - text: ☆\n  - button \"2.5 stars\"\n  - button \"3 stars\"\n  - text: ☆\n  - button \"3.5 stars\"\n  - button \"4 stars\"\n  - text: ☆\n  - button \"4.5 stars\"\n  - button \"5 stars\"\n  - text: Tap to rate\n- heading \"Why it's here\" [level=4]\n- text: Quiet drama Slow burn Coastal\n- paragraph: In order to celebrate Father’s Day, Gogor gets homework from school to write about his father. But, Gogor never knew his father, so he questions his mother. However, his mother refuses to answer because she has so much work to do. Gogor becomes worried that he won't be able to complete his homework.\n- button \"Find torrent\"\n- text: Upload .torrent",
+        "full": {
+          "bytes": 2329,
+          "chars": 2314,
+          "tokens": 579
+        },
+        "deltaSize": {
+          "bytes": 955,
+          "chars": 940,
+          "tokens": 235
+        }
+      },
+      {
+        "name": "read the action block",
+        "delta": "#detail-rec",
+        "fullText": "- banner:\n  - link \"Torrent Hub\":\n    - /url: /\n    - text: Torrent\n    - emphasis: Hub\n  - link \"Downloads\":\n    - /url: /downloads\n  - link \"Library\":\n    - /url: /library\n  - link \"Trailers\":\n    - /url: \"#\"\n  - button \"Bakeoff\"\n  - menu:\n    - text: Bakeoff\n    - menuitem \"Profiles\"\n    - menuitem \"Settings\"\n    - menuitem \"Stuffing\"\n    - menuitem \"Seeding\"\n    - menuitem \"Requests\"\n    - menuitem \"Notifications blocked\" [disabled]\n    - menuitem \"Switch Profile\"\n- main:\n  - heading \"Recommended\" [level=1]\n  - link \"Home\":\n    - /url: /\n  - text: Quiet drama\n  - paragraph: Synthetic fixture row\n  - link \"No image Harbour Lights\":\n    - /url: /media/900001?media_type=movie&rec_row=row-quiet-drama\n  - link \"No image The Long Static\":\n    - /url: /media/900002?media_type=movie&rec_row=row-quiet-drama\n  - link \"No image Winter Ferry\":\n    - /url: /media/900003?media_type=movie&rec_row=row-quiet-drama\n  - text: Coastal\n  - paragraph: Synthetic fixture row\n  - link \"No image Salt Marsh\":\n    - /url: /media/900004?media_type=movie&rec_row=row-coastal\n  - link \"No image Signal House\":\n    - /url: /media/900005?media_type=tv&rec_row=row-coastal\n  - link \"No image Low Tide\":\n    - /url: /media/900006?media_type=movie&rec_row=row-coastal\n  - button \"Get LLM picks\"\n- dialog \"Title details\":\n  - button \"Close\": ×\n  - img \"Sleepless Mom\"\n  - heading \"Sleepless Mom\" [level=1]\n  - paragraph: 2021 movie ★ 10.0\n  - button \"My list\"\n  - button \"Seen it\"\n  - button \"Not for me\"\n  - group \"Your rating\":\n    - text: Your rating ☆\n    - button \"0.5 stars\"\n    - button \"1 star\"\n    - text: ☆\n    - button \"1.5 stars\"\n    - button \"2 stars\"\n    - text: ☆\n    - button \"2.5 stars\"\n    - button \"3 stars\"\n    - text: ☆\n    - button \"3.5 stars\"\n    - button \"4 stars\"\n    - text: ☆\n    - button \"4.5 stars\"\n    - button \"5 stars\"\n    - text: Tap to rate\n  - heading \"Why it's here\" [level=4]\n  - text: Quiet drama Slow burn Coastal\n  - paragraph: In order to celebrate Father’s Day, Gogor gets homework from school to write about his father. But, Gogor never knew his father, so he questions his mother. However, his mother refuses to answer because she has so much work to do. Gogor becomes worried that he won't be able to complete his homework.\n  - button \"Find torrent\"\n  - text: Upload .torrent\n  - status",
+        "deltaText": "- button \"My list\"\n- button \"Seen it\"\n- button \"Not for me\"\n- group \"Your rating\":\n  - text: Your rating ☆\n  - button \"0.5 stars\"\n  - button \"1 star\"\n  - text: ☆\n  - button \"1.5 stars\"\n  - button \"2 stars\"\n  - text: ☆\n  - button \"2.5 stars\"\n  - button \"3 stars\"\n  - text: ☆\n  - button \"3.5 stars\"\n  - button \"4 stars\"\n  - text: ☆\n  - button \"4.5 stars\"\n  - button \"5 stars\"\n  - text: Tap to rate\n- heading \"Why it's here\" [level=4]\n- text: Quiet drama Slow burn Coastal",
+        "full": {
+          "bytes": 2329,
+          "chars": 2314,
+          "tokens": 579
+        },
+        "deltaSize": {
+          "bytes": 479,
+          "chars": 469,
+          "tokens": 118
+        }
+      },
+      {
+        "name": "mark Seen it",
+        "delta": "#detail-rec",
+        "fullText": "- banner:\n  - link \"Torrent Hub\":\n    - /url: /\n    - text: Torrent\n    - emphasis: Hub\n  - link \"Downloads\":\n    - /url: /downloads\n  - link \"Library\":\n    - /url: /library\n  - link \"Trailers\":\n    - /url: \"#\"\n  - button \"Bakeoff\"\n  - menu:\n    - text: Bakeoff\n    - menuitem \"Profiles\"\n    - menuitem \"Settings\"\n    - menuitem \"Stuffing\"\n    - menuitem \"Seeding\"\n    - menuitem \"Requests\"\n    - menuitem \"Notifications blocked\" [disabled]\n    - menuitem \"Switch Profile\"\n- main:\n  - heading \"Recommended\" [level=1]\n  - link \"Home\":\n    - /url: /\n  - text: Quiet drama\n  - paragraph: Synthetic fixture row\n  - link \"No image Harbour Lights\":\n    - /url: /media/900001?media_type=movie&rec_row=row-quiet-drama\n  - text: Seen\n  - link \"No image The Long Static\":\n    - /url: /media/900002?media_type=movie&rec_row=row-quiet-drama\n  - link \"No image Winter Ferry\":\n    - /url: /media/900003?media_type=movie&rec_row=row-quiet-drama\n  - text: Coastal\n  - paragraph: Synthetic fixture row\n  - link \"No image Salt Marsh\":\n    - /url: /media/900004?media_type=movie&rec_row=row-coastal\n  - link \"No image Signal House\":\n    - /url: /media/900005?media_type=tv&rec_row=row-coastal\n  - link \"No image Low Tide\":\n    - /url: /media/900006?media_type=movie&rec_row=row-coastal\n  - button \"Get LLM picks\"\n- dialog \"Title details\":\n  - button \"Close\": ×\n  - img \"Sleepless Mom\"\n  - heading \"Sleepless Mom\" [level=1]\n  - paragraph: 2021 movie ★ 10.0\n  - button \"My list\"\n  - button \"Seen\" [pressed]\n  - button \"Not for me\"\n  - group \"Your rating\":\n    - text: Your rating ☆\n    - button \"0.5 stars\"\n    - button \"1 star\"\n    - text: ☆\n    - button \"1.5 stars\"\n    - button \"2 stars\"\n    - text: ☆\n    - button \"2.5 stars\"\n    - button \"3 stars\"\n    - text: ☆\n    - button \"3.5 stars\"\n    - button \"4 stars\"\n    - text: ☆\n    - button \"4.5 stars\"\n    - button \"5 stars\"\n    - text: Tap to rate\n  - heading \"Why it's here\" [level=4]\n  - text: Quiet drama Slow burn Coastal\n  - paragraph: In order to celebrate Father’s Day, Gogor gets homework from school to write about his father. But, Gogor never knew his father, so he questions his mother. However, his mother refuses to answer because she has so much work to do. Gogor becomes worried that he won't be able to complete his homework.\n  - button \"Find torrent\"\n  - text: Upload .torrent\n  - status",
+        "deltaText": "- button \"My list\"\n- button \"Seen\" [pressed]\n- button \"Not for me\"\n- group \"Your rating\":\n  - text: Your rating ☆\n  - button \"0.5 stars\"\n  - button \"1 star\"\n  - text: ☆\n  - button \"1.5 stars\"\n  - button \"2 stars\"\n  - text: ☆\n  - button \"2.5 stars\"\n  - button \"3 stars\"\n  - text: ☆\n  - button \"3.5 stars\"\n  - button \"4 stars\"\n  - text: ☆\n  - button \"4.5 stars\"\n  - button \"5 stars\"\n  - text: Tap to rate\n- heading \"Why it's here\" [level=4]\n- text: Quiet drama Slow burn Coastal",
+        "full": {
+          "bytes": 2351,
+          "chars": 2336,
+          "tokens": 584
+        },
+        "deltaSize": {
+          "bytes": 486,
+          "chars": 476,
+          "tokens": 119
+        }
+      },
+      {
+        "name": "close the sheet",
+        "delta": "#rec-row-row-quiet-drama",
+        "fullText": "- banner:\n  - link \"Torrent Hub\":\n    - /url: /\n    - text: Torrent\n    - emphasis: Hub\n  - link \"Downloads\":\n    - /url: /downloads\n  - link \"Library\":\n    - /url: /library\n  - link \"Trailers\":\n    - /url: \"#\"\n  - button \"Bakeoff\"\n  - menu:\n    - text: Bakeoff\n    - menuitem \"Profiles\"\n    - menuitem \"Settings\"\n    - menuitem \"Stuffing\"\n    - menuitem \"Seeding\"\n    - menuitem \"Requests\"\n    - menuitem \"Notifications blocked\" [disabled]\n    - menuitem \"Switch Profile\"\n- main:\n  - heading \"Recommended\" [level=1]\n  - link \"Home\":\n    - /url: /\n  - text: Quiet drama\n  - paragraph: Synthetic fixture row\n  - link \"No image Harbour Lights\":\n    - /url: /media/900001?media_type=movie&rec_row=row-quiet-drama\n  - text: Seen\n  - link \"No image The Long Static\":\n    - /url: /media/900002?media_type=movie&rec_row=row-quiet-drama\n  - link \"No image Winter Ferry\":\n    - /url: /media/900003?media_type=movie&rec_row=row-quiet-drama\n  - text: Coastal\n  - paragraph: Synthetic fixture row\n  - link \"No image Salt Marsh\":\n    - /url: /media/900004?media_type=movie&rec_row=row-coastal\n  - link \"No image Signal House\":\n    - /url: /media/900005?media_type=tv&rec_row=row-coastal\n  - link \"No image Low Tide\":\n    - /url: /media/900006?media_type=movie&rec_row=row-coastal\n  - button \"Get LLM picks\"\n- status",
+        "deltaText": "- text: Quiet drama\n- paragraph: Synthetic fixture row\n- link \"No image Harbour Lights\":\n  - /url: /media/900001?media_type=movie&rec_row=row-quiet-drama\n- text: Seen\n- link \"No image The Long Static\":\n  - /url: /media/900002?media_type=movie&rec_row=row-quiet-drama\n- link \"No image Winter Ferry\":\n  - /url: /media/900003?media_type=movie&rec_row=row-quiet-drama",
+        "full": {
+          "bytes": 1302,
+          "chars": 1302,
+          "tokens": 326
+        },
+        "deltaSize": {
+          "bytes": 363,
+          "chars": 363,
+          "tokens": 91
+        }
+      },
+      {
+        "name": "read the first row again",
+        "delta": "#rec-row-row-quiet-drama",
+        "fullText": "- banner:\n  - link \"Torrent Hub\":\n    - /url: /\n    - text: Torrent\n    - emphasis: Hub\n  - link \"Downloads\":\n    - /url: /downloads\n  - link \"Library\":\n    - /url: /library\n  - link \"Trailers\":\n    - /url: \"#\"\n  - button \"Bakeoff\"\n  - menu:\n    - text: Bakeoff\n    - menuitem \"Profiles\"\n    - menuitem \"Settings\"\n    - menuitem \"Stuffing\"\n    - menuitem \"Seeding\"\n    - menuitem \"Requests\"\n    - menuitem \"Notifications blocked\" [disabled]\n    - menuitem \"Switch Profile\"\n- main:\n  - heading \"Recommended\" [level=1]\n  - link \"Home\":\n    - /url: /\n  - text: Quiet drama\n  - paragraph: Synthetic fixture row\n  - link \"No image Harbour Lights\":\n    - /url: /media/900001?media_type=movie&rec_row=row-quiet-drama\n  - text: Seen\n  - link \"No image The Long Static\":\n    - /url: /media/900002?media_type=movie&rec_row=row-quiet-drama\n  - link \"No image Winter Ferry\":\n    - /url: /media/900003?media_type=movie&rec_row=row-quiet-drama\n  - text: Coastal\n  - paragraph: Synthetic fixture row\n  - link \"No image Salt Marsh\":\n    - /url: /media/900004?media_type=movie&rec_row=row-coastal\n  - link \"No image Signal House\":\n    - /url: /media/900005?media_type=tv&rec_row=row-coastal\n  - link \"No image Low Tide\":\n    - /url: /media/900006?media_type=movie&rec_row=row-coastal\n  - button \"Get LLM picks\"\n- status",
+        "deltaText": "- text: Quiet drama\n- paragraph: Synthetic fixture row\n- link \"No image Harbour Lights\":\n  - /url: /media/900001?media_type=movie&rec_row=row-quiet-drama\n- text: Seen\n- link \"No image The Long Static\":\n  - /url: /media/900002?media_type=movie&rec_row=row-quiet-drama\n- link \"No image Winter Ferry\":\n  - /url: /media/900003?media_type=movie&rec_row=row-quiet-drama",
+        "full": {
+          "bytes": 1302,
+          "chars": 1302,
+          "tokens": 326
+        },
+        "deltaSize": {
+          "bytes": 363,
+          "chars": 363,
+          "tokens": 91
+        }
+      }
+    ]
+  },
+  {
+    "contender": "playwright",
+    "journey": "J2 action loop",
+    "steps": [
+      {
+        "name": "load /recommend",
+        "delta": "#rec-row-row-quiet-drama",
+        "fullText": "- banner:\n  - link \"Torrent Hub\":\n    - /url: /\n    - text: Torrent\n    - emphasis: Hub\n  - link \"Downloads\":\n    - /url: /downloads\n  - link \"Library\":\n    - /url: /library\n  - link \"Trailers\":\n    - /url: \"#\"\n  - button \"Bakeoff\"\n  - menu:\n    - text: Bakeoff\n    - menuitem \"Profiles\"\n    - menuitem \"Settings\"\n    - menuitem \"Stuffing\"\n    - menuitem \"Seeding\"\n    - menuitem \"Requests\"\n    - menuitem \"Notifications blocked\" [disabled]\n    - menuitem \"Switch Profile\"\n- status\n- main:\n  - heading \"Recommended\" [level=1]\n  - link \"Home\":\n    - /url: /\n  - text: Quiet drama\n  - paragraph: Synthetic fixture row\n  - link \"No image Harbour Lights\":\n    - /url: /media/900001?media_type=movie&rec_row=row-quiet-drama\n  - link \"No image The Long Static\":\n    - /url: /media/900002?media_type=movie&rec_row=row-quiet-drama\n  - link \"No image Winter Ferry\":\n    - /url: /media/900003?media_type=movie&rec_row=row-quiet-drama\n  - text: Coastal\n  - paragraph: Synthetic fixture row\n  - link \"No image Salt Marsh\":\n    - /url: /media/900004?media_type=movie&rec_row=row-coastal\n  - link \"No image Signal House\":\n    - /url: /media/900005?media_type=tv&rec_row=row-coastal\n  - link \"No image Low Tide\":\n    - /url: /media/900006?media_type=movie&rec_row=row-coastal\n  - button \"Get LLM picks\"",
+        "deltaText": "- text: Quiet drama\n- paragraph: Synthetic fixture row\n- link \"No image Harbour Lights\":\n  - /url: /media/900001?media_type=movie&rec_row=row-quiet-drama\n- link \"No image The Long Static\":\n  - /url: /media/900002?media_type=movie&rec_row=row-quiet-drama\n- link \"No image Winter Ferry\":\n  - /url: /media/900003?media_type=movie&rec_row=row-quiet-drama",
+        "full": {
+          "bytes": 1287,
+          "chars": 1287,
+          "tokens": 322
+        },
+        "deltaSize": {
+          "bytes": 350,
+          "chars": 350,
+          "tokens": 88
+        }
+      },
+      {
+        "name": "open the sheet",
+        "delta": "#detail-sheet-body",
+        "fullText": "- banner:\n  - link \"Torrent Hub\":\n    - /url: /\n    - text: Torrent\n    - emphasis: Hub\n  - link \"Downloads\":\n    - /url: /downloads\n  - link \"Library\":\n    - /url: /library\n  - link \"Trailers\":\n    - /url: \"#\"\n  - button \"Bakeoff\"\n  - menu:\n    - text: Bakeoff\n    - menuitem \"Profiles\"\n    - menuitem \"Settings\"\n    - menuitem \"Stuffing\"\n    - menuitem \"Seeding\"\n    - menuitem \"Requests\"\n    - menuitem \"Notifications blocked\" [disabled]\n    - menuitem \"Switch Profile\"\n- main:\n  - heading \"Recommended\" [level=1]\n  - link \"Home\":\n    - /url: /\n  - text: Quiet drama\n  - paragraph: Synthetic fixture row\n  - link \"No image Harbour Lights\":\n    - /url: /media/900001?media_type=movie&rec_row=row-quiet-drama\n  - link \"No image The Long Static\":\n    - /url: /media/900002?media_type=movie&rec_row=row-quiet-drama\n  - link \"No image Winter Ferry\":\n    - /url: /media/900003?media_type=movie&rec_row=row-quiet-drama\n  - text: Coastal\n  - paragraph: Synthetic fixture row\n  - link \"No image Salt Marsh\":\n    - /url: /media/900004?media_type=movie&rec_row=row-coastal\n  - link \"No image Signal House\":\n    - /url: /media/900005?media_type=tv&rec_row=row-coastal\n  - link \"No image Low Tide\":\n    - /url: /media/900006?media_type=movie&rec_row=row-coastal\n  - button \"Get LLM picks\"\n- dialog \"Title details\":\n  - button \"Close\": ×\n  - img \"Sleepless Mom\"\n  - heading \"Sleepless Mom\" [level=1]\n  - paragraph: 2021 movie ★ 10.0\n  - button \"My list\"\n  - button \"Seen it\"\n  - button \"Not for me\"\n  - group \"Your rating\":\n    - text: Your rating ☆\n    - button \"0.5 stars\"\n    - button \"1 star\"\n    - text: ☆\n    - button \"1.5 stars\"\n    - button \"2 stars\"\n    - text: ☆\n    - button \"2.5 stars\"\n    - button \"3 stars\"\n    - text: ☆\n    - button \"3.5 stars\"\n    - button \"4 stars\"\n    - text: ☆\n    - button \"4.5 stars\"\n    - button \"5 stars\"\n    - text: Tap to rate\n  - heading \"Why it's here\" [level=4]\n  - text: Quiet drama Slow burn Coastal\n  - paragraph: In order to celebrate Father’s Day, Gogor gets homework from school to write about his father. But, Gogor never knew his father, so he questions his mother. However, his mother refuses to answer because she has so much work to do. Gogor becomes worried that he won't be able to complete his homework.\n  - button \"Find torrent\"\n  - text: Upload .torrent\n  - status",
+        "deltaText": "- button \"Close\": ×\n- img \"Sleepless Mom\"\n- heading \"Sleepless Mom\" [level=1]\n- paragraph: 2021 movie ★ 10.0\n- button \"My list\"\n- button \"Seen it\"\n- button \"Not for me\"\n- group \"Your rating\":\n  - text: Your rating ☆\n  - button \"0.5 stars\"\n  - button \"1 star\"\n  - text: ☆\n  - button \"1.5 stars\"\n  - button \"2 stars\"\n  - text: ☆\n  - button \"2.5 stars\"\n  - button \"3 stars\"\n  - text: ☆\n  - button \"3.5 stars\"\n  - button \"4 stars\"\n  - text: ☆\n  - button \"4.5 stars\"\n  - button \"5 stars\"\n  - text: Tap to rate\n- heading \"Why it's here\" [level=4]\n- text: Quiet drama Slow burn Coastal\n- paragraph: In order to celebrate Father’s Day, Gogor gets homework from school to write about his father. But, Gogor never knew his father, so he questions his mother. However, his mother refuses to answer because she has so much work to do. Gogor becomes worried that he won't be able to complete his homework.\n- button \"Find torrent\"\n- text: Upload .torrent",
+        "full": {
+          "bytes": 2329,
+          "chars": 2314,
+          "tokens": 579
+        },
+        "deltaSize": {
+          "bytes": 955,
+          "chars": 940,
+          "tokens": 235
+        }
+      },
+      {
+        "name": "My list",
+        "delta": "#detail-rec",
+        "fullText": "- banner:\n  - link \"Torrent Hub\":\n    - /url: /\n    - text: Torrent\n    - emphasis: Hub\n  - link \"Downloads\":\n    - /url: /downloads\n  - link \"Library\":\n    - /url: /library\n  - link \"Trailers\":\n    - /url: \"#\"\n  - button \"Bakeoff\"\n  - menu:\n    - text: Bakeoff\n    - menuitem \"Profiles\"\n    - menuitem \"Settings\"\n    - menuitem \"Stuffing\"\n    - menuitem \"Seeding\"\n    - menuitem \"Requests\"\n    - menuitem \"Notifications blocked\" [disabled]\n    - menuitem \"Switch Profile\"\n- main:\n  - heading \"Recommended\" [level=1]\n  - link \"Home\":\n    - /url: /\n  - text: Quiet drama\n  - paragraph: Synthetic fixture row\n  - link \"No image Harbour Lights\":\n    - /url: /media/900001?media_type=movie&rec_row=row-quiet-drama\n  - text: In list\n  - link \"No image The Long Static\":\n    - /url: /media/900002?media_type=movie&rec_row=row-quiet-drama\n  - link \"No image Winter Ferry\":\n    - /url: /media/900003?media_type=movie&rec_row=row-quiet-drama\n  - text: Coastal\n  - paragraph: Synthetic fixture row\n  - link \"No image Salt Marsh\":\n    - /url: /media/900004?media_type=movie&rec_row=row-coastal\n  - link \"No image Signal House\":\n    - /url: /media/900005?media_type=tv&rec_row=row-coastal\n  - link \"No image Low Tide\":\n    - /url: /media/900006?media_type=movie&rec_row=row-coastal\n  - button \"Get LLM picks\"\n- dialog \"Title details\":\n  - button \"Close\": ×\n  - img \"Sleepless Mom\"\n  - heading \"Sleepless Mom\" [level=1]\n  - paragraph: 2021 movie ★ 10.0\n  - button \"On my list\" [pressed]\n  - button \"Seen it\"\n  - button \"Not for me\"\n  - group \"Your rating\":\n    - text: Your rating ☆\n    - button \"0.5 stars\"\n    - button \"1 star\"\n    - text: ☆\n    - button \"1.5 stars\"\n    - button \"2 stars\"\n    - text: ☆\n    - button \"2.5 stars\"\n    - button \"3 stars\"\n    - text: ☆\n    - button \"3.5 stars\"\n    - button \"4 stars\"\n    - text: ☆\n    - button \"4.5 stars\"\n    - button \"5 stars\"\n    - text: Tap to rate\n  - heading \"Why it's here\" [level=4]\n  - text: Quiet drama Slow burn Coastal\n  - paragraph: In order to celebrate Father’s Day, Gogor gets homework from school to write about his father. But, Gogor never knew his father, so he questions his mother. However, his mother refuses to answer because she has so much work to do. Gogor becomes worried that he won't be able to complete his homework.\n  - button \"Find torrent\"\n  - text: Upload .torrent\n  - status",
+        "deltaText": "- button \"On my list\" [pressed]\n- button \"Seen it\"\n- button \"Not for me\"\n- group \"Your rating\":\n  - text: Your rating ☆\n  - button \"0.5 stars\"\n  - button \"1 star\"\n  - text: ☆\n  - button \"1.5 stars\"\n  - button \"2 stars\"\n  - text: ☆\n  - button \"2.5 stars\"\n  - button \"3 stars\"\n  - text: ☆\n  - button \"3.5 stars\"\n  - button \"4 stars\"\n  - text: ☆\n  - button \"4.5 stars\"\n  - button \"5 stars\"\n  - text: Tap to rate\n- heading \"Why it's here\" [level=4]\n- text: Quiet drama Slow burn Coastal",
+        "full": {
+          "bytes": 2360,
+          "chars": 2345,
+          "tokens": 587
+        },
+        "deltaSize": {
+          "bytes": 492,
+          "chars": 482,
+          "tokens": 121
+        }
+      },
+      {
+        "name": "Seen it",
+        "delta": "#detail-rec",
+        "fullText": "- banner:\n  - link \"Torrent Hub\":\n    - /url: /\n    - text: Torrent\n    - emphasis: Hub\n  - link \"Downloads\":\n    - /url: /downloads\n  - link \"Library\":\n    - /url: /library\n  - link \"Trailers\":\n    - /url: \"#\"\n  - button \"Bakeoff\"\n  - menu:\n    - text: Bakeoff\n    - menuitem \"Profiles\"\n    - menuitem \"Settings\"\n    - menuitem \"Stuffing\"\n    - menuitem \"Seeding\"\n    - menuitem \"Requests\"\n    - menuitem \"Notifications blocked\" [disabled]\n    - menuitem \"Switch Profile\"\n- main:\n  - heading \"Recommended\" [level=1]\n  - link \"Home\":\n    - /url: /\n  - text: Quiet drama\n  - paragraph: Synthetic fixture row\n  - link \"No image Harbour Lights\":\n    - /url: /media/900001?media_type=movie&rec_row=row-quiet-drama\n  - text: Seen\n  - link \"No image The Long Static\":\n    - /url: /media/900002?media_type=movie&rec_row=row-quiet-drama\n  - link \"No image Winter Ferry\":\n    - /url: /media/900003?media_type=movie&rec_row=row-quiet-drama\n  - text: Coastal\n  - paragraph: Synthetic fixture row\n  - link \"No image Salt Marsh\":\n    - /url: /media/900004?media_type=movie&rec_row=row-coastal\n  - link \"No image Signal House\":\n    - /url: /media/900005?media_type=tv&rec_row=row-coastal\n  - link \"No image Low Tide\":\n    - /url: /media/900006?media_type=movie&rec_row=row-coastal\n  - button \"Get LLM picks\"\n- dialog \"Title details\":\n  - button \"Close\": ×\n  - img \"Sleepless Mom\"\n  - heading \"Sleepless Mom\" [level=1]\n  - paragraph: 2021 movie ★ 10.0\n  - button \"On my list\" [pressed]\n  - button \"Seen\" [pressed]\n  - button \"Not for me\"\n  - group \"Your rating\":\n    - text: Your rating ☆\n    - button \"0.5 stars\"\n    - button \"1 star\"\n    - text: ☆\n    - button \"1.5 stars\"\n    - button \"2 stars\"\n    - text: ☆\n    - button \"2.5 stars\"\n    - button \"3 stars\"\n    - text: ☆\n    - button \"3.5 stars\"\n    - button \"4 stars\"\n    - text: ☆\n    - button \"4.5 stars\"\n    - button \"5 stars\"\n    - text: Tap to rate\n  - heading \"Why it's here\" [level=4]\n  - text: Quiet drama Slow burn Coastal\n  - paragraph: In order to celebrate Father’s Day, Gogor gets homework from school to write about his father. But, Gogor never knew his father, so he questions his mother. However, his mother refuses to answer because she has so much work to do. Gogor becomes worried that he won't be able to complete his homework.\n  - button \"Find torrent\"\n  - text: Upload .torrent\n  - status",
+        "deltaText": "- button \"On my list\" [pressed]\n- button \"Seen\" [pressed]\n- button \"Not for me\"\n- group \"Your rating\":\n  - text: Your rating ☆\n  - button \"0.5 stars\"\n  - button \"1 star\"\n  - text: ☆\n  - button \"1.5 stars\"\n  - button \"2 stars\"\n  - text: ☆\n  - button \"2.5 stars\"\n  - button \"3 stars\"\n  - text: ☆\n  - button \"3.5 stars\"\n  - button \"4 stars\"\n  - text: ☆\n  - button \"4.5 stars\"\n  - button \"5 stars\"\n  - text: Tap to rate\n- heading \"Why it's here\" [level=4]\n- text: Quiet drama Slow burn Coastal",
+        "full": {
+          "bytes": 2364,
+          "chars": 2349,
+          "tokens": 588
+        },
+        "deltaSize": {
+          "bytes": 499,
+          "chars": 489,
+          "tokens": 123
+        }
+      },
+      {
+        "name": "rate 4 stars",
+        "delta": "#detail-rec",
+        "fullText": "- banner:\n  - link \"Torrent Hub\":\n    - /url: /\n    - text: Torrent\n    - emphasis: Hub\n  - link \"Downloads\":\n    - /url: /downloads\n  - link \"Library\":\n    - /url: /library\n  - link \"Trailers\":\n    - /url: \"#\"\n  - button \"Bakeoff\"\n  - menu:\n    - text: Bakeoff\n    - menuitem \"Profiles\"\n    - menuitem \"Settings\"\n    - menuitem \"Stuffing\"\n    - menuitem \"Seeding\"\n    - menuitem \"Requests\"\n    - menuitem \"Notifications blocked\" [disabled]\n    - menuitem \"Switch Profile\"\n- main:\n  - heading \"Recommended\" [level=1]\n  - link \"Home\":\n    - /url: /\n  - text: Quiet drama\n  - paragraph: Synthetic fixture row\n  - link \"No image Harbour Lights\":\n    - /url: /media/900001?media_type=movie&rec_row=row-quiet-drama\n  - text: Seen\n  - link \"No image The Long Static\":\n    - /url: /media/900002?media_type=movie&rec_row=row-quiet-drama\n  - link \"No image Winter Ferry\":\n    - /url: /media/900003?media_type=movie&rec_row=row-quiet-drama\n  - text: Coastal\n  - paragraph: Synthetic fixture row\n  - link \"No image Salt Marsh\":\n    - /url: /media/900004?media_type=movie&rec_row=row-coastal\n  - link \"No image Signal House\":\n    - /url: /media/900005?media_type=tv&rec_row=row-coastal\n  - link \"No image Low Tide\":\n    - /url: /media/900006?media_type=movie&rec_row=row-coastal\n  - button \"Get LLM picks\"\n- dialog \"Title details\":\n  - button \"Close\": ×\n  - img \"Sleepless Mom\"\n  - heading \"Sleepless Mom\" [level=1]\n  - paragraph: 2021 movie ★ 10.0\n  - button \"On my list\" [pressed]\n  - button \"Seen\" [pressed]\n  - button \"Not for me\"\n  - group \"Your rating\":\n    - text: Your rating ★\n    - button \"0.5 stars\"\n    - button \"1 star\"\n    - text: ★\n    - button \"1.5 stars\"\n    - button \"2 stars\"\n    - text: ★\n    - button \"2.5 stars\"\n    - button \"3 stars\"\n    - text: ★\n    - button \"3.5 stars\"\n    - button \"4 stars\"\n    - text: ☆\n    - button \"4.5 stars\"\n    - button \"5 stars\"\n    - text: \"You: 4.0★\"\n  - heading \"Why it's here\" [level=4]\n  - text: Quiet drama Slow burn Coastal\n  - paragraph: In order to celebrate Father’s Day, Gogor gets homework from school to write about his father. But, Gogor never knew his father, so he questions his mother. However, his mother refuses to answer because she has so much work to do. Gogor becomes worried that he won't be able to complete his homework.\n  - button \"Find torrent\"\n  - text: Upload .torrent\n  - status",
+        "deltaText": "- button \"On my list\" [pressed]\n- button \"Seen\" [pressed]\n- button \"Not for me\"\n- group \"Your rating\":\n  - text: Your rating ★\n  - button \"0.5 stars\"\n  - button \"1 star\"\n  - text: ★\n  - button \"1.5 stars\"\n  - button \"2 stars\"\n  - text: ★\n  - button \"2.5 stars\"\n  - button \"3 stars\"\n  - text: ★\n  - button \"3.5 stars\"\n  - button \"4 stars\"\n  - text: ☆\n  - button \"4.5 stars\"\n  - button \"5 stars\"\n  - text: \"You: 4.0★\"\n- heading \"Why it's here\" [level=4]\n- text: Quiet drama Slow burn Coastal",
+        "full": {
+          "bytes": 2366,
+          "chars": 2349,
+          "tokens": 588
+        },
+        "deltaSize": {
+          "bytes": 501,
+          "chars": 489,
+          "tokens": 123
+        }
+      },
+      {
+        "name": "Not for me",
+        "delta": "#detail-rec",
+        "fullText": "- banner:\n  - link \"Torrent Hub\":\n    - /url: /\n    - text: Torrent\n    - emphasis: Hub\n  - link \"Downloads\":\n    - /url: /downloads\n  - link \"Library\":\n    - /url: /library\n  - link \"Trailers\":\n    - /url: \"#\"\n  - button \"Bakeoff\"\n  - menu:\n    - text: Bakeoff\n    - menuitem \"Profiles\"\n    - menuitem \"Settings\"\n    - menuitem \"Stuffing\"\n    - menuitem \"Seeding\"\n    - menuitem \"Requests\"\n    - menuitem \"Notifications blocked\" [disabled]\n    - menuitem \"Switch Profile\"\n- text: offline\n- main:\n  - heading \"Recommended\" [level=1]\n  - link \"Home\":\n    - /url: /\n  - text: Quiet drama\n  - paragraph: Synthetic fixture row\n  - link \"No image Harbour Lights\":\n    - /url: /media/900001?media_type=movie&rec_row=row-quiet-drama\n  - text: Not for me\n  - link \"No image The Long Static\":\n    - /url: /media/900002?media_type=movie&rec_row=row-quiet-drama\n  - link \"No image Winter Ferry\":\n    - /url: /media/900003?media_type=movie&rec_row=row-quiet-drama\n  - text: Coastal\n  - paragraph: Synthetic fixture row\n  - link \"No image Salt Marsh\":\n    - /url: /media/900004?media_type=movie&rec_row=row-coastal\n  - link \"No image Signal House\":\n    - /url: /media/900005?media_type=tv&rec_row=row-coastal\n  - link \"No image Low Tide\":\n    - /url: /media/900006?media_type=movie&rec_row=row-coastal\n  - button \"Get LLM picks\"\n- dialog \"Title details\":\n  - button \"Close\": ×\n  - img \"Sleepless Mom\"\n  - heading \"Sleepless Mom\" [level=1]\n  - paragraph: 2021 movie ★ 10.0\n  - button \"On my list\" [pressed]\n  - button \"Seen\" [pressed]\n  - button \"Not for me\" [pressed]\n  - group \"Your rating\":\n    - text: Your rating ★\n    - button \"0.5 stars\"\n    - button \"1 star\"\n    - text: ★\n    - button \"1.5 stars\"\n    - button \"2 stars\"\n    - text: ★\n    - button \"2.5 stars\"\n    - button \"3 stars\"\n    - text: ★\n    - button \"3.5 stars\"\n    - button \"4 stars\"\n    - text: ☆\n    - button \"4.5 stars\"\n    - button \"5 stars\"\n    - text: \"You: 4.0★\"\n  - heading \"Why it's here\" [level=4]\n  - text: Quiet drama Slow burn Coastal\n  - paragraph: In order to celebrate Father’s Day, Gogor gets homework from school to write about his father. But, Gogor never knew his father, so he questions his mother. However, his mother refuses to answer because she has so much work to do. Gogor becomes worried that he won't be able to complete his homework.\n  - button \"Find torrent\"\n  - text: Upload .torrent\n  - status",
+        "deltaText": "- button \"On my list\" [pressed]\n- button \"Seen\" [pressed]\n- button \"Not for me\" [pressed]\n- group \"Your rating\":\n  - text: Your rating ★\n  - button \"0.5 stars\"\n  - button \"1 star\"\n  - text: ★\n  - button \"1.5 stars\"\n  - button \"2 stars\"\n  - text: ★\n  - button \"2.5 stars\"\n  - button \"3 stars\"\n  - text: ★\n  - button \"3.5 stars\"\n  - button \"4 stars\"\n  - text: ☆\n  - button \"4.5 stars\"\n  - button \"5 stars\"\n  - text: \"You: 4.0★\"\n- heading \"Why it's here\" [level=4]\n- text: Quiet drama Slow burn Coastal",
+        "full": {
+          "bytes": 2398,
+          "chars": 2381,
+          "tokens": 596
+        },
+        "deltaSize": {
+          "bytes": 511,
+          "chars": 499,
+          "tokens": 125
+        }
+      },
+      {
+        "name": "close the sheet",
+        "delta": "#rec-row-row-quiet-drama",
+        "fullText": "- banner:\n  - link \"Torrent Hub\":\n    - /url: /\n    - text: Torrent\n    - emphasis: Hub\n  - link \"Downloads\":\n    - /url: /downloads\n  - link \"Library\":\n    - /url: /library\n  - link \"Trailers\":\n    - /url: \"#\"\n  - button \"Bakeoff\"\n  - menu:\n    - text: Bakeoff\n    - menuitem \"Profiles\"\n    - menuitem \"Settings\"\n    - menuitem \"Stuffing\"\n    - menuitem \"Seeding\"\n    - menuitem \"Requests\"\n    - menuitem \"Notifications blocked\" [disabled]\n    - menuitem \"Switch Profile\"\n- text: offline\n- main:\n  - heading \"Recommended\" [level=1]\n  - link \"Home\":\n    - /url: /\n  - text: Quiet drama\n  - paragraph: Synthetic fixture row\n  - link \"No image Harbour Lights\":\n    - /url: /media/900001?media_type=movie&rec_row=row-quiet-drama\n  - text: Not for me\n  - link \"No image The Long Static\":\n    - /url: /media/900002?media_type=movie&rec_row=row-quiet-drama\n  - link \"No image Winter Ferry\":\n    - /url: /media/900003?media_type=movie&rec_row=row-quiet-drama\n  - text: Coastal\n  - paragraph: Synthetic fixture row\n  - link \"No image Salt Marsh\":\n    - /url: /media/900004?media_type=movie&rec_row=row-coastal\n  - link \"No image Signal House\":\n    - /url: /media/900005?media_type=tv&rec_row=row-coastal\n  - link \"No image Low Tide\":\n    - /url: /media/900006?media_type=movie&rec_row=row-coastal\n  - button \"Get LLM picks\"\n- status",
+        "deltaText": "- text: Quiet drama\n- paragraph: Synthetic fixture row\n- link \"No image Harbour Lights\":\n  - /url: /media/900001?media_type=movie&rec_row=row-quiet-drama\n- text: Not for me\n- link \"No image The Long Static\":\n  - /url: /media/900002?media_type=movie&rec_row=row-quiet-drama\n- link \"No image Winter Ferry\":\n  - /url: /media/900003?media_type=movie&rec_row=row-quiet-drama",
+        "full": {
+          "bytes": 1324,
+          "chars": 1324,
+          "tokens": 331
+        },
+        "deltaSize": {
+          "bytes": 369,
+          "chars": 369,
+          "tokens": 93
+        }
+      },
+      {
+        "name": "read the tile badge",
+        "delta": "#rec-card-movie_900001",
+        "fullText": "- banner:\n  - link \"Torrent Hub\":\n    - /url: /\n    - text: Torrent\n    - emphasis: Hub\n  - link \"Downloads\":\n    - /url: /downloads\n  - link \"Library\":\n    - /url: /library\n  - link \"Trailers\":\n    - /url: \"#\"\n  - button \"Bakeoff\"\n  - menu:\n    - text: Bakeoff\n    - menuitem \"Profiles\"\n    - menuitem \"Settings\"\n    - menuitem \"Stuffing\"\n    - menuitem \"Seeding\"\n    - menuitem \"Requests\"\n    - menuitem \"Notifications blocked\" [disabled]\n    - menuitem \"Switch Profile\"\n- text: offline\n- main:\n  - heading \"Recommended\" [level=1]\n  - link \"Home\":\n    - /url: /\n  - text: Quiet drama\n  - paragraph: Synthetic fixture row\n  - link \"No image Harbour Lights\":\n    - /url: /media/900001?media_type=movie&rec_row=row-quiet-drama\n  - text: Not for me\n  - link \"No image The Long Static\":\n    - /url: /media/900002?media_type=movie&rec_row=row-quiet-drama\n  - link \"No image Winter Ferry\":\n    - /url: /media/900003?media_type=movie&rec_row=row-quiet-drama\n  - text: Coastal\n  - paragraph: Synthetic fixture row\n  - link \"No image Salt Marsh\":\n    - /url: /media/900004?media_type=movie&rec_row=row-coastal\n  - link \"No image Signal House\":\n    - /url: /media/900005?media_type=tv&rec_row=row-coastal\n  - link \"No image Low Tide\":\n    - /url: /media/900006?media_type=movie&rec_row=row-coastal\n  - button \"Get LLM picks\"\n- status",
+        "deltaText": "- link \"No image Harbour Lights\":\n  - /url: /media/900001?media_type=movie&rec_row=row-quiet-drama\n- text: Not for me",
+        "full": {
+          "bytes": 1324,
+          "chars": 1324,
+          "tokens": 331
+        },
+        "deltaSize": {
+          "bytes": 117,
+          "chars": 117,
+          "tokens": 30
+        }
+      }
+    ]
+  },
+  {
+    "contender": "playwright",
+    "journey": "J3 change outside the delta",
+    "steps": [
+      {
+        "name": "load /recommend",
+        "delta": "#rec-row-row-quiet-drama",
+        "fullText": "- banner:\n  - link \"Torrent Hub\":\n    - /url: /\n    - text: Torrent\n    - emphasis: Hub\n  - link \"Downloads\":\n    - /url: /downloads\n  - link \"Library\":\n    - /url: /library\n  - link \"Trailers\":\n    - /url: \"#\"\n  - button \"Bakeoff\"\n  - menu:\n    - text: Bakeoff\n    - menuitem \"Profiles\"\n    - menuitem \"Settings\"\n    - menuitem \"Stuffing\"\n    - menuitem \"Seeding\"\n    - menuitem \"Requests\"\n    - menuitem \"Notifications blocked\" [disabled]\n    - menuitem \"Switch Profile\"\n- status\n- main:\n  - heading \"Recommended\" [level=1]\n  - link \"Home\":\n    - /url: /\n  - text: Quiet drama\n  - paragraph: Synthetic fixture row\n  - link \"No image Harbour Lights\":\n    - /url: /media/900001?media_type=movie&rec_row=row-quiet-drama\n  - link \"No image The Long Static\":\n    - /url: /media/900002?media_type=movie&rec_row=row-quiet-drama\n  - link \"No image Winter Ferry\":\n    - /url: /media/900003?media_type=movie&rec_row=row-quiet-drama\n  - text: Coastal\n  - paragraph: Synthetic fixture row\n  - link \"No image Salt Marsh\":\n    - /url: /media/900004?media_type=movie&rec_row=row-coastal\n  - link \"No image Signal House\":\n    - /url: /media/900005?media_type=tv&rec_row=row-coastal\n  - link \"No image Low Tide\":\n    - /url: /media/900006?media_type=movie&rec_row=row-coastal\n  - button \"Get LLM picks\"",
+        "deltaText": "- text: Quiet drama\n- paragraph: Synthetic fixture row\n- link \"No image Harbour Lights\":\n  - /url: /media/900001?media_type=movie&rec_row=row-quiet-drama\n- link \"No image The Long Static\":\n  - /url: /media/900002?media_type=movie&rec_row=row-quiet-drama\n- link \"No image Winter Ferry\":\n  - /url: /media/900003?media_type=movie&rec_row=row-quiet-drama",
+        "full": {
+          "bytes": 1287,
+          "chars": 1287,
+          "tokens": 322
+        },
+        "deltaSize": {
+          "bytes": 350,
+          "chars": 350,
+          "tokens": 88
+        }
+      },
+      {
+        "name": "read the tile badge",
+        "delta": "#rec-card-movie_900001",
+        "fullText": "- banner:\n  - link \"Torrent Hub\":\n    - /url: /\n    - text: Torrent\n    - emphasis: Hub\n  - link \"Downloads\":\n    - /url: /downloads\n  - link \"Library\":\n    - /url: /library\n  - link \"Trailers\":\n    - /url: \"#\"\n  - button \"Bakeoff\"\n  - menu:\n    - text: Bakeoff\n    - menuitem \"Profiles\"\n    - menuitem \"Settings\"\n    - menuitem \"Stuffing\"\n    - menuitem \"Seeding\"\n    - menuitem \"Requests\"\n    - menuitem \"Notifications blocked\" [disabled]\n    - menuitem \"Switch Profile\"\n- status\n- text: offline\n- main:\n  - heading \"Recommended\" [level=1]\n  - link \"Home\":\n    - /url: /\n  - text: Quiet drama\n  - paragraph: Synthetic fixture row\n  - link \"No image Harbour Lights\":\n    - /url: /media/900001?media_type=movie&rec_row=row-quiet-drama\n  - link \"No image The Long Static\":\n    - /url: /media/900002?media_type=movie&rec_row=row-quiet-drama\n  - link \"No image Winter Ferry\":\n    - /url: /media/900003?media_type=movie&rec_row=row-quiet-drama\n  - text: Coastal\n  - paragraph: Synthetic fixture row\n  - link \"No image Salt Marsh\":\n    - /url: /media/900004?media_type=movie&rec_row=row-coastal\n  - link \"No image Signal House\":\n    - /url: /media/900005?media_type=tv&rec_row=row-coastal\n  - link \"No image Low Tide\":\n    - /url: /media/900006?media_type=movie&rec_row=row-coastal\n  - button \"Get LLM picks\"",
+        "deltaText": "- link \"No image Harbour Lights\":\n  - /url: /media/900001?media_type=movie&rec_row=row-quiet-drama",
+        "full": {
+          "bytes": 1303,
+          "chars": 1303,
+          "tokens": 326
+        },
+        "deltaSize": {
+          "bytes": 98,
+          "chars": 98,
+          "tokens": 25
+        }
+      },
+      {
+        "name": "open the sheet",
+        "delta": "#detail-sheet-body",
+        "fullText": "- banner:\n  - link \"Torrent Hub\":\n    - /url: /\n    - text: Torrent\n    - emphasis: Hub\n  - link \"Downloads\":\n    - /url: /downloads\n  - link \"Library\":\n    - /url: /library\n  - link \"Trailers\":\n    - /url: \"#\"\n  - button \"Bakeoff\"\n  - menu:\n    - text: Bakeoff\n    - menuitem \"Profiles\"\n    - menuitem \"Settings\"\n    - menuitem \"Stuffing\"\n    - menuitem \"Seeding\"\n    - menuitem \"Requests\"\n    - menuitem \"Notifications blocked\" [disabled]\n    - menuitem \"Switch Profile\"\n- text: offline\n- main:\n  - heading \"Recommended\" [level=1]\n  - link \"Home\":\n    - /url: /\n  - text: Quiet drama\n  - paragraph: Synthetic fixture row\n  - link \"No image Harbour Lights\":\n    - /url: /media/900001?media_type=movie&rec_row=row-quiet-drama\n  - link \"No image The Long Static\":\n    - /url: /media/900002?media_type=movie&rec_row=row-quiet-drama\n  - link \"No image Winter Ferry\":\n    - /url: /media/900003?media_type=movie&rec_row=row-quiet-drama\n  - text: Coastal\n  - paragraph: Synthetic fixture row\n  - link \"No image Salt Marsh\":\n    - /url: /media/900004?media_type=movie&rec_row=row-coastal\n  - link \"No image Signal House\":\n    - /url: /media/900005?media_type=tv&rec_row=row-coastal\n  - link \"No image Low Tide\":\n    - /url: /media/900006?media_type=movie&rec_row=row-coastal\n  - button \"Get LLM picks\"\n- dialog \"Title details\":\n  - button \"Close\": ×\n  - img \"Sleepless Mom\"\n  - heading \"Sleepless Mom\" [level=1]\n  - paragraph: 2021 movie ★ 10.0\n  - button \"My list\"\n  - button \"Seen it\"\n  - button \"Not for me\"\n  - group \"Your rating\":\n    - text: Your rating ☆\n    - button \"0.5 stars\"\n    - button \"1 star\"\n    - text: ☆\n    - button \"1.5 stars\"\n    - button \"2 stars\"\n    - text: ☆\n    - button \"2.5 stars\"\n    - button \"3 stars\"\n    - text: ☆\n    - button \"3.5 stars\"\n    - button \"4 stars\"\n    - text: ☆\n    - button \"4.5 stars\"\n    - button \"5 stars\"\n    - text: Tap to rate\n  - heading \"Why it's here\" [level=4]\n  - text: Quiet drama Slow burn Coastal\n  - paragraph: In order to celebrate Father’s Day, Gogor gets homework from school to write about his father. But, Gogor never knew his father, so he questions his mother. However, his mother refuses to answer because she has so much work to do. Gogor becomes worried that he won't be able to complete his homework.\n  - button \"Find torrent\"\n  - text: Upload .torrent\n  - status",
+        "deltaText": "- button \"Close\": ×\n- img \"Sleepless Mom\"\n- heading \"Sleepless Mom\" [level=1]\n- paragraph: 2021 movie ★ 10.0\n- button \"My list\"\n- button \"Seen it\"\n- button \"Not for me\"\n- group \"Your rating\":\n  - text: Your rating ☆\n  - button \"0.5 stars\"\n  - button \"1 star\"\n  - text: ☆\n  - button \"1.5 stars\"\n  - button \"2 stars\"\n  - text: ☆\n  - button \"2.5 stars\"\n  - button \"3 stars\"\n  - text: ☆\n  - button \"3.5 stars\"\n  - button \"4 stars\"\n  - text: ☆\n  - button \"4.5 stars\"\n  - button \"5 stars\"\n  - text: Tap to rate\n- heading \"Why it's here\" [level=4]\n- text: Quiet drama Slow burn Coastal\n- paragraph: In order to celebrate Father’s Day, Gogor gets homework from school to write about his father. But, Gogor never knew his father, so he questions his mother. However, his mother refuses to answer because she has so much work to do. Gogor becomes worried that he won't be able to complete his homework.\n- button \"Find torrent\"\n- text: Upload .torrent",
+        "full": {
+          "bytes": 2345,
+          "chars": 2330,
+          "tokens": 583
+        },
+        "deltaSize": {
+          "bytes": 955,
+          "chars": 940,
+          "tokens": 235
+        }
+      },
+      {
+        "name": "read the action block",
+        "delta": "#detail-rec",
+        "fullText": "- banner:\n  - link \"Torrent Hub\":\n    - /url: /\n    - text: Torrent\n    - emphasis: Hub\n  - link \"Downloads\":\n    - /url: /downloads\n  - link \"Library\":\n    - /url: /library\n  - link \"Trailers\":\n    - /url: \"#\"\n  - button \"Bakeoff\"\n  - menu:\n    - text: Bakeoff\n    - menuitem \"Profiles\"\n    - menuitem \"Settings\"\n    - menuitem \"Stuffing\"\n    - menuitem \"Seeding\"\n    - menuitem \"Requests\"\n    - menuitem \"Notifications blocked\" [disabled]\n    - menuitem \"Switch Profile\"\n- text: offline\n- main:\n  - heading \"Recommended\" [level=1]\n  - link \"Home\":\n    - /url: /\n  - text: Quiet drama\n  - paragraph: Synthetic fixture row\n  - link \"No image Harbour Lights\":\n    - /url: /media/900001?media_type=movie&rec_row=row-quiet-drama\n  - link \"No image The Long Static\":\n    - /url: /media/900002?media_type=movie&rec_row=row-quiet-drama\n  - link \"No image Winter Ferry\":\n    - /url: /media/900003?media_type=movie&rec_row=row-quiet-drama\n  - text: Coastal\n  - paragraph: Synthetic fixture row\n  - link \"No image Salt Marsh\":\n    - /url: /media/900004?media_type=movie&rec_row=row-coastal\n  - link \"No image Signal House\":\n    - /url: /media/900005?media_type=tv&rec_row=row-coastal\n  - link \"No image Low Tide\":\n    - /url: /media/900006?media_type=movie&rec_row=row-coastal\n  - button \"Get LLM picks\"\n- dialog \"Title details\":\n  - button \"Close\": ×\n  - img \"Sleepless Mom\"\n  - heading \"Sleepless Mom\" [level=1]\n  - paragraph: 2021 movie ★ 10.0\n  - button \"My list\"\n  - button \"Seen it\"\n  - button \"Not for me\"\n  - group \"Your rating\":\n    - text: Your rating ☆\n    - button \"0.5 stars\"\n    - button \"1 star\"\n    - text: ☆\n    - button \"1.5 stars\"\n    - button \"2 stars\"\n    - text: ☆\n    - button \"2.5 stars\"\n    - button \"3 stars\"\n    - text: ☆\n    - button \"3.5 stars\"\n    - button \"4 stars\"\n    - text: ☆\n    - button \"4.5 stars\"\n    - button \"5 stars\"\n    - text: Tap to rate\n  - heading \"Why it's here\" [level=4]\n  - text: Quiet drama Slow burn Coastal\n  - paragraph: In order to celebrate Father’s Day, Gogor gets homework from school to write about his father. But, Gogor never knew his father, so he questions his mother. However, his mother refuses to answer because she has so much work to do. Gogor becomes worried that he won't be able to complete his homework.\n  - button \"Find torrent\"\n  - text: Upload .torrent\n  - status",
+        "deltaText": "- button \"My list\"\n- button \"Seen it\"\n- button \"Not for me\"\n- group \"Your rating\":\n  - text: Your rating ☆\n  - button \"0.5 stars\"\n  - button \"1 star\"\n  - text: ☆\n  - button \"1.5 stars\"\n  - button \"2 stars\"\n  - text: ☆\n  - button \"2.5 stars\"\n  - button \"3 stars\"\n  - text: ☆\n  - button \"3.5 stars\"\n  - button \"4 stars\"\n  - text: ☆\n  - button \"4.5 stars\"\n  - button \"5 stars\"\n  - text: Tap to rate\n- heading \"Why it's here\" [level=4]\n- text: Quiet drama Slow burn Coastal",
+        "full": {
+          "bytes": 2345,
+          "chars": 2330,
+          "tokens": 583
+        },
+        "deltaSize": {
+          "bytes": 479,
+          "chars": 469,
+          "tokens": 118
+        }
+      },
+      {
+        "name": "My list",
+        "delta": "#detail-rec",
+        "fullText": "- banner:\n  - link \"Torrent Hub\":\n    - /url: /\n    - text: Torrent\n    - emphasis: Hub\n  - link \"Downloads\":\n    - /url: /downloads\n  - link \"Library\":\n    - /url: /library\n  - link \"Trailers\":\n    - /url: \"#\"\n  - button \"Bakeoff\"\n  - menu:\n    - text: Bakeoff\n    - menuitem \"Profiles\"\n    - menuitem \"Settings\"\n    - menuitem \"Stuffing\"\n    - menuitem \"Seeding\"\n    - menuitem \"Requests\"\n    - menuitem \"Notifications blocked\" [disabled]\n    - menuitem \"Switch Profile\"\n- text: offline\n- main:\n  - heading \"Recommended\" [level=1]\n  - link \"Home\":\n    - /url: /\n  - text: Quiet drama\n  - paragraph: Synthetic fixture row\n  - link \"No image Harbour Lights\":\n    - /url: /media/900001?media_type=movie&rec_row=row-quiet-drama\n  - text: In list\n  - link \"No image The Long Static\":\n    - /url: /media/900002?media_type=movie&rec_row=row-quiet-drama\n  - link \"No image Winter Ferry\":\n    - /url: /media/900003?media_type=movie&rec_row=row-quiet-drama\n  - text: Coastal\n  - paragraph: Synthetic fixture row\n  - link \"No image Salt Marsh\":\n    - /url: /media/900004?media_type=movie&rec_row=row-coastal\n  - link \"No image Signal House\":\n    - /url: /media/900005?media_type=tv&rec_row=row-coastal\n  - link \"No image Low Tide\":\n    - /url: /media/900006?media_type=movie&rec_row=row-coastal\n  - button \"Get LLM picks\"\n- dialog \"Title details\":\n  - button \"Close\": ×\n  - img \"Sleepless Mom\"\n  - heading \"Sleepless Mom\" [level=1]\n  - paragraph: 2021 movie ★ 10.0\n  - button \"On my list\" [pressed]\n  - button \"Seen it\"\n  - button \"Not for me\"\n  - group \"Your rating\":\n    - text: Your rating ☆\n    - button \"0.5 stars\"\n    - button \"1 star\"\n    - text: ☆\n    - button \"1.5 stars\"\n    - button \"2 stars\"\n    - text: ☆\n    - button \"2.5 stars\"\n    - button \"3 stars\"\n    - text: ☆\n    - button \"3.5 stars\"\n    - button \"4 stars\"\n    - text: ☆\n    - button \"4.5 stars\"\n    - button \"5 stars\"\n    - text: Tap to rate\n  - heading \"Why it's here\" [level=4]\n  - text: Quiet drama Slow burn Coastal\n  - paragraph: In order to celebrate Father’s Day, Gogor gets homework from school to write about his father. But, Gogor never knew his father, so he questions his mother. However, his mother refuses to answer because she has so much work to do. Gogor becomes worried that he won't be able to complete his homework.\n  - button \"Find torrent\"\n  - text: Upload .torrent\n  - status",
+        "deltaText": "- button \"On my list\" [pressed]\n- button \"Seen it\"\n- button \"Not for me\"\n- group \"Your rating\":\n  - text: Your rating ☆\n  - button \"0.5 stars\"\n  - button \"1 star\"\n  - text: ☆\n  - button \"1.5 stars\"\n  - button \"2 stars\"\n  - text: ☆\n  - button \"2.5 stars\"\n  - button \"3 stars\"\n  - text: ☆\n  - button \"3.5 stars\"\n  - button \"4 stars\"\n  - text: ☆\n  - button \"4.5 stars\"\n  - button \"5 stars\"\n  - text: Tap to rate\n- heading \"Why it's here\" [level=4]\n- text: Quiet drama Slow burn Coastal",
+        "full": {
+          "bytes": 2376,
+          "chars": 2361,
+          "tokens": 591
+        },
+        "deltaSize": {
+          "bytes": 492,
+          "chars": 482,
+          "tokens": 121
+        }
+      },
+      {
+        "name": "re-read the swapped block",
+        "delta": "#detail-rec",
+        "fullText": "- banner:\n  - link \"Torrent Hub\":\n    - /url: /\n    - text: Torrent\n    - emphasis: Hub\n  - link \"Downloads\":\n    - /url: /downloads\n  - link \"Library\":\n    - /url: /library\n  - link \"Trailers\":\n    - /url: \"#\"\n  - button \"Bakeoff\"\n  - menu:\n    - text: Bakeoff\n    - menuitem \"Profiles\"\n    - menuitem \"Settings\"\n    - menuitem \"Stuffing\"\n    - menuitem \"Seeding\"\n    - menuitem \"Requests\"\n    - menuitem \"Notifications blocked\" [disabled]\n    - menuitem \"Switch Profile\"\n- text: offline\n- main:\n  - heading \"Recommended\" [level=1]\n  - link \"Home\":\n    - /url: /\n  - text: Quiet drama\n  - paragraph: Synthetic fixture row\n  - link \"No image Harbour Lights\":\n    - /url: /media/900001?media_type=movie&rec_row=row-quiet-drama\n  - text: In list\n  - link \"No image The Long Static\":\n    - /url: /media/900002?media_type=movie&rec_row=row-quiet-drama\n  - link \"No image Winter Ferry\":\n    - /url: /media/900003?media_type=movie&rec_row=row-quiet-drama\n  - text: Coastal\n  - paragraph: Synthetic fixture row\n  - link \"No image Salt Marsh\":\n    - /url: /media/900004?media_type=movie&rec_row=row-coastal\n  - link \"No image Signal House\":\n    - /url: /media/900005?media_type=tv&rec_row=row-coastal\n  - link \"No image Low Tide\":\n    - /url: /media/900006?media_type=movie&rec_row=row-coastal\n  - button \"Get LLM picks\"\n- dialog \"Title details\":\n  - button \"Close\": ×\n  - img \"Sleepless Mom\"\n  - heading \"Sleepless Mom\" [level=1]\n  - paragraph: 2021 movie ★ 10.0\n  - button \"On my list\" [pressed]\n  - button \"Seen it\"\n  - button \"Not for me\"\n  - group \"Your rating\":\n    - text: Your rating ☆\n    - button \"0.5 stars\"\n    - button \"1 star\"\n    - text: ☆\n    - button \"1.5 stars\"\n    - button \"2 stars\"\n    - text: ☆\n    - button \"2.5 stars\"\n    - button \"3 stars\"\n    - text: ☆\n    - button \"3.5 stars\"\n    - button \"4 stars\"\n    - text: ☆\n    - button \"4.5 stars\"\n    - button \"5 stars\"\n    - text: Tap to rate\n  - heading \"Why it's here\" [level=4]\n  - text: Quiet drama Slow burn Coastal\n  - paragraph: In order to celebrate Father’s Day, Gogor gets homework from school to write about his father. But, Gogor never knew his father, so he questions his mother. However, his mother refuses to answer because she has so much work to do. Gogor becomes worried that he won't be able to complete his homework.\n  - button \"Find torrent\"\n  - text: Upload .torrent\n  - status",
+        "deltaText": "- button \"On my list\" [pressed]\n- button \"Seen it\"\n- button \"Not for me\"\n- group \"Your rating\":\n  - text: Your rating ☆\n  - button \"0.5 stars\"\n  - button \"1 star\"\n  - text: ☆\n  - button \"1.5 stars\"\n  - button \"2 stars\"\n  - text: ☆\n  - button \"2.5 stars\"\n  - button \"3 stars\"\n  - text: ☆\n  - button \"3.5 stars\"\n  - button \"4 stars\"\n  - text: ☆\n  - button \"4.5 stars\"\n  - button \"5 stars\"\n  - text: Tap to rate\n- heading \"Why it's here\" [level=4]\n- text: Quiet drama Slow burn Coastal",
+        "full": {
+          "bytes": 2376,
+          "chars": 2361,
+          "tokens": 591
+        },
+        "deltaSize": {
+          "bytes": 492,
+          "chars": 482,
+          "tokens": 121
+        }
+      },
+      {
+        "name": "read the tile badge",
+        "delta": "#rec-card-movie_900001",
+        "fullText": "- banner:\n  - link \"Torrent Hub\":\n    - /url: /\n    - text: Torrent\n    - emphasis: Hub\n  - link \"Downloads\":\n    - /url: /downloads\n  - link \"Library\":\n    - /url: /library\n  - link \"Trailers\":\n    - /url: \"#\"\n  - button \"Bakeoff\"\n  - menu:\n    - text: Bakeoff\n    - menuitem \"Profiles\"\n    - menuitem \"Settings\"\n    - menuitem \"Stuffing\"\n    - menuitem \"Seeding\"\n    - menuitem \"Requests\"\n    - menuitem \"Notifications blocked\" [disabled]\n    - menuitem \"Switch Profile\"\n- text: offline\n- main:\n  - heading \"Recommended\" [level=1]\n  - link \"Home\":\n    - /url: /\n  - text: Quiet drama\n  - paragraph: Synthetic fixture row\n  - link \"No image Harbour Lights\":\n    - /url: /media/900001?media_type=movie&rec_row=row-quiet-drama\n  - text: In list\n  - link \"No image The Long Static\":\n    - /url: /media/900002?media_type=movie&rec_row=row-quiet-drama\n  - link \"No image Winter Ferry\":\n    - /url: /media/900003?media_type=movie&rec_row=row-quiet-drama\n  - text: Coastal\n  - paragraph: Synthetic fixture row\n  - link \"No image Salt Marsh\":\n    - /url: /media/900004?media_type=movie&rec_row=row-coastal\n  - link \"No image Signal House\":\n    - /url: /media/900005?media_type=tv&rec_row=row-coastal\n  - link \"No image Low Tide\":\n    - /url: /media/900006?media_type=movie&rec_row=row-coastal\n  - button \"Get LLM picks\"\n- dialog \"Title details\":\n  - button \"Close\": ×\n  - img \"Sleepless Mom\"\n  - heading \"Sleepless Mom\" [level=1]\n  - paragraph: 2021 movie ★ 10.0\n  - button \"On my list\" [pressed]\n  - button \"Seen it\"\n  - button \"Not for me\"\n  - group \"Your rating\":\n    - text: Your rating ☆\n    - button \"0.5 stars\"\n    - button \"1 star\"\n    - text: ☆\n    - button \"1.5 stars\"\n    - button \"2 stars\"\n    - text: ☆\n    - button \"2.5 stars\"\n    - button \"3 stars\"\n    - text: ☆\n    - button \"3.5 stars\"\n    - button \"4 stars\"\n    - text: ☆\n    - button \"4.5 stars\"\n    - button \"5 stars\"\n    - text: Tap to rate\n  - heading \"Why it's here\" [level=4]\n  - text: Quiet drama Slow burn Coastal\n  - paragraph: In order to celebrate Father’s Day, Gogor gets homework from school to write about his father. But, Gogor never knew his father, so he questions his mother. However, his mother refuses to answer because she has so much work to do. Gogor becomes worried that he won't be able to complete his homework.\n  - button \"Find torrent\"\n  - text: Upload .torrent\n  - status",
+        "deltaText": "- link \"No image Harbour Lights\":\n  - /url: /media/900001?media_type=movie&rec_row=row-quiet-drama\n- text: In list",
+        "full": {
+          "bytes": 2376,
+          "chars": 2361,
+          "tokens": 591
+        },
+        "deltaSize": {
+          "bytes": 114,
+          "chars": 114,
+          "tokens": 29
+        }
+      },
+      {
+        "name": "close the sheet",
+        "delta": "#rec-row-row-quiet-drama",
+        "fullText": "- banner:\n  - link \"Torrent Hub\":\n    - /url: /\n    - text: Torrent\n    - emphasis: Hub\n  - link \"Downloads\":\n    - /url: /downloads\n  - link \"Library\":\n    - /url: /library\n  - link \"Trailers\":\n    - /url: \"#\"\n  - button \"Bakeoff\"\n  - menu:\n    - text: Bakeoff\n    - menuitem \"Profiles\"\n    - menuitem \"Settings\"\n    - menuitem \"Stuffing\"\n    - menuitem \"Seeding\"\n    - menuitem \"Requests\"\n    - menuitem \"Notifications blocked\" [disabled]\n    - menuitem \"Switch Profile\"\n- text: offline\n- main:\n  - heading \"Recommended\" [level=1]\n  - link \"Home\":\n    - /url: /\n  - text: Quiet drama\n  - paragraph: Synthetic fixture row\n  - link \"No image Harbour Lights\":\n    - /url: /media/900001?media_type=movie&rec_row=row-quiet-drama\n  - text: In list\n  - link \"No image The Long Static\":\n    - /url: /media/900002?media_type=movie&rec_row=row-quiet-drama\n  - link \"No image Winter Ferry\":\n    - /url: /media/900003?media_type=movie&rec_row=row-quiet-drama\n  - text: Coastal\n  - paragraph: Synthetic fixture row\n  - link \"No image Salt Marsh\":\n    - /url: /media/900004?media_type=movie&rec_row=row-coastal\n  - link \"No image Signal House\":\n    - /url: /media/900005?media_type=tv&rec_row=row-coastal\n  - link \"No image Low Tide\":\n    - /url: /media/900006?media_type=movie&rec_row=row-coastal\n  - button \"Get LLM picks\"\n- status",
+        "deltaText": "- text: Quiet drama\n- paragraph: Synthetic fixture row\n- link \"No image Harbour Lights\":\n  - /url: /media/900001?media_type=movie&rec_row=row-quiet-drama\n- text: In list\n- link \"No image The Long Static\":\n  - /url: /media/900002?media_type=movie&rec_row=row-quiet-drama\n- link \"No image Winter Ferry\":\n  - /url: /media/900003?media_type=movie&rec_row=row-quiet-drama",
+        "full": {
+          "bytes": 1321,
+          "chars": 1321,
+          "tokens": 331
+        },
+        "deltaSize": {
+          "bytes": 366,
+          "chars": 366,
+          "tokens": 92
+        }
+      }
+    ]
+  },
+  {
+    "contender": "cdp",
+    "journey": "J1 open and inspect",
+    "steps": [
+      {
+        "name": "load /recommend",
+        "delta": "#rec-row-row-quiet-drama",
+        "fullText": "RootWebArea \"TorrentHub\"\n  banner\n    link \"Torrent Hub\"\n      StaticText \"Torrent\"\n      emphasis\n        StaticText \"Hub\"\n    link \"Downloads\"\n      StaticText \"Downloads\"\n    link \"Library\"\n      StaticText \"Library\"\n    link \"Trailers\"\n      StaticText \"Trailers\"\n    button \"Bakeoff\"\n      StaticText \"Bakeoff\"\n    menu\n      StaticText \"Bakeoff\"\n      menuitem \"Profiles\"\n        StaticText \"Profiles\"\n      menuitem \"Settings\"\n        StaticText \"Settings\"\n      menuitem \"Stuffing\"\n        StaticText \"Stuffing\"\n      menuitem \"Seeding\"\n        StaticText \"Seeding\"\n      menuitem \"Requests\"\n        StaticText \"Requests\"\n      menuitem \"Enable notifications\"\n        StaticText \"Enable notifications\"\n      menuitem \"Switch Profile\"\n        StaticText \"Switch Profile\"\n  status\n  StaticText \"offline\"\n  main\n    heading \"Recommended\"\n      StaticText \"Recommended\"\n    link \"Home\"\n      StaticText \"Home\"\n    StaticText \"Quiet drama\"\n    paragraph\n      StaticText \"Synthetic fixture row\"\n    link \"No image Harbour Lights\"\n      StaticText \"No image\"\n      StaticText \"Harbour Lights\"\n    link \"No image The Long Static\"\n      StaticText \"No image\"\n      StaticText \"The Long Static\"\n    link \"No image Winter Ferry\"\n      StaticText \"No image\"\n      StaticText \"Winter Ferry\"\n    StaticText \"Coastal\"\n    paragraph\n      StaticText \"Synthetic fixture row\"\n    link \"No image Salt Marsh\"\n      StaticText \"No image\"\n      StaticText \"Salt Marsh\"\n    link \"No image Signal House\"\n      StaticText \"No image\"\n      StaticText \"Signal House\"\n    link \"No image Low Tide\"\n      StaticText \"No image\"\n      StaticText \"Low Tide\"\n    button \"Get LLM picks\"\n      StaticText \"Get LLM picks\"",
+        "deltaText": "StaticText \"Quiet drama\"\nparagraph\n  StaticText \"Synthetic fixture row\"\nlink \"No image Harbour Lights\"\n  StaticText \"No image\"\n  StaticText \"Harbour Lights\"\nlink \"No image The Long Static\"\n  StaticText \"No image\"\n  StaticText \"The Long Static\"\nlink \"No image Winter Ferry\"\n  StaticText \"No image\"\n  StaticText \"Winter Ferry\"",
+        "full": {
+          "bytes": 1693,
+          "chars": 1693,
+          "tokens": 424
+        },
+        "deltaSize": {
+          "bytes": 324,
+          "chars": 324,
+          "tokens": 81
+        }
+      },
+      {
+        "name": "read the second row",
+        "delta": "#rec-row-row-coastal",
+        "fullText": "RootWebArea \"TorrentHub\"\n  banner\n    link \"Torrent Hub\"\n      StaticText \"Torrent\"\n      emphasis\n        StaticText \"Hub\"\n    link \"Downloads\"\n      StaticText \"Downloads\"\n    link \"Library\"\n      StaticText \"Library\"\n    link \"Trailers\"\n      StaticText \"Trailers\"\n    button \"Bakeoff\"\n      StaticText \"Bakeoff\"\n    menu\n      StaticText \"Bakeoff\"\n      menuitem \"Profiles\"\n        StaticText \"Profiles\"\n      menuitem \"Settings\"\n        StaticText \"Settings\"\n      menuitem \"Stuffing\"\n        StaticText \"Stuffing\"\n      menuitem \"Seeding\"\n        StaticText \"Seeding\"\n      menuitem \"Requests\"\n        StaticText \"Requests\"\n      menuitem \"Enable notifications\"\n        StaticText \"Enable notifications\"\n      menuitem \"Switch Profile\"\n        StaticText \"Switch Profile\"\n  status\n  StaticText \"offline\"\n  main\n    heading \"Recommended\"\n      StaticText \"Recommended\"\n    link \"Home\"\n      StaticText \"Home\"\n    StaticText \"Quiet drama\"\n    paragraph\n      StaticText \"Synthetic fixture row\"\n    link \"No image Harbour Lights\"\n      StaticText \"No image\"\n      StaticText \"Harbour Lights\"\n    link \"No image The Long Static\"\n      StaticText \"No image\"\n      StaticText \"The Long Static\"\n    link \"No image Winter Ferry\"\n      StaticText \"No image\"\n      StaticText \"Winter Ferry\"\n    StaticText \"Coastal\"\n    paragraph\n      StaticText \"Synthetic fixture row\"\n    link \"No image Salt Marsh\"\n      StaticText \"No image\"\n      StaticText \"Salt Marsh\"\n    link \"No image Signal House\"\n      StaticText \"No image\"\n      StaticText \"Signal House\"\n    link \"No image Low Tide\"\n      StaticText \"No image\"\n      StaticText \"Low Tide\"\n    button \"Get LLM picks\"\n      StaticText \"Get LLM picks\"",
+        "deltaText": "StaticText \"Coastal\"\nparagraph\n  StaticText \"Synthetic fixture row\"\nlink \"No image Salt Marsh\"\n  StaticText \"No image\"\n  StaticText \"Salt Marsh\"\nlink \"No image Signal House\"\n  StaticText \"No image\"\n  StaticText \"Signal House\"\nlink \"No image Low Tide\"\n  StaticText \"No image\"\n  StaticText \"Low Tide\"",
+        "full": {
+          "bytes": 1693,
+          "chars": 1693,
+          "tokens": 424
+        },
+        "deltaSize": {
+          "bytes": 298,
+          "chars": 298,
+          "tokens": 75
+        }
+      },
+      {
+        "name": "open the sheet",
+        "delta": "#detail-sheet-body",
+        "fullText": "RootWebArea \"TorrentHub\"\n  dialog \"Title details\"\n    button \"Close\"\n      StaticText \"×\"\n    image \"Sleepless Mom\"\n    heading \"Sleepless Mom\"\n      StaticText \"Sleepless Mom\"\n    StaticText \"2021\"\n    StaticText \"movie\"\n    StaticText \"★ 10.0\"\n    form\n      button \"My list\"\n        StaticText \"My list\"\n    form\n      button \"Seen it\"\n        StaticText \"Seen it\"\n    form\n      button \"Not for me\"\n        StaticText \"Not for me\"\n    group \"Your rating\"\n      StaticText \"Your rating\"\n      StaticText \"☆\"\n      button \"0.5 stars\"\n      button \"1 star\"\n      StaticText \"☆\"\n      button \"1.5 stars\"\n      button \"2 stars\"\n      StaticText \"☆\"\n      button \"2.5 stars\"\n      button \"3 stars\"\n      StaticText \"☆\"\n      button \"3.5 stars\"\n      button \"4 stars\"\n      StaticText \"☆\"\n      button \"4.5 stars\"\n      button \"5 stars\"\n      StaticText \"Tap to rate\"\n    heading \"WHY IT'S HERE\"\n      StaticText \"WHY IT'S HERE\"\n    StaticText \"Quiet drama\"\n    StaticText \"Slow burn\"\n    StaticText \"Coastal\"\n    paragraph\n      StaticText \"In order to celebrate Father’s Day, Gogor gets homework from school to write about his father. But, Gogor never knew his father, so he questions his mother. However, his mother refuses to answer because she has so much work to do. Gogor becomes worried that he won't be able to complete his homework.\"\n    button \"Find torrent\"\n      StaticText \"Find torrent\"\n    form\n      LabelText\n        StaticText \"Upload .torrent\"\n    status",
+        "deltaText": "button \"Close\"\n  StaticText \"×\"\nimage \"Sleepless Mom\"\nheading \"Sleepless Mom\"\n  StaticText \"Sleepless Mom\"\nStaticText \"2021\"\nStaticText \"movie\"\nStaticText \"★ 10.0\"\nform\n  button \"My list\"\n    StaticText \"My list\"\nform\n  button \"Seen it\"\n    StaticText \"Seen it\"\nform\n  button \"Not for me\"\n    StaticText \"Not for me\"\ngroup \"Your rating\"\n  StaticText \"Your rating\"\n  StaticText \"☆\"\n  button \"0.5 stars\"\n  button \"1 star\"\n  StaticText \"☆\"\n  button \"1.5 stars\"\n  button \"2 stars\"\n  StaticText \"☆\"\n  button \"2.5 stars\"\n  button \"3 stars\"\n  StaticText \"☆\"\n  button \"3.5 stars\"\n  button \"4 stars\"\n  StaticText \"☆\"\n  button \"4.5 stars\"\n  button \"5 stars\"\n  StaticText \"Tap to rate\"\nheading \"WHY IT'S HERE\"\n  StaticText \"WHY IT'S HERE\"\nStaticText \"Quiet drama\"\nStaticText \"Slow burn\"\nStaticText \"Coastal\"\nparagraph\n  StaticText \"In order to celebrate Father’s Day, Gogor gets homework from school to write about his father. But, Gogor never knew his father, so he questions his mother. However, his mother refuses to answer because she has so much work to do. Gogor becomes worried that he won't be able to complete his homework.\"\nbutton \"Find torrent\"\n  StaticText \"Find torrent\"\nform\n  LabelText\n    StaticText \"Upload .torrent\"",
+        "full": {
+          "bytes": 1486,
+          "chars": 1471,
+          "tokens": 368
+        },
+        "deltaSize": {
+          "bytes": 1237,
+          "chars": 1222,
+          "tokens": 306
+        }
+      },
+      {
+        "name": "read the action block",
+        "delta": "#detail-rec",
+        "fullText": "RootWebArea \"TorrentHub\"\n  dialog \"Title details\"\n    button \"Close\"\n      StaticText \"×\"\n    image \"Sleepless Mom\"\n    heading \"Sleepless Mom\"\n      StaticText \"Sleepless Mom\"\n    StaticText \"2021\"\n    StaticText \"movie\"\n    StaticText \"★ 10.0\"\n    form\n      button \"My list\"\n        StaticText \"My list\"\n    form\n      button \"Seen it\"\n        StaticText \"Seen it\"\n    form\n      button \"Not for me\"\n        StaticText \"Not for me\"\n    group \"Your rating\"\n      StaticText \"Your rating\"\n      StaticText \"☆\"\n      button \"0.5 stars\"\n      button \"1 star\"\n      StaticText \"☆\"\n      button \"1.5 stars\"\n      button \"2 stars\"\n      StaticText \"☆\"\n      button \"2.5 stars\"\n      button \"3 stars\"\n      StaticText \"☆\"\n      button \"3.5 stars\"\n      button \"4 stars\"\n      StaticText \"☆\"\n      button \"4.5 stars\"\n      button \"5 stars\"\n      StaticText \"Tap to rate\"\n    heading \"WHY IT'S HERE\"\n      StaticText \"WHY IT'S HERE\"\n    StaticText \"Quiet drama\"\n    StaticText \"Slow burn\"\n    StaticText \"Coastal\"\n    paragraph\n      StaticText \"In order to celebrate Father’s Day, Gogor gets homework from school to write about his father. But, Gogor never knew his father, so he questions his mother. However, his mother refuses to answer because she has so much work to do. Gogor becomes worried that he won't be able to complete his homework.\"\n    button \"Find torrent\"\n      StaticText \"Find torrent\"\n    form\n      LabelText\n        StaticText \"Upload .torrent\"\n    status",
+        "deltaText": "form\n  button \"My list\"\n    StaticText \"My list\"\nform\n  button \"Seen it\"\n    StaticText \"Seen it\"\nform\n  button \"Not for me\"\n    StaticText \"Not for me\"\ngroup \"Your rating\"\n  StaticText \"Your rating\"\n  StaticText \"☆\"\n  button \"0.5 stars\"\n  button \"1 star\"\n  StaticText \"☆\"\n  button \"1.5 stars\"\n  button \"2 stars\"\n  StaticText \"☆\"\n  button \"2.5 stars\"\n  button \"3 stars\"\n  StaticText \"☆\"\n  button \"3.5 stars\"\n  button \"4 stars\"\n  StaticText \"☆\"\n  button \"4.5 stars\"\n  button \"5 stars\"\n  StaticText \"Tap to rate\"\nheading \"WHY IT'S HERE\"\n  StaticText \"WHY IT'S HERE\"\nStaticText \"Quiet drama\"\nStaticText \"Slow burn\"\nStaticText \"Coastal\"",
+        "full": {
+          "bytes": 1486,
+          "chars": 1471,
+          "tokens": 368
+        },
+        "deltaSize": {
+          "bytes": 642,
+          "chars": 632,
+          "tokens": 158
+        }
+      },
+      {
+        "name": "mark Seen it",
+        "delta": "#detail-rec",
+        "fullText": "RootWebArea \"TorrentHub\"\n  dialog \"Title details\"\n    button \"Close\"\n      StaticText \"×\"\n    image \"Sleepless Mom\"\n    heading \"Sleepless Mom\"\n      StaticText \"Sleepless Mom\"\n    StaticText \"2021\"\n    StaticText \"movie\"\n    StaticText \"★ 10.0\"\n    form\n      button \"My list\"\n        StaticText \"My list\"\n    form\n      button \"Seen\"\n        StaticText \"Seen\"\n    form\n      button \"Not for me\"\n        StaticText \"Not for me\"\n    group \"Your rating\"\n      StaticText \"Your rating\"\n      StaticText \"☆\"\n      button \"0.5 stars\"\n      button \"1 star\"\n      StaticText \"☆\"\n      button \"1.5 stars\"\n      button \"2 stars\"\n      StaticText \"☆\"\n      button \"2.5 stars\"\n      button \"3 stars\"\n      StaticText \"☆\"\n      button \"3.5 stars\"\n      button \"4 stars\"\n      StaticText \"☆\"\n      button \"4.5 stars\"\n      button \"5 stars\"\n      StaticText \"Tap to rate\"\n    heading \"WHY IT'S HERE\"\n      StaticText \"WHY IT'S HERE\"\n    StaticText \"Quiet drama\"\n    StaticText \"Slow burn\"\n    StaticText \"Coastal\"\n    paragraph\n      StaticText \"In order to celebrate Father’s Day, Gogor gets homework from school to write about his father. But, Gogor never knew his father, so he questions his mother. However, his mother refuses to answer because she has so much work to do. Gogor becomes worried that he won't be able to complete his homework.\"\n    button \"Find torrent\"\n      StaticText \"Find torrent\"\n    form\n      LabelText\n        StaticText \"Upload .torrent\"\n    status",
+        "deltaText": "form\n  button \"My list\"\n    StaticText \"My list\"\nform\n  button \"Seen\"\n    StaticText \"Seen\"\nform\n  button \"Not for me\"\n    StaticText \"Not for me\"\ngroup \"Your rating\"\n  StaticText \"Your rating\"\n  StaticText \"☆\"\n  button \"0.5 stars\"\n  button \"1 star\"\n  StaticText \"☆\"\n  button \"1.5 stars\"\n  button \"2 stars\"\n  StaticText \"☆\"\n  button \"2.5 stars\"\n  button \"3 stars\"\n  StaticText \"☆\"\n  button \"3.5 stars\"\n  button \"4 stars\"\n  StaticText \"☆\"\n  button \"4.5 stars\"\n  button \"5 stars\"\n  StaticText \"Tap to rate\"\nheading \"WHY IT'S HERE\"\n  StaticText \"WHY IT'S HERE\"\nStaticText \"Quiet drama\"\nStaticText \"Slow burn\"\nStaticText \"Coastal\"",
+        "full": {
+          "bytes": 1480,
+          "chars": 1465,
+          "tokens": 367
+        },
+        "deltaSize": {
+          "bytes": 636,
+          "chars": 626,
+          "tokens": 157
+        }
+      },
+      {
+        "name": "close the sheet",
+        "delta": "#rec-row-row-quiet-drama",
+        "fullText": "RootWebArea \"TorrentHub\"\n  banner\n    link \"Torrent Hub\"\n      StaticText \"Torrent\"\n      emphasis\n        StaticText \"Hub\"\n    link \"Downloads\"\n      StaticText \"Downloads\"\n    link \"Library\"\n      StaticText \"Library\"\n    link \"Trailers\"\n      StaticText \"Trailers\"\n    button \"Bakeoff\"\n      StaticText \"Bakeoff\"\n    menu\n      StaticText \"Bakeoff\"\n      menuitem \"Profiles\"\n        StaticText \"Profiles\"\n      menuitem \"Settings\"\n        StaticText \"Settings\"\n      menuitem \"Stuffing\"\n        StaticText \"Stuffing\"\n      menuitem \"Seeding\"\n        StaticText \"Seeding\"\n      menuitem \"Requests\"\n        StaticText \"Requests\"\n      menuitem \"Enable notifications\"\n        StaticText \"Enable notifications\"\n      menuitem \"Switch Profile\"\n        StaticText \"Switch Profile\"\n  StaticText \"offline\"\n  main\n    heading \"Recommended\"\n      StaticText \"Recommended\"\n    link \"Home\"\n      StaticText \"Home\"\n    StaticText \"Quiet drama\"\n    paragraph\n      StaticText \"Synthetic fixture row\"\n    link \"No image Harbour Lights\"\n      StaticText \"No image\"\n      StaticText \"Harbour Lights\"\n    StaticText \"Seen\"\n    link \"No image The Long Static\"\n      StaticText \"No image\"\n      StaticText \"The Long Static\"\n    link \"No image Winter Ferry\"\n      StaticText \"No image\"\n      StaticText \"Winter Ferry\"\n    StaticText \"Coastal\"\n    paragraph\n      StaticText \"Synthetic fixture row\"\n    link \"No image Salt Marsh\"\n      StaticText \"No image\"\n      StaticText \"Salt Marsh\"\n    link \"No image Signal House\"\n      StaticText \"No image\"\n      StaticText \"Signal House\"\n    link \"No image Low Tide\"\n      StaticText \"No image\"\n      StaticText \"Low Tide\"\n    button \"Get LLM picks\"\n      StaticText \"Get LLM picks\"\n  status",
+        "deltaText": "StaticText \"Quiet drama\"\nparagraph\n  StaticText \"Synthetic fixture row\"\nlink \"No image Harbour Lights\"\n  StaticText \"No image\"\n  StaticText \"Harbour Lights\"\nStaticText \"Seen\"\nlink \"No image The Long Static\"\n  StaticText \"No image\"\n  StaticText \"The Long Static\"\nlink \"No image Winter Ferry\"\n  StaticText \"No image\"\n  StaticText \"Winter Ferry\"",
+        "full": {
+          "bytes": 1715,
+          "chars": 1715,
+          "tokens": 429
+        },
+        "deltaSize": {
+          "bytes": 342,
+          "chars": 342,
+          "tokens": 86
+        }
+      },
+      {
+        "name": "read the first row again",
+        "delta": "#rec-row-row-quiet-drama",
+        "fullText": "RootWebArea \"TorrentHub\"\n  banner\n    link \"Torrent Hub\"\n      StaticText \"Torrent\"\n      emphasis\n        StaticText \"Hub\"\n    link \"Downloads\"\n      StaticText \"Downloads\"\n    link \"Library\"\n      StaticText \"Library\"\n    link \"Trailers\"\n      StaticText \"Trailers\"\n    button \"Bakeoff\"\n      StaticText \"Bakeoff\"\n    menu\n      StaticText \"Bakeoff\"\n      menuitem \"Profiles\"\n        StaticText \"Profiles\"\n      menuitem \"Settings\"\n        StaticText \"Settings\"\n      menuitem \"Stuffing\"\n        StaticText \"Stuffing\"\n      menuitem \"Seeding\"\n        StaticText \"Seeding\"\n      menuitem \"Requests\"\n        StaticText \"Requests\"\n      menuitem \"Enable notifications\"\n        StaticText \"Enable notifications\"\n      menuitem \"Switch Profile\"\n        StaticText \"Switch Profile\"\n  StaticText \"offline\"\n  main\n    heading \"Recommended\"\n      StaticText \"Recommended\"\n    link \"Home\"\n      StaticText \"Home\"\n    StaticText \"Quiet drama\"\n    paragraph\n      StaticText \"Synthetic fixture row\"\n    link \"No image Harbour Lights\"\n      StaticText \"No image\"\n      StaticText \"Harbour Lights\"\n    StaticText \"Seen\"\n    link \"No image The Long Static\"\n      StaticText \"No image\"\n      StaticText \"The Long Static\"\n    link \"No image Winter Ferry\"\n      StaticText \"No image\"\n      StaticText \"Winter Ferry\"\n    StaticText \"Coastal\"\n    paragraph\n      StaticText \"Synthetic fixture row\"\n    link \"No image Salt Marsh\"\n      StaticText \"No image\"\n      StaticText \"Salt Marsh\"\n    link \"No image Signal House\"\n      StaticText \"No image\"\n      StaticText \"Signal House\"\n    link \"No image Low Tide\"\n      StaticText \"No image\"\n      StaticText \"Low Tide\"\n    button \"Get LLM picks\"\n      StaticText \"Get LLM picks\"\n  status",
+        "deltaText": "StaticText \"Quiet drama\"\nparagraph\n  StaticText \"Synthetic fixture row\"\nlink \"No image Harbour Lights\"\n  StaticText \"No image\"\n  StaticText \"Harbour Lights\"\nStaticText \"Seen\"\nlink \"No image The Long Static\"\n  StaticText \"No image\"\n  StaticText \"The Long Static\"\nlink \"No image Winter Ferry\"\n  StaticText \"No image\"\n  StaticText \"Winter Ferry\"",
+        "full": {
+          "bytes": 1715,
+          "chars": 1715,
+          "tokens": 429
+        },
+        "deltaSize": {
+          "bytes": 342,
+          "chars": 342,
+          "tokens": 86
+        }
+      }
+    ]
+  },
+  {
+    "contender": "cdp",
+    "journey": "J2 action loop",
+    "steps": [
+      {
+        "name": "load /recommend",
+        "delta": "#rec-row-row-quiet-drama",
+        "fullText": "RootWebArea \"TorrentHub\"\n  banner\n    link \"Torrent Hub\"\n      StaticText \"Torrent\"\n      emphasis\n        StaticText \"Hub\"\n    link \"Downloads\"\n      StaticText \"Downloads\"\n    link \"Library\"\n      StaticText \"Library\"\n    link \"Trailers\"\n      StaticText \"Trailers\"\n    button \"Bakeoff\"\n      StaticText \"Bakeoff\"\n    menu\n      StaticText \"Bakeoff\"\n      menuitem \"Profiles\"\n        StaticText \"Profiles\"\n      menuitem \"Settings\"\n        StaticText \"Settings\"\n      menuitem \"Stuffing\"\n        StaticText \"Stuffing\"\n      menuitem \"Seeding\"\n        StaticText \"Seeding\"\n      menuitem \"Requests\"\n        StaticText \"Requests\"\n      menuitem \"Enable notifications\"\n        StaticText \"Enable notifications\"\n      menuitem \"Switch Profile\"\n        StaticText \"Switch Profile\"\n  status\n  main\n    heading \"Recommended\"\n      StaticText \"Recommended\"\n    link \"Home\"\n      StaticText \"Home\"\n    StaticText \"Quiet drama\"\n    paragraph\n      StaticText \"Synthetic fixture row\"\n    link \"No image Harbour Lights\"\n      StaticText \"No image\"\n      StaticText \"Harbour Lights\"\n    link \"No image The Long Static\"\n      StaticText \"No image\"\n      StaticText \"The Long Static\"\n    link \"No image Winter Ferry\"\n      StaticText \"No image\"\n      StaticText \"Winter Ferry\"\n    StaticText \"Coastal\"\n    paragraph\n      StaticText \"Synthetic fixture row\"\n    link \"No image Salt Marsh\"\n      StaticText \"No image\"\n      StaticText \"Salt Marsh\"\n    link \"No image Signal House\"\n      StaticText \"No image\"\n      StaticText \"Signal House\"\n    link \"No image Low Tide\"\n      StaticText \"No image\"\n      StaticText \"Low Tide\"\n    button \"Get LLM picks\"\n      StaticText \"Get LLM picks\"",
+        "deltaText": "StaticText \"Quiet drama\"\nparagraph\n  StaticText \"Synthetic fixture row\"\nlink \"No image Harbour Lights\"\n  StaticText \"No image\"\n  StaticText \"Harbour Lights\"\nlink \"No image The Long Static\"\n  StaticText \"No image\"\n  StaticText \"The Long Static\"\nlink \"No image Winter Ferry\"\n  StaticText \"No image\"\n  StaticText \"Winter Ferry\"",
+        "full": {
+          "bytes": 1670,
+          "chars": 1670,
+          "tokens": 418
+        },
+        "deltaSize": {
+          "bytes": 324,
+          "chars": 324,
+          "tokens": 81
+        }
+      },
+      {
+        "name": "open the sheet",
+        "delta": "#detail-sheet-body",
+        "fullText": "RootWebArea \"TorrentHub\"\n  dialog \"Title details\"\n    button \"Close\"\n      StaticText \"×\"\n    image \"Sleepless Mom\"\n    heading \"Sleepless Mom\"\n      StaticText \"Sleepless Mom\"\n    StaticText \"2021\"\n    StaticText \"movie\"\n    StaticText \"★ 10.0\"\n    form\n      button \"My list\"\n        StaticText \"My list\"\n    form\n      button \"Seen it\"\n        StaticText \"Seen it\"\n    form\n      button \"Not for me\"\n        StaticText \"Not for me\"\n    group \"Your rating\"\n      StaticText \"Your rating\"\n      StaticText \"☆\"\n      button \"0.5 stars\"\n      button \"1 star\"\n      StaticText \"☆\"\n      button \"1.5 stars\"\n      button \"2 stars\"\n      StaticText \"☆\"\n      button \"2.5 stars\"\n      button \"3 stars\"\n      StaticText \"☆\"\n      button \"3.5 stars\"\n      button \"4 stars\"\n      StaticText \"☆\"\n      button \"4.5 stars\"\n      button \"5 stars\"\n      StaticText \"Tap to rate\"\n    heading \"WHY IT'S HERE\"\n      StaticText \"WHY IT'S HERE\"\n    StaticText \"Quiet drama\"\n    StaticText \"Slow burn\"\n    StaticText \"Coastal\"\n    paragraph\n      StaticText \"In order to celebrate Father’s Day, Gogor gets homework from school to write about his father. But, Gogor never knew his father, so he questions his mother. However, his mother refuses to answer because she has so much work to do. Gogor becomes worried that he won't be able to complete his homework.\"\n    button \"Find torrent\"\n      StaticText \"Find torrent\"\n    form\n      LabelText\n        StaticText \"Upload .torrent\"\n    status",
+        "deltaText": "button \"Close\"\n  StaticText \"×\"\nimage \"Sleepless Mom\"\nheading \"Sleepless Mom\"\n  StaticText \"Sleepless Mom\"\nStaticText \"2021\"\nStaticText \"movie\"\nStaticText \"★ 10.0\"\nform\n  button \"My list\"\n    StaticText \"My list\"\nform\n  button \"Seen it\"\n    StaticText \"Seen it\"\nform\n  button \"Not for me\"\n    StaticText \"Not for me\"\ngroup \"Your rating\"\n  StaticText \"Your rating\"\n  StaticText \"☆\"\n  button \"0.5 stars\"\n  button \"1 star\"\n  StaticText \"☆\"\n  button \"1.5 stars\"\n  button \"2 stars\"\n  StaticText \"☆\"\n  button \"2.5 stars\"\n  button \"3 stars\"\n  StaticText \"☆\"\n  button \"3.5 stars\"\n  button \"4 stars\"\n  StaticText \"☆\"\n  button \"4.5 stars\"\n  button \"5 stars\"\n  StaticText \"Tap to rate\"\nheading \"WHY IT'S HERE\"\n  StaticText \"WHY IT'S HERE\"\nStaticText \"Quiet drama\"\nStaticText \"Slow burn\"\nStaticText \"Coastal\"\nparagraph\n  StaticText \"In order to celebrate Father’s Day, Gogor gets homework from school to write about his father. But, Gogor never knew his father, so he questions his mother. However, his mother refuses to answer because she has so much work to do. Gogor becomes worried that he won't be able to complete his homework.\"\nbutton \"Find torrent\"\n  StaticText \"Find torrent\"\nform\n  LabelText\n    StaticText \"Upload .torrent\"",
+        "full": {
+          "bytes": 1486,
+          "chars": 1471,
+          "tokens": 368
+        },
+        "deltaSize": {
+          "bytes": 1237,
+          "chars": 1222,
+          "tokens": 306
+        }
+      },
+      {
+        "name": "My list",
+        "delta": "#detail-rec",
+        "fullText": "RootWebArea \"TorrentHub\"\n  dialog \"Title details\"\n    button \"Close\"\n      StaticText \"×\"\n    image \"Sleepless Mom\"\n    heading \"Sleepless Mom\"\n      StaticText \"Sleepless Mom\"\n    StaticText \"2021\"\n    StaticText \"movie\"\n    StaticText \"★ 10.0\"\n    form\n      button \"On my list\"\n        StaticText \"On my list\"\n    form\n      button \"Seen it\"\n        StaticText \"Seen it\"\n    form\n      button \"Not for me\"\n        StaticText \"Not for me\"\n    group \"Your rating\"\n      StaticText \"Your rating\"\n      StaticText \"☆\"\n      button \"0.5 stars\"\n      button \"1 star\"\n      StaticText \"☆\"\n      button \"1.5 stars\"\n      button \"2 stars\"\n      StaticText \"☆\"\n      button \"2.5 stars\"\n      button \"3 stars\"\n      StaticText \"☆\"\n      button \"3.5 stars\"\n      button \"4 stars\"\n      StaticText \"☆\"\n      button \"4.5 stars\"\n      button \"5 stars\"\n      StaticText \"Tap to rate\"\n    heading \"WHY IT'S HERE\"\n      StaticText \"WHY IT'S HERE\"\n    StaticText \"Quiet drama\"\n    StaticText \"Slow burn\"\n    StaticText \"Coastal\"\n    paragraph\n      StaticText \"In order to celebrate Father’s Day, Gogor gets homework from school to write about his father. But, Gogor never knew his father, so he questions his mother. However, his mother refuses to answer because she has so much work to do. Gogor becomes worried that he won't be able to complete his homework.\"\n    button \"Find torrent\"\n      StaticText \"Find torrent\"\n    form\n      LabelText\n        StaticText \"Upload .torrent\"\n    status",
+        "deltaText": "form\n  button \"On my list\"\n    StaticText \"On my list\"\nform\n  button \"Seen it\"\n    StaticText \"Seen it\"\nform\n  button \"Not for me\"\n    StaticText \"Not for me\"\ngroup \"Your rating\"\n  StaticText \"Your rating\"\n  StaticText \"☆\"\n  button \"0.5 stars\"\n  button \"1 star\"\n  StaticText \"☆\"\n  button \"1.5 stars\"\n  button \"2 stars\"\n  StaticText \"☆\"\n  button \"2.5 stars\"\n  button \"3 stars\"\n  StaticText \"☆\"\n  button \"3.5 stars\"\n  button \"4 stars\"\n  StaticText \"☆\"\n  button \"4.5 stars\"\n  button \"5 stars\"\n  StaticText \"Tap to rate\"\nheading \"WHY IT'S HERE\"\n  StaticText \"WHY IT'S HERE\"\nStaticText \"Quiet drama\"\nStaticText \"Slow burn\"\nStaticText \"Coastal\"",
+        "full": {
+          "bytes": 1492,
+          "chars": 1477,
+          "tokens": 370
+        },
+        "deltaSize": {
+          "bytes": 648,
+          "chars": 638,
+          "tokens": 160
+        }
+      },
+      {
+        "name": "Seen it",
+        "delta": "#detail-rec",
+        "fullText": "RootWebArea \"TorrentHub\"\n  dialog \"Title details\"\n    button \"Close\"\n      StaticText \"×\"\n    image \"Sleepless Mom\"\n    heading \"Sleepless Mom\"\n      StaticText \"Sleepless Mom\"\n    StaticText \"2021\"\n    StaticText \"movie\"\n    StaticText \"★ 10.0\"\n    form\n      button \"On my list\"\n        StaticText \"On my list\"\n    form\n      button \"Seen\"\n        StaticText \"Seen\"\n    form\n      button \"Not for me\"\n        StaticText \"Not for me\"\n    group \"Your rating\"\n      StaticText \"Your rating\"\n      StaticText \"☆\"\n      button \"0.5 stars\"\n      button \"1 star\"\n      StaticText \"☆\"\n      button \"1.5 stars\"\n      button \"2 stars\"\n      StaticText \"☆\"\n      button \"2.5 stars\"\n      button \"3 stars\"\n      StaticText \"☆\"\n      button \"3.5 stars\"\n      button \"4 stars\"\n      StaticText \"☆\"\n      button \"4.5 stars\"\n      button \"5 stars\"\n      StaticText \"Tap to rate\"\n    heading \"WHY IT'S HERE\"\n      StaticText \"WHY IT'S HERE\"\n    StaticText \"Quiet drama\"\n    StaticText \"Slow burn\"\n    StaticText \"Coastal\"\n    paragraph\n      StaticText \"In order to celebrate Father’s Day, Gogor gets homework from school to write about his father. But, Gogor never knew his father, so he questions his mother. However, his mother refuses to answer because she has so much work to do. Gogor becomes worried that he won't be able to complete his homework.\"\n    button \"Find torrent\"\n      StaticText \"Find torrent\"\n    form\n      LabelText\n        StaticText \"Upload .torrent\"\n    status",
+        "deltaText": "form\n  button \"On my list\"\n    StaticText \"On my list\"\nform\n  button \"Seen\"\n    StaticText \"Seen\"\nform\n  button \"Not for me\"\n    StaticText \"Not for me\"\ngroup \"Your rating\"\n  StaticText \"Your rating\"\n  StaticText \"☆\"\n  button \"0.5 stars\"\n  button \"1 star\"\n  StaticText \"☆\"\n  button \"1.5 stars\"\n  button \"2 stars\"\n  StaticText \"☆\"\n  button \"2.5 stars\"\n  button \"3 stars\"\n  StaticText \"☆\"\n  button \"3.5 stars\"\n  button \"4 stars\"\n  StaticText \"☆\"\n  button \"4.5 stars\"\n  button \"5 stars\"\n  StaticText \"Tap to rate\"\nheading \"WHY IT'S HERE\"\n  StaticText \"WHY IT'S HERE\"\nStaticText \"Quiet drama\"\nStaticText \"Slow burn\"\nStaticText \"Coastal\"",
+        "full": {
+          "bytes": 1486,
+          "chars": 1471,
+          "tokens": 368
+        },
+        "deltaSize": {
+          "bytes": 642,
+          "chars": 632,
+          "tokens": 158
+        }
+      },
+      {
+        "name": "rate 4 stars",
+        "delta": "#detail-rec",
+        "fullText": "RootWebArea \"TorrentHub\"\n  dialog \"Title details\"\n    button \"Close\"\n      StaticText \"×\"\n    image \"Sleepless Mom\"\n    heading \"Sleepless Mom\"\n      StaticText \"Sleepless Mom\"\n    StaticText \"2021\"\n    StaticText \"movie\"\n    StaticText \"★ 10.0\"\n    form\n      button \"On my list\"\n        StaticText \"On my list\"\n    form\n      button \"Seen\"\n        StaticText \"Seen\"\n    form\n      button \"Not for me\"\n        StaticText \"Not for me\"\n    group \"Your rating\"\n      StaticText \"Your rating\"\n      StaticText \"★\"\n      button \"0.5 stars\"\n      button \"1 star\"\n      StaticText \"★\"\n      button \"1.5 stars\"\n      button \"2 stars\"\n      StaticText \"★\"\n      button \"2.5 stars\"\n      button \"3 stars\"\n      StaticText \"★\"\n      button \"3.5 stars\"\n      button \"4 stars\"\n      StaticText \"☆\"\n      button \"4.5 stars\"\n      button \"5 stars\"\n      StaticText \"You: 4.0★\"\n    heading \"WHY IT'S HERE\"\n      StaticText \"WHY IT'S HERE\"\n    StaticText \"Quiet drama\"\n    StaticText \"Slow burn\"\n    StaticText \"Coastal\"\n    paragraph\n      StaticText \"In order to celebrate Father’s Day, Gogor gets homework from school to write about his father. But, Gogor never knew his father, so he questions his mother. However, his mother refuses to answer because she has so much work to do. Gogor becomes worried that he won't be able to complete his homework.\"\n    button \"Find torrent\"\n      StaticText \"Find torrent\"\n    form\n      LabelText\n        StaticText \"Upload .torrent\"\n    status",
+        "deltaText": "form\n  button \"On my list\"\n    StaticText \"On my list\"\nform\n  button \"Seen\"\n    StaticText \"Seen\"\nform\n  button \"Not for me\"\n    StaticText \"Not for me\"\ngroup \"Your rating\"\n  StaticText \"Your rating\"\n  StaticText \"★\"\n  button \"0.5 stars\"\n  button \"1 star\"\n  StaticText \"★\"\n  button \"1.5 stars\"\n  button \"2 stars\"\n  StaticText \"★\"\n  button \"2.5 stars\"\n  button \"3 stars\"\n  StaticText \"★\"\n  button \"3.5 stars\"\n  button \"4 stars\"\n  StaticText \"☆\"\n  button \"4.5 stars\"\n  button \"5 stars\"\n  StaticText \"You: 4.0★\"\nheading \"WHY IT'S HERE\"\n  StaticText \"WHY IT'S HERE\"\nStaticText \"Quiet drama\"\nStaticText \"Slow burn\"\nStaticText \"Coastal\"",
+        "full": {
+          "bytes": 1486,
+          "chars": 1469,
+          "tokens": 368
+        },
+        "deltaSize": {
+          "bytes": 642,
+          "chars": 630,
+          "tokens": 158
+        }
+      },
+      {
+        "name": "Not for me",
+        "delta": "#detail-rec",
+        "fullText": "RootWebArea \"TorrentHub\"\n  dialog \"Title details\"\n    button \"Close\"\n      StaticText \"×\"\n    image \"Sleepless Mom\"\n    heading \"Sleepless Mom\"\n      StaticText \"Sleepless Mom\"\n    StaticText \"2021\"\n    StaticText \"movie\"\n    StaticText \"★ 10.0\"\n    form\n      button \"On my list\"\n        StaticText \"On my list\"\n    form\n      button \"Seen\"\n        StaticText \"Seen\"\n    form\n      button \"Not for me\"\n        StaticText \"Not for me\"\n    group \"Your rating\"\n      StaticText \"Your rating\"\n      StaticText \"★\"\n      button \"0.5 stars\"\n      button \"1 star\"\n      StaticText \"★\"\n      button \"1.5 stars\"\n      button \"2 stars\"\n      StaticText \"★\"\n      button \"2.5 stars\"\n      button \"3 stars\"\n      StaticText \"★\"\n      button \"3.5 stars\"\n      button \"4 stars\"\n      StaticText \"☆\"\n      button \"4.5 stars\"\n      button \"5 stars\"\n      StaticText \"You: 4.0★\"\n    heading \"WHY IT'S HERE\"\n      StaticText \"WHY IT'S HERE\"\n    StaticText \"Quiet drama\"\n    StaticText \"Slow burn\"\n    StaticText \"Coastal\"\n    paragraph\n      StaticText \"In order to celebrate Father’s Day, Gogor gets homework from school to write about his father. But, Gogor never knew his father, so he questions his mother. However, his mother refuses to answer because she has so much work to do. Gogor becomes worried that he won't be able to complete his homework.\"\n    button \"Find torrent\"\n      StaticText \"Find torrent\"\n    form\n      LabelText\n        StaticText \"Upload .torrent\"\n    status",
+        "deltaText": "form\n  button \"On my list\"\n    StaticText \"On my list\"\nform\n  button \"Seen\"\n    StaticText \"Seen\"\nform\n  button \"Not for me\"\n    StaticText \"Not for me\"\ngroup \"Your rating\"\n  StaticText \"Your rating\"\n  StaticText \"★\"\n  button \"0.5 stars\"\n  button \"1 star\"\n  StaticText \"★\"\n  button \"1.5 stars\"\n  button \"2 stars\"\n  StaticText \"★\"\n  button \"2.5 stars\"\n  button \"3 stars\"\n  StaticText \"★\"\n  button \"3.5 stars\"\n  button \"4 stars\"\n  StaticText \"☆\"\n  button \"4.5 stars\"\n  button \"5 stars\"\n  StaticText \"You: 4.0★\"\nheading \"WHY IT'S HERE\"\n  StaticText \"WHY IT'S HERE\"\nStaticText \"Quiet drama\"\nStaticText \"Slow burn\"\nStaticText \"Coastal\"",
+        "full": {
+          "bytes": 1486,
+          "chars": 1469,
+          "tokens": 368
+        },
+        "deltaSize": {
+          "bytes": 642,
+          "chars": 630,
+          "tokens": 158
+        }
+      },
+      {
+        "name": "close the sheet",
+        "delta": "#rec-row-row-quiet-drama",
+        "fullText": "RootWebArea \"TorrentHub\"\n  banner\n    link \"Torrent Hub\"\n      StaticText \"Torrent\"\n      emphasis\n        StaticText \"Hub\"\n    link \"Downloads\"\n      StaticText \"Downloads\"\n    link \"Library\"\n      StaticText \"Library\"\n    link \"Trailers\"\n      StaticText \"Trailers\"\n    button \"Bakeoff\"\n      StaticText \"Bakeoff\"\n    menu\n      StaticText \"Bakeoff\"\n      menuitem \"Profiles\"\n        StaticText \"Profiles\"\n      menuitem \"Settings\"\n        StaticText \"Settings\"\n      menuitem \"Stuffing\"\n        StaticText \"Stuffing\"\n      menuitem \"Seeding\"\n        StaticText \"Seeding\"\n      menuitem \"Requests\"\n        StaticText \"Requests\"\n      menuitem \"Enable notifications\"\n        StaticText \"Enable notifications\"\n      menuitem \"Switch Profile\"\n        StaticText \"Switch Profile\"\n  StaticText \"offline\"\n  main\n    heading \"Recommended\"\n      StaticText \"Recommended\"\n    link \"Home\"\n      StaticText \"Home\"\n    StaticText \"Quiet drama\"\n    paragraph\n      StaticText \"Synthetic fixture row\"\n    link \"No image Harbour Lights\"\n      StaticText \"No image\"\n      StaticText \"Harbour Lights\"\n    StaticText \"Not for me\"\n    link \"No image The Long Static\"\n      StaticText \"No image\"\n      StaticText \"The Long Static\"\n    link \"No image Winter Ferry\"\n      StaticText \"No image\"\n      StaticText \"Winter Ferry\"\n    StaticText \"Coastal\"\n    paragraph\n      StaticText \"Synthetic fixture row\"\n    link \"No image Salt Marsh\"\n      StaticText \"No image\"\n      StaticText \"Salt Marsh\"\n    link \"No image Signal House\"\n      StaticText \"No image\"\n      StaticText \"Signal House\"\n    link \"No image Low Tide\"\n      StaticText \"No image\"\n      StaticText \"Low Tide\"\n    button \"Get LLM picks\"\n      StaticText \"Get LLM picks\"\n  status",
+        "deltaText": "StaticText \"Quiet drama\"\nparagraph\n  StaticText \"Synthetic fixture row\"\nlink \"No image Harbour Lights\"\n  StaticText \"No image\"\n  StaticText \"Harbour Lights\"\nStaticText \"Not for me\"\nlink \"No image The Long Static\"\n  StaticText \"No image\"\n  StaticText \"The Long Static\"\nlink \"No image Winter Ferry\"\n  StaticText \"No image\"\n  StaticText \"Winter Ferry\"",
+        "full": {
+          "bytes": 1721,
+          "chars": 1721,
+          "tokens": 431
+        },
+        "deltaSize": {
+          "bytes": 348,
+          "chars": 348,
+          "tokens": 87
+        }
+      },
+      {
+        "name": "read the tile badge",
+        "delta": "#rec-card-movie_900001",
+        "fullText": "RootWebArea \"TorrentHub\"\n  banner\n    link \"Torrent Hub\"\n      StaticText \"Torrent\"\n      emphasis\n        StaticText \"Hub\"\n    link \"Downloads\"\n      StaticText \"Downloads\"\n    link \"Library\"\n      StaticText \"Library\"\n    link \"Trailers\"\n      StaticText \"Trailers\"\n    button \"Bakeoff\"\n      StaticText \"Bakeoff\"\n    menu\n      StaticText \"Bakeoff\"\n      menuitem \"Profiles\"\n        StaticText \"Profiles\"\n      menuitem \"Settings\"\n        StaticText \"Settings\"\n      menuitem \"Stuffing\"\n        StaticText \"Stuffing\"\n      menuitem \"Seeding\"\n        StaticText \"Seeding\"\n      menuitem \"Requests\"\n        StaticText \"Requests\"\n      menuitem \"Enable notifications\"\n        StaticText \"Enable notifications\"\n      menuitem \"Switch Profile\"\n        StaticText \"Switch Profile\"\n  StaticText \"offline\"\n  main\n    heading \"Recommended\"\n      StaticText \"Recommended\"\n    link \"Home\"\n      StaticText \"Home\"\n    StaticText \"Quiet drama\"\n    paragraph\n      StaticText \"Synthetic fixture row\"\n    link \"No image Harbour Lights\"\n      StaticText \"No image\"\n      StaticText \"Harbour Lights\"\n    StaticText \"Not for me\"\n    link \"No image The Long Static\"\n      StaticText \"No image\"\n      StaticText \"The Long Static\"\n    link \"No image Winter Ferry\"\n      StaticText \"No image\"\n      StaticText \"Winter Ferry\"\n    StaticText \"Coastal\"\n    paragraph\n      StaticText \"Synthetic fixture row\"\n    link \"No image Salt Marsh\"\n      StaticText \"No image\"\n      StaticText \"Salt Marsh\"\n    link \"No image Signal House\"\n      StaticText \"No image\"\n      StaticText \"Signal House\"\n    link \"No image Low Tide\"\n      StaticText \"No image\"\n      StaticText \"Low Tide\"\n    button \"Get LLM picks\"\n      StaticText \"Get LLM picks\"\n  status",
+        "deltaText": "link \"No image Harbour Lights\"\n  StaticText \"No image\"\n  StaticText \"Harbour Lights\"\nStaticText \"Not for me\"",
+        "full": {
+          "bytes": 1721,
+          "chars": 1721,
+          "tokens": 431
+        },
+        "deltaSize": {
+          "bytes": 108,
+          "chars": 108,
+          "tokens": 27
+        }
+      }
+    ]
+  },
+  {
+    "contender": "cdp",
+    "journey": "J3 change outside the delta",
+    "steps": [
+      {
+        "name": "load /recommend",
+        "delta": "#rec-row-row-quiet-drama",
+        "fullText": "RootWebArea \"TorrentHub\"\n  banner\n    link \"Torrent Hub\"\n      StaticText \"Torrent\"\n      emphasis\n        StaticText \"Hub\"\n    link \"Downloads\"\n      StaticText \"Downloads\"\n    link \"Library\"\n      StaticText \"Library\"\n    link \"Trailers\"\n      StaticText \"Trailers\"\n    button \"Bakeoff\"\n      StaticText \"Bakeoff\"\n    menu\n      StaticText \"Bakeoff\"\n      menuitem \"Profiles\"\n        StaticText \"Profiles\"\n      menuitem \"Settings\"\n        StaticText \"Settings\"\n      menuitem \"Stuffing\"\n        StaticText \"Stuffing\"\n      menuitem \"Seeding\"\n        StaticText \"Seeding\"\n      menuitem \"Requests\"\n        StaticText \"Requests\"\n      menuitem \"Enable notifications\"\n        StaticText \"Enable notifications\"\n      menuitem \"Switch Profile\"\n        StaticText \"Switch Profile\"\n  status\n  main\n    heading \"Recommended\"\n      StaticText \"Recommended\"\n    link \"Home\"\n      StaticText \"Home\"\n    StaticText \"Quiet drama\"\n    paragraph\n      StaticText \"Synthetic fixture row\"\n    link \"No image Harbour Lights\"\n      StaticText \"No image\"\n      StaticText \"Harbour Lights\"\n    link \"No image The Long Static\"\n      StaticText \"No image\"\n      StaticText \"The Long Static\"\n    link \"No image Winter Ferry\"\n      StaticText \"No image\"\n      StaticText \"Winter Ferry\"\n    StaticText \"Coastal\"\n    paragraph\n      StaticText \"Synthetic fixture row\"\n    link \"No image Salt Marsh\"\n      StaticText \"No image\"\n      StaticText \"Salt Marsh\"\n    link \"No image Signal House\"\n      StaticText \"No image\"\n      StaticText \"Signal House\"\n    link \"No image Low Tide\"\n      StaticText \"No image\"\n      StaticText \"Low Tide\"\n    button \"Get LLM picks\"\n      StaticText \"Get LLM picks\"",
+        "deltaText": "StaticText \"Quiet drama\"\nparagraph\n  StaticText \"Synthetic fixture row\"\nlink \"No image Harbour Lights\"\n  StaticText \"No image\"\n  StaticText \"Harbour Lights\"\nlink \"No image The Long Static\"\n  StaticText \"No image\"\n  StaticText \"The Long Static\"\nlink \"No image Winter Ferry\"\n  StaticText \"No image\"\n  StaticText \"Winter Ferry\"",
+        "full": {
+          "bytes": 1670,
+          "chars": 1670,
+          "tokens": 418
+        },
+        "deltaSize": {
+          "bytes": 324,
+          "chars": 324,
+          "tokens": 81
+        }
+      },
+      {
+        "name": "read the tile badge",
+        "delta": "#rec-card-movie_900001",
+        "fullText": "RootWebArea \"TorrentHub\"\n  banner\n    link \"Torrent Hub\"\n      StaticText \"Torrent\"\n      emphasis\n        StaticText \"Hub\"\n    link \"Downloads\"\n      StaticText \"Downloads\"\n    link \"Library\"\n      StaticText \"Library\"\n    link \"Trailers\"\n      StaticText \"Trailers\"\n    button \"Bakeoff\"\n      StaticText \"Bakeoff\"\n    menu\n      StaticText \"Bakeoff\"\n      menuitem \"Profiles\"\n        StaticText \"Profiles\"\n      menuitem \"Settings\"\n        StaticText \"Settings\"\n      menuitem \"Stuffing\"\n        StaticText \"Stuffing\"\n      menuitem \"Seeding\"\n        StaticText \"Seeding\"\n      menuitem \"Requests\"\n        StaticText \"Requests\"\n      menuitem \"Enable notifications\"\n        StaticText \"Enable notifications\"\n      menuitem \"Switch Profile\"\n        StaticText \"Switch Profile\"\n  status\n  StaticText \"offline\"\n  main\n    heading \"Recommended\"\n      StaticText \"Recommended\"\n    link \"Home\"\n      StaticText \"Home\"\n    StaticText \"Quiet drama\"\n    paragraph\n      StaticText \"Synthetic fixture row\"\n    link \"No image Harbour Lights\"\n      StaticText \"No image\"\n      StaticText \"Harbour Lights\"\n    link \"No image The Long Static\"\n      StaticText \"No image\"\n      StaticText \"The Long Static\"\n    link \"No image Winter Ferry\"\n      StaticText \"No image\"\n      StaticText \"Winter Ferry\"\n    StaticText \"Coastal\"\n    paragraph\n      StaticText \"Synthetic fixture row\"\n    link \"No image Salt Marsh\"\n      StaticText \"No image\"\n      StaticText \"Salt Marsh\"\n    link \"No image Signal House\"\n      StaticText \"No image\"\n      StaticText \"Signal House\"\n    link \"No image Low Tide\"\n      StaticText \"No image\"\n      StaticText \"Low Tide\"\n    button \"Get LLM picks\"\n      StaticText \"Get LLM picks\"",
+        "deltaText": "link \"No image Harbour Lights\"\n  StaticText \"No image\"\n  StaticText \"Harbour Lights\"",
+        "full": {
+          "bytes": 1693,
+          "chars": 1693,
+          "tokens": 424
+        },
+        "deltaSize": {
+          "bytes": 84,
+          "chars": 84,
+          "tokens": 21
+        }
+      },
+      {
+        "name": "open the sheet",
+        "delta": "#detail-sheet-body",
+        "fullText": "RootWebArea \"TorrentHub\"\n  dialog \"Title details\"\n    button \"Close\"\n      StaticText \"×\"\n    image \"Sleepless Mom\"\n    heading \"Sleepless Mom\"\n      StaticText \"Sleepless Mom\"\n    StaticText \"2021\"\n    StaticText \"movie\"\n    StaticText \"★ 10.0\"\n    form\n      button \"My list\"\n        StaticText \"My list\"\n    form\n      button \"Seen it\"\n        StaticText \"Seen it\"\n    form\n      button \"Not for me\"\n        StaticText \"Not for me\"\n    group \"Your rating\"\n      StaticText \"Your rating\"\n      StaticText \"☆\"\n      button \"0.5 stars\"\n      button \"1 star\"\n      StaticText \"☆\"\n      button \"1.5 stars\"\n      button \"2 stars\"\n      StaticText \"☆\"\n      button \"2.5 stars\"\n      button \"3 stars\"\n      StaticText \"☆\"\n      button \"3.5 stars\"\n      button \"4 stars\"\n      StaticText \"☆\"\n      button \"4.5 stars\"\n      button \"5 stars\"\n      StaticText \"Tap to rate\"\n    heading \"WHY IT'S HERE\"\n      StaticText \"WHY IT'S HERE\"\n    StaticText \"Quiet drama\"\n    StaticText \"Slow burn\"\n    StaticText \"Coastal\"\n    paragraph\n      StaticText \"In order to celebrate Father’s Day, Gogor gets homework from school to write about his father. But, Gogor never knew his father, so he questions his mother. However, his mother refuses to answer because she has so much work to do. Gogor becomes worried that he won't be able to complete his homework.\"\n    button \"Find torrent\"\n      StaticText \"Find torrent\"\n    form\n      LabelText\n        StaticText \"Upload .torrent\"\n    status",
+        "deltaText": "button \"Close\"\n  StaticText \"×\"\nimage \"Sleepless Mom\"\nheading \"Sleepless Mom\"\n  StaticText \"Sleepless Mom\"\nStaticText \"2021\"\nStaticText \"movie\"\nStaticText \"★ 10.0\"\nform\n  button \"My list\"\n    StaticText \"My list\"\nform\n  button \"Seen it\"\n    StaticText \"Seen it\"\nform\n  button \"Not for me\"\n    StaticText \"Not for me\"\ngroup \"Your rating\"\n  StaticText \"Your rating\"\n  StaticText \"☆\"\n  button \"0.5 stars\"\n  button \"1 star\"\n  StaticText \"☆\"\n  button \"1.5 stars\"\n  button \"2 stars\"\n  StaticText \"☆\"\n  button \"2.5 stars\"\n  button \"3 stars\"\n  StaticText \"☆\"\n  button \"3.5 stars\"\n  button \"4 stars\"\n  StaticText \"☆\"\n  button \"4.5 stars\"\n  button \"5 stars\"\n  StaticText \"Tap to rate\"\nheading \"WHY IT'S HERE\"\n  StaticText \"WHY IT'S HERE\"\nStaticText \"Quiet drama\"\nStaticText \"Slow burn\"\nStaticText \"Coastal\"\nparagraph\n  StaticText \"In order to celebrate Father’s Day, Gogor gets homework from school to write about his father. But, Gogor never knew his father, so he questions his mother. However, his mother refuses to answer because she has so much work to do. Gogor becomes worried that he won't be able to complete his homework.\"\nbutton \"Find torrent\"\n  StaticText \"Find torrent\"\nform\n  LabelText\n    StaticText \"Upload .torrent\"",
+        "full": {
+          "bytes": 1486,
+          "chars": 1471,
+          "tokens": 368
+        },
+        "deltaSize": {
+          "bytes": 1237,
+          "chars": 1222,
+          "tokens": 306
+        }
+      },
+      {
+        "name": "read the action block",
+        "delta": "#detail-rec",
+        "fullText": "RootWebArea \"TorrentHub\"\n  dialog \"Title details\"\n    button \"Close\"\n      StaticText \"×\"\n    image \"Sleepless Mom\"\n    heading \"Sleepless Mom\"\n      StaticText \"Sleepless Mom\"\n    StaticText \"2021\"\n    StaticText \"movie\"\n    StaticText \"★ 10.0\"\n    form\n      button \"My list\"\n        StaticText \"My list\"\n    form\n      button \"Seen it\"\n        StaticText \"Seen it\"\n    form\n      button \"Not for me\"\n        StaticText \"Not for me\"\n    group \"Your rating\"\n      StaticText \"Your rating\"\n      StaticText \"☆\"\n      button \"0.5 stars\"\n      button \"1 star\"\n      StaticText \"☆\"\n      button \"1.5 stars\"\n      button \"2 stars\"\n      StaticText \"☆\"\n      button \"2.5 stars\"\n      button \"3 stars\"\n      StaticText \"☆\"\n      button \"3.5 stars\"\n      button \"4 stars\"\n      StaticText \"☆\"\n      button \"4.5 stars\"\n      button \"5 stars\"\n      StaticText \"Tap to rate\"\n    heading \"WHY IT'S HERE\"\n      StaticText \"WHY IT'S HERE\"\n    StaticText \"Quiet drama\"\n    StaticText \"Slow burn\"\n    StaticText \"Coastal\"\n    paragraph\n      StaticText \"In order to celebrate Father’s Day, Gogor gets homework from school to write about his father. But, Gogor never knew his father, so he questions his mother. However, his mother refuses to answer because she has so much work to do. Gogor becomes worried that he won't be able to complete his homework.\"\n    button \"Find torrent\"\n      StaticText \"Find torrent\"\n    form\n      LabelText\n        StaticText \"Upload .torrent\"\n    status",
+        "deltaText": "form\n  button \"My list\"\n    StaticText \"My list\"\nform\n  button \"Seen it\"\n    StaticText \"Seen it\"\nform\n  button \"Not for me\"\n    StaticText \"Not for me\"\ngroup \"Your rating\"\n  StaticText \"Your rating\"\n  StaticText \"☆\"\n  button \"0.5 stars\"\n  button \"1 star\"\n  StaticText \"☆\"\n  button \"1.5 stars\"\n  button \"2 stars\"\n  StaticText \"☆\"\n  button \"2.5 stars\"\n  button \"3 stars\"\n  StaticText \"☆\"\n  button \"3.5 stars\"\n  button \"4 stars\"\n  StaticText \"☆\"\n  button \"4.5 stars\"\n  button \"5 stars\"\n  StaticText \"Tap to rate\"\nheading \"WHY IT'S HERE\"\n  StaticText \"WHY IT'S HERE\"\nStaticText \"Quiet drama\"\nStaticText \"Slow burn\"\nStaticText \"Coastal\"",
+        "full": {
+          "bytes": 1486,
+          "chars": 1471,
+          "tokens": 368
+        },
+        "deltaSize": {
+          "bytes": 642,
+          "chars": 632,
+          "tokens": 158
+        }
+      },
+      {
+        "name": "My list",
+        "delta": "#detail-rec",
+        "fullText": "RootWebArea \"TorrentHub\"\n  dialog \"Title details\"\n    button \"Close\"\n      StaticText \"×\"\n    image \"Sleepless Mom\"\n    heading \"Sleepless Mom\"\n      StaticText \"Sleepless Mom\"\n    StaticText \"2021\"\n    StaticText \"movie\"\n    StaticText \"★ 10.0\"\n    form\n      button \"On my list\"\n        StaticText \"On my list\"\n    form\n      button \"Seen it\"\n        StaticText \"Seen it\"\n    form\n      button \"Not for me\"\n        StaticText \"Not for me\"\n    group \"Your rating\"\n      StaticText \"Your rating\"\n      StaticText \"☆\"\n      button \"0.5 stars\"\n      button \"1 star\"\n      StaticText \"☆\"\n      button \"1.5 stars\"\n      button \"2 stars\"\n      StaticText \"☆\"\n      button \"2.5 stars\"\n      button \"3 stars\"\n      StaticText \"☆\"\n      button \"3.5 stars\"\n      button \"4 stars\"\n      StaticText \"☆\"\n      button \"4.5 stars\"\n      button \"5 stars\"\n      StaticText \"Tap to rate\"\n    heading \"WHY IT'S HERE\"\n      StaticText \"WHY IT'S HERE\"\n    StaticText \"Quiet drama\"\n    StaticText \"Slow burn\"\n    StaticText \"Coastal\"\n    paragraph\n      StaticText \"In order to celebrate Father’s Day, Gogor gets homework from school to write about his father. But, Gogor never knew his father, so he questions his mother. However, his mother refuses to answer because she has so much work to do. Gogor becomes worried that he won't be able to complete his homework.\"\n    button \"Find torrent\"\n      StaticText \"Find torrent\"\n    form\n      LabelText\n        StaticText \"Upload .torrent\"\n    status",
+        "deltaText": "form\n  button \"On my list\"\n    StaticText \"On my list\"\nform\n  button \"Seen it\"\n    StaticText \"Seen it\"\nform\n  button \"Not for me\"\n    StaticText \"Not for me\"\ngroup \"Your rating\"\n  StaticText \"Your rating\"\n  StaticText \"☆\"\n  button \"0.5 stars\"\n  button \"1 star\"\n  StaticText \"☆\"\n  button \"1.5 stars\"\n  button \"2 stars\"\n  StaticText \"☆\"\n  button \"2.5 stars\"\n  button \"3 stars\"\n  StaticText \"☆\"\n  button \"3.5 stars\"\n  button \"4 stars\"\n  StaticText \"☆\"\n  button \"4.5 stars\"\n  button \"5 stars\"\n  StaticText \"Tap to rate\"\nheading \"WHY IT'S HERE\"\n  StaticText \"WHY IT'S HERE\"\nStaticText \"Quiet drama\"\nStaticText \"Slow burn\"\nStaticText \"Coastal\"",
+        "full": {
+          "bytes": 1492,
+          "chars": 1477,
+          "tokens": 370
+        },
+        "deltaSize": {
+          "bytes": 648,
+          "chars": 638,
+          "tokens": 160
+        }
+      },
+      {
+        "name": "re-read the swapped block",
+        "delta": "#detail-rec",
+        "fullText": "RootWebArea \"TorrentHub\"\n  dialog \"Title details\"\n    button \"Close\"\n      StaticText \"×\"\n    image \"Sleepless Mom\"\n    heading \"Sleepless Mom\"\n      StaticText \"Sleepless Mom\"\n    StaticText \"2021\"\n    StaticText \"movie\"\n    StaticText \"★ 10.0\"\n    form\n      button \"On my list\"\n        StaticText \"On my list\"\n    form\n      button \"Seen it\"\n        StaticText \"Seen it\"\n    form\n      button \"Not for me\"\n        StaticText \"Not for me\"\n    group \"Your rating\"\n      StaticText \"Your rating\"\n      StaticText \"☆\"\n      button \"0.5 stars\"\n      button \"1 star\"\n      StaticText \"☆\"\n      button \"1.5 stars\"\n      button \"2 stars\"\n      StaticText \"☆\"\n      button \"2.5 stars\"\n      button \"3 stars\"\n      StaticText \"☆\"\n      button \"3.5 stars\"\n      button \"4 stars\"\n      StaticText \"☆\"\n      button \"4.5 stars\"\n      button \"5 stars\"\n      StaticText \"Tap to rate\"\n    heading \"WHY IT'S HERE\"\n      StaticText \"WHY IT'S HERE\"\n    StaticText \"Quiet drama\"\n    StaticText \"Slow burn\"\n    StaticText \"Coastal\"\n    paragraph\n      StaticText \"In order to celebrate Father’s Day, Gogor gets homework from school to write about his father. But, Gogor never knew his father, so he questions his mother. However, his mother refuses to answer because she has so much work to do. Gogor becomes worried that he won't be able to complete his homework.\"\n    button \"Find torrent\"\n      StaticText \"Find torrent\"\n    form\n      LabelText\n        StaticText \"Upload .torrent\"\n    status",
+        "deltaText": "form\n  button \"On my list\"\n    StaticText \"On my list\"\nform\n  button \"Seen it\"\n    StaticText \"Seen it\"\nform\n  button \"Not for me\"\n    StaticText \"Not for me\"\ngroup \"Your rating\"\n  StaticText \"Your rating\"\n  StaticText \"☆\"\n  button \"0.5 stars\"\n  button \"1 star\"\n  StaticText \"☆\"\n  button \"1.5 stars\"\n  button \"2 stars\"\n  StaticText \"☆\"\n  button \"2.5 stars\"\n  button \"3 stars\"\n  StaticText \"☆\"\n  button \"3.5 stars\"\n  button \"4 stars\"\n  StaticText \"☆\"\n  button \"4.5 stars\"\n  button \"5 stars\"\n  StaticText \"Tap to rate\"\nheading \"WHY IT'S HERE\"\n  StaticText \"WHY IT'S HERE\"\nStaticText \"Quiet drama\"\nStaticText \"Slow burn\"\nStaticText \"Coastal\"",
+        "full": {
+          "bytes": 1492,
+          "chars": 1477,
+          "tokens": 370
+        },
+        "deltaSize": {
+          "bytes": 648,
+          "chars": 638,
+          "tokens": 160
+        }
+      },
+      {
+        "name": "read the tile badge",
+        "delta": "#rec-card-movie_900001",
+        "fullText": "RootWebArea \"TorrentHub\"\n  dialog \"Title details\"\n    button \"Close\"\n      StaticText \"×\"\n    image \"Sleepless Mom\"\n    heading \"Sleepless Mom\"\n      StaticText \"Sleepless Mom\"\n    StaticText \"2021\"\n    StaticText \"movie\"\n    StaticText \"★ 10.0\"\n    form\n      button \"On my list\"\n        StaticText \"On my list\"\n    form\n      button \"Seen it\"\n        StaticText \"Seen it\"\n    form\n      button \"Not for me\"\n        StaticText \"Not for me\"\n    group \"Your rating\"\n      StaticText \"Your rating\"\n      StaticText \"☆\"\n      button \"0.5 stars\"\n      button \"1 star\"\n      StaticText \"☆\"\n      button \"1.5 stars\"\n      button \"2 stars\"\n      StaticText \"☆\"\n      button \"2.5 stars\"\n      button \"3 stars\"\n      StaticText \"☆\"\n      button \"3.5 stars\"\n      button \"4 stars\"\n      StaticText \"☆\"\n      button \"4.5 stars\"\n      button \"5 stars\"\n      StaticText \"Tap to rate\"\n    heading \"WHY IT'S HERE\"\n      StaticText \"WHY IT'S HERE\"\n    StaticText \"Quiet drama\"\n    StaticText \"Slow burn\"\n    StaticText \"Coastal\"\n    paragraph\n      StaticText \"In order to celebrate Father’s Day, Gogor gets homework from school to write about his father. But, Gogor never knew his father, so he questions his mother. However, his mother refuses to answer because she has so much work to do. Gogor becomes worried that he won't be able to complete his homework.\"\n    button \"Find torrent\"\n      StaticText \"Find torrent\"\n    form\n      LabelText\n        StaticText \"Upload .torrent\"\n    status",
+        "deltaText": "",
+        "full": {
+          "bytes": 1492,
+          "chars": 1477,
+          "tokens": 370
+        },
+        "deltaSize": {
+          "bytes": 0,
+          "chars": 0,
+          "tokens": 0
+        }
+      },
+      {
+        "name": "close the sheet",
+        "delta": "#rec-row-row-quiet-drama",
+        "fullText": "RootWebArea \"TorrentHub\"\n  banner\n    link \"Torrent Hub\"\n      StaticText \"Torrent\"\n      emphasis\n        StaticText \"Hub\"\n    link \"Downloads\"\n      StaticText \"Downloads\"\n    link \"Library\"\n      StaticText \"Library\"\n    link \"Trailers\"\n      StaticText \"Trailers\"\n    button \"Bakeoff\"\n      StaticText \"Bakeoff\"\n    menu\n      StaticText \"Bakeoff\"\n      menuitem \"Profiles\"\n        StaticText \"Profiles\"\n      menuitem \"Settings\"\n        StaticText \"Settings\"\n      menuitem \"Stuffing\"\n        StaticText \"Stuffing\"\n      menuitem \"Seeding\"\n        StaticText \"Seeding\"\n      menuitem \"Requests\"\n        StaticText \"Requests\"\n      menuitem \"Enable notifications\"\n        StaticText \"Enable notifications\"\n      menuitem \"Switch Profile\"\n        StaticText \"Switch Profile\"\n  StaticText \"offline\"\n  main\n    heading \"Recommended\"\n      StaticText \"Recommended\"\n    link \"Home\"\n      StaticText \"Home\"\n    StaticText \"Quiet drama\"\n    paragraph\n      StaticText \"Synthetic fixture row\"\n    link \"No image Harbour Lights\"\n      StaticText \"No image\"\n      StaticText \"Harbour Lights\"\n    StaticText \"In list\"\n    link \"No image The Long Static\"\n      StaticText \"No image\"\n      StaticText \"The Long Static\"\n    link \"No image Winter Ferry\"\n      StaticText \"No image\"\n      StaticText \"Winter Ferry\"\n    StaticText \"Coastal\"\n    paragraph\n      StaticText \"Synthetic fixture row\"\n    link \"No image Salt Marsh\"\n      StaticText \"No image\"\n      StaticText \"Salt Marsh\"\n    link \"No image Signal House\"\n      StaticText \"No image\"\n      StaticText \"Signal House\"\n    link \"No image Low Tide\"\n      StaticText \"No image\"\n      StaticText \"Low Tide\"\n    button \"Get LLM picks\"\n      StaticText \"Get LLM picks\"\n  status",
+        "deltaText": "StaticText \"Quiet drama\"\nparagraph\n  StaticText \"Synthetic fixture row\"\nlink \"No image Harbour Lights\"\n  StaticText \"No image\"\n  StaticText \"Harbour Lights\"\nStaticText \"In list\"\nlink \"No image The Long Static\"\n  StaticText \"No image\"\n  StaticText \"The Long Static\"\nlink \"No image Winter Ferry\"\n  StaticText \"No image\"\n  StaticText \"Winter Ferry\"",
+        "full": {
+          "bytes": 1718,
+          "chars": 1718,
+          "tokens": 430
+        },
+        "deltaSize": {
+          "bytes": 345,
+          "chars": 345,
+          "tokens": 87
+        }
+      }
+    ]
+  }
+]

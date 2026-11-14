@@ -1,0 +1,11 @@
+# DELIBERATELY BROKEN: the hover step is shaped like the paper's nested schema
+# (`action: { type: hover }`) instead of the flat one-op-per-step vocabulary.
+# The validator must reject it (unknown step key "action").
+id: t2-hover
+task: t2-hover
+backend: browser
+steps:
+  - viewport: { width: 1280, height: 900 }
+  - open: { url: "http://127.0.0.1:18771/sheet.html" }
+  - action: { type: hover, target: "[data-testid=rec-tile]" }
+  - expect_css: { target: "[data-testid=hover-bar]", property: "opacity", equals: "1" }

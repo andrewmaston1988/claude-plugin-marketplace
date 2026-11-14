@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ui-probe bake-off fixture — detail sheet</title>
+<style>
+  :root { --bg: #070A14; --panel: #1B2238; --line: #2A3350; --text: #E8ECF5; --muted: #8E97AE; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; background: var(--bg); color: var(--text); font-family: Inter, system-ui, sans-serif; }
+  /* 390 viewport - 2 * 20.5 padding = 349 content; 3 * 111 + 2 * 8 gap = 349 exactly. */
+  .sheet { width: 100%; padding: 16px 20.5px; }
+  .top { display: flex; align-items: center; justify-content: space-between; }
+  .title { font-size: 18px; font-weight: 600; }
+  .close { width: 44px; height: 44px; border: 0; border-radius: 22px; background: transparent; color: var(--text); }
+  .actions { display: grid; grid-template-columns: repeat(3, 111px); justify-content: space-between; gap: 8px; margin: 20px 0; }
+  .action { height: 64px; border-radius: 12px; background: var(--panel); border: 1px solid var(--line); color: var(--text); font-size: 12px; }
+  .recs { display: flex; gap: 8px; overflow-x: auto; }
+  .rec { position: relative; width: 104px; height: 156px; flex: 0 0 auto; border-radius: 10px; background: #1E2640; border: 1px dashed var(--line); }
+  .hover-bar { position: absolute; inset: auto 0 0 0; opacity: 0; transition: opacity 120ms linear; background: rgba(91, 91, 240, 0.9); color: #fff; font-size: 11px; padding: 4px; text-align: center; }
+  /* The reveal exists only where the device reports a real hover pointer. */
+  @media (hover: hover) and (pointer: fine) {
+    .rec:hover .hover-bar { opacity: 1; }
+  }
+  footer { margin-top: 24px; }
+  .primary { width: 100%; height: 52px; border: 0; border-radius: 12px; background: #5B5BF0; color: #fff; font-size: 16px; font-weight: 600; }
+</style>
+</head>
+<body>
+  <main class="sheet" data-testid="sheet">
+    <div class="top">
+      <span class="title">Fixture Title</span>
+      <button class="close" data-testid="close" aria-label="Close">&times;</button>
+    </div>
+    <div class="actions" data-testid="actions">
+      <button class="action" data-testid="action-tile">My list</button>
+      <button class="action" data-testid="action-tile">Seen it</button>
+      <button class="action" data-testid="action-tile">Not for me</button>
+    </div>
+    <div class="recs" data-testid="recs">
+      <article class="rec" data-testid="rec-tile">
+        <div class="hover-bar" data-testid="hover-bar">Play</div>
+      </article>
+      <article class="rec" data-testid="rec-tile">
+        <div class="hover-bar" data-testid="hover-bar">Play</div>
+      </article>
+    </div>
+    <footer>
+      <button class="primary" data-testid="footer-primary">Grab best release</button>
+    </footer>
+  </main>
+</body>
+</html>

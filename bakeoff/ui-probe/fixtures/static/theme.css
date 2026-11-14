@@ -1,0 +1,69 @@
+:root {
+  /* Surfaces */
+  --bg-page:       #0f172a;
+  --bg-darker:     #030712;
+  --bg-card:       #111827;
+  --bg-card-alt:   #1f2937;
+  --bg-input:      #1f2937;
+  --bg-darkest:    #0d1117;
+  --bg-accent:     #1e1b4b;
+
+  /* Borders */
+  --border:        #374151;
+  --border-light:  #1f2937;
+  --border-focus:  #3b82f6;
+
+  /* Text */
+  --text-primary:  #d1d5db;
+  --text-bright:   #f9fafb;
+  --text-secondary:#9ca3af;
+  --text-muted:    #6b7280;
+  --text-dim:      #4b5563;
+  --text-light:    #e2e8f0;
+  --text-accent:   #a5b4fc;
+  --text-accent-2: #818cf8;
+
+  /* Accents */
+  --accent-primary: #6366f1;
+  --accent-primary-dark: #4f46e5;
+  --accent-primary-darker: #4338ca;
+
+  /* Section headers */
+  --section-torrent: #5E6DD4;
+  --section-plex:    #e5a00d;
+  --section-qb:      #a5b4fc;
+
+  /* Semantic — status */
+  --color-ok:      #4ade80;
+  --color-warn:    #fbbf24;
+  --color-error:   #f87171;
+  --color-info:    #60a5fa;
+  --color-ok-alt:  #86efac;
+
+  /* Semantic — badge backgrounds */
+  --bg-ok:         #166534;
+  --bg-ok-dark:    #15803d;
+  --bg-ok-light:   #16a34a;
+  --bg-warn:       #422006;
+  --bg-warn-light: #ca8a04;
+  --bg-warn-medium: #78350f;
+  --bg-error:      #450a0a;
+  --bg-error-dark: #991b1b;
+  --bg-info:       #172554;
+  --bg-info-dark:  #1d4ed8;
+  --bg-info-light: #1e3a5f;
+  --bg-partial:    #713f12;
+
+  /* Semantic — badge text */
+  --text-ok:       #bbf7d0;
+  --text-warn:     #fde68a;
+  --text-error:    #fca5a5;
+  --text-error-light: #fecaca;
+  --text-info:     #93c5fd;
+  --text-partial:  #fef08a;
+
+  /* Radii / spacing */
+  --radius-sm:     .25rem;
+  --radius:        .375rem;
+  --radius-lg:     .5rem;
+}

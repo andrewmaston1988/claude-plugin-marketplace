@@ -1,0 +1,204 @@
+{
+  "generatedAt": "2026-11-13T03:05:19.548Z",
+  "fixture": "http://127.0.0.1:8001",
+  "arms": [
+    {
+      "contender": "playwright",
+      "arm": "unguarded",
+      "target": {
+        "ck": "movie:900001",
+        "label": "Seen it",
+        "method": "POST",
+        "url": "/recommend/action",
+        "pressed": "false",
+        "x": 679.875,
+        "y": 369.59375
+      },
+      "refusal": null,
+      "posts": 1,
+      "postLines": [
+        "2026-11-13 03:05:21,583 127.0.0.1:50565 - \"POST /recommend/action HTTP/1.1\" 200"
+      ],
+      "allLines": 1,
+      "dbFrom": 0,
+      "dbTo": 1,
+      "dbDelta": 1,
+      "blockedByTool": [],
+      "act": {
+        "label": "Seen",
+        "pressed": "true",
+        "on": true
+      },
+      "ms": 3128.07
+    },
+    {
+      "contender": "playwright",
+      "arm": "network-guard",
+      "target": {
+        "ck": "movie:900001",
+        "label": "Seen it",
+        "method": "POST",
+        "url": "/recommend/action",
+        "pressed": "false",
+        "x": 679.875,
+        "y": 369.59375
+      },
+      "refusal": null,
+      "posts": 0,
+      "postLines": [],
+      "allLines": 0,
+      "dbFrom": 0,
+      "dbTo": 0,
+      "dbDelta": 0,
+      "blockedByTool": [
+        "POST http://127.0.0.1:8001/recommend/action"
+      ],
+      "act": {
+        "label": "Seen it",
+        "pressed": "false",
+        "on": false
+      },
+      "ms": 2971.4
+    },
+    {
+      "contender": "playwright",
+      "arm": "action-allowlist",
+      "target": {
+        "ck": "movie:900001",
+        "label": "Seen it",
+        "method": "POST",
+        "url": "/recommend/action",
+        "pressed": "false",
+        "x": 679.875,
+        "y": 369.59375
+      },
+      "refusal": {
+        "reason": "not on the allowlist",
+        "ck": "movie:900001",
+        "label": "Seen it",
+        "method": "POST",
+        "url": "/recommend/action",
+        "pressed": "false",
+        "x": 679.875,
+        "y": 369.59375
+      },
+      "posts": 0,
+      "postLines": [],
+      "allLines": 0,
+      "dbFrom": 0,
+      "dbTo": 0,
+      "dbDelta": 0,
+      "blockedByTool": [],
+      "act": {
+        "label": "Seen it",
+        "pressed": "false",
+        "on": false
+      },
+      "ms": 3023.99
+    },
+    {
+      "contender": "cdp",
+      "arm": "unguarded",
+      "target": {
+        "ck": "movie:900001",
+        "label": "Seen it",
+        "method": "POST",
+        "url": "/recommend/action",
+        "pressed": "false",
+        "x": 679.875,
+        "y": 369.59375
+      },
+      "refusal": null,
+      "posts": 1,
+      "postLines": [
+        "2026-11-13 03:05:31,756 127.0.0.1:52336 - \"POST /recommend/action HTTP/1.1\" 200"
+      ],
+      "allLines": 1,
+      "dbFrom": 0,
+      "dbTo": 1,
+      "dbDelta": 1,
+      "blockedByTool": [],
+      "act": {
+        "label": "Seen",
+        "pressed": "true",
+        "on": true
+      },
+      "ms": 3080.46
+    },
+    {
+      "contender": "cdp",
+      "arm": "network-guard",
+      "target": {
+        "ck": "movie:900001",
+        "label": "Seen it",
+        "method": "POST",
+        "url": "/recommend/action",
+        "pressed": "false",
+        "x": 679.875,
+        "y": 369.59375
+      },
+      "refusal": null,
+      "posts": 0,
+      "postLines": [],
+      "allLines": 0,
+      "dbFrom": 0,
+      "dbTo": 0,
+      "dbDelta": 0,
+      "blockedByTool": [
+        "POST http://127.0.0.1:8001/recommend/action"
+      ],
+      "act": {
+        "label": "Seen it",
+        "pressed": "false",
+        "on": false
+      },
+      "ms": 3178.79
+    },
+    {
+      "contender": "cdp",
+      "arm": "action-allowlist",
+      "target": {
+        "ck": "movie:900001",
+        "label": "Seen it",
+        "method": "POST",
+        "url": "/recommend/action",
+        "pressed": "false",
+        "x": 679.875,
+        "y": 369.59375
+      },
+      "refusal": {
+        "reason": "not on the allowlist",
+        "ck": "movie:900001",
+        "label": "Seen it",
+        "method": "POST",
+        "url": "/recommend/action",
+        "pressed": "false",
+        "x": 679.875,
+        "y": 369.59375
+      },
+      "posts": 0,
+      "postLines": [],
+      "allLines": 0,
+      "dbFrom": 0,
+      "dbTo": 0,
+      "dbDelta": 0,
+      "blockedByTool": [],
+      "act": {
+        "label": "Seen it",
+        "pressed": "false",
+        "on": false
+      },
+      "ms": 3141.1
+    }
+  ],
+  "contenders": [
+    {
+      "name": "playwright",
+      "version": "1.66.0-alpha-2026-11-09"
+    },
+    {
+      "name": "cdp",
+      "version": "swarm/lib/cdp.mjs (99 lines, zero npm dependencies)"
+    }
+  ]
+}
