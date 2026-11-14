@@ -23,15 +23,6 @@ function must(args, cwd) {
   return r.stdout;
 }
 
-function tmpRepo() {
-  const repo = mkdtempSync(join(tmpdir(), "swarm-landed-"));
-  must(["init", "-q", "-b", "main"], repo);
-  writeFileSync(join(repo, "a.txt"), "hello\n");
-  must(["add", "."], repo);
-  must(["commit", "-qm", "init"], repo);
-  return repo;
-}
-
 function newBranch(repo, name, from = "main") {
   must(["checkout", "-q", "-b", name, from], repo);
 }
@@ -59,12 +50,12 @@ function addOrigin(repo) {
 
 // One repo per row, cleaned even when an assertion throws.
 function withRepo(fn) {
-  const repo = tmpRepo();
+  const repo = initRepo();
   try { return fn(repo); } finally { rmSync(repo, { recursive: true, force: true }); }
 }
 
 function withRepoAndOrigin(fn) {
-  const repo = tmpRepo();
+  const repo = initRepo();
   const bare = addOrigin(repo);
   try { return fn(repo); } finally { cleanup(repo, bare); }
 }
