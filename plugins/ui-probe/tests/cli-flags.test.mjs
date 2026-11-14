@@ -16,6 +16,7 @@ const DEVICE_MODULES = [
   "src/tv/sdb.mjs",
   "src/browser.mjs",
   "src/cdp.mjs",
+  "src/config.mjs",
 ];
 
 // Hook probes run from the plugin root and take --config explicitly, so a tv config lives in a
@@ -83,7 +84,9 @@ test("row 2: every subcommand refuses an unknown flag and honours --help after i
   }
 
   for (const [subcommand, args] of cases) {
-    const help = ["--help", ...args.slice(1).filter((arg) => arg !== "--nope")];
+    // The subcommand's own tokens lead, so this exercises its branch. Putting "--help" first
+    // would take the global help path before the dispatch and prove nothing about the guard.
+    const help = [...args.filter((arg) => arg !== "--nope"), "--help"];
     const log = logFile("ui-probe-flags-help-log");
     const result = await probe(help, { hook: true, log, env });
     assert.equal(result.status, 0, `${subcommand} --help exited ${result.status}: ${result.stderr}`);
