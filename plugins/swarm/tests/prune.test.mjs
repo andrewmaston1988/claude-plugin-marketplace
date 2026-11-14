@@ -151,6 +151,7 @@ test("plan measures unlanded commits and dirty porcelain; blockers include unkno
   // and the row measures Infinity.
   const git = (args, cwd) => {
     calls.push({ args, cwd });
+    if (args[0] === "version") return { status: 0, stdout: "git version 2.39.0", stderr: "" };
     if (args[0] === "for-each-ref") return { status: 0, stdout: "", stderr: "" };
     if (args[0] === "symbolic-ref") {
       return args[1] === "-q" ? { status: 0, stdout: "refs/heads/main", stderr: "" } : { status: 1, stdout: "", stderr: "" };

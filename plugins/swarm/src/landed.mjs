@@ -1,12 +1,9 @@
-// "Landed" means destroying this branch loses nothing: its work is held
-// elsewhere. Two mechanical tests, because neither alone is enough — a ref may
-// contain the branch tip (a traditional merge, an integrate), or the branch may
-// already be folded into a base by tree equality (a squash, a rebase, a
-// cherry-pick). Every git answer this module cannot read as a definite "no"
-// becomes Infinity, so callers fail closed on a destructive path.
+// "Landed" means destroying this branch loses nothing: a ref outside the swarm prefix
+// holds its tip, or a base already absorbs it. An unreadable git answer is Infinity.
 
 const TIMEOUT = 60000;
 const TOUCHING_SCAN_CAP = 20;
+const MERGE_TREE_MIN_VERSION = [2, 38];
 
 function gitOf(gitRunner, args, repo) {
   return gitRunner(args, repo, { timeout: TIMEOUT });
@@ -70,6 +67,25 @@ export function reachable(branch, repo, prefix, gitRunner) {
   return lines(r.stdout).some((ref) => ref !== self && !isSwarmRef(ref, prefix));
 }
 
+// `merge-tree --write-tree` arrived in git 2.38. Below it absorption is skipped, never
+// Infinity — an unsupported option would otherwise refuse every prune permanently.
+const mergeTreeSupport = new WeakMap();
+
+function supportsMergeTree(repo, gitRunner) {
+  if (!mergeTreeSupport.has(gitRunner)) mergeTreeSupport.set(gitRunner, readMergeTreeSupport(repo, gitRunner));
+  return mergeTreeSupport.get(gitRunner);
+}
+
+function readMergeTreeSupport(repo, gitRunner) {
+  const r = gitOf(gitRunner, ["version"], repo);
+  if (r.status !== 0) fail("version", r);
+  const m = /(\d+)\.(\d+)/.exec(r.stdout);
+  if (!m) throw new Error(`git version unreadable: ${r.stdout}`);
+  const [major, minor] = [Number(m[1]), Number(m[2])];
+  return major > MERGE_TREE_MIN_VERSION[0]
+    || (major === MERGE_TREE_MIN_VERSION[0] && minor >= MERGE_TREE_MIN_VERSION[1]);
+}
+
 // A clean merge of `branch` into `commit` that reproduces `commit`'s tree: the
 // branch adds nothing there. Exit 1 is that commit's definite no; anything else
 // is unanswerable.
@@ -106,6 +122,7 @@ function absorbedByTree(commit, branch, repo, gitRunner, files) {
 // touched the branch's files, newest first — the squash itself, once later
 // commits have moved the same files on.
 export function absorbed(base, branch, repo, gitRunner) {
+  if (!supportsMergeTree(repo, gitRunner)) return false;
   const mb = gitOf(gitRunner, ["merge-base", base, branch], repo);
   if (mb.status === 1) return false;
   if (mb.status !== 0) fail(`merge-base ${base} ${branch}`, mb);
