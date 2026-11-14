@@ -151,7 +151,7 @@ function loadChild(node, parentPath, cwd, cfg, resultsDir, errors, warnings, { a
   const cycle = detectCycle(raw.tasks.filter((t) => t.id));
   if (cycle) errors.push(`${nodeLabel}: dependency cycle in child manifest: ${cycle.join(" -> ")}`);
   const tasks = normalizeTasks(raw.tasks, {
-    cwd, resultsDir, cfg, errors, label, cache, io, probedGuards,
+    cwd, resultsDir, cfg, errors, warnings, label, cache, io, probedGuards,
     providerRegistry,
     defaultTimeoutMs: node.timeoutMs ?? raw.timeoutMs ?? cfg.timeoutMs ?? DEFAULT_TIMEOUT_MS,
   });

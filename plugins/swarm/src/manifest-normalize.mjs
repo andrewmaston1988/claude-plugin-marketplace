@@ -10,10 +10,11 @@ import { providerConfig } from "./providers.mjs";
 import { runScopeKey } from "./worktree.mjs";
 import { checkGovernance } from "./governance.mjs";
 import { defaultToolsFor, hasWriteTools, resolveWorktreeName } from "./manifest-task-policy.mjs";
-import { guardFor, probeGuard, defaultManifestIo } from "./manifest-leaf-guard.mjs";
+import { guardOf, probeGuard, defaultManifestIo, projectFor } from "./manifest-leaf-guard.mjs";
+import { leafMcpOff, toolUsesServer } from "./leaf-mcp.mjs";
 import { PROVIDERS, checkDenylist, checkHeadroom, resolveProvider, validateEffort } from "./manifest-model-gates.mjs";
 
-export function normalizeTasks(rawTasks, { cwd, resultsDir, cfg, defaultTimeoutMs, errors, label, childPlans, headroom, warnings, cache = [], io = defaultManifestIo(), probedGuards = new Set(), providerRegistry = PROVIDERS }) {
+export function normalizeTasks(rawTasks, { cwd, resultsDir, cfg, defaultTimeoutMs, errors, label, childPlans, headroom, warnings = [], cache = [], io = defaultManifestIo(), probedGuards = new Set(), providerRegistry = PROVIDERS }) {
   // Many tasks share a cwd; ask git once per directory.
   const tops = new Map();
   const repoTop = (dir) => {
@@ -24,6 +25,32 @@ export function normalizeTasks(rawTasks, { cwd, resultsDir, cfg, defaultTimeoutM
   // same answer, so read it at most once per manifest.
   let mcpRoster;
   const mcpNames = () => (mcpRoster ??= io.mcpTools());
+  // A name the config lists that is not a user-scope server and not a plugin server
+  // is a typo. Warn once per name: a child manifest shares this array with its parent.
+  const knownServers = new Set(mcpNames().map((tool) => tool.replace(/^mcp__/, "")));
+  const warnUnknown = (name, key) => {
+    if (name.startsWith("plugin:") || knownServers.has(name)) return;
+    const message = `${key} names '${name}', which is not a configured MCP server — check \`claude mcp list\``;
+    if (!warnings.includes(message)) warnings.push(message);
+  };
+  for (const name of cfg?.mcp?.off || []) warnUnknown(name, "mcp.off");
+  for (const project of cfg?.projects || []) for (const name of project?.mcp?.on || []) warnUnknown(name, "projects[].mcp.on");
+  const mcpLines = new Set();
+  const reportMcp = (repoName, project, taskId, off, allowedTools) => {
+    const machineOff = cfg?.mcp?.off || [];
+    if (!machineOff.length) return;
+    const key = `${repoName}|${off.join(",")}`;
+    if (mcpLines.has(key)) return;
+    mcpLines.add(key);
+    const turnedOn = machineOff.filter((server) => !off.includes(server));
+    const repoOn = turnedOn.filter((server) => (project?.mcp?.on || []).includes(server));
+    const tools = String(allowedTools || "").split(",").map((t) => t.trim()).filter(Boolean);
+    const taskOn = turnedOn.filter((server) => !repoOn.includes(server) && tools.some((tool) => toolUsesServer(tool, server)));
+    const notes = [];
+    if (repoOn.length) notes.push(`(${repoName} turns on ${repoOn.join(", ")})`);
+    if (taskOn.length) notes.push(`(task ${taskId} names ${taskOn.join(", ")})`);
+    io.stdout(`leaf mcp: off ${off.length ? off.join(", ") : "none"}${notes.length ? " " + notes.join(" ") : ""}`);
+  };
   return rawTasks.map((t) => {
     const l = label(t);
     const isCompute = t.compute !== undefined;
@@ -85,8 +112,10 @@ export function normalizeTasks(rawTasks, { cwd, resultsDir, cfg, defaultTimeoutM
     // task only gets the "off" line when a guard would otherwise have applied —
     // opting out of nothing is not worth reporting.
     let guard;
+    let mcpOff = [];
     if (!isCompute && !isManifest && !isIntegrate) {
-      const resolved = guardFor(originalCwd, cfg, io);
+      const { project, repoName } = projectFor(originalCwd, cfg, io);
+      const resolved = guardOf(project);
       if (t.leafGuard === false) {
         if (resolved) io.stdout(`leaf guard: off (task opt-out)`);
       } else if (resolved) {
@@ -94,6 +123,8 @@ export function normalizeTasks(rawTasks, { cwd, resultsDir, cfg, defaultTimeoutM
         probeGuard(guard, originalCwd, l, io, probedGuards, errors);
         io.stdout(`leaf guard: ${guard.name} → ${guard.command}${provider === "codex" ? " (fires once swarm's hooks are trusted in Codex)" : ""}`);
       }
+      mcpOff = leafMcpOff({ project, cfg, allowedTools: t.allowedTools });
+      reportMcp(repoName, project, t.id, mcpOff, t.allowedTools);
     }
     // ONE derivation, for every leaf. A leaf that can write gets a tree; a leaf that
     // cannot reads the live repo where it was pointed. There is no second branch for an
@@ -147,7 +178,8 @@ export function normalizeTasks(rawTasks, { cwd, resultsDir, cfg, defaultTimeoutM
       effort: isCompute || isManifest || isIntegrate ? undefined : resolvedEffort,
       // An authored list wins whole. The default is filled in HERE — not appended at
       // dispatch — so the snapshot and the leaf's own result record the list it got.
-      allowedTools: isCompute || isManifest || isIntegrate ? "" : t.allowedTools || defaultToolsFor(provider, mcpNames()),
+      allowedTools: isCompute || isManifest || isIntegrate ? "" : t.allowedTools || defaultToolsFor(provider,
+        mcpNames().filter((tool) => !mcpOff.some((server) => toolUsesServer(tool, server)))),
       cwd: originalCwd,
       originalCwd,
       ...(checkoutToplevel !== undefined && { checkoutToplevel }),
@@ -169,6 +201,9 @@ export function normalizeTasks(rawTasks, { cwd, resultsDir, cfg, defaultTimeoutM
       ...(t.settings && typeof t.settings === "object" && !Array.isArray(t.settings) && { settings: t.settings }),
       ...(childPlans?.has(t.id) && { childPlan: childPlans.get(t.id) }),
       ...(guard && { leafGuard: guard }),
+      // Stamped whatever the primary provider is: a Codex task with a Claude
+      // fallback becomes a Claude-CLI leaf at quota time, and only that runner reads it.
+      ...(mcpOff.length && { mcpOff }),
     };
   });
 }
