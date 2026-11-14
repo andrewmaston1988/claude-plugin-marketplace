@@ -1,6 +1,7 @@
 // The commit gate's scope and its run.log trail: only leaves that can edit files by
 // their runner's own mechanism are judged, an unmeasurable tree counts as dirty, and
 // a failure says why in run.log.
+import "./helpers/isolate-home.mjs";
 import { test } from "node:test";
 import { equal, ok } from "node:assert/strict";
 import { readFileSync, rmSync } from "node:fs";

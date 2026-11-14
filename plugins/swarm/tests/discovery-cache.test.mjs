@@ -3,6 +3,7 @@
 // contract (corrupt vs missing), identity-normalised merge/eviction, and the
 // single-writer rule. Sibling of discovery.test.mjs — keep its row shape.
 
+import "./helpers/isolate-home.mjs";
 import { test } from "node:test";
 import { equal, deepEqual, ok, throws, rejects } from "node:assert/strict";
 import { mkdtempSync, rmSync, writeFileSync, readFileSync } from "node:fs";

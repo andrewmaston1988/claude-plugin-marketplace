@@ -1,7 +1,7 @@
 // Codex leaves read with shell commands, not the Read tool, so their mustRead
 // coverage comes from the exec events in their own transcript. Sibling of
 // coverage.test.mjs, which is over the 500-line bar and may not grow.
-import { test } from "node:test";
+import "./helpers/isolate-home.mjs"; import { test } from "node:test";
 import { equal, deepEqual, ok } from "node:assert/strict";
 import { mkdtempSync, rmSync, writeFileSync, readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";

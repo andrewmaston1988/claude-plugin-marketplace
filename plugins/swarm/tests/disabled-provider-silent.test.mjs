@@ -2,6 +2,7 @@
 // no request to its vendor (not even a DNS lookup, so the gate sits before any
 // request is built), no cost row or section, no price card. Grading off is never
 // shown as "not graded yet". Every test drives a real entry point.
+import "./helpers/isolate-home.mjs";
 import { test } from "node:test";
 import { deepEqual, equal, ok, throws, rejects } from "node:assert/strict";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";

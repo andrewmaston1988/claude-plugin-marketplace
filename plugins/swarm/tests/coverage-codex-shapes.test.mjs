@@ -1,5 +1,6 @@
 // Codex coverage: the shell shapes real gpt leaves emit — newline-joined statements,
 // concatenated-segment payloads, `$root` + Join-Path, and over-cap multi-reads.
+import "./helpers/isolate-home.mjs";
 import { test } from "node:test";
 import { equal, deepEqual, ok } from "node:assert/strict";
 import { mkdtempSync, rmSync, readFileSync, writeFileSync } from "node:fs";

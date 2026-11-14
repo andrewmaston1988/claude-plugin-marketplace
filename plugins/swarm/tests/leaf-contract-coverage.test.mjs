@@ -2,6 +2,7 @@
 // making progress, a leaf that read NOTHING fails instead of passing, and a codex
 // leaf is handed its read plan as files it can actually see. Sibling of
 // coverage.test.mjs, which is over the 500-line bar and may not grow.
+import "./helpers/isolate-home.mjs";
 import { test } from "node:test";
 import { equal, ok, deepEqual } from "node:assert/strict";
 import { mkdtempSync, rmSync, writeFileSync, existsSync, readdirSync, readFileSync } from "node:fs";

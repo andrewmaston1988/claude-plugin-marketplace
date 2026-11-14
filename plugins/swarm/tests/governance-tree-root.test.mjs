@@ -1,5 +1,6 @@
 // A tree under an out-of-home treeRoot must be judged by its source repo,
 // while the allowedRoots gate continues to bind.
+import "./helpers/isolate-home.mjs";
 import { test } from "node:test";
 import { equal, ok } from "node:assert/strict";
 import { mkdirSync, rmSync } from "node:fs";

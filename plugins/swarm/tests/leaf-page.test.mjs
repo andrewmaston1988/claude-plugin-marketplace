@@ -1,5 +1,6 @@
 // The leaf page as one feature: a status banner stating the leaf's single most useful
 // fact, then its chips, then three cards — position in the graph, tokens, prompt/output.
+import "./helpers/isolate-home.mjs";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";

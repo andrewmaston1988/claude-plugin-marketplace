@@ -1,3 +1,4 @@
+import "./helpers/isolate-home.mjs";
 import { test } from "node:test";
 import { EventEmitter } from "node:events";
 import { deepEqual, equal, ok } from "node:assert/strict";

@@ -1,3 +1,4 @@
+import "./helpers/isolate-home.mjs";
 import { test } from "node:test";
 import { ok } from "node:assert/strict";
 import { formatClosing } from "../src/results.mjs";

@@ -2,6 +2,7 @@
 // closing `tokens:` line, `swarm ask`, the estate row, the run and leaf routes, and the
 // three dashboard screens that print what those hand them. Default reads `% of week` alone;
 // every dollar figure is behind `display.money`, and none is ever priced from a result file.
+import "./helpers/isolate-home.mjs";
 import { test } from "node:test";
 import { equal, ok, match } from "node:assert/strict";
 import { rmSync, writeFileSync } from "node:fs";

@@ -1,6 +1,7 @@
 // TD1: the tray's pure decision functions (D4c/D4e). Windows-only — dot-sources
 // tray-decide.ps1 and drives Get-TrayAction through a decision table via
 // -EncodedCommand, the same pattern daemon.test.mjs uses for tray.ps1.
+import "./helpers/isolate-home.mjs";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";

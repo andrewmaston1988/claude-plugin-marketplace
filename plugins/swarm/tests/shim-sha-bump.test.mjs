@@ -8,6 +8,7 @@
 // picked up with nothing re-installed. It does NOT cover what a real
 // `claude plugin update` also does — rewriting the cache contents and moving
 // the install dir — that leg is the manual row's alone.
+import "./helpers/isolate-home.mjs";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync, mkdirSync, writeFileSync, readFileSync } from "node:fs";

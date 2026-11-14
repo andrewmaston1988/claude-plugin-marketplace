@@ -1,5 +1,6 @@
 // The dashboard's https surface: the CA route, with and without TLS, and the
 // maskable icons Chrome needs to mint a WebAPK whose icon fills the launcher.
+import "./helpers/isolate-home.mjs";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { rmSync } from "node:fs";

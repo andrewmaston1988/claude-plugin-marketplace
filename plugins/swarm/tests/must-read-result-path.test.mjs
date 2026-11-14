@@ -1,6 +1,7 @@
 // A prompt that hands a leaf {{resultPath:<dep>}} hands it an absolute path and
 // nothing else proves the leaf opened it — the rule lives in manifest-must-read.mjs
 // and is exercised through the same validate entry manifest.test.mjs uses.
+import "./helpers/isolate-home.mjs";
 import { test } from "node:test";
 import { ok, equal } from "node:assert/strict";
 import { rmSync, readFileSync } from "node:fs";

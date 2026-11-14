@@ -1,5 +1,6 @@
 // Helper seams: the root-containment predicate, the project-guard lookup and the
 // write-tool classifier the tree derivation rests on.
+import "./helpers/isolate-home.mjs";
 import { test } from "node:test";
 import { equal, deepEqual } from "node:assert/strict";
 import { join, sep, basename } from "node:path";

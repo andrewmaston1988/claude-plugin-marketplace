@@ -1,5 +1,6 @@
 // Coverage rendering: the loud-not-fatal closing-block lines a leaf's read
 // shortfall earns, and the projection a grade row copies.
+import "./helpers/isolate-home.mjs";
 import { test } from "node:test";
 import { equal, deepEqual, ok } from "node:assert/strict";
 import { formatClosing, mechanicalOf } from "../src/results.mjs";

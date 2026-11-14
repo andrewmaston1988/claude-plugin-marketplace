@@ -3,6 +3,7 @@
 // the request and 500s a page whose only job is display. The row drives the real
 // endpoint, not the helper: a unit test on costRoster would pass with the catch
 // removed from the request path.
+import "./helpers/isolate-home.mjs";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";

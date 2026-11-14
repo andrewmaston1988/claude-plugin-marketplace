@@ -1,5 +1,6 @@
 // A refresh that fails or hangs keeps the committed screen; a failed navigation
 // still paints the error panel over its skeleton.
+import "./helpers/isolate-home.mjs";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { RUN_URL, listRow, listData, loadPage } from "./helpers/page-harness.mjs";

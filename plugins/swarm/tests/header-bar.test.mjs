@@ -1,5 +1,6 @@
 // Operator 2026-09-24: one header shape on every screen, no back arrow now the bottom
 // nav reaches every tab; a child screen carries a tappable trail instead.
+import "./helpers/isolate-home.mjs";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { loadPage, listData, listRow } from "./helpers/page-harness.mjs";

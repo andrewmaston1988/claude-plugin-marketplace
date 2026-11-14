@@ -1,4 +1,4 @@
-import { spawnSync, spawn } from "node:child_process";
+import "./helpers/isolate-home.mjs"; import { spawnSync, spawn } from "node:child_process";
 import { test } from "node:test";
 import { equal, ok, deepEqual, match } from "node:assert/strict";
 import { mkdtempSync, rmSync, writeFileSync, readFileSync, existsSync, readdirSync, mkdirSync, utimesSync, statSync } from "node:fs";

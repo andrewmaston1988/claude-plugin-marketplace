@@ -4,6 +4,7 @@
 // confidence tally. These tests pin the LOAD-BEARING failure modes the plan names —
 // HTML-injection, badge-word-in-prose, path:line-in-a-fence, malformed input — and
 // the upgrades themselves.
+import "./helpers/isolate-home.mjs";
 import { test } from "node:test";
 import { ok, match, doesNotMatch, equal, deepEqual, throws } from "node:assert/strict";
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";

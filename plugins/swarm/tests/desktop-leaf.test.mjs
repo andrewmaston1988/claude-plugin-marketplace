@@ -1,6 +1,7 @@
 // The leaf screen at desktop width: the verdict and the chips across the top, the prompt
 // and output down the left, the position and token cards beside them. The chips take the
 // grid's width — which is the cards' width, never past their right edge.
+import "./helpers/isolate-home.mjs";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";

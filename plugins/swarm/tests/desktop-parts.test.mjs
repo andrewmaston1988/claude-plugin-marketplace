@@ -1,5 +1,6 @@
 // The desktop views reuse the phone's parts, so each phone screen must stay exactly
 // its parts joined — a screen that drifts from its parts would split the two layouts.
+import "./helpers/isolate-home.mjs";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { loadPerfViews, H } from "./helpers/perf-views-harness.mjs";

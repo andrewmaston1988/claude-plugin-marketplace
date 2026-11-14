@@ -1,10 +1,11 @@
 // Prune, nudge and dead-engine recovery must find resolver-created trees while
 // the run keeps its own history, even if the scratch root is later deleted.
-import { test } from "node:test";
+import "./helpers/isolate-home.mjs";
+import { after, test } from "node:test";
 import { equal, ok, deepEqual } from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import * as nodeFs from "node:fs";
-import { mkdirSync, rmSync, writeFileSync, readFileSync, existsSync } from "node:fs";
+import { mkdirSync, rmSync, writeFileSync, readFileSync, existsSync, utimesSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { plan, makeGit } from "../src/prune.mjs";
 import { projectRunsHoldingWorktrees } from "../src/prune-nudge.mjs";
@@ -21,7 +22,7 @@ const SESSION = "sess-lifecycle";
 // A run dir in the REAL shape — <swarmHome>/runs/<encoded>/<run> — because the
 // resolver's inverse (runOfTree) is only exact against the runs root it was built
 // from, and prune/nudge ownership is judged with it.
-const runDir = (name) => join(swarmHome(), "runs", runsKeyFor("C--code-lifecycle"), name);
+const runDir = (name, key = "C--code-lifecycle") => join(swarmHome(), "runs", runsKeyFor(key), name);
 const scratchTree = (name, tree) => resolve(join(swarmHome(), "worktrees", runsKeyFor("C--code-lifecycle"), name, tree));
 
 // A finished run: run.log then summary.json, in that order — runLiveness trusts the
@@ -169,21 +170,18 @@ test("prune (CLI) removes an unrecorded new-layout run's tree and branch", () =>
 test("prune (CLI) removes a recorded tree's record and empty treeRoot parents", () => {
   const repo = initRepo();
   const name = "cli-prune-recorded";
-  const dir = runDir(name);
-  const treeRoot = join(swarmHome(), "tree-root-prune-recorded");
-  const projectDir = join(treeRoot, runsKeyFor("C--code-lifecycle"));
+  // Its own project key: the shipped default root is shared with the rows above,
+  // whose empty parent dirs would otherwise keep the project directory non-empty.
+  const dir = runDir(name, "C--code-lifecycle-recorded");
+  const projectDir = join(swarmHome(), "worktrees", runsKeyFor("C--code-lifecycle-recorded"));
   const runTreeDir = join(projectDir, name);
   const outsideCanary = join(swarmHome(), "tree-root-prune-outside-canary");
-  const configPath = join(swarmHome(), "config.json");
-  const previousConfig = existsSync(configPath) ? readFileSync(configPath) : null;
   let wt;
   try {
     mkdirSync(dir, { recursive: true });
-    mkdirSync(swarmHome(), { recursive: true });
-    writeFileSync(configPath, JSON.stringify({ treeRoot }));
     writeFileSync(outsideCanary, "keep");
-    const cfg = { ...CFG, treeRoot };
-    wt = prepareIsolation({ id: "impl", originalCwd: repo, cwd: repo }, cfg, dir, ADD(repo));
+    wt = prepareIsolation({ id: "impl", originalCwd: repo, cwd: repo }, CFG, dir, ADD(repo));
+    equal(resolve(wt.path), resolve(join(runTreeDir, "impl")), "the tree must sit under the default treeRoot");
     finishRun(dir, { kept: [] });
     writeFileSync(join(dir, "manifest.json"), JSON.stringify({ resultsDir: dir, cwd: repo, tasks: [] }));
 
@@ -201,8 +199,6 @@ test("prune (CLI) removes a recorded tree's record and empty treeRoot parents", 
   } finally {
     if (wt) dropWorktree(repo, wt.path);
     rmSync(outsideCanary, { force: true });
-    if (previousConfig) writeFileSync(configPath, previousConfig);
-    else rmSync(configPath, { force: true });
     cleanup(dir, repo);
   }
 });
@@ -212,14 +208,20 @@ test("swarm stop on a dead engine records the scratch-dir tree and prints its pr
   const dir = runDir("cli-stop-scratch");
   let wt;
   try {
-    mkdirSync(join(swarmHome()), { recursive: true });
-    writeFileSync(join(swarmHome(), "config.json"), JSON.stringify({ heartbeatSecs: 0.1 }));
     wt = treeWithoutRecord(repo, dir);
     writeFileSync(join(dir, "manifest.json"), JSON.stringify({ resultsDir: dir, cwd: repo, tasks: [] }));
     const line = (o) => JSON.stringify({ ts: new Date().toISOString(), ...o }) + "\n";
-    writeFileSync(join(dir, "run.log"),
+    const runLog = join(dir, "run.log");
+    const heartbeat = join(dir, "heartbeat");
+    const stale = new Date(Date.now() - 120_000);
+    writeFileSync(runLog,
       line({ event: "run-start", launcher: SESSION, tasks: [{ id: "impl", provider: "claude", model: "claude-haiku-4-5-20251001" }] }) +
       line({ id: "impl", state: "running" }));
+    writeFileSync(heartbeat, `${stale.toISOString()} 1234\n`);
+    // The shipped heartbeat is 15 s and a run quiet for 45 s reads as dead; backdate
+    // the fixture rather than shrink the beat, so the row runs on the defaults.
+    utimesSync(runLog, stale, stale);
+    utimesSync(heartbeat, stale, stale);
 
     const r = runCli(["stop", dir], { cwd: repo });
     equal(r.status, 0, r.stdout + r.stderr);
@@ -231,30 +233,28 @@ test("swarm stop on a dead engine records the scratch-dir tree and prints its pr
     equal(summary.worktreesKept[0].branch, "swarm/impl");
   } finally {
     if (wt) dropWorktree(repo, wt.path);
-    rmSync(join(swarmHome(), "config.json"), { force: true });
     cleanup(dir, repo);
   }
 });
 
-// The GUARD the plan's review added: the scratch root is disposable scratch, so
-// deleting it can never cost the run its history.
-test("deleting treeRoot leaves the run's results, summary and dashboard row readable", () => {
-  const repo = initRepo();
-  const dir = runDir("guard-deleted-root");
+// History lives in the run dir, so a kept tree's root going missing can never cost
+// the run its record. The root is never created at all — nothing is deleted.
+test("a kept tree whose root is gone leaves the run's results, summary and dashboard row readable", () => {
+  const dir = runDir("guard-gone-root");
+  const goneTree = join(swarmHome(), "tree-root-never-created", runsKeyFor("C--code-lifecycle"), "guard-gone-root", "impl");
   try {
-    treeWithoutRecord(repo, dir);
-    finishRun(dir, { kept: [{ name: "impl", branch: "swarm/impl", path: scratchTree("guard-deleted-root", "impl") }] });
-
-    rmSync(resolve(join(swarmHome(), "worktrees")), { recursive: true, force: true });
+    mkdirSync(dir, { recursive: true });
+    finishRun(dir, { kept: [{ name: "impl", branch: "swarm/impl", path: goneTree }] });
+    ok(!existsSync(goneTree), "the recorded tree's root must never be created — history cannot depend on it");
 
     const listed = listRuns(swarmHome()).map((r) => r.dir);
     ok(listed.includes(resolve(dir)), `the run must still be listed: ${JSON.stringify(listed)}`);
     equal(readRun(dir).tasks.length, 1, "the run's leaves still read");
     equal(JSON.parse(readFileSync(join(dir, "summary.json"), "utf8")).finished.length > 0, true, "the summary still reads");
     const snapshot = buildSnapshot(swarmHome(), new Map());
-    ok(snapshot.rows.some((row) => row.name === "guard-deleted-root"), "the dashboard still has the run");
+    ok(snapshot.rows.some((row) => row.name === "guard-gone-root"), "the dashboard still has the run");
   } finally {
-    cleanup(dir, repo);
+    cleanup(dir);
   }
 });
 
@@ -271,4 +271,10 @@ test("treeDirFor and prune agree on where a recorded tree lives", () => {
     if (wt) dropWorktree(repo, wt.path);
     cleanup(dir, repo);
   }
+});
+
+// Every row above runs on the shipped defaults. A user config materialised in the
+// test home would mean one has started shaping its fixture through the home.
+after(() => {
+  ok(!existsSync(join(process.env.SWARM_HOME, "config.json")), "no row may create the home's config");
 });

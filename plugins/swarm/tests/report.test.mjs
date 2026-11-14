@@ -2,6 +2,7 @@
 // and the header renderer; these pin the thing that actually has to happen: the
 // leaf writes report.md, the ENGINE prepends the provenance header to it, and the
 // agent-facing digest.md is unaffected either way.
+import "./helpers/isolate-home.mjs";
 import { test } from "node:test";
 import { deepEqual, equal, match, ok } from "node:assert/strict";
 import { spawnSync } from "node:child_process";

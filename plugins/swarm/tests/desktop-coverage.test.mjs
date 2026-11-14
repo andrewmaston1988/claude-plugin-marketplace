@@ -1,6 +1,7 @@
 // Coverage on a desktop is the wireframe's table — a 180px model column, one fr column
 // per aspect, each cell a count on a tint — not the phone's SVG stretched until its
 // in-drawing text is several times its size.
+import "./helpers/isolate-home.mjs";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { aggregate } from "../src/scores.mjs";

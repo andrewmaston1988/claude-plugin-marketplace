@@ -1,6 +1,7 @@
 // Every phone screen's markup, pinned: the desktop work moves render helpers out of
 // page.html and splits perf.js, and each move must leave the phone byte-identical.
 // SWARM_UPDATE_SNAPSHOTS=1 rewrites the golden file; review its diff like code.
+import "./helpers/isolate-home.mjs";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync, writeFileSync } from "node:fs";

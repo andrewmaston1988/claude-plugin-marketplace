@@ -1,6 +1,7 @@
 // Each Goal-table row of swarm-token-headline-cost: a leaf is priced in its own unit beside
 // its work tokens, money is opt-in, and the units are never summed. The surfaces that print
 // the figure are pinned in run-cost-surfaces.test.mjs.
+import "./helpers/isolate-home.mjs";
 import { test } from "node:test";
 import { deepEqual, equal, ok, throws, match } from "node:assert/strict";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";

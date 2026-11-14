@@ -2,6 +2,7 @@
 // writer's tree is scratch under `treeRoot`, recorded per tree in the run dir.
 // Three docs used to place a tree inside the run dir — each must now say where
 // it actually lives. README states the layout once; the other two point at it.
+import "./helpers/isolate-home.mjs";
 import { test } from "node:test";
 import { ok } from "node:assert/strict";
 import { readFileSync } from "node:fs";

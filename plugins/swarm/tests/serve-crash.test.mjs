@@ -3,6 +3,7 @@
 // listen/bind handling -- so a crash in the bind/takeover window is caught
 // too. Drives the REAL registered handler in a spawned serve child via the
 // test-only SWARM_SERVE_TEST_CRASH trigger, never calling the handler directly.
+import "./helpers/isolate-home.mjs";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync, writeFileSync, readFileSync, existsSync } from "node:fs";

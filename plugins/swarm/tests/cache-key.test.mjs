@@ -1,6 +1,7 @@
 // A re-run replays a cached leaf only when the task that produced it is unchanged.
 // Every row drives a real runPlan twice against ONE resultsDir with the manifest
 // reloaded in between, so the assertion is on the DISPATCH, never on the key helper.
+import "./helpers/isolate-home.mjs";
 import { test } from "node:test";
 import { equal, ok } from "node:assert/strict";
 import { mkdtempSync, rmSync, readFileSync, writeFileSync, existsSync } from "node:fs";

@@ -1,6 +1,7 @@
 // The desktop shell: one breakpoint, one nav (the phone's, restyled), and the run
 // count the sidebar wears. Every fact asserted here is one the page already holds —
 // a desktop width introduces no figure the phone did not have.
+import "./helpers/isolate-home.mjs";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync, readdirSync } from "node:fs";

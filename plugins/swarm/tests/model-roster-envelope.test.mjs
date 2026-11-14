@@ -1,6 +1,7 @@
 // The roster envelope's edges: the old flat file, throttled failures, the
 // reader's cost, eviction, the registry contract and the one-reader guard.
 
+import "./helpers/isolate-home.mjs";
 import { test } from "node:test";
 import { deepEqual, equal, ok, throws, rejects } from "node:assert/strict";
 import { writeFileSync, readFileSync, readdirSync, utimesSync } from "node:fs";

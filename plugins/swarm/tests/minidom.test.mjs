@@ -1,6 +1,7 @@
 // minidom — the plugin's only HTML parser. These tests pin the TREE, not a
 // pattern: the segment scan in parseUsage scopes [data-usage-segment] queries
 // per usage bar, so every case below is a way that scoping silently breaks.
+import "./helpers/isolate-home.mjs";
 import { test } from "node:test";
 import { equal, deepEqual, ok, throws } from "node:assert/strict";
 import { readFileSync } from "node:fs";

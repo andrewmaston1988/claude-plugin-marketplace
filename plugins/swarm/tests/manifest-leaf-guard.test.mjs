@@ -1,6 +1,7 @@
 // Leaf guards: the project guard a task inherits from its repo name — probe,
 // print, and explicit opt-out — and the write guard the Claude runner merges into
 // a writer's own `--settings` so a leaf cannot rewrite it.
+import "./helpers/isolate-home.mjs";
 import { test } from "node:test";
 import { equal, ok, deepEqual, match } from "node:assert/strict";
 import { writeFileSync, rmSync } from "node:fs";

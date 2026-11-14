@@ -1,6 +1,7 @@
 // Test plan: repos/claude-plugin-marketplace/plans/codex-plugin-surface-test-plan.md
 // Every row reads the REAL shipped manifest. A fixture proves nothing about what
 // installs (#302: 1,380 green fixture tests missed a defect in the shipped artifact).
+import "./helpers/isolate-home.mjs";
 import { test } from "node:test";
 import { equal, deepEqual, ok } from "node:assert/strict";
 import { readFileSync, existsSync, statSync, mkdirSync, rmSync } from "node:fs";

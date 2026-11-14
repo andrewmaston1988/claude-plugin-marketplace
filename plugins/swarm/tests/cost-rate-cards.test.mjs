@@ -1,6 +1,7 @@
 // Provider-local rate cards — the published price tables, the rows derived from
 // them, and the staleness banners. Split from cost.test.mjs, which keeps the
 // snapshot storage and the meter-derived multiplier arithmetic.
+import "./helpers/isolate-home.mjs";
 import { test } from "node:test";
 import { equal, deepEqual, ok, match } from "node:assert/strict";
 import { mkdtempSync, writeFileSync, utimesSync } from "node:fs";

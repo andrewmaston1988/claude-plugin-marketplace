@@ -1,5 +1,6 @@
 // Usage as a top-level screen: `/api/usage` is a LIVE read of every provider, so
 // the page fetches it once per navigation — never on a tick, never on the switch.
+import "./helpers/isolate-home.mjs";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";

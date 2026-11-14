@@ -1,6 +1,6 @@
 // N3 mechanical citation verification — all tests for src/citations.mjs and
 // its enforceLeafContract/manifest/CLI integration live in this one file.
-import { test } from "node:test";
+import "./helpers/isolate-home.mjs"; import { test } from "node:test";
 import { equal, deepEqual, ok } from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync, readFileSync } from "node:fs";

@@ -6,6 +6,7 @@
 // appeared in the right order — which stayed true when the bar scrolled off the
 // bottom of a nine-wave run. So the layout-role pin below asserts `position:fixed`,
 // the property that actually decides whether the operator can reach it.
+import "./helpers/isolate-home.mjs";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync, mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";

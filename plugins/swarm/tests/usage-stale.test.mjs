@@ -1,6 +1,7 @@
 // What a reading this process did not fetch prints: the /!\ banner above the
 // figures, and the age mark that rides the figure itself. Split from
 // usage.test.mjs, which is over the 500-line bar.
+import "./helpers/isolate-home.mjs";
 import { test } from "node:test";
 import { equal, deepEqual, ok } from "node:assert/strict";
 import { join } from "node:path";

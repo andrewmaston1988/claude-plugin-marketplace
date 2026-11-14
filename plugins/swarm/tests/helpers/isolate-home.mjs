@@ -1,20 +1,26 @@
-// Preloaded by `npm test` (--import): points SWARM_HOME at a throwaway dir so no
-// test that forgets to isolate can write runs, scores or caches into the real
-// ~/.swarm. Child processes (node --test workers, CLI spawns) inherit it.
-import { copyFileSync, linkSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+// Imported first by every test file: points SWARM_HOME, HOME and USERPROFILE at a
+// throwaway dir so a run cannot read or write the real ~/.swarm or ~/.claude.
+// Child processes (node --test workers, CLI spawns) inherit it.
+import { copyFileSync, existsSync, linkSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { delimiter, join } from "node:path";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 
 // An inherited SWARM_HOME is only trustworthy when WE set it — the marker says so.
 // Without it, an operator who exports SWARM_HOME in their shell gets their real
 // store written to by the suite, which is the one thing this file exists to stop.
-// Plain "always override" is not the fix: the workers must inherit the parent's dir,
-// not each mint their own.
+// Each test-file process mints its own home; the marker lets a CLI child a test
+// spawns inherit that dir rather than minting a second.
 if (!process.env.SWARM_HOME || process.env.SWARM_TEST_HOME !== "1") {
   const dir = mkdtempSync(join(tmpdir(), "swarm-test-home-"));
   const binDir = join(dir, "bin");
   mkdirSync(binDir);
+  // Moving HOME hides git's global config, and tests commit. Point git at the
+  // real file before HOME moves away from it.
+  const globalConfig = join(homedir(), ".gitconfig");
+  if (!process.env.GIT_CONFIG_GLOBAL && existsSync(globalConfig)) process.env.GIT_CONFIG_GLOBAL = globalConfig;
   process.env.SWARM_HOME = dir;
+  process.env.HOME = dir;
+  process.env.USERPROFILE = dir;
   process.env.SWARM_TEST_HOME = "1";
   process.env.SWARM_CREDENTIALS = join(dir, "claude-credentials.json");
   process.env.PATH = `${binDir}${delimiter}${process.env.PATH || ""}`;

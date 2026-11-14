@@ -1,3 +1,4 @@
+import "./helpers/isolate-home.mjs";
 import { test } from "node:test";
 import { equal, ok, deepEqual } from "node:assert/strict";
 import { parseExpr, evalExpr, evalBool, collectDepRefs, collectIdents, ExprError, MAX_EXPR_LEN } from "../src/expr.mjs";

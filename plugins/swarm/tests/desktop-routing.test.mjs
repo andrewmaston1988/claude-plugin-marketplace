@@ -1,6 +1,7 @@
 // Decision 3's routes. The layout is read through the harness's --layout stub, so
 // these tests drive the same switch the browser does — a second width in the JS would
 // pass them and still put the two layouts on different lines.
+import "./helpers/isolate-home.mjs";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { loadPage, listData, listRow } from "./helpers/page-harness.mjs";

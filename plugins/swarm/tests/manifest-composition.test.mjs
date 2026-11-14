@@ -1,5 +1,6 @@
 // Composition: the schema-validated `returns` contract a leaf hands back, and
 // bounded child-manifest nesting under a parent that owns the run.
+import "./helpers/isolate-home.mjs";
 import { test } from "node:test";
 import { equal, ok, deepEqual } from "node:assert/strict";
 import { writeFileSync, rmSync } from "node:fs";

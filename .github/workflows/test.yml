@@ -72,10 +72,34 @@ jobs:
         run: |
           git config --global user.email "ci@example.com"
           git config --global user.name "CI"
-      # npm test preloads isolate-home.mjs; a bare `node --test` reads the real ~/.swarm
+      # Read-only, not just hashed: a test that overwrites a real file and writes
+      # it back leaves a snapshot unchanged, but it cannot restore a file it was
+      # denied permission to write. The config is valid so a leak fails here
+      # rather than on config validation. Both homes the helper redirects are
+      # watched.
+      - name: Plant read-only home sentinels
+        run: |
+          mkdir -p ~/.swarm/worktrees/sentinel ~/.claude
+          printf '{"concurrency":3}\n' > ~/.swarm/config.json
+          printf 'keep\n' > ~/.swarm/worktrees/sentinel/keep
+          printf 'keep\n' > ~/.claude/sentinel
+          chmod -R a-w ~/.swarm ~/.claude
+          find ~/.swarm ~/.claude -printf '%y %m %p\n' | sort > "$RUNNER_TEMP/sentinel-listing"
+          find ~/.swarm ~/.claude \( -type f -o -type l \) -print0 | sort -z | xargs -0 sha256sum > "$RUNNER_TEMP/sentinel-hashes"
+      # Every test file imports tests/helpers/isolate-home.mjs first, so the suite
+      # resolves the throwaway home whether it is run by npm or by hand.
       - name: Run tests
         run: npm test
         working-directory: plugins/swarm
+      - name: Verify home sentinels untouched
+        if: always()
+        run: |
+          find ~/.swarm ~/.claude -printf '%y %m %p\n' | sort > "$RUNNER_TEMP/after-listing"
+          find ~/.swarm ~/.claude \( -type f -o -type l \) -print0 | sort -z | xargs -0 sha256sum > "$RUNNER_TEMP/after-hashes"
+          rc=0
+          diff -u "$RUNNER_TEMP/sentinel-listing" "$RUNNER_TEMP/after-listing" || rc=1
+          diff -u "$RUNNER_TEMP/sentinel-hashes" "$RUNNER_TEMP/after-hashes" || rc=1
+          exit $rc
 
   ui-probe:
     name: ui-probe

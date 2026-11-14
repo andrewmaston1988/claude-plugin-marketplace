@@ -2,6 +2,7 @@
 // NAME recovered from a recorded leaf's cwd — the one thing `swarm ask` has to
 // rebuild a task from. Both used to derive a path from the run dir, which put
 // them out of step with prepareIsolation the moment trees left for the scratch root.
+import "./helpers/isolate-home.mjs";
 import { test } from "node:test";
 import { equal, ok } from "node:assert/strict";
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";

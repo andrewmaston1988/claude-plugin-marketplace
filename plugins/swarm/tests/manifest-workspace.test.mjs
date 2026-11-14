@@ -1,5 +1,6 @@
 // Workspace and branch: how a task names the tree it runs in, how that name is
 // run-scoped, and the ordering and collision rules the shared surface imposes.
+import "./helpers/isolate-home.mjs";
 import { test } from "node:test";
 import { equal, ok, deepEqual } from "node:assert/strict";
 import { rmSync } from "node:fs";

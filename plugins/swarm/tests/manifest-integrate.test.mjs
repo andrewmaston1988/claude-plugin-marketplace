@@ -1,6 +1,7 @@
 // Tree-name derivation and the agentless nodes: the single `resolveWorktreeName`
 // rule every site shares, `integrate` normalisation onto its target tree, and
 // folding a forEach parent's clone branches back in.
+import "./helpers/isolate-home.mjs";
 import { test } from "node:test";
 import { equal, ok, deepEqual } from "node:assert/strict";
 import { rmSync } from "node:fs";

@@ -3,6 +3,7 @@
 // toggling dashboard.https without a restart must not make status, the
 // already-running short-circuit or the launcher describe a listener that is not
 // there.
+import "./helpers/isolate-home.mjs";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from "node:fs";

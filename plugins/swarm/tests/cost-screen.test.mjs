@@ -1,6 +1,7 @@
 // The Cost screen's renderer, run for real through perf.js (see the harness).
 // Mockup 922–983: one provider per page, its value hero,
 // then a ranked card per model — or one fact card, never both.
+import "./helpers/isolate-home.mjs";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { loadPerfViews, H } from "./helpers/perf-views-harness.mjs";

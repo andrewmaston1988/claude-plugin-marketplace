@@ -1,6 +1,7 @@
 // validate refuses a seat whose estimated mustRead reads exceed half its model's
 // declared context window. Driven through loadManifest with a temp dir and an
 // injected roster; boundary pins use the literals 4 bytes/token and 0.5.
+import "./helpers/isolate-home.mjs";
 import { test } from "node:test";
 import { equal, ok, deepEqual } from "node:assert/strict";
 import { writeFileSync, mkdirSync } from "node:fs";

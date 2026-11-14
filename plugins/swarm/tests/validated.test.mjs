@@ -1,6 +1,7 @@
 // The dispatch gate: `run` refuses a manifest whose exact bytes + args have not
 // passed `validate`. Every row is observable from the CLI; the marker directory
 // is the only internal and it is read as a filesystem fact, never re-derived.
+import "./helpers/isolate-home.mjs";
 import { test } from "node:test";
 import { equal, ok } from "node:assert/strict";
 import { mkdirSync, renameSync, rmSync, writeFileSync, existsSync, readdirSync, readFileSync } from "node:fs";

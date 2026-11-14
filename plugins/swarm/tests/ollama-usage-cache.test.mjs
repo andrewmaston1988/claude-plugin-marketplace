@@ -1,6 +1,7 @@
 // The cache half of the ollama reading: what `getUsage` does under the 5-minute
 // TTL, what a failed refresh leaves behind, and what the cache-only reader sees.
 // Split from ollama-usage.test.mjs, which is over the 500-line bar.
+import "./helpers/isolate-home.mjs";
 import { test } from "node:test";
 import { equal, deepEqual, ok } from "node:assert/strict";
 import { mkdtempSync, rmSync, writeFileSync, readFileSync, existsSync } from "node:fs";

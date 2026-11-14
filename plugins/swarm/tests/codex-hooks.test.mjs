@@ -1,6 +1,7 @@
 // Codex runs swarm's hooks with Claude-shaped payloads (session_id, tool_name "Bash",
 // tool_input.command) plus turn_id and model — probed live. These
 // rows pin the three places the hosts differ, and the prune reminder both hosts share.
+import "./helpers/isolate-home.mjs";
 import { test } from "node:test";
 import { equal, deepEqual, ok } from "node:assert/strict";
 import { mkdtempSync, mkdirSync, writeFileSync, appendFileSync, utimesSync, rmSync, existsSync } from "node:fs";

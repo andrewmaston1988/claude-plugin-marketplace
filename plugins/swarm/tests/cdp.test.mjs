@@ -1,3 +1,4 @@
+import "./helpers/isolate-home.mjs";
 import { test } from "node:test";
 import { rejects } from "node:assert/strict";
 import { connect } from "../scripts/lib/cdp.mjs";

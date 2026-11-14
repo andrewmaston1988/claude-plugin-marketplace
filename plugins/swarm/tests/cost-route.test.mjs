@@ -1,6 +1,7 @@
 // Cost as its own top-level screen: `#/cost` off its own grading-independent
 // endpoint, `/api/cost`, which serves the flat costView — the first build served
 // the /api/perf wrapper and the screen read "no cost history yet" on real data.
+import "./helpers/isolate-home.mjs";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, writeFileSync, readFileSync, rmSync } from "node:fs";

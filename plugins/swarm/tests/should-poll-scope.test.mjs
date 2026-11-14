@@ -1,5 +1,6 @@
 // The 5 s full refetch belongs to the run screens. currentRun outlives them, so reading
 // it on any view made Cost and Performance blink every poll after a live run was opened.
+import "./helpers/isolate-home.mjs";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
