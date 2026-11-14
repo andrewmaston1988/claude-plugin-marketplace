@@ -11,7 +11,7 @@ const READERS = {
   css: (property) => `el ? getComputedStyle(el).getPropertyValue(${q(property)}) : null`,
   text: () => `el ? (el.textContent || "").trim() : null`,
   prop: (property) => `el ? (typeof el[${q(property)}] === "number" || typeof el[${q(property)}] === "boolean"
-    ? el[${q(property)}] : String(el[${q(property)}] ?? "")) : null`,
+    ? el[${q(property)}] : String(el[${q(property)}] == null ? "" : el[${q(property)}])) : null`,
   count: () => "document.querySelectorAll(selector).length",
 };
 
@@ -25,8 +25,8 @@ function samplerJs({ selector, read, expected, tolerance, over }) {
       const wanted = expected.equals;
       if (typeof wanted === "boolean" || typeof value === "boolean") return wanted === value;
       if (typeof wanted === "number" && typeof value === "number") return Math.abs(value - wanted) <= tolerance;
-      const a = String(value ?? "").trim();
-      const b = String(wanted ?? "").trim();
+      const a = String(value == null ? "" : value).trim();
+      const b = String(wanted == null ? "" : wanted).trim();
       if (a !== "" && b !== "" && Number.isFinite(Number(a)) && Number.isFinite(Number(b))) {
         return Math.abs(Number(a) - Number(b)) <= tolerance;
       }
