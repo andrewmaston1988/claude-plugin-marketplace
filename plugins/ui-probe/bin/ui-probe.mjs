@@ -40,7 +40,7 @@ const HELP = [
   "  --listen-wait <s>      tv probe: seconds to wait for each key (default 8)",
   "  --fetch <url>          tv probe: one credentialed GET from the settled page",
   "  --exit                 tv probe: exit the app last and report whether it closed",
-  "  --help                 this text",
+  "  --help, -h             this text",
   "",
 ].join("\n");
 

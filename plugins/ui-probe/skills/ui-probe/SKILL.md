@@ -149,7 +149,7 @@ Exit codes, which tell you what to do next:
 | 1 | a step failed | the app is wrong; quote measured vs expected |
 | 2 | a step was inconclusive | the probe or the fixture is wrong, not the app |
 | 3 | `needs_review` | the scenario asserts nothing — add an assertion |
-| 64 | invalid scenario, config or arguments | `validate` names the field, the fix and a correct example |
+| 64 | invalid scenario, config or arguments, or a flag the subcommand does not take | a refused flag names itself and the flags it accepts; otherwise `validate` names the field, the fix and a correct example |
 
 ## Workflow
 
