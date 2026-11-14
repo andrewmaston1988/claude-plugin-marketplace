@@ -138,6 +138,27 @@ test("swarm procedure falls back to descriptions without grades", () => {
   ok(step.includes("no graded record") && step.includes("swarm models") && step.includes("descriptions"), `step 1 lacks the no-graded-record fallback: ${step}`);
 });
 
+test("setup walks leaf MCP servers through swarm mcp set", () => {
+  const setup = read("setup.md");
+  for (const needle of [
+    "swarm mcp list --json",
+    "swarm mcp set --off",
+    "Do any other repos get the turned-off tools?",
+    "--repo <repo>=<servers>",
+    '--repo "rts-mobile=blender"',
+  ]) {
+    ok(setup.includes(needle), `setup.md must keep: ${needle}`);
+  }
+  ok(/^### Stage 7e —/m.test(setup), "Stage 7e must be a stage the walk reaches");
+});
+
+test("setup's projects row describes the optional hooks and mcp keys", () => {
+  const setup = read("setup.md");
+  ok(setup.includes("{ name, hooks?, mcp? }"), "the projects appendix row must describe all three fields");
+  ok(setup.includes("| `mcp` |"), "the appendix must carry its own `mcp` row");
+  ok(setup.includes("Stage 7e"), "the projects row must point at the MCP stage");
+});
+
 for (const [level, description] of [
   ["low", "quick mechanical work"],
   ["medium", "balanced reasoning"],
