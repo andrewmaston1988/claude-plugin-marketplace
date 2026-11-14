@@ -25,6 +25,7 @@ import { cmdRun, refuseLiveEngine } from "../src/cmd-run.mjs";
 import { cmdServe } from "./cmd-serve.mjs";
 import { cmdStatus } from "./cmd-status.mjs";
 import { cmdPrune } from "./cmd-prune.mjs";
+import { cmdMcp } from "./cmd-mcp.mjs";
 import { cmdReport } from "./cmd-report.mjs";
 import { cmdCost } from "./cmd-cost.mjs";
 import { cmdScoresRealmodel } from "./cmd-scores.mjs";
@@ -42,6 +43,8 @@ const USAGE = `usage: swarm.mjs <command>
   wait <resultsDir> [--timeout <secs>]  block until the run settles, then print the final roster (exit 0 clean · 1 leaf not ok · 2 engine died · 3 timed out)
   stop <resultsDir>          cooperative stop: signal a live engine and wait, or record a dead one — never kills a process
   prune <resultsDir> [--dry-run] [--discard-unlanded]   destroy kept worktrees + branches; refuses live, unlanded, or dirty trees
+  mcp list [--json]          MCP servers a leaf starts, with today's off/on state and the repos that turn one on
+  mcp set --off <a,b> [--repo <repo>=<servers>]…   write the leaf MCP config: the off list plus the repos that turn one back on
   report <resultsDir>        render the run's digest.md/report.md → digest.html/report.html (self-contained, theme-aware; backfill for old runs)
   ask <resultsDir> <taskId> "<question>" [--model <m>]   resume a finished leaf's session with a follow-up
   quota | usage              provider utilization per limit window (exit 1 when Anthropic is exhausted)
@@ -576,6 +579,9 @@ async function main() {
       }
       case "prune": {
         return await cmdPrune(rest, { usage: USAGE });
+      }
+      case "mcp": {
+        return cmdMcp(rest, { usage: USAGE });
       }
       case "serve":
         return await cmdServe(rest, { readProviderUsage });

@@ -3,7 +3,8 @@
 // plugin:<plugin>:<server>. The off set is the machine's list, minus what the
 // leaf's repo turns back on, minus what the leaf's own tools name.
 
-function namesEqual(a, b) {
+// Repo names match case-insensitively on Windows, the same rule the leaf guard uses.
+export function namesEqual(a, b) {
   return process.platform === "win32" ? a.toLowerCase() === b.toLowerCase() : a === b;
 }
 
