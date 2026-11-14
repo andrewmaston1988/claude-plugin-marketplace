@@ -1,6 +1,7 @@
 import { join, resolve, dirname } from "node:path";
 import { existsSync, readdirSync } from "node:fs";
-import { unlandedCount, treeDirFor, runOfTree, listTreeRecords, legacyTreeDirs, treeRecordPath, treeRootFor } from "./worktree.mjs";
+import { unlandedCount } from "./landed.mjs";
+import { treeDirFor, runOfTree, listTreeRecords, legacyTreeDirs, treeRecordPath, treeRootFor } from "./worktree.mjs";
 import { isUnderRoot, normalizeForCompare } from "./roots.mjs";
 import { getConfig } from "./config.mjs";
 
@@ -59,10 +60,10 @@ export function reposOfTrees(fs, dir, spawnSync, { cfg } = {}) {
 }
 
 // A git runner behind an injected spawnSync — the closure production code and
-// tests both build over the raw module.
+// tests both build over the raw module. `input` feeds a path list on stdin.
 export function makeGit(spawnSync) {
-  return (args, cwd) => {
-    const r = spawnSync("git", args, { cwd, encoding: "utf8", windowsHide: true, timeout: 60000 });
+  return (args, cwd, { input } = {}) => {
+    const r = spawnSync("git", args, { cwd, encoding: "utf8", windowsHide: true, timeout: 60000, input });
     return { status: r.status, stdout: (r.stdout || "").trim(), stderr: (r.stderr || "").trim() };
   };
 }
@@ -171,6 +172,7 @@ function treeFacts(git, path) {
 export function plan(run, git, fs, { cfg } = {}) {
   if (run.live) return { live: true };
 
+  const prefix = cfg?.worktreeBranchPrefix || "swarm/";
   const rows = [];
   const seen = new Set();
   // The path is kept AS GIVEN — the injected `fs` keys on it, and a summary's own
@@ -180,7 +182,7 @@ export function plan(run, git, fs, { cfg } = {}) {
     const key = normalizeForCompare(path);
     if (seen.has(key)) return;
     seen.add(key);
-    rows.push(measureRow({ path, branch, bytes: dirSize(fs, path), repo }, git, fs));
+    rows.push(measureRow({ path, branch, bytes: dirSize(fs, path), repo }, git, fs, prefix));
   };
 
   // summary.json's own list: how the run reported what it left, and the only source that
@@ -228,10 +230,10 @@ function detachedUnlanded(git, path) {
   return Number.isFinite(n) ? n : Infinity;
 }
 
-function measureRow(row, git, fs) {
+function measureRow(row, git, fs, prefix) {
   if (!fs.existsSync(row.repo)) return { ...row, unlanded: Infinity, dirty: Infinity };
   const unlanded = row.branch
-    ? unlandedCount("HEAD", row.branch, row.repo, git)
+    ? unlandedCount(row.branch, row.repo, { prefix, gitRunner: git })
     : detachedUnlanded(git, row.path);
   const status = git(["status", "--porcelain", "--untracked-files=all"], row.path);
   const dirty = status.status === 0
