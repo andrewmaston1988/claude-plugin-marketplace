@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { dirname, extname, resolve } from 'node:path';
 import { KEYS, isKnownKey } from './tv/keys.mjs';
-import { parseYaml } from './yaml.mjs';
+import { lineOf, parseYaml } from './yaml.mjs';
 
 export const OPS = {
   open: { required: ['url'], url: true },
@@ -232,6 +232,22 @@ export function validate(doc, options = {}) {
   return problems;
 }
 
+// Each spliced step's own file and position within that file. Kept out of the step object so the
+// IR's shape and its JSON form stay what `validate` accepts.
+const ORIGINS = new WeakMap();
+
+/**
+ * The label a step reports: `<file>:<line>` when the parser knew the line, else `<file>#step<n>`.
+ * An included step names the file it is written in, because that is the file an operator edits.
+ */
+export function stepLabel(step, index, source) {
+  const origin = step && typeof step === 'object' ? ORIGINS.get(step) : null;
+  const file = origin?.file ?? source;
+  const line = lineOf(step);
+  if (line != null) return `${file}:${line}`;
+  return `${file}#step${origin?.position ?? index + 1}`;
+}
+
 function includeFormat(file) {
   const ext = extname(file).toLowerCase();
   if (ext === '.json') return 'json';
@@ -252,6 +268,9 @@ function spliceIncludes(doc, { baseDir = null, file = null, _readFile = readFile
   doc.steps.forEach((step, index) => {
     if (!isRecord(step) || Object.keys(step)[0] !== 'include') {
       steps.push(step);
+      // `validate` splices the already-expanded doc again; the first record is the one that names
+      // the file the step is written in.
+      if (isRecord(step) && !ORIGINS.has(step)) ORIGINS.set(step, { file: null, position: index + 1 });
       return;
     }
     const where = `steps[${index}].include`;
@@ -301,6 +320,9 @@ function spliceIncludes(doc, { baseDir = null, file = null, _readFile = readFile
       'Inline the nested file where it is included, or move the include to the top level.', EXAMPLES.include));
       return;
     }
+    nested.forEach((step, k) => {
+      if (isRecord(step) && !ORIGINS.has(step)) ORIGINS.set(step, { file: name, position: k + 1 });
+    });
     steps.push(...nested);
   });
   return { steps, problems };

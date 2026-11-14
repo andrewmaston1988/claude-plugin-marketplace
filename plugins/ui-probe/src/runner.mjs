@@ -3,7 +3,7 @@
 import { sleep } from "./cdp.mjs";
 import { setCookies } from "./auth.mjs";
 import { installGuard, inTvScope, NO_PROTOCOL } from "./guard.mjs";
-import { assertsNothing, expandIncludes, validate } from "./ir.mjs";
+import { assertsNothing, expandIncludes, stepLabel, validate } from "./ir.mjs";
 import { StepFailure, absolute, inconclusive, q } from "./ops/common.mjs";
 import { OPS } from "./ops/index.mjs";
 
@@ -139,7 +139,7 @@ export async function run(doc, ctx = {}) {
     for (const [index, step] of scenario.steps.entries()) {
       const op = Object.keys(step)[0];
       const args = step[op];
-      const base = { source: `${state.source}:${index + 1}`, op };
+      const base = { source: stepLabel(step, index, state.source), op };
       if (args?.target) base.target = args.target;
       if (stopped) {
         records.push({ ...base, outcome: "not_run", ms: 0 });

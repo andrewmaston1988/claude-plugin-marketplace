@@ -227,7 +227,7 @@ test("row 28: a capture whose screen step fails prints that step's digest line",
     assert.match(result.stdout, /^steps: failed$/m, result.stdout);
     assert.match(
       result.stdout,
-      /^FAILED broken:1 expect_widths \[data-testid=action-tile\] measured=\[111,111,111\] expected=54$/m,
+      /^FAILED broken#step1 expect_widths \[data-testid=action-tile\] measured=\[111,111,111\] expected=54$/m,
       result.stdout,
     );
   } finally {
