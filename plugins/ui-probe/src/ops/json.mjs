@@ -14,11 +14,20 @@ function sameValue(actual, expected) {
 
 export async function expectJson(args, state) {
   const url = absolute(args.url, state.baseUrl);
+  // AbortSignal.timeout's timer is unref'd, so a fetch stub (or a quiet network) would let Node
+  // exit before the abort could fire. A ref'd timer keeps the loop alive; it is cleared on settle.
+  const controller = new AbortController();
+  const timer = setTimeout(
+    () => controller.abort(new DOMException("The operation was aborted due to timeout", "TimeoutError")),
+    state.fetchTimeoutMs,
+  );
   let response;
   try {
-    response = await state._fetch(url, { signal: AbortSignal.timeout(state.fetchTimeoutMs) });
+    response = await state._fetch(url, { signal: controller.signal });
   } catch (error) {
     throw new StepFailure("inconclusive", null, `GET ${url} failed: ${error.message}`);
+  } finally {
+    clearTimeout(timer);
   }
   const status = response.status ?? 0;
   if (status < 200 || status >= 300) throw new StepFailure("inconclusive", null, `GET ${url} returned ${status}`);
