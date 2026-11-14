@@ -8,8 +8,8 @@ import { homedir, tmpdir } from "node:os";
 // An inherited SWARM_HOME is only trustworthy when WE set it — the marker says so.
 // Without it, an operator who exports SWARM_HOME in their shell gets their real
 // store written to by the suite, which is the one thing this file exists to stop.
-// Plain "always override" is not the fix: the workers must inherit the parent's dir,
-// not each mint their own.
+// Each test-file process mints its own home; the marker lets a CLI child a test
+// spawns inherit that dir rather than minting a second.
 if (!process.env.SWARM_HOME || process.env.SWARM_TEST_HOME !== "1") {
   const dir = mkdtempSync(join(tmpdir(), "swarm-test-home-"));
   const binDir = join(dir, "bin");
