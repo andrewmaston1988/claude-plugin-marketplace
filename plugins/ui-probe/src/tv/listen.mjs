@@ -3,10 +3,15 @@
 
 import { evaluate } from '../cdp.mjs';
 import { KEYS, isKnownKey } from './keys.mjs';
-import { KEYS_INSTALL_JS, KEYS_READ_JS, pageOf, removeEverything } from './steps.mjs';
+import {
+  KEYS_INSTALL_JS, KEYS_READ_JS, messageOf, pageOf, registerKeyJs, removeEverything, unregisterKeyJs,
+} from './steps.mjs';
 
 const POLL_MS = 200;
 const HOLD_MS = 1000;
+
+// Only these reach a Tizen page without being registered.
+const MANDATORY = new Set(['Left', 'Up', 'Right', 'Down', 'Enter', 'Back']);
 
 export const DEFAULT_LISTEN_KEYS = Object.freeze(['Left', 'Right', 'Digit1', 'MediaPlay']);
 // Back at the app's root exits it, so these are offered only on a page the probe navigated to.
@@ -91,7 +96,12 @@ const readJs = `(() => {
 const receivedText = (name, event) =>
   `✓ ${listenLabel(name)} — key ${event.key}, code ${event.code}, keyCode ${event.keyCode}`;
 
-const missingText = (name) => `✗ ${listenLabel(name)} — not received`;
+/** A miss says why only when the key was never registered: a returned register explains nothing. */
+export function registerNote(register) {
+  return register === 'absent' || register === 'threw' ? ` (registerKey ${register})` : '';
+}
+
+const missingText = (name, register) => `✗ ${listenLabel(name)} — not received${registerNote(register)}`;
 
 /**
  * Prompt each key in turn. The capture listener records and swallows every event, so an
@@ -119,17 +129,50 @@ export async function listenStep(cdp, {
     for (let index = 0; index < keys.length; index += 1) {
       const name = keys[index];
       const keyCode = KEYS[name].keyCode;
-      await evaluate(cdp, promptJs(`Press ${listenLabel(name)} on the remote`));
+      const tizenName = KEYS[name].key;
 
-      let event = null;
-      for (let attempt = 0; attempt < attempts && !event; attempt += 1) {
-        const read = await evaluate(cdp, readJs);
-        event = (read?.events ?? []).find((one) => one.type === 'keydown' && one.keyCode === keyCode) ?? null;
-        if (!event) await _sleep(POLL_MS);
+      let register = 'not-needed';
+      let registerError;
+      if (!MANDATORY.has(name)) {
+        try {
+          register = (await evaluate(cdp, registerKeyJs(tizenName))) === 'returned' ? 'returned' : 'absent';
+        } catch (error) {
+          register = 'threw';
+          registerError = messageOf(error);
+        }
       }
 
-      await evaluate(cdp, resultJs(event ? receivedText(name, event) : missingText(name)));
-      results.push({ key: name, received: Boolean(event), ...(event ? { event } : {}) });
+      let event = null;
+      let unregister;
+      try {
+        await evaluate(cdp, promptJs(`Press ${listenLabel(name)} on the remote`));
+
+        for (let attempt = 0; attempt < attempts && !event; attempt += 1) {
+          const read = await evaluate(cdp, readJs);
+          event = (read?.events ?? []).find((one) => one.type === 'keydown' && one.keyCode === keyCode) ?? null;
+          if (!event) await _sleep(POLL_MS);
+        }
+
+        await evaluate(cdp, resultJs(event ? receivedText(name, event) : missingText(name, register)));
+      } finally {
+        // A poll that throws mid-key must not leave the key swallowed from the app.
+        if (register === 'returned') {
+          try {
+            unregister = (await evaluate(cdp, unregisterKeyJs(tizenName))) === 'returned' ? 'returned' : 'absent';
+          } catch {
+            unregister = 'threw';
+          }
+        }
+      }
+
+      results.push({
+        key: name,
+        received: Boolean(event),
+        ...(event ? { event } : {}),
+        register,
+        ...(registerError ? { registerError } : {}),
+        ...(unregister ? { unregister } : {}),
+      });
       if (index < keys.length - 1) await _sleep(HOLD_MS);
     }
     events = (await evaluate(cdp, KEYS_READ_JS)) ?? [];

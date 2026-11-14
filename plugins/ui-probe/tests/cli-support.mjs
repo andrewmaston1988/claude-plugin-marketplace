@@ -56,7 +56,7 @@ export function scratchDir(prefix) {
 
 // A CDP target the CLI can attach to with --attach-port: /json/list, /json/protocol and a
 // WebSocket that answers CDP calls. Only reachable over loopback, never the set.
-export async function startCdpStub({ protocol, evaluate = () => null, onEvaluated = null } = {}) {
+export async function startCdpStub({ protocol, evaluate = () => null, onEvaluated = null, onMessage = null } = {}) {
   const sockets = new Set();
   const server = createServer((req, res) => {
     const json = (body) => {
@@ -103,6 +103,12 @@ export async function startCdpStub({ protocol, evaluate = () => null, onEvaluate
         const value = message.method === "Runtime.evaluate"
           ? { result: { result: { value: evaluate(expression) } } }
           : { result: {} };
+        // A test can push a CDP event at the client before the reply, so it is delivered first.
+        onMessage?.({
+          method: message.method,
+          params: message.params ?? {},
+          emit: (event, params) => socket.write(encodeFrame(JSON.stringify({ method: event, params }))),
+        });
         socket.write(encodeFrame(JSON.stringify({ id: message.id, ...value })));
         if (message.method === "Runtime.evaluate" && onEvaluated?.(expression) === "close") {
           socket.end();

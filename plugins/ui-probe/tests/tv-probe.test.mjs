@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { FEATURES_JS, platformPath, platformSummary, tvProbe, verdictLine } from '../src/tv/probe.mjs';
 import {
   cleanupReply, currentReply, featuresReply, installReply, keyCodes, listenStub, noSleep, PAGE,
-  pageReply, plainRun, readReply, registerReply, stubCdp,
+  pageReply, plainRun, readReply, registerReply, stubCdp, unregisterReply,
 } from './tv-support.mjs';
 
 // A probe that leaves a listener or an element behind has changed the app it measured.
@@ -135,6 +135,17 @@ test('features records registerKey as threw, returned or absent', async () => {
   const absentPlatform = await tvProbe(absent, { _sleep: noSleep });
   assert.equal(absentPlatform.features.registerKey.outcome, 'absent');
   assert.equal(absentPlatform.features.registerKey.present, false);
+
+  // A page whose register answers null has not returned either: the script's own answer decides.
+  const unanswered = stubCdp({ replies: [featuresReply(), currentReply('object'), installReply, readReply([]), cleanupReply] });
+  const unansweredPlatform = await tvProbe(unanswered, { _sleep: noSleep });
+  assert.equal(unansweredPlatform.features.registerKey.outcome, 'absent');
+
+  // The key step runs the same scripts and records what they answered.
+  const scripted = stubCdp({ replies: [...plainRun(), registerReply('returned', { sticky: true }), unregisterReply('returned', { sticky: true })] });
+  const scriptedPlatform = await tvProbe(scripted, { _sleep: noSleep });
+  assert.deepEqual(scriptedPlatform.keys.registered, { key: 'Digit1', register: 'returned', unregister: 'returned' });
+  assert.equal(keyCodes(scripted).includes(49), true, 'the registered digit is still injected');
 });
 
 // Presence read on one document and calls made on another is no evidence at all.
@@ -377,10 +388,10 @@ test('row 27: --listen prompts each key in order and records the fields that arr
   assert.deepEqual(stub.prompts, ['Left', 'Right', '1', 'Play'], 'the overlay names every key, in order');
   assert.deepEqual(platform.listen.keys, ['Left', 'Right', 'Digit1', 'MediaPlay']);
   assert.deepEqual(platform.listen.results, [
-    { key: 'Left', received: true, event: left },
-    { key: 'Right', received: false },
-    { key: 'Digit1', received: false },
-    { key: 'MediaPlay', received: false },
+    { key: 'Left', received: true, event: left, register: 'not-needed' },
+    { key: 'Right', received: false, register: 'not-needed' },
+    { key: 'Digit1', received: false, register: 'absent' },
+    { key: 'MediaPlay', received: false, register: 'absent' },
   ]);
   assert.equal(platform.listen.waitSeconds, 8);
 });
@@ -400,7 +411,7 @@ test('row 27: a key counts only when its keyCode arrives as a keydown', async ()
   });
   const platform = await tvProbe(stub.cdp, { listenKeys: ['Right'], listenWaitSeconds: 8, _sleep: noSleep });
 
-  assert.deepEqual(platform.listen.results, [{ key: 'Right', received: true, event: right }]);
+  assert.deepEqual(platform.listen.results, [{ key: 'Right', received: true, event: right, register: 'not-needed' }]);
 });
 
 test('row 27: a key that never arrives is not received after the whole wait', async () => {
@@ -413,7 +424,7 @@ test('row 27: a key that never arrives is not received after the whole wait', as
     _now: () => clock,
   });
 
-  assert.deepEqual(platform.listen.results, [{ key: 'Digit1', received: false }]);
+  assert.deepEqual(platform.listen.results, [{ key: 'Digit1', received: false, register: 'absent' }]);
   assert.ok(clock >= 2000, `waited the whole 2 s before giving up: ${clock} ms`);
 });
 

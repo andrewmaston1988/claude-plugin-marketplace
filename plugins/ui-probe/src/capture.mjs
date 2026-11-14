@@ -8,6 +8,7 @@ import { installGuard, NO_PROTOCOL } from "./guard.mjs";
 import { observe } from "./observe.mjs";
 import { navigate, run } from "./runner.mjs";
 import { digestLine } from "./digest.mjs";
+import { networkLog, recordEvidence } from "./evidence.mjs";
 import { platformPath, platformSummary } from "./tv/probe.mjs";
 
 const ENV_JS = `(() => {
@@ -62,42 +63,10 @@ async function emulate(cdp, viewport) {
   await cdp.send("Emulation.setTouchEmulationEnabled", touchParams);
 }
 
-function networkLog(requests, blocked) {
-  const entries = [...requests.values()].map(({ method, url, status }) => ({
-    method, url, status: status ?? null, blocked: false,
-  }));
-  for (const stop of blocked) {
-    const hit = entries.find((entry) => entry.method === stop.method && entry.url === stop.url);
-    if (hit) hit.blocked = true;
-    else entries.push({ method: stop.method, url: stop.url, status: null, blocked: true });
-  }
-  return entries;
-}
-
 function assetList(requests) {
   return [...requests.values()]
     .filter((request) => request.type)
     .map(({ url, type }) => ({ url, type }));
-}
-
-function listen(cdp, events) {
-  return [
-    cdp.on("Network.requestWillBeSent", ({ requestId, request }) => {
-      events.requests.set(requestId, { method: request.method, url: request.url, status: null, type: null });
-    }),
-    cdp.on("Network.responseReceived", ({ requestId, response, type }) => {
-      const entry = events.requests.get(requestId);
-      if (!entry) return;
-      entry.status = response.status;
-      entry.type = type;
-    }),
-    cdp.on("Runtime.consoleAPICalled", ({ type, args }) => {
-      events.console.push({ level: type, text: args.map((arg) => arg.value ?? arg.description ?? "").join(" ") });
-    }),
-    cdp.on("Log.entryAdded", ({ entry }) => {
-      events.console.push({ level: entry.level, text: entry.text });
-    }),
-  ];
 }
 
 const SHOT_SCALE = 0.5;
@@ -257,7 +226,7 @@ function readPlatformSummary(appid) {
  * `capture --device tv`: the app is already attached and loaded, so there is one viewport and no
  * navigation. The screen is read, never driven, unless the screen's steps say otherwise.
  */
-async function captureTv({ screen, config, cdp, ctx, events, guard, blocked, outDir, lines }) {
+async function captureTv({ screen, config, cdp, ctx, events, evidence, guard, blocked, outDir, lines }) {
   const dir = join(outDir, "tv");
   mkdirSync(dir, { recursive: true });
   const selectors = screen.measure ?? [];
@@ -272,6 +241,7 @@ async function captureTv({ screen, config, cdp, ctx, events, guard, blocked, out
         allowWrites: Boolean(ctx.allowWrites),
         guard,
         blocked,
+        evidence,
         requireAssertion: false,
         source: ctx.source ?? "tv",
         loadTimeoutMs: ctx.loadTimeoutMs,
@@ -360,12 +330,8 @@ export async function capture(screen, ctx = {}) {
   const allowWrites = Boolean(ctx.allowWrites);
 
   await cdp.send("Page.enable");
-  await cdp.send("Runtime.enable");
-  await cdp.send("Network.enable");
-  try { await cdp.send("Log.enable"); } catch { /* Log is optional on older Chromium */ }
-
-  const events = { requests: new Map(), console: [] };
-  const offs = listen(cdp, events);
+  const recorder = await recordEvidence(cdp);
+  const events = recorder.events;
   const blocked = [];
   // A protocol the set would not serve is unknown, not a modern browser: no interception.
   const protocol = ctx.device === "tv" && ctx.protocol == null ? NO_PROTOCOL : (ctx.protocol ?? null);
@@ -378,7 +344,7 @@ export async function capture(screen, ctx = {}) {
 
   try {
     if (ctx.device === "tv") {
-      await captureTv({ screen, config, cdp, ctx, events, guard, blocked, outDir, lines });
+      await captureTv({ screen, config, cdp, ctx, events, evidence: recorder, guard, blocked, outDir, lines });
       return { digest: lines.join("\n"), outDir };
     }
 
@@ -405,7 +371,7 @@ export async function capture(screen, ctx = {}) {
         steps = await run(
           { id: "capture", steps: screen.steps },
           {
-            cdp, baseUrl: config.baseUrl, allowWrites, guard, blocked,
+            cdp, baseUrl: config.baseUrl, allowWrites, guard, blocked, evidence: recorder,
             requireAssertion: false, source: ctx.source ?? name,
             loadTimeoutMs: ctx.loadTimeoutMs,
             // A screen's steps live in the config file, so its includes sit beside it.
@@ -441,7 +407,7 @@ export async function capture(screen, ctx = {}) {
       lines.push(`out: ${dir}`);
     }
   } finally {
-    for (const off of offs) off();
+    recorder.stop();
     await guard.uninstall();
   }
 

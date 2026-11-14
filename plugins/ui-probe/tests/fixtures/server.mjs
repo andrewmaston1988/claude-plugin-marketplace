@@ -106,6 +106,16 @@ const PAGES = {
     <button id="deep" style="display:block;width:120px;height:40px">Deep target</button>
     <div id="overlay" style="position:fixed;inset:0;background:rgba(0,0,0,.1)"></div>`),
 
+  // Console and traffic evidence: one log, one error, and one GET that completes before the page
+  // says it is ready, so a run's network.json is complete by the time its assertion passes.
+  "/console.html": page(`
+    <div id="ready">loading</div>
+    <script>
+      console.log("hello from the page");
+      console.error("boom");
+      fetch("/json/data").then(() => { document.getElementById("ready").textContent = "ready"; });
+    </script>`),
+
   // The TV journey target lives in its own module so a reader can see the page the row names.
   "/tv-grid.html": TV_GRID_HTML,
 };

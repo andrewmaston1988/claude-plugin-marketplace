@@ -3,7 +3,8 @@
 import { sleep } from "./cdp.mjs";
 import { setCookies } from "./auth.mjs";
 import { installGuard, inTvScope, NO_PROTOCOL } from "./guard.mjs";
-import { assertsNothing, expandIncludes, validate } from "./ir.mjs";
+import { networkLog, recordEvidence } from "./evidence.mjs";
+import { assertsNothing, expandIncludes, stepLabel, validate } from "./ir.mjs";
 import { StepFailure, absolute, inconclusive, q } from "./ops/common.mjs";
 import { OPS } from "./ops/index.mjs";
 
@@ -121,8 +122,16 @@ export async function run(doc, ctx = {}) {
       const cookieUrl = open && /^https?:\/\//.test(open.url) ? open.url : state.baseUrl;
       if (cookieUrl) await setCookies(state.cdp, ctx.cookies, cookieUrl);
     }
-    if (!state.guard) {
-      // The set may serve no protocol at all; on the web a null one is the modern browser.
+  }
+
+  const records = [];
+  let stopped = false;
+  // A caller that already records (capture) hands its recorder in: run() then reports no evidence
+  // of its own, because the caller's files are the record.
+  const owned = browser && !ctx.evidence ? await recordEvidence(state.cdp) : null;
+  try {
+    if (browser && !state.guard) {
+      // Everything the recorder wants is enabled before the guard may pause a request.
       const protocol = device === "tv" && ctx.protocol == null ? NO_PROTOCOL : (ctx.protocol ?? null);
       state.guard = await installGuard(state.cdp, protocol, {
         allowWrites: state.allowWrites,
@@ -131,15 +140,10 @@ export async function run(doc, ctx = {}) {
         tvScope,
       });
     }
-  }
-
-  const records = [];
-  let stopped = false;
-  try {
     for (const [index, step] of scenario.steps.entries()) {
       const op = Object.keys(step)[0];
       const args = step[op];
-      const base = { source: `${state.source}:${index + 1}`, op };
+      const base = { source: stepLabel(step, index, state.source), op };
       if (args?.target) base.target = args.target;
       if (stopped) {
         records.push({ ...base, outcome: "not_run", ms: 0 });
@@ -161,11 +165,17 @@ export async function run(doc, ctx = {}) {
       }
     }
   } finally {
+    if (owned) owned.stop();
     if (state.guard && !ctx.guard) await state.guard.uninstall();
   }
 
   const outcome = records.some((record) => record.outcome === "failed")
     ? "failed"
     : records.some((record) => record.outcome === "inconclusive") ? "inconclusive" : "passed";
-  return { outcome, steps: records, exitCode: EXIT_CODES[outcome], blocked: state.blocked };
+  const result = { outcome, steps: records, exitCode: EXIT_CODES[outcome], blocked: state.blocked };
+  if (owned) {
+    result.console = owned.events.console;
+    result.network = networkLog(owned.events.requests, state.blocked);
+  }
+  return result;
 }

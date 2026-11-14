@@ -38,7 +38,7 @@ its path and stop.
 |---|---|---|
 | answers | "what is this page doing right now" | "does this claim hold" |
 | needs | a config screen, or `--url` | a scenario file on disk |
-| output | `screenshot.png`, `measure.json`, `env.json`, `observation.txt`, `dom.html`, `console.json`, `network.json`, `assets.json` | `results.json` with one record per step |
+| output | `screenshot.png`, `measure.json`, `env.json`, `observation.txt`, `dom.html`, `console.json`, `network.json`, `assets.json` | `results.json` with one record per step; a browser-backed run adds `console.json` and `network.json` |
 | verdict | none — you read the numbers | `passed` / `failed` / `inconclusive` / `needs_review`, plus an exit code |
 | lives on | nothing; the out dir dies with the session | the repo — a regression stays checked |
 
@@ -67,9 +67,11 @@ Use `--device tv` when the question needs the installed app on a real Tizen set:
 
 A TV capture attaches to the app already running on the set. Its DOM observation marks the app's configured focus element (default selector `.focused`) with `[focused]`; many TV apps move this marker while `document.activeElement` stays on `body`. Capture writes under `<outDir>/tv/`. `--screenshot` is opt-in because replay is slow and uses TV CPU. `screenshot.png` is for the operator only: give them its path when requested, and never Read it.
 
+A `--device tv` run records console and traffic from the attached target for the whole run — from before its first step, so `console.json` and `network.json` hold what the app did as the run started, not only what it did inside a step.
+
 `/ui-probe tv probe --navigate http://127.0.0.1:8001` writes `platform.json` and reports Tizen API availability, video behavior, injected keys, and whether the page reached the test URL. After a launch it waits for the app's page to settle (bounded at 20 s), and every step and the verdict name the page they measured. Its final verdict line names that page, or says it could not be read: `shell: plan A` when it is an `http(s)` page and both `registerKey("1")` returned and `getCurrentApplication()` returned an object, `shell: plan B` when it is a widget-local (non-`http(s)`) page with the same two calls working, `shell: no tizen` when the calls are absent or threw, or `shell: undetermined` when the page itself could not be read, so neither plan can be claimed. Presence alone is never a plan. `--fetch <url>` makes one credentialed GET from the settled page and records its status and CORS headers; `--exit` exits the app last and reports whether the inspector closed within 3 s.
 
-`--listen` is a guided physical-press check, one key at a time. For each key the TV shows a full-width banner — "Press 1 on the remote" — then either ticks the press with the `key`, `code` and `keyCode` it received, or says "not received" after `--listen-wait <seconds>` (default 8), holds that for about a second, and moves on. The CLI prints the key list and the per-key wait before the banner appears, so the operator at the remote knows what to press and how long they have. Matching is by `keyCode`; every event is recorded, so a press that was not asked for still shows in `platform.json`'s `listen.events`, while `listen.results` holds one `{key, received, event?}` per key. This is the only check that proves a physical press reaches the page: CDP input bypasses `registerKey`, so injected keys cannot settle it.
+`--listen` is a guided physical-press check, one key at a time. For each key the TV shows a full-width banner — "Press 1 on the remote" — then either ticks the press with the `key`, `code` and `keyCode` it received, or says "not received" after `--listen-wait <seconds>` (default 8), holds that for about a second, and moves on. The CLI prints the key list and the per-key wait before the banner appears, so the operator at the remote knows what to press and how long they have. Matching is by `keyCode`; every event is recorded, so a press that was not asked for still shows in `platform.json`'s `listen.events`, while `listen.results` holds one `{key, received, register, event?, unregister?}` per key. Each non-mandatory key is registered with `tizen.tvinputdevice.registerKey` just before its banner and unregistered after its result, because only the arrows, Enter and Back reach a Tizen page unregistered; a miss whose register did not return carries `(registerKey absent)` or `(registerKey threw)` in both the digest and the TV banner. This is the only check that proves a physical press reaches the page: CDP input bypasses `registerKey`, so injected keys cannot settle it.
 
 The remote key names are `Left`, `Up`, `Right`, `Down`, `Enter`, `Back`, `Digit0` through `Digit9`, and `MediaPlay`, `MediaPause`, `MediaPlayPause`, `MediaStop`, `MediaRewind`, `MediaFastForward`. Use these names in `key` steps, and as the comma-separated list `--listen` takes. During `tv probe`, Back and Enter are withheld until navigation reaches the test URL, because either can leave or act on the installed app; the `--listen` prompts follow the same gate — the defaults are `Left`, `Right`, `Digit1` and `MediaPlay`, gaining `Enter` and `Back` only on the fixture grid. A key list you pass yourself overrides that default, so name Back only when the app's root can survive it.
 
@@ -158,9 +160,11 @@ Exit codes, which tell you what to do next:
    Never run an unvalidated file; exit 64 is cheaper to fix than a half-run.
 5. **Read the digest lines first**, then only the output files that answer the question. Do not open the whole
    out dir.
-6. **Report the measurement.** One line per assertion, `measured` beside `expected`, with `<file>:<step>`. For
-   a capture the digest lines already are the report — copy them, and hand the operator the
-   `screenshot.png` path.
+6. **Report the measurement.** One line per assertion, `measured` beside `expected`, with the step's source. A
+   source is `<file>:<line>` where the step is written, `<file>#step<n>` when no line is known (a JSON scenario,
+   a config screen), and an included step names the include as written with its line in that file. For a
+   capture the digest lines already are the report — copy them, and hand the operator the `screenshot.png`
+   path.
 
 ## Worked examples
 
@@ -213,7 +217,7 @@ step's line in the run digest's form:
 ```
 [data-testid=action-tile] widths=54,111,111
 steps: failed
-FAILED detail-sheet:2 expect_widths [data-testid=action-tile] measured=[54,111,111] expected=111
+FAILED detail-sheet#step2 expect_widths [data-testid=action-tile] measured=[54,111,111] expected=111
 blocked: 0
 ```
 

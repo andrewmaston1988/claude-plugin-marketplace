@@ -8,7 +8,7 @@ import { run } from '../src/runner.mjs';
 import { tvProbe } from '../src/tv/probe.mjs';
 import {
   cleanupReply, currentReply, featuresReply, installReply, listenStub, noSleep, PAGE,
-  pageReply, readReply, registerReply, stubCdp,
+  pageReply, readReply, registerReply, stubCdp, unregisterReply,
 } from './tv-support.mjs';
 
 const M69_UNPARSEABLE = /\?\?|\|\|=|&&=|\?\.(?!\d)/;
@@ -72,19 +72,23 @@ test('every tv probe page script parses on Chromium 69', async () => {
     replies: [
       pageReply(PAGE), featuresReply(), registerReply('returned'), currentReply('object'),
       installReply, readReply([]), navigateReply, cleanupReply,
+      // Answers every register after the feature read, so the listen's scripts both reach the page.
+      registerReply('returned', { sticky: true }), unregisterReply('returned', { sticky: true }),
     ],
     batches: { Left: [[{ type: 'keydown', key: 'ArrowLeft', code: 'ArrowLeft', keyCode: 37 }]] },
   });
 
   const platform = await tvProbe(cdp, {
     navigate: `${PAGE.origin}/after`,
-    listenKeys: 'Left',
+    listenKeys: 'Left,Digit1',
     listenWaitSeconds: 1,
     testOrigin: PAGE.origin,
     _sleep: noSleep,
   });
 
   assert.equal(platform.listen.status, 'measured');
-  assert.deepEqual(prompts, ['Left']);
+  assert.deepEqual(prompts, ['Left', '1']);
+  assert.ok(expressionsSent(cdp).some((js) => /\bdevice\.registerKey\("1"\)/.test(js)), 'the register script ran');
+  assert.ok(expressionsSent(cdp).some((js) => js.includes('unregisterKey(')), 'the unregister script ran');
   assertParsesOnM69(expressionsSent(cdp));
 });

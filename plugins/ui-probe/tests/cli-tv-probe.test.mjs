@@ -143,9 +143,56 @@ test("row 27: tv probe --listen prints the key list and wait, then runs the guid
     assert.deepEqual(written.listen.results.map((entry) => entry.key), ["Left", "Right", "Digit1", "MediaPlay"]);
     assert.equal(written.listen.results[0].received, true);
     assert.equal(written.listen.results[1].received, false);
-    assert.match(result.stdout, /^listen: 1\/4 keys received in 0\.2s each/m, result.stdout);
+    assert.match(
+      result.stdout,
+      /^listen: 1\/4 keys received in 0\.2s each — not received: Right, 1 \(registerKey absent\), Play \(registerKey absent\)$/m,
+      result.stdout,
+    );
   } finally {
     await close();
+  }
+});
+
+// A key whose register returned is a genuine miss, so its digest entry carries no extra note.
+test('row 3: a missed key whose register returned prints bare in the digest', async () => {
+  const dir = scratchDir("ui-probe-tv-listen-registered");
+  const env = noSdbEnv(scratchDir("ui-probe-tv-listen-registered-home"));
+  const outDir = path.join(dir, "out");
+  scratchConfig(dir, {
+    baseUrl: "http://127.0.0.1:9",
+    tv: { host: "192.0.2.10:26101", appid: "torrenthub.main" },
+  });
+
+  const stub = await startCdpStub({
+    protocol: { domains: [{ domain: "Page" }, { domain: "Network" }] },
+    evaluate: (expression) => {
+      const js = String(expression);
+      if (js.includes("document.readyState")) return SETTLED_PAGE;
+      if (js.includes("IntersectionObserver")) return { ...TV_FEATURES, registerKeyPresent: true };
+      if (/Press (.+?) on the remote/.test(js)) return true;
+      if (js.includes("state.log.slice")) return { events: [] };
+      if (js.includes("__uiProbeKey.read()")) return [];
+      if (js.includes("__uiProbeKey = {")) return { active: "BODY" };
+      if (js.includes("unregisterKey(")) return "returned";
+      if (js.includes("registerKey(")) return "returned";
+      if (js.includes("removeEventListener")) return true;
+      return null;
+    },
+  });
+
+  try {
+    const result = await probe(
+      ["tv", "probe", "--attach-port", String(stub.port), "--listen", "Digit1", "--listen-wait", "0.2", "--out", outDir],
+      { cwd: dir, env },
+    );
+    assert.equal(result.status, 0, `tv probe exited ${result.status}: ${result.stderr}`);
+    assert.match(result.stdout, /^listen: 0\/1 keys received in 0\.2s each — not received: 1$/m, result.stdout);
+
+    const written = JSON.parse(readFileSync(path.join(outDir, "platform.json"), "utf8"));
+    assert.equal(written.listen.results[0].register, "returned");
+    assert.equal(written.listen.results[0].unregister, "returned");
+  } finally {
+    await stub.close();
   }
 });
 

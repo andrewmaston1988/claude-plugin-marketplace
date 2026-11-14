@@ -3,6 +3,15 @@
 // No anchors, tags, multi-document streams or block scalars — none are needed,
 // and a parser that silently mis-reads YAML would corrupt the validity score.
 
+// The line each sequence item starts on, kept beside the parsed tree so nothing has to thread
+// a parallel array through the include and config paths.
+const LINES = new WeakMap();
+
+export function lineOf(node) {
+  if (node === null || typeof node !== "object") return null;
+  return LINES.get(node) ?? null;
+}
+
 function stripComment(line) {
   let quote = null;
   for (let i = 0; i < line.length; i += 1) {
@@ -110,23 +119,29 @@ export function parseYaml(source) {
       const rest = line.content.slice(1).trim();
       i += 1;
       if (rest === '') {
-        out.push(parseBlock(indent + 1));
+        const block = parseBlock(indent + 1);
+        if (block && typeof block === 'object') LINES.set(block, line.n);
+        out.push(block);
       } else if (splitKey(rest)) {
         // "- key: value" starts a mapping whose remaining keys sit at indent + 2
         const map = {};
         const [k, v] = splitKey(rest);
         // The key starts two columns in (after "- "), so its child block is at +4.
-        assign(map, scalar(k), v, indent + 4, line.n);
+        assign(map, scalar(k), v, indent + 4);
         while (i < lines.length && lines[i].indent === indent + 2 && !lines[i].content.startsWith('- ')) {
           const inner = lines[i];
           const kv = splitKey(inner.content);
           if (!kv) throw new Error(`line ${inner.n}: expected "key: value"`);
           i += 1;
-          assign(map, scalar(kv[0]), kv[1], indent + 4, inner.n);
+          assign(map, scalar(kv[0]), kv[1], indent + 4);
         }
+        LINES.set(map, line.n);
         out.push(map);
       } else {
-        out.push(scalar(rest));
+        // A flow map reaches this branch: `splitKey` finds no colon at depth 0 in `{ ... }`.
+        const value = scalar(rest);
+        if (value && typeof value === 'object') LINES.set(value, line.n);
+        out.push(value);
       }
     }
     return out;
@@ -140,19 +155,18 @@ export function parseYaml(source) {
       const kv = splitKey(line.content);
       if (!kv) throw new Error(`line ${line.n}: expected "key: value", got ${JSON.stringify(line.content)}`);
       i += 1;
-      assign(out, scalar(kv[0]), kv[1], indent + 1, line.n);
+      assign(out, scalar(kv[0]), kv[1], indent + 1);
     }
     return out;
   }
 
-  function assign(map, key, rawValue, childIndent, lineNo) {
+  function assign(map, key, rawValue, childIndent) {
     if (rawValue === '') {
       if (i < lines.length && lines[i].indent >= childIndent) map[key] = parseBlock(lines[i].indent);
       else map[key] = null;
     } else {
       map[key] = scalar(rawValue);
     }
-    void lineNo;
   }
 
   const value = parseBlock(0);

@@ -257,8 +257,9 @@ test("a tv run whose protocol the target would not serve installs no guard", asy
   assert.equal(cdp.methods().includes("Network.setRequestInterception"), false, cdp.methods().join(","));
 });
 
-test("a step's source is the scenario name and its 1-based index", async () => {
+test("a step's source names its file and position when no line is known", async () => {
   const cdp = stubCdp({ nodeIds: [2] });
+  // These steps are built in code, so there is no file line to name: `#step<n>`, never `:n`.
   const result = await run(doc({ open: { url: URL } }, { expect_text: { target: "h1", equals: "hello" } }), { cdp, source: "t2-hover.yaml" });
-  assert.deepEqual(result.steps.map((step) => step.source), ["t2-hover.yaml:1", "t2-hover.yaml:2"]);
+  assert.deepEqual(result.steps.map((step) => step.source), ["t2-hover.yaml#step1", "t2-hover.yaml#step2"]);
 });
