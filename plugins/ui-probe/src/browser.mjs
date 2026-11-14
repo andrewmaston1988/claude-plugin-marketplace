@@ -31,7 +31,8 @@ const DEFAULT_FS = { mkdtempSync, existsSync, readFileSync, rmSync };
 // within milliseconds, so an early exit is fatal only when no DevToolsActivePort appears.
 const LAUNCHER_GRACE_MS = 8000;
 const PORT_POLL_MS = 100;
-const PORT_POLLS = 200;
+// Generous on purpose: a cold start on a busy machine can take a minute; a healthy one returns early.
+const PORT_POLLS = 600;
 
 const CLOSE_POLL_MS = 150;
 const CLOSE_POLLS = 40;
