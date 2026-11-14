@@ -246,7 +246,7 @@ const settle = (code) => { setTimeout(() => process.exit(code), 150); };
       out(digestLine(step));
     }
     out(`run: ${result.outcome} (${counts.passed} passed, ${counts.failed} failed, ${counts.inconclusive} inconclusive, ${counts.not_run} not run) → ${outDir}`);
-    writeResults(outDir, result.steps);
+    writeResults(outDir, result);
     settle(result.exitCode);
     return;
   }
@@ -441,12 +441,18 @@ async function openBrowser(browserPath) {
   };
 }
 
-function writeResults(outDir, steps) {
+function writeResults(outDir, result) {
   mkdirSync(outDir, { recursive: true });
-  const target = path.join(outDir, "results.json");
-  const tmp = `${target}.tmp`;
-  writeFileSync(tmp, JSON.stringify(steps, null, 2));
-  renameSync(tmp, target);
+  const write = (name, value) => {
+    const target = path.join(outDir, name);
+    const tmp = `${target}.tmp`;
+    writeFileSync(tmp, JSON.stringify(value, null, 2));
+    renameSync(tmp, target);
+  };
+  write("results.json", result.steps);
+  // Only a browser-backed run carries these: an http run touched no page to record.
+  if (result.console) write("console.json", result.console);
+  if (result.network) write("network.json", result.network);
 }
 
 function resolveOutDir(config, explicit) {

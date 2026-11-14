@@ -3,7 +3,7 @@
 
 import test from "node:test";
 import assert from "node:assert/strict";
-import { writeFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { startFixtureServer } from "./fixtures/server.mjs";
 import { findBrowser } from "../src/browser.mjs";
@@ -294,6 +294,58 @@ test("row 22: a TV run prints its attach timings on the digest header", async ()
     assert.equal(result.status, 0, `exited ${result.status}: ${result.stdout}${result.stderr}`);
     const header = result.stdout.split("\n")[0];
     assert.match(header, /^tv attach: \d+ ms, relaunch: n\/a, settle: \d+ ms$/, `the header: ${header}`);
+  } finally {
+    await stub.close();
+  }
+});
+
+// A TV run records what the attached app says and fetches, from the moment the run attaches.
+test("row 8: a TV run writes console.json and network.json from the attached target", async () => {
+  const dir = scratchDir("ui-probe-tv-evidence");
+  const env = noSdbEnv(scratchDir("ui-probe-tv-evidence-home"));
+  scratchConfig(dir, {
+    baseUrl: "http://127.0.0.1:9",
+    tv: { host: "192.0.2.10:26101", appid: "torrenthub.main", testOrigin: "http://127.0.0.1:8001" },
+  });
+  const scenario = path.join(dir, "keys.yaml");
+  writeFileSync(scenario, [
+    "id: tv-evidence",
+    "backend: tv",
+    "steps:",
+    '  - key: { key: "Left" }',
+    '  - expect_text: { target: "h1", equals: "One" }',
+    "",
+  ].join("\n"));
+  const outDir = path.join(dir, "out");
+
+  const stub = await startCdpStub({
+    protocol: { domains: [{ domain: "Network", commands: [{ name: "setRequestInterception" }, { name: "continueInterceptedRequest" }] }] },
+    evaluate: (js) => settling(js) ?? (String(js).includes("textContent") ? { found: true, value: "One" } : null),
+    onMessage: ({ method, params, emit }) => {
+      if (method !== "Runtime.evaluate" || !String(params.expression).includes("textContent")) return;
+      emit("Runtime.consoleAPICalled", { type: "log", args: [{ value: "hello from the set" }] });
+      emit("Network.requestWillBeSent", {
+        requestId: "t1", request: { method: "GET", url: "http://192.0.2.30:8000/tv" },
+      });
+      emit("Network.responseReceived", { requestId: "t1", response: { status: 200 }, type: "Document" });
+    },
+  });
+  try {
+    const result = await probe([
+      "run", scenario, "--device", "tv", "--attach-port", String(stub.port), "--out", outDir,
+    ], { cwd: dir, env });
+    assert.equal(result.status, 0, `exited ${result.status}: ${result.stdout}${result.stderr}`);
+
+    const consoleLog = JSON.parse(readFileSync(path.join(outDir, "console.json"), "utf8"));
+    assert.ok(
+      consoleLog.some((entry) => entry.level === "log" && entry.text === "hello from the set"),
+      JSON.stringify(consoleLog),
+    );
+    const network = JSON.parse(readFileSync(path.join(outDir, "network.json"), "utf8"));
+    assert.ok(
+      network.some((entry) => entry.url === "http://192.0.2.30:8000/tv" && entry.status === 200),
+      JSON.stringify(network),
+    );
   } finally {
     await stub.close();
   }

@@ -235,6 +235,91 @@ test("row 28: a capture whose screen step fails prints that step's digest line",
   }
 });
 
+test("row 8: a browser run writes console.json and network.json beside results.json", async (t) => {
+  let browser;
+  try {
+    browser = findBrowser({});
+  } catch (error) {
+    if (process.env.UI_PROBE_REQUIRE_BROWSER === "1") throw error;
+    t.skip(`no Chromium browser found: ${error.message}`);
+    return;
+  }
+
+  const fixture = await startFixtureServer();
+  const dir = scratchDir("ui-probe-run-evidence");
+  const scenario = (name, assertion) => {
+    const file = path.join(dir, name);
+    writeFileSync(file, [
+      "id: console-evidence",
+      "backend: browser",
+      "steps:",
+      `  - open: { url: "${fixture.path("/console.html")}" }`,
+      `  - expect_text: { target: "#ready", ${assertion} }`,
+      "",
+    ].join("\n"));
+    return file;
+  };
+  const readJson = (file) => JSON.parse(readFileSync(file, "utf8"));
+  const evidenceFiles = (out) => ["console.json", "network.json"].map((name) => path.join(out, name));
+
+  try {
+    scratchConfig(dir, { baseUrl: fixture.origin, browser });
+
+    // Passing: the page's own log, its error, and both requests it made.
+    const passingOut = path.join(dir, "passing-out");
+    const passing = await probe(["run", scenario("passing.yaml", 'equals: "ready"'), "--out", passingOut], { cwd: dir });
+    assert.equal(passing.status, 0, `a passing run exited ${passing.status}: ${passing.stderr}`);
+    for (const file of [path.join(passingOut, "results.json"), ...evidenceFiles(passingOut)]) {
+      assert.equal(existsSync(file), true, `${path.basename(file)} is written`);
+    }
+    const consoleLog = readJson(path.join(passingOut, "console.json"));
+    assert.ok(consoleLog.some((entry) => entry.level === "log" && entry.text === "hello from the page"), JSON.stringify(consoleLog));
+    assert.ok(consoleLog.some((entry) => entry.level === "error" && entry.text === "boom"), JSON.stringify(consoleLog));
+    const network = readJson(path.join(passingOut, "network.json"));
+    assert.ok(network.some((entry) => entry.url === fixture.path("/console.html") && entry.status === 200), JSON.stringify(network));
+    assert.ok(network.some((entry) => entry.url === fixture.path("/json/data") && entry.status === 200), JSON.stringify(network));
+
+    // Failing: the evidence is exactly what a failing journey is diagnosed from, so it must exist.
+    const failingOut = path.join(dir, "failing-out");
+    const failing = await probe(
+      ["run", scenario("failing.yaml", 'equals: "never", timeoutMs: 0'), "--out", failingOut],
+      { cwd: dir },
+    );
+    assert.equal(failing.status, 1, `a failing run exited ${failing.status}: ${failing.stderr}`);
+    for (const file of evidenceFiles(failingOut)) {
+      assert.equal(existsSync(file), true, `${path.basename(file)} is written for a failing run`);
+    }
+
+    // No page to record: an http run writes neither.
+    const httpOut = path.join(dir, "http-out");
+    const httpScenario = path.join(dir, "http.yaml");
+    writeFileSync(httpScenario, [
+      "id: http-evidence",
+      "backend: http",
+      "steps:",
+      `  - expect_json: { url: "${fixture.path("/json/data")}", path: "ok", equals: true }`,
+      "",
+    ].join("\n"));
+    const http = await probe(["run", httpScenario, "--out", httpOut], { cwd: dir });
+    assert.equal(http.status, 0, `an http run exited ${http.status}: ${http.stderr}`);
+    for (const file of evidenceFiles(httpOut)) {
+      assert.equal(existsSync(file), false, `${path.basename(file)} must not be written by an http run`);
+    }
+
+    // Nothing launched: an invalid run writes neither.
+    const invalidOut = path.join(dir, "invalid-out");
+    const invalidScenario = path.join(dir, "invalid.yaml");
+    writeFileSync(invalidScenario, ["id: invalid-evidence", "steps:", '  - frobnicate: { url: "/x" }', ""].join("\n"));
+    const invalid = await probe(["run", invalidScenario, "--out", invalidOut], { cwd: dir });
+    assert.equal(invalid.status, 64, `an invalid run exited ${invalid.status}: ${invalid.stderr}`);
+    for (const file of evidenceFiles(invalidOut)) {
+      assert.equal(existsSync(file), false, `${path.basename(file)} must not be written by an invalid run`);
+    }
+  } finally {
+    await fixture.close();
+  }
+});
+
 test("capture exits 64 and prints AuthError when a cookie variable is missing", async () => {
   const fixture = await startFixtureServer();
   const dir = scratchDir("ui-probe-capture-auth");

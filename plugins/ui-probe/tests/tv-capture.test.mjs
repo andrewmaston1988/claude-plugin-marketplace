@@ -72,6 +72,23 @@ async function captureTv(overrides = {}) {
 
 const readEnv = (out) => JSON.parse(readFileSync(join(out, 'env.json'), 'utf8'));
 
+// The capture's recorder is the one the run inside it uses, so the page is enabled once.
+test('row 6: a TV capture hands its recorder to run, so Runtime.enable is sent once', async () => {
+  const cdp = tvCaptureCdp({
+    replies: [
+      { match: (e) => e.includes('textContent'), value: { found: true, value: 'hello' } },
+      ...captureReplies(),
+      compositeReply,
+    ],
+  });
+  const run = await captureTv({ cdp, screen: { url: '/tv', steps: [{ expect_text: { target: 'h1', equals: 'hello' } }] } });
+  try {
+    assert.equal(run.cdp.sent('Runtime.enable').length, 1, run.cdp.methods().join(','));
+  } finally {
+    rmSync(run.dir, { recursive: true, force: true });
+  }
+});
+
 // The platform probe's summary rides into env.json, so a capture says which shell it measured.
 test('capture on the TV writes the platform.json summary into env.json when the file exists', async () => {
   const appid = `uiprobe.summary${process.pid}`;
