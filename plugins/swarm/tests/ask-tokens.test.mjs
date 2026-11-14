@@ -1,5 +1,6 @@
 // `swarm ask` prints the work tokens of the follow-up, with cache read as a labelled
 // breakdown only when there was some.
+import "./helpers/isolate-home.mjs";
 import { test } from "node:test";
 import { equal, ok } from "node:assert/strict";
 import { rmSync, writeFileSync } from "node:fs";

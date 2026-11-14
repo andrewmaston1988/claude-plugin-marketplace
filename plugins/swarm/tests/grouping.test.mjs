@@ -1,3 +1,4 @@
+import "./helpers/isolate-home.mjs";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { projectGrouping } from "../src/serve/grouping.mjs";

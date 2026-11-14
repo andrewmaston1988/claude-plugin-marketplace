@@ -2,6 +2,7 @@
 // the WORK figure (input + output + cache writes), not the cacheRead-inclusive
 // total. Every row below asserts on a RENDERED roster line — a row that called
 // workTokens directly would pass without the cell in results.mjs ever changing.
+import "./helpers/isolate-home.mjs";
 import { test } from "node:test";
 import { equal, ok, match } from "node:assert/strict";
 import { renderRoster, formatClosing } from "../src/results.mjs";

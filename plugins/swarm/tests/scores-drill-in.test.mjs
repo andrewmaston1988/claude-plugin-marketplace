@@ -1,3 +1,4 @@
+import "./helpers/isolate-home.mjs";
 import { test } from "node:test";
 import { equal } from "node:assert/strict";
 import { aggregate, overall } from "../src/scores.mjs";

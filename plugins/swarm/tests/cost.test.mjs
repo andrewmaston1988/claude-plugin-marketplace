@@ -3,6 +3,7 @@
 // derivation tests (week split, per-model cost, multipliers) are below and are
 // ported field-for-field from the operator's cost-table arithmetic. The
 // provider rate cards and the rows built from them are in cost-rate-cards.test.mjs.
+import "./helpers/isolate-home.mjs";
 import { test } from "node:test";
 import { equal, deepEqual, ok, throws, match } from "node:assert/strict";
 import { mkdtempSync, rmSync, readFileSync, appendFileSync, existsSync } from "node:fs";

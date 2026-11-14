@@ -2,6 +2,7 @@
 // the manifest's cwd resolves to nothing, and prune used to report "nothing to prune"
 // while git still registered every leaf tree (scout, 2026-09-24). The trees
 // themselves still know their repo.
+import "./helpers/isolate-home.mjs";
 import { spawnSync } from "node:child_process";
 import { test } from "node:test";
 import { equal, ok } from "node:assert/strict";

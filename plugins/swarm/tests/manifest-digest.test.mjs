@@ -1,6 +1,7 @@
 // Report-mode digests: the authored digest block, the args that reach it, the win32
 // command-line measurement, and the generated-digest dispatch validation that turns a
 // provider-incompatible engine task into a validation error before scheduling.
+import "./helpers/isolate-home.mjs";
 import { test } from "node:test";
 import { equal, ok, deepEqual, throws, match } from "node:assert/strict";
 import { rmSync } from "node:fs";

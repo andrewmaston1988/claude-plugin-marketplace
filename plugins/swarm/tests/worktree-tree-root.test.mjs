@@ -3,6 +3,7 @@
 //
 // Split from worktree.test.mjs rather than appended to it: that file is already
 // over the file-size ratchet's 500-line ceiling, so it may not grow.
+import "./helpers/isolate-home.mjs";
 import { after, test } from "node:test";
 import { equal, ok, deepEqual } from "node:assert/strict";
 import { mkdtempSync, mkdirSync, writeFileSync, existsSync, readFileSync, readdirSync } from "node:fs";

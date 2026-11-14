@@ -1,3 +1,4 @@
+import "./helpers/isolate-home.mjs";
 import { test } from "node:test";
 import { doesNotThrow, equal, throws } from "node:assert/strict";
 import { createRunnerRegistry, defaultRunnerDescriptors } from "../src/runners.mjs";

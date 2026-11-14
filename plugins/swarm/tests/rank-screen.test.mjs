@@ -2,6 +2,7 @@
 // the harness) — and the server payload it draws. The operator deleted the old
 // footer text; the runs screen's Show all row, as a Show/Hide superseded toggle, puts the
 // superseded rows back in the ranking in place.
+import "./helpers/isolate-home.mjs";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, writeFileSync, readFileSync, rmSync } from "node:fs";

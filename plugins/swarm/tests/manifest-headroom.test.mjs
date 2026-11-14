@@ -1,5 +1,6 @@
 // Headroom: the :cloud weekly-allowance preflight, and the provenance rules that
 // decide whether a meter reading may gate a run at all.
+import "./helpers/isolate-home.mjs";
 import { test } from "node:test";
 import { equal, ok } from "node:assert/strict";
 import { writeFileSync, readFileSync, rmSync, mkdirSync } from "node:fs";

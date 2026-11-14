@@ -1,6 +1,7 @@
 // `swarm config init` — the /swarm:swarm setup surface. Split out of
 // config.test.mjs at its existing banner: everything here is about what initConfig
 // WRITES into the user's file, everything there is about what loadConfig READS.
+import "./helpers/isolate-home.mjs";
 import { test } from "node:test";
 import { equal, deepEqual } from "node:assert/strict";
 import { mkdtempSync, writeFileSync, rmSync, readdirSync, readFileSync } from "node:fs";

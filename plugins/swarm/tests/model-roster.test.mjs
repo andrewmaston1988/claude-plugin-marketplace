@@ -2,6 +2,7 @@
 // envelope, one async refresher for the network providers, and each adapter's
 // own staleness rule.
 
+import "./helpers/isolate-home.mjs";
 import { test } from "node:test";
 import { deepEqual, equal, ok } from "node:assert/strict";
 import { readFileSync } from "node:fs";

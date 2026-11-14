@@ -1,6 +1,7 @@
 // The prune reminder is one line about THIS session's runs, and the list it points at
 // lives in `swarm status --mine`'s output where the terminal collapses it. Every row
 // below is literal: the reason string, the listing lines, the marker's contents.
+import "./helpers/isolate-home.mjs";
 import { test } from "node:test";
 import { equal, deepEqual, ok } from "node:assert/strict";
 import { spawnSync } from "node:child_process";

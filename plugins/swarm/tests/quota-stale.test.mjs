@@ -1,5 +1,6 @@
 // A refused usage fetch (429) must not blank the reading: the last good one is served,
 // and the endpoint's Retry-After is honoured so the dashboard stops extending the 429.
+import "./helpers/isolate-home.mjs";
 import { test } from "node:test";
 import { equal, ok, rejects } from "node:assert/strict";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";

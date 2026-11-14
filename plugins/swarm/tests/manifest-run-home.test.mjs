@@ -1,6 +1,7 @@
 // Run home: the results directory is keyed on the repo toplevel, so a dispatch
 // from any subdirectory resumes the same run — while a non-repo, or a repo
 // outside allowedRoots, is refused.
+import "./helpers/isolate-home.mjs";
 import { test } from "node:test";
 import { equal, ok } from "node:assert/strict";
 import { writeFileSync, rmSync, mkdirSync, realpathSync } from "node:fs";

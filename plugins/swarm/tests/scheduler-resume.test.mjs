@@ -2,6 +2,7 @@
 // when one does not. Every row asserts on the DISPATCH — the argv the engine
 // built — never on a helper, so a predicate that is never consulted by the
 // scheduler cannot pass these.
+import "./helpers/isolate-home.mjs";
 import { test } from "node:test";
 import { equal, ok } from "node:assert/strict";
 import { mkdtempSync, rmSync, readFileSync, writeFileSync, existsSync } from "node:fs";

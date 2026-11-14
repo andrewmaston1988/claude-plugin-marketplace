@@ -1,6 +1,7 @@
 // Named manifests and argument substitution: an args value reaches prompts and
 // digest instructions, and an unknown or unused key is refused rather than
 // silently substituted away.
+import "./helpers/isolate-home.mjs";
 import { test } from "node:test";
 import { equal, ok, deepEqual, notEqual } from "node:assert/strict";
 import { rmSync } from "node:fs";

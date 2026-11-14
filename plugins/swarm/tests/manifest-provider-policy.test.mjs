@@ -1,5 +1,6 @@
 // Provider identity and provider-shape policy: which provider a task dispatches on,
 // what each provider accepts, and the governance that gates both.
+import "./helpers/isolate-home.mjs";
 import { test } from "node:test";
 import { equal, ok, deepEqual } from "node:assert/strict";
 import { rmSync } from "node:fs";

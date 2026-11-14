@@ -1,6 +1,7 @@
 // Tests for the update watcher (plan dashboard-launch-path, tests 3-5). The
 // spawner, the registry resolve, the clock and fs.watch are all injected —
 // nothing here ever re-execs, spawns, or waits on a real timer.
+import "./helpers/isolate-home.mjs";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";

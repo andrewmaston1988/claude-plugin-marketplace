@@ -1,5 +1,6 @@
 // pageHtml() is the page both the server and the harness boot: markers become the
 // named asset's text, and an asset that would close its inline element is refused.
+import "./helpers/isolate-home.mjs";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync, mkdtempSync, mkdirSync, rmSync } from "node:fs";

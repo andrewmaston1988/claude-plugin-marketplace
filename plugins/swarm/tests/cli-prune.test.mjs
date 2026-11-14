@@ -1,5 +1,6 @@
 // The `swarm prune` subcommand's CLI tests, split out of cli.test.mjs. Fixtures
 // shared with the sweeps still in cli.test.mjs live in helpers/prune-fixture.mjs.
+import "./helpers/isolate-home.mjs";
 import { spawnSync } from "node:child_process";
 import { test } from "node:test";
 import { equal, ok, deepEqual } from "node:assert/strict";

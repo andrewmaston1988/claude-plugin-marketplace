@@ -11,6 +11,7 @@
 //
 // Move 2026-09-29 (swarm-token-headline-work): the run total is work tokens again, so it went
 // 374.1k → 324.1k — `fix[0]`'s 50k cacheRead left the headline. No row moved.
+import "./helpers/isolate-home.mjs";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, existsSync } from "node:fs";

@@ -2,6 +2,7 @@
 // Every reader that later prices a leaf builds its row from something the engine wrote, so
 // each one has to be handed the count: the summary row, the run.log task-done event and
 // `readRun`, the live roster, the re-ask sum, and the ask entry.
+import "./helpers/isolate-home.mjs";
 import { test } from "node:test";
 import { equal, ok } from "node:assert/strict";
 import { readFileSync, rmSync } from "node:fs";

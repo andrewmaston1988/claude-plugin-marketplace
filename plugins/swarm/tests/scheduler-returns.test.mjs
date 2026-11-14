@@ -2,6 +2,7 @@
 // writes beside the results, and the null-stripping that keeps the author's own
 // schema the thing validated. Split from scheduler.test.mjs, which is past the
 // file-size bar and may not grow.
+import "./helpers/isolate-home.mjs";
 import { test } from "node:test";
 import { equal, deepEqual, ok } from "node:assert/strict";
 import { rmSync, readFileSync, existsSync } from "node:fs";

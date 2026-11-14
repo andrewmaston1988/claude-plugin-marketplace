@@ -1,5 +1,6 @@
 // The Usage screen's renderer, run for real through perf.js. A limit's `percent`
 // is percent USED; every figure on screen is what is LEFT.
+import "./helpers/isolate-home.mjs";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { loadPerfViews, H } from "./helpers/perf-views-harness.mjs";

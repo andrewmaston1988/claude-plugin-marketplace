@@ -1,6 +1,7 @@
 // The desktop assets ride the phone's gate: desktop.css is inlined by pageHtml() (a
 // static <link> carries no ?t= and 401s) and the lazy scripts are served under the token
 // exactly as perf.js is — lazily, so a phone never pays for them.
+import "./helpers/isolate-home.mjs";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, mkdirSync, rmSync } from "node:fs";

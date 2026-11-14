@@ -1,5 +1,6 @@
 // A navigation paints the new screen's frame at once — title, tab, placeholder
 // blocks — and the data fills in when it lands; a refresh never blanks the screen.
+import "./helpers/isolate-home.mjs";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { loadPage, listData, listRow } from "./helpers/page-harness.mjs";

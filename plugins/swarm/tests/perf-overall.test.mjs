@@ -1,6 +1,7 @@
 // `swarm perf` through the real CLI: the needs-grades block, its order, its
 // grading gate, its immunity to filters, the ranked table below it, and how the
 // two views print the infra tally.
+import "./helpers/isolate-home.mjs";
 import { test } from "node:test";
 import { equal, ok, deepEqual } from "node:assert/strict";
 import { rmSync, writeFileSync } from "node:fs";

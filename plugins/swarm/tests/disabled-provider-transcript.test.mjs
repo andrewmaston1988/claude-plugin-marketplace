@@ -2,6 +2,7 @@
 // Operator, 2026-09-29: "it's just something I don't want e.g. transcripts spammed with their model
 // designations" and "if you have only codex enabled ... we should never see claude".
 // Every provider is seeded everywhere, so a leak is a read that ignored the enabled flag.
+import "./helpers/isolate-home.mjs";
 import { test } from "node:test";
 import { equal, ok } from "node:assert/strict";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";

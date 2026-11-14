@@ -1,4 +1,5 @@
 // The public surface of the split modules: importers never learn a module was split.
+import "./helpers/isolate-home.mjs";
 import { test } from "node:test";
 import { deepEqual } from "node:assert/strict";
 

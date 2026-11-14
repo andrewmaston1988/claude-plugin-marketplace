@@ -2,6 +2,7 @@
 // under 5 minutes, read live past it, serve the last reading marked stale when
 // that live read fails. The clock and the fetch are injected; nothing here
 // touches the network or the real SWARM_HOME.
+import "./helpers/isolate-home.mjs";
 import { test } from "node:test";
 import { equal, deepEqual, notEqual, ok } from "node:assert/strict";
 import { mkdtempSync, rmSync, readFileSync, writeFileSync, readdirSync } from "node:fs";

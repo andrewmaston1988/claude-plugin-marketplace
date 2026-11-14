@@ -1,5 +1,6 @@
 // The runs screen in the leaf/Usage flavour: live runs are cards, the header names
 // the screen and carries a live pill; finished stacks stay compact rows.
+import "./helpers/isolate-home.mjs";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { loadPage, listData, listRow, RUN_URL, targetRun } from "./helpers/page-harness.mjs";

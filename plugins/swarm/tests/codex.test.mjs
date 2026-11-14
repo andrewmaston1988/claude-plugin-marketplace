@@ -1,4 +1,4 @@
-import { test } from "node:test";
+import "./helpers/isolate-home.mjs"; import { test } from "node:test";
 import { deepEqual, equal, match, ok, rejects, throws } from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { EventEmitter } from "node:events";

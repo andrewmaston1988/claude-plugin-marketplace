@@ -1,6 +1,7 @@
 // The engine's own prompt text: every leaf is told its output contract, and a
 // codex leaf is told what tools it actually has. Both failures were silent —
 // findings left mid-transcript, and a codex leaf refusing a Claude tool list.
+import "./helpers/isolate-home.mjs";
 import { test } from "node:test";
 import { equal, ok } from "node:assert/strict";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";

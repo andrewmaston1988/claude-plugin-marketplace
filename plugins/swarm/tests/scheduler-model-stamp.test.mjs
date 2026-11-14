@@ -14,6 +14,7 @@
 // family token reads null and silently stops being stamped. Every launchable id
 // happens to match, so the whole suite stayed green under the swap: 1573/1573
 // with it reverted. These rows are what makes the line guarded at all.
+import "./helpers/isolate-home.mjs";
 import { test } from "node:test";
 import { equal } from "node:assert/strict";
 import { mkdtempSync, rmSync, readFileSync } from "node:fs";

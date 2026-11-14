@@ -1,5 +1,6 @@
 // Prune, nudge and dead-engine recovery must find resolver-created trees while
 // the run keeps its own history, even if the scratch root is later deleted.
+import "./helpers/isolate-home.mjs";
 import { test } from "node:test";
 import { equal, ok, deepEqual } from "node:assert/strict";
 import { spawnSync } from "node:child_process";

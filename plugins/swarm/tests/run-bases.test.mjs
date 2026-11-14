@@ -1,5 +1,6 @@
 // The run's base commits: captured once per repo at dispatch, persisted so a
 // resume re-enters the same base, and recaptured only on --force.
+import "./helpers/isolate-home.mjs";
 import { test } from "node:test";
 import { equal, ok, deepEqual } from "node:assert/strict";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";

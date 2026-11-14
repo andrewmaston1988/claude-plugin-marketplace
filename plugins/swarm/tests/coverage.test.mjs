@@ -2,7 +2,7 @@
 // scheduler/manifest/CLI integration live in this one file (the citations.test.mjs
 // precedent). RED first; every assertion compares against a source literal, never
 // the constant it pins.
-import { test } from "node:test";
+import "./helpers/isolate-home.mjs"; import { test } from "node:test";
 import { equal, deepEqual, ok } from "node:assert/strict";
 import { mkdtempSync, rmSync, writeFileSync, readFileSync, mkdirSync } from "node:fs";
 import { join, resolve } from "node:path";

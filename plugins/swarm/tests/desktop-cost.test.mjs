@@ -1,5 +1,6 @@
 // One provider per page is a phone constraint — its switcher can only show one at a
 // time. A desktop shows them side by side, each still costSection's own markup.
+import "./helpers/isolate-home.mjs";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { loadPage } from "./helpers/page-harness.mjs";

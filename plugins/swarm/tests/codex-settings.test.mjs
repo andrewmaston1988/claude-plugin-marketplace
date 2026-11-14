@@ -2,6 +2,7 @@
 // no `--settings`; its two routes are the spawn env (settings.env) and the
 // plugin's own PreToolUse hook, fed per-leaf roots through SWARM_WRITE_GUARD_ROOTS.
 // Every row drives the real runTask with a stub io.spawn and reads the call it made.
+import "./helpers/isolate-home.mjs";
 import { test } from "node:test";
 import { equal, deepEqual, ok, match } from "node:assert/strict";
 import { rmSync } from "node:fs";

@@ -1,6 +1,7 @@
 // The `treeRoot` config key: shipped once, defaulted in code (it is
 // machine-relative, so the shipped file cannot carry a real path), and refused
 // when a user hands it a relative one.
+import "./helpers/isolate-home.mjs";
 import { test } from "node:test";
 import { equal, ok, throws } from "node:assert/strict";
 import { mkdtempSync, rmSync, writeFileSync, readFileSync } from "node:fs";

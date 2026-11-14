@@ -1,6 +1,7 @@
 // The run screen at desktop width: the verdict, the elapsed time and the token total as
 // three boxes across the top, and the leaves as a table grouped by wave. Every cell is a
 // value the run payload already carries (D5) — the cut is the layout, never a new figure.
+import "./helpers/isolate-home.mjs";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";

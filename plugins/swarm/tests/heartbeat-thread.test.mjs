@@ -1,5 +1,6 @@
 // The heartbeat must keep beating while the main thread is blocked — synchronous
 // worktree git on a large repo once starved it past the liveness window.
+import "./helpers/isolate-home.mjs";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";

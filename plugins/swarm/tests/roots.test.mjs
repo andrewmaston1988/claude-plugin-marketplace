@@ -1,6 +1,7 @@
 // roots.mjs is the one containment predicate every gate reads (governance, dispatch,
 // ask, the leaf write guard). This is the shape a config entry can take that it got
 // wrong: a root that IS the filesystem root.
+import "./helpers/isolate-home.mjs";
 import { test } from "node:test";
 import { equal } from "node:assert/strict";
 import { posix } from "node:path";

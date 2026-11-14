@@ -1,3 +1,4 @@
+import "./helpers/isolate-home.mjs";
 import { test } from "node:test";
 import { equal, deepEqual, ok } from "node:assert/strict";
 import { declaredEfforts, effortFor, isClaudeModel, tierFromModel, isValidEffort } from "../src/models.mjs";

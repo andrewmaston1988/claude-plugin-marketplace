@@ -2,6 +2,7 @@
 // the probe: it is the one roster source a raw read of the cache file cannot
 // see, so a caller still reading the file passes every row here only by luck.
 
+import "./helpers/isolate-home.mjs";
 import { test } from "node:test";
 import { deepEqual, equal, ok } from "node:assert/strict";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";

@@ -12,6 +12,7 @@
 // These rows drive the REAL codex adapter and the REAL `readCodexUsage` over a
 // fake app-server client, so the contract's `record()` sits in the path — the
 // field has to survive it to reach the gate.
+import "./helpers/isolate-home.mjs";
 import { test } from "node:test";
 import { equal, ok, rejects } from "node:assert/strict";
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";

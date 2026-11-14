@@ -1,5 +1,6 @@
 // The one derivation: branch scope, tree-name collisions and the authored plan
 // doc, pinned to literals alongside the independent run-scope oracle.
+import "./helpers/isolate-home.mjs";
 import { test } from "node:test";
 import { equal, ok, deepEqual, notEqual } from "node:assert/strict";
 import { rmSync, mkdirSync } from "node:fs";

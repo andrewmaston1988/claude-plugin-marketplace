@@ -7,6 +7,7 @@
 // through `providerUsageSnapshot`, which validates and strips. A snapshot
 // carrying `worst`/`exhaustedScopes`/`limits` (checkQuota's raw shape) fails the
 // strip assertions even when every field reads right.
+import "./helpers/isolate-home.mjs";
 import { test } from "node:test";
 import { equal, ok } from "node:assert/strict";
 import { mkdtempSync, writeFileSync, rmSync } from "node:fs";

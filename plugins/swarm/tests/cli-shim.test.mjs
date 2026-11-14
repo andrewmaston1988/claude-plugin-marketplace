@@ -3,6 +3,7 @@
 // shim-sha-bump.test.mjs, row 4 in docs-no-hand-resolution.test.mjs).
 // Every `swarm install` here runs against a fake HOME so nothing ever
 // touches the real ~/.local/bin.
+import "./helpers/isolate-home.mjs";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync, mkdirSync, writeFileSync, readFileSync, existsSync, readdirSync, utimesSync } from "node:fs";

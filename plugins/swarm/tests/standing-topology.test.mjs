@@ -2,6 +2,7 @@
 // phrases once told a `swarm.always` session to keep its partition, three legs and
 // graph off the page — the decision the orchestrating-agents Iron Law says exists
 // only on the page.
+import "./helpers/isolate-home.mjs";
 import { test } from "node:test";
 import { ok } from "node:assert/strict";
 import { readFileSync, readdirSync } from "node:fs";

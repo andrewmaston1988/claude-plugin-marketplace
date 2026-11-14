@@ -1,6 +1,7 @@
 // Decision 4: the desktop table is the phone's row cut into its columns, not a second
 // renderer. Same text, same order — and the phone never passes `columns`, so its
 // markup cannot move with the desktop's.
+import "./helpers/isolate-home.mjs";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { loadPage, listData, listRow } from "./helpers/page-harness.mjs";

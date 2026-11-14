@@ -1,5 +1,6 @@
 // Usage, Cost and Performance change gradually: each paints its last reading at once,
 // refreshes behind it on its own cadence, and repaints only when the data changed.
+import "./helpers/isolate-home.mjs";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { loadPage, listData, listRow, targetRun, RUN_URL } from "./helpers/page-harness.mjs";

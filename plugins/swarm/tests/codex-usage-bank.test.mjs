@@ -2,6 +2,7 @@
 // the TTL must never stand between it and the client's own answer — and that
 // answer is banked like every other live read, so the next reader inherits it
 // instead of spending a spawn of its own.
+import "./helpers/isolate-home.mjs";
 import { test } from "node:test";
 import { equal, ok } from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";

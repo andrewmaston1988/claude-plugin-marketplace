@@ -1,4 +1,5 @@
 // Defaults differ by runner: a claude-CLI leaf keeps Skill and the MCP servers, Codex gets the trio alone.
+import "./helpers/isolate-home.mjs";
 import { test } from "node:test";
 import { equal, deepEqual } from "node:assert/strict";
 import { rmSync } from "node:fs";

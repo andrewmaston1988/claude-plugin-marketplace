@@ -1,3 +1,4 @@
+import "./helpers/isolate-home.mjs";
 import { test } from "node:test";
 import { equal, deepEqual, ok, match } from "node:assert/strict";
 import { rmSync, readFileSync, writeFileSync } from "node:fs";

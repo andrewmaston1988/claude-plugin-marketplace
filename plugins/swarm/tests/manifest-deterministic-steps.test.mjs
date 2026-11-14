@@ -1,5 +1,6 @@
 // Deterministic steps: compute, when and forEach — the agentless nodes whose shape,
 // expressions and refs are validated at load time.
+import "./helpers/isolate-home.mjs";
 import { test } from "node:test";
 import { equal, ok, deepEqual } from "node:assert/strict";
 import { rmSync } from "node:fs";

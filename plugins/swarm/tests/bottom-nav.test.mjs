@@ -1,6 +1,7 @@
 // The bottom nav replaces the hamburger menu: four always-visible targets, the
 // active one lit from the route, Perf greyed while grading is off. Overview rides
 // the same element for the desktop sidebar and is hidden below the breakpoint.
+import "./helpers/isolate-home.mjs";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";

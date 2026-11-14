@@ -2,6 +2,7 @@
 // swarm-grading-nudge-test-plan.md — against the exported decision function
 // with injected state, plus ungradedRuns over fixture run trees. The plugin
 // Uses decideGradeNudge as the pure seam and spawns the hook for its host gate.
+import "./helpers/isolate-home.mjs";
 import { test } from "node:test";
 import { spawnSync } from "node:child_process";
 import { equal, deepEqual, ok, match } from "node:assert/strict";
