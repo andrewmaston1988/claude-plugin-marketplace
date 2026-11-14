@@ -295,20 +295,20 @@ export function repoHead(repo) {
 // but the branch survives even carrying nothing, because the merge needs the
 // REF, not its contents: `git merge` on an empty branch reports "Already up
 // to date".
-export function collect(task, cfg, wt, { isChainFollower = false, isIntegrateSource = false } = {}) {
-  const status = git(["status", "--porcelain"], wt.path, { timeout: 60000 });
-  const headNow = git(["rev-parse", "HEAD"], wt.path, { timeout: 60000 });
+export function collect(task, cfg, wt, { isChainFollower = false, isIntegrateSource = false, _git = git } = {}) {
+  const status = _git(["status", "--porcelain"], wt.path, { timeout: 60000 });
+  const headNow = _git(["rev-parse", "HEAD"], wt.path, { timeout: 60000 });
   const changed = status.stdout !== "" || (headNow.status === 0 && headNow.stdout !== wt.head);
 
   // Destroy only a tree that carries nothing: a leaf changing nothing of its OWN
   // may still sit on a branch holding earlier phases' commits (or an integrate node's
   // merges), and `branch -D` would take them with it. `isChainFollower` only sees THIS
-  // plan's group, so ask git as well.
-  const carriesWork = unlandedCount(wt.branch, wt.repo, { prefix: cfg.worktreeBranchPrefix || "swarm/", gitRunner: git }) > 0;
-
-  if (!changed && !(wt.reused && isChainFollower) && !carriesWork) {
-    git(["worktree", "remove", "--force", wt.path], wt.repo, { timeout: 60000 });
-    if (!isIntegrateSource) git(["branch", "-D", wt.branch], wt.repo, { timeout: 60000 });
+  // plan's group, so ask git as well — and only when a sweep is still possible.
+  const sweepable = !changed && !(wt.reused && isChainFollower);
+  if (sweepable
+    && unlandedCount(wt.branch, wt.repo, { prefix: cfg.worktreeBranchPrefix || "swarm/", gitRunner: _git }) === 0) {
+    _git(["worktree", "remove", "--force", wt.path], wt.repo, { timeout: 60000 });
+    if (!isIntegrateSource) _git(["branch", "-D", wt.branch], wt.repo, { timeout: 60000 });
     // The record goes with the tree: a record still saying "ready" would name a path
     // that discovery would then try to remove all over again.
     if (wt.resultsDir) removeTreeRecord(wt.resultsDir, wt.name);
@@ -316,23 +316,23 @@ export function collect(task, cfg, wt, { isChainFollower = false, isIntegrateSou
   }
 
   // Diff against the start HEAD covers both committed and uncommitted changes.
-  const diffstat = git(["diff", "--stat", wt.head], wt.path, { timeout: 60000 });
+  const diffstat = _git(["diff", "--stat", wt.head], wt.path, { timeout: 60000 });
   return {
     kept: true,
     branch: wt.branch,
     path: wt.path,
     porcelain: status.stdout,
     diffstat: diffstat.stdout,
-    uncommitted: measureUncommitted(wt),
+    uncommitted: measureUncommitted(wt, _git),
   };
 }
 
 // What the leaf left outside git history. `--untracked-files=all` so a new directory
 // counts its files, not one path. Commits ahead is a plain rev-list count, not the
 // landed check, which answers Infinity when git fails.
-function measureUncommitted(wt) {
-  const dirty = git(["status", "--porcelain", "--untracked-files=all"], wt.path, { timeout: 60000 });
-  const ahead = git(["rev-list", "--count", `${wt.head}..HEAD`], wt.path, { timeout: 60000 });
+function measureUncommitted(wt, runner) {
+  const dirty = runner(["status", "--porcelain", "--untracked-files=all"], wt.path, { timeout: 60000 });
+  const ahead = runner(["rev-list", "--count", `${wt.head}..HEAD`], wt.path, { timeout: 60000 });
   // null, not 0: a status git could not answer must never read as a clean tree.
   const files = dirty.status === 0 ? dirty.stdout.split(/\r?\n/).filter(Boolean).length : null;
   return { files, commitsAhead: ahead.status === 0 ? Number(ahead.stdout) || 0 : 0 };

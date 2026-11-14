@@ -63,3 +63,21 @@ test("collect reports an unmeasured tree, not zero files, when git status cannot
     cleanup(results, repo);
   }
 });
+
+test("row 18: collect never asks whether a changed leaf landed", () => {
+  const calls = [];
+  const runner = (args) => {
+    calls.push(args);
+    if (args[0] === "status") return { status: 0, stdout: " M a.txt", stderr: "" };
+    if (args[0] === "rev-parse") return { status: 0, stdout: "tree-head", stderr: "" };
+    if (args[0] === "diff") return { status: 0, stdout: "", stderr: "" };
+    if (args[0] === "rev-list") return { status: 0, stdout: "1", stderr: "" };
+    return { status: 0, stdout: "", stderr: "" };
+  };
+  const wt = { branch: "swarm/leaf", repo: "/repo", path: "/tree", head: "start-head" };
+
+  const result = collect({ id: "leaf" }, CFG, wt, { _git: runner });
+  const landed = calls.filter((args) => args[0] === "for-each-ref" || args[0] === "merge-tree");
+  equal(landed.length, 0, `a changed leaf must not pay for the landed check: ${JSON.stringify(landed)}`);
+  equal(result.kept, true, "the changed tree is kept");
+});
