@@ -46,11 +46,13 @@ function lastRunNamed(runsRoot, name) {
   return hit ? newestRun(runsRoot, hit) : null;
 }
 
-// The repos offered for per-repo setup: the ones leaves have actually run in, plus
-// every repo already in `projects`, newest run first. A configured project keeps its
-// place even with no run directory, so setup can re-show an answer it wrote before.
+// The repos offered for per-repo setup: the ones leaves have actually run in, newest
+// first, then every repo already in `projects`. Configured projects always make the
+// list whatever their run history — `set` is authoritative, so a project that fell
+// out of the listing would lose its `on` on the next setup run.
 export function repoCandidates(cfg, home) {
   const runsRoot = join(home, "runs");
+  const projects = projectsOf(cfg);
   const byName = new Map();
   for (const root of Array.isArray(cfg?.allowedRoots) ? cfg.allowedRoots : []) {
     let entries;
@@ -64,13 +66,14 @@ export function repoCandidates(cfg, home) {
       byName.set(entry.name, { name: entry.name, lastRun });
     }
   }
-  for (const project of projectsOf(cfg)) {
-    if (byName.has(project.name)) continue;
-    byName.set(project.name, { name: project.name, lastRun: lastRunNamed(runsRoot, project.name) });
+  const runRepos = [...byName.values()].sort((a, b) => (b.lastRun ?? 0) - (a.lastRun ?? 0) || a.name.localeCompare(b.name));
+  const picked = runRepos.slice(0, Math.max(0, MAX_REPOS - projects.length));
+  for (const project of projects) {
+    if (picked.some((repo) => namesEqual(repo.name, project.name))) continue;
+    const ran = runRepos.find((repo) => namesEqual(repo.name, project.name));
+    picked.push({ name: project.name, lastRun: ran ? ran.lastRun : lastRunNamed(runsRoot, project.name) });
   }
-  return [...byName.values()]
-    .sort((a, b) => (b.lastRun ?? 0) - (a.lastRun ?? 0) || a.name.localeCompare(b.name))
-    .slice(0, MAX_REPOS);
+  return picked;
 }
 
 // The roster a leaf sees, with each server's state and the repos that turn it back
@@ -79,14 +82,15 @@ export function repoCandidates(cfg, home) {
 export function mcpReport(cfg, home, listingText) {
   const off = offNamesOf(cfg);
   const projects = projectsOf(cfg);
+  // Server names are the CLI's own and match exactly; only repo names fold case.
   const decorate = (server) => ({
     ...server,
-    off: off.some((name) => namesEqual(name, server.name)),
-    onFor: projects.filter((p) => onOf(p).some((name) => namesEqual(name, server.name))).map((p) => p.name),
+    off: off.includes(server.name),
+    onFor: projects.filter((p) => onOf(p).includes(server.name)).map((p) => p.name),
   });
   const servers = parseMcpList(listingText).map(decorate);
   for (const name of off) {
-    if (!servers.some((s) => namesEqual(s.name, name))) {
+    if (!servers.some((s) => s.name === name)) {
       servers.push(decorate({ name, target: "", status: "not listed" }));
     }
   }
@@ -176,7 +180,8 @@ function cmdSet(rest, { cfg, home, env, spawn, platform, configPath, out: write,
     }
     repos.push(repo);
   }
-  // Two flags for one repo: the last answer wins rather than both being merged.
+  // Two flags for one repo: the last answer wins rather than both being merged. The
+  // last `--off` wins the same way.
   const lastByRepo = [...new Map(repos.map((r) => [r.name.toLowerCase(), r])).values()];
   const off = splitNames(offFlags[offFlags.length - 1]);
 
@@ -198,8 +203,7 @@ function cmdSet(rest, { cfg, home, env, spawn, platform, configPath, out: write,
   // still names what each repo turns back on, and says why the rest is missing.
   const listed = runListing(cfg, { spawn, env, platform });
   const roster = listed.ok ? mcpReport(cfg, home, listed.text).servers.map((s) => s.name) : null;
-  const started = (on) =>
-    roster ? roster.filter((name) => !off.some((o) => namesEqual(o, name)) || on.some((a) => namesEqual(a, name))) : null;
+  const started = (on) => (roster ? roster.filter((name) => !off.includes(name) || on.includes(name)) : null);
   const rows = lastByRepo.map((repo) => ({ label: repo.name, on: repoOnFor(written.config, repo.name) }));
   const width = Math.max(16, ...rows.map((r) => r.label.length));
   const cell = (on) => {

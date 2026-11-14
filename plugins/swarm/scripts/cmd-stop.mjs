@@ -1,6 +1,5 @@
 // `swarm stop` — cooperative stop of a live run, and the recorded stop of a dead one.
-// Split out of swarm.mjs, which now just dispatches to it: the file was over the
-// 500-line bar, and one command per module is the seam every sibling already uses.
+// One command per module is the seam every sibling subcommand uses.
 import { resolve, basename } from "node:path";
 import { getConfig, enginePath } from "../src/config.mjs";
 import { runLiveness, readRun, ALIVE_STATES } from "../src/runlog.mjs";

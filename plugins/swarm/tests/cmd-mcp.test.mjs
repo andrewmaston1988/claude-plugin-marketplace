@@ -4,7 +4,7 @@
 import "./helpers/isolate-home.mjs";
 import { test } from "node:test";
 import { deepEqual, equal, ok } from "node:assert/strict";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { cleanMcpConfig, parseMcpList } from "../src/leaf-mcp.mjs";
@@ -13,14 +13,14 @@ import { cmdMcp } from "../scripts/cmd-mcp.mjs";
 
 const SLACK = "plugin:slack-bridge:slack-bridge-remote";
 
-// The 2026-11-14 output, trimmed to the four lines the machine has.
+// The shape `claude mcp list` prints, trimmed to the four servers in play.
 const LISTING = [
   "Checking MCP server health…",
   "",
-  `${SLACK}: node C:\\Users\\Andrew\\.claude\\plugins\\cache\\slack-bridge\\x\\claude-slack.mjs remote-mcp - ✔ Connected`,
+  `${SLACK}: node /opt/mcp/claude-slack.mjs remote-mcp - ✔ Connected`,
   "context7: https://mcp.context7.com/mcp (HTTP) - ✔ Connected",
   "scout: http://localhost:8765/mcp (HTTP) - ✔ Connected",
-  "blender: C:/Users/Andrew/.local/bin/uvx.exe mcp-for-blender - ✔ Connected",
+  "blender: /opt/mcp/uvx mcp-for-blender - ✔ Connected",
   "",
 ].join("\n");
 
@@ -50,15 +50,15 @@ function sandbox() {
   };
 }
 
-test("parseMcpList: the four 2026-11-14 lines parse and the health-check header is skipped", () => {
+test("parseMcpList: the four listing lines parse and the health-check header is skipped", () => {
   const servers = parseMcpList(LISTING);
   deepEqual(servers.map((s) => s.name), [SLACK, "context7", "scout", "blender"]);
   deepEqual(servers[0], {
     name: SLACK,
-    target: "node C:\\Users\\Andrew\\.claude\\plugins\\cache\\slack-bridge\\x\\claude-slack.mjs remote-mcp",
+    target: "node /opt/mcp/claude-slack.mjs remote-mcp",
     status: "✔ Connected",
   });
-  equal(servers[3].target, "C:/Users/Andrew/.local/bin/uvx.exe mcp-for-blender");
+  equal(servers[3].target, "/opt/mcp/uvx mcp-for-blender");
   deepEqual(parseMcpList(""), []);
 });
 
@@ -206,6 +206,46 @@ test("swarm mcp list --json: repo candidates come from runsKeyFor matches, so a 
     const report = JSON.parse(sink.text());
     deepEqual(report.repos.map((r) => r.name), ["rts-mobile"]);
     ok(report.repos[0].lastRun, "a repo offered for per-repo setup carries when its leaves last ran");
+  } finally {
+    box.done();
+  }
+});
+
+test("swarm mcp list --json: a configured project with no run directory survives 17 newer run repos", () => {
+  const box = sandbox();
+  try {
+    const reposRoot = join(box.root, "code");
+    const now = Date.now();
+    for (let i = 0; i < 17; i++) {
+      const repo = join(reposRoot, `repo-${String(i).padStart(2, "0")}`);
+      mkdirSync(join(repo, ".git"), { recursive: true });
+      const log = join(box.home, "runs", runsKeyFor(repo), "ship-1", "run.log");
+      mkdirSync(join(log, ".."), { recursive: true });
+      writeFileSync(log, "2026-11-14T00:00:00Z run-start\n");
+      // Every run repo is newer than the configured project's absent run history.
+      utimesSync(log, new Date(now - i * 60_000), new Date(now - i * 60_000));
+    }
+
+    const sink = box.capture();
+    const cfg = { allowedRoots: [reposRoot], projects: [{ name: "zz-configured", mcp: { on: ["blender"] } }] };
+    equal(cmdMcp(["list", "--json"], { cfg, home: box.home, spawn: fakeSpawn(), out: sink.out, err: sink.err }), 0, sink.text());
+    const report = JSON.parse(sink.text());
+    const configured = report.repos.find((r) => r.name === "zz-configured");
+    ok(configured, `a configured project must stay listed whatever its run history: ${sink.text()}`);
+    deepEqual(configured.on, ["blender"]);
+  } finally {
+    box.done();
+  }
+});
+
+test("swarm mcp list --json: a server name in a project's on matches the listing exactly", () => {
+  const box = sandbox();
+  try {
+    const sink = box.capture();
+    const cfg = { mcp: { off: ["blender"] }, projects: [{ name: "rts-mobile", mcp: { on: ["Blender"] } }] };
+    equal(cmdMcp(["list", "--json"], { cfg, home: box.home, spawn: fakeSpawn(), out: sink.out, err: sink.err }), 0, sink.text());
+    const report = JSON.parse(sink.text());
+    deepEqual(report.servers.find((s) => s.name === "blender").onFor, []);
   } finally {
     box.done();
   }
