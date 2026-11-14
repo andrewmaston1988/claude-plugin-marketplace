@@ -6,7 +6,7 @@
 import { readFileSync, writeFileSync, mkdirSync, renameSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { deviceFlag, getFlag, hasFlag, positionals, varsFrom } from "../src/flags.mjs";
+import { checkFlags, deviceFlag, getFlag, hasFlag, positionals, varsFrom, wantsHelp } from "../src/flags.mjs";
 
 const HELP = [
   "usage: ui-probe <command> [options]",
@@ -40,7 +40,7 @@ const HELP = [
   "  --listen-wait <s>      tv probe: seconds to wait for each key (default 8)",
   "  --fetch <url>          tv probe: one credentialed GET from the settled page",
   "  --exit                 tv probe: exit the app last and report whether it closed",
-  "  --help                 this text",
+  "  --help, -h             this text",
   "",
 ].join("\n");
 
@@ -51,12 +51,27 @@ const out = (line) => process.stdout.write(line + "\n");
 const err = (line) => process.stderr.write(line + "\n");
 // Windows UV handle teardown needs a beat before exit or stdout is lost.
 const settle = (code) => { setTimeout(() => process.exit(code), 150); };
+// Refuse a flag the subcommand does not take before it loads a config or touches a device.
+function refuseUnknown(subcommand, args) {
+  const { unknown, known, equalsForm } = checkFlags(subcommand, args);
+  if (!unknown) return false;
+  if (equalsForm) {
+    const eq = unknown.indexOf("=");
+    err(`${unknown} is not supported — write ${unknown.slice(0, eq)} ${unknown.slice(eq + 1)}`);
+  } else {
+    err(`unknown flag ${unknown} for ${subcommand} — its flags are: ${known.join(", ")}`);
+  }
+  process.stdout.write(HELP);
+  settle(64);
+  return true;
+}
 
 (async () => {
-  if (cmd === undefined || cmd === "--help") { process.stdout.write(HELP); settle(0); return; }
+  if (cmd === undefined || wantsHelp(argv)) { process.stdout.write(HELP); settle(0); return; }
 
   if (cmd === "capture") {
     const rest = argv.slice(1);
+    if (refuseUnknown("capture", rest)) return;
     let loaded;
     try {
       loaded = await loadConfig(getFlag("--config", rest), true);
@@ -126,6 +141,7 @@ const settle = (code) => { setTimeout(() => process.exit(code), 150); };
 
   if (cmd === "run") {
     const rest = argv.slice(1);
+    if (refuseUnknown("run", rest)) return;
     const file = positionals(rest)[0];
     if (!file) { err("run needs a scenario file"); settle(64); return; }
     const format = scenarioFormat(file);
@@ -258,6 +274,7 @@ const settle = (code) => { setTimeout(() => process.exit(code), 150); };
       return;
     }
     const rest = argv.slice(2);
+    if (refuseUnknown("tv probe", rest)) return;
     let loaded;
     try {
       loaded = await loadConfig(getFlag("--config", rest), true);
@@ -271,6 +288,7 @@ const settle = (code) => { setTimeout(() => process.exit(code), 150); };
 
   if (cmd === "validate") {
     const rest = argv.slice(1);
+    if (refuseUnknown("validate", rest)) return;
     const file = positionals(rest)[0];
     const wantsConfig = hasFlag("--config", rest) || !file;
     let failed = false;
@@ -313,6 +331,7 @@ const settle = (code) => { setTimeout(() => process.exit(code), 150); };
 
   if (cmd === "screens") {
     const rest = argv.slice(1);
+    if (refuseUnknown("screens", rest)) return;
     let loaded;
     try {
       loaded = await loadConfig(getFlag("--config", rest), true);
@@ -331,6 +350,7 @@ const settle = (code) => { setTimeout(() => process.exit(code), 150); };
 
   if (cmd === "doctor") {
     const rest = argv.slice(1);
+    if (refuseUnknown("doctor", rest)) return;
     let loaded;
     try {
       loaded = await loadConfig(getFlag("--config", rest), true);

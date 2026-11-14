@@ -17,7 +17,7 @@ Create `.ui-probe.json` in your project:
 }
 ```
 
-Use `/ui-probe screens` to list screens, `/ui-probe capture home --viewport phone,desktop` to capture, and `/ui-probe run scenario.yaml` to run a scenario. `/ui-probe validate scenario.yaml` checks a scenario; `/ui-probe validate --config` checks config.
+Use `/ui-probe screens` to list screens, `/ui-probe capture home --viewport phone,desktop` to capture, and `/ui-probe run scenario.yaml` to run a scenario. `/ui-probe validate scenario.yaml` checks a scenario; `/ui-probe validate --config` checks config. A flag the subcommand does not take exits 64 naming it, before any config or device is touched; `--help` or `-h` anywhere prints usage.
 
 ### Tizen TV setup
 
