@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { FEATURES_JS, platformPath, platformSummary, tvProbe, verdictLine } from '../src/tv/probe.mjs';
 import {
   cleanupReply, currentReply, featuresReply, installReply, keyCodes, listenStub, noSleep, PAGE,
-  pageReply, plainRun, readReply, registerReply, stubCdp,
+  pageReply, plainRun, readReply, registerReply, stubCdp, unregisterReply,
 } from './tv-support.mjs';
 
 // A probe that leaves a listener or an element behind has changed the app it measured.
@@ -135,6 +135,17 @@ test('features records registerKey as threw, returned or absent', async () => {
   const absentPlatform = await tvProbe(absent, { _sleep: noSleep });
   assert.equal(absentPlatform.features.registerKey.outcome, 'absent');
   assert.equal(absentPlatform.features.registerKey.present, false);
+
+  // A page whose register answers null has not returned either: the script's own answer decides.
+  const unanswered = stubCdp({ replies: [featuresReply(), currentReply('object'), installReply, readReply([]), cleanupReply] });
+  const unansweredPlatform = await tvProbe(unanswered, { _sleep: noSleep });
+  assert.equal(unansweredPlatform.features.registerKey.outcome, 'absent');
+
+  // The key step runs the same scripts and records what they answered.
+  const scripted = stubCdp({ replies: [...plainRun(), registerReply('returned', { sticky: true }), unregisterReply('returned', { sticky: true })] });
+  const scriptedPlatform = await tvProbe(scripted, { _sleep: noSleep });
+  assert.deepEqual(scriptedPlatform.keys.registered, { key: 'Digit1', register: 'returned', unregister: 'returned' });
+  assert.equal(keyCodes(scripted).includes(49), true, 'the registered digit is still injected');
 });
 
 // Presence read on one document and calls made on another is no evidence at all.
