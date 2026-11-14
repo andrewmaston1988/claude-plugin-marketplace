@@ -75,6 +75,35 @@ test("every test file opens with the home-isolation import", () => {
   );
 });
 
+// Built from parts so this file's own source never matches the patterns it enforces.
+const HOME_CALL = "swarm" + "Home()";
+const CONFIG_ARG = `${HOME_CALL}, "config.json"`;
+const MUTATOR = /writeFileSync|renameSync|rmSync|unlinkSync|rmdirSync/;
+
+// A line that names the home's config is flagged even without a mutator: hoisting
+// the path into `configPath` is how a write and its restore once hid from a
+// call-site check.
+function homeWrites(file) {
+  const hits = [];
+  readFileSync(file, "utf8").split("\n").forEach((line, i) => {
+    if (line.trimStart().startsWith("//")) return;
+    if (line.includes(CONFIG_ARG) || (line.includes(HOME_CALL) && MUTATOR.test(line))) {
+      hits.push(`  ${relative(TESTS, file)}:${i + 1}  ${line.trim()}`);
+    }
+  });
+  return hits;
+}
+
+test("no test writes, renames or removes under the home it runs in", () => {
+  const hits = testFiles(TESTS).flatMap(homeWrites);
+  equal(
+    hits.length,
+    0,
+    "a test writes or deletes inside the home it runs in — without isolation that home is the operator's real profile:\n" +
+      hits.join("\n"),
+  );
+});
+
 test("a test process runs against one throwaway home, with git's global config carried across", () => {
   ok(process.env.SWARM_HOME, "the helper must set SWARM_HOME");
   equal(
