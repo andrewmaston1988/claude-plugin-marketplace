@@ -41,7 +41,14 @@ function buildClaudeInvocation(task, prompt, cfg, providerId) {
   const base = providerId === "claude" && isClaudeModel(task.model) && cfg.disable1mContext === false
     ? { env: { CLAUDE_CODE_DISABLE_1M_CONTEXT: "0" } }
     : null;
-  const settings = base || taskSettings ? deepMerge(base || {}, taskSettings || {}) : null;
+  // The engine's MCP off list merges LAST, like the write guard: a task's own
+  // settings must not be able to displace which servers its leaf starts.
+  const mcpSettings = Array.isArray(task.mcpOff) && task.mcpOff.length
+    ? { deniedMcpServers: task.mcpOff.map((serverName) => ({ serverName })) }
+    : null;
+  const settings = base || taskSettings || mcpSettings
+    ? deepMerge(deepMerge(base || {}, taskSettings || {}), mcpSettings || {})
+    : null;
   // `[1m]` is matched by the CLI on the model name; provider endpoints still need
   // the bare id, so this suffix must never reach ANTHROPIC_MODEL.
   const cliModel = task.contextWindow === CONTEXT_WINDOW_1M ? `${task.model}[1m]` : task.model;

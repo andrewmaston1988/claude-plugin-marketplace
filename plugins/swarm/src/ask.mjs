@@ -14,10 +14,12 @@ import { allowedRootsFor, providerConfig } from "./providers.mjs";
 import { defaultProviderRegistry } from "./default-providers.mjs";
 import { runPlan, makeDefaultIo } from "./scheduler.mjs";
 import { claimEngine, lockRefusal } from "./engine-lock.mjs";
+import { defaultManifestIo, projectFor } from "./manifest-leaf-guard.mjs";
+import { leafMcpOff } from "./leaf-mcp.mjs";
 
 const PROVIDERS = defaultProviderRegistry();
 
-export async function askLeaf({ resultsDir, taskId, question, model, provider, cfg, io = makeDefaultIo(), providerRegistry = PROVIDERS, runnerRegistry, _governanceIo = defaultGovernanceIo(cfg), _mcpTools = mcpTools }) {
+export async function askLeaf({ resultsDir, taskId, question, model, provider, cfg, io = makeDefaultIo(), providerRegistry = PROVIDERS, runnerRegistry, _governanceIo = defaultGovernanceIo(cfg), _mcpTools = mcpTools, _projectFor = (dir) => projectFor(dir, cfg, defaultManifestIo(cfg)) }) {
   const prior = readResult(resultsDir, taskId);
   if (!prior) throw new Error(`no result for '${taskId}' under ${resultsDir}`);
   if (!prior.sessionId) {
@@ -86,9 +88,13 @@ export async function askLeaf({ resultsDir, taskId, question, model, provider, c
   // falls back to the same runner-dependent default normalize would have filled in,
   // so an ask keeps the confinement the original dispatch ran under.
   const fallbackTools = defaultToolsFor(identity.provider, _mcpTools());
+  // An ask is a new dispatch: it starts what the CURRENT config gives the leaf's repo.
+  // askLeaf's io has no repoToplevel, so the derivation goes through its own seam.
+  const askTools = prior.allowedTools || fallbackTools;
+  const mcpOff = leafMcpOff({ project: _projectFor(prior.originalCwd || cwd).project, cfg, allowedTools: askTools });
   const tasks = isTopLevel
     ? manifest.tasks.map((t) => (t.id === taskId
-        ? { ...t, ...(treeName !== undefined && { worktreeName: treeName }), after: t.after || [], provider: identity.provider, allowedTools: prior.allowedTools || fallbackTools, timeoutMs: cfg.timeoutMs ?? DEFAULT_TIMEOUT_MS }
+        ? { ...t, ...(treeName !== undefined && { worktreeName: treeName }), after: t.after || [], provider: identity.provider, allowedTools: askTools, timeoutMs: cfg.timeoutMs ?? DEFAULT_TIMEOUT_MS, ...(mcpOff.length && { mcpOff }) }
         : { ...t, after: t.after || [] }))
     : [
         ...manifest.tasks.map((t) => ({ ...t, after: t.after || [] })),
@@ -98,10 +104,11 @@ export async function askLeaf({ resultsDir, taskId, question, model, provider, c
           provider: identity.provider,
           cwd: prior.cwd,
           originalCwd: prior.originalCwd || prior.cwd,
-          allowedTools: prior.allowedTools || fallbackTools,
+          allowedTools: askTools,
           timeoutMs: cfg.timeoutMs ?? DEFAULT_TIMEOUT_MS,
           after: [],
           ...(treeName !== undefined && { worktreeName: treeName }),
+          ...(mcpOff.length && { mcpOff }),
           // The digest's cwd is engine scratch, outside every tree; without this the
           // id fallback would name `wt-__digest` and deny every write it makes there.
           ...(taskId === DIGEST_ID && { isDigest: true }),

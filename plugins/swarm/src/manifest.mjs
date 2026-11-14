@@ -7,7 +7,8 @@ import { buildDigestTask } from "./digest.mjs";
 import { usageFromCache } from "./ollama-usage.mjs";
 import { checkGovernance, checkRunRoots } from "./governance.mjs";
 import { manifestCwd, checkChildTopKeys } from "./manifest-top.mjs";
-import { defaultManifestIo } from "./manifest-leaf-guard.mjs";
+import { defaultManifestIo, projectFor } from "./manifest-leaf-guard.mjs";
+import { leafMcpOff } from "./leaf-mcp.mjs";
 import { normalizeTasks } from "./manifest-normalize.mjs";
 import { checkCommandLineLengths, measurablePrompt } from "./manifest-dispatch-budget.mjs";
 import { validateTaskShapes } from "./manifest-task-shape.mjs";
@@ -322,12 +323,16 @@ export function loadManifest(path, cfg, cwd = process.cwd(), { args, fromRegistr
     }
   }
 
+  // The digest runs as a leaf in the dispatching repo, so it starts what that repo's
+  // leaves start. Stamped on the plan so the scheduler's run-time rebuild matches.
+  const planOff = leafMcpOff({ project: projectFor(cwd, cfg, resolvedIo).project, cfg });
+
   // The digest leaf is dispatched through the same buildDispatch/toSpawnable
   // path as any other task (scheduler.mjs), so its prompt is just as exposed
   // to the win32 command-line cap — build it the same way the scheduler does
   // and measure it too.
   if (digest) {
-    const digestTask = buildDigestTask({ tasks, resultsDir, goal: raw.goal || "", digest, cwd });
+    const digestTask = buildDigestTask({ tasks, resultsDir, goal: raw.goal || "", digest, cwd, mcpOff: planOff });
     checkCommandLineLengths([digestTask], cfg, resolvedIo, errors, () => "digest");
     // ...and built once more, because the measurement above swallows a dispatch
     // exception and the engine's own task has no other reporter. Every platform,
@@ -357,6 +362,7 @@ export function loadManifest(path, cfg, cwd = process.cwd(), { args, fromRegistr
     goal: raw.goal || "",
     // The dispatching repo, which the run is filed under.
     repoToplevel: toplevel,
+    ...(planOff.length && { mcpOff: planOff }),
     ...(args && Object.keys(args).length && { args }),
     ...(ref && { ref }),
     ...(warnings.length && { warnings }),
