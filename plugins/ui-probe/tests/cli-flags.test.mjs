@@ -112,8 +112,23 @@ test("row 3: a flag belongs to its own subcommand, and an unknown command keeps 
   assert.match(bogus.stdout, /^usage: ui-probe/m, "an unknown command still prints usage");
   assert.doesNotMatch(bogus.stderr, /TypeError|ERR_/, "an unknown command must not throw");
 
+  const equals = await probe(["screens", `--config=${configPath}`], { env });
+  assert.equal(equals.status, 64, `screens --config= exited ${equals.status}: ${equals.stderr}`);
+  assert.ok(
+    equals.stderr.includes(
+      `--config=${configPath} is not supported — write --config ${configPath}`,
+    ),
+    `screens names the unsupported form: ${equals.stderr}`,
+  );
+
   assert.equal(checkFlags("run", ["x.yaml", "--exit"]).unknown, "--exit", "run does not take tv probe's flag");
   assert.equal(checkFlags("tv probe", ["--screenshot"]).unknown, "--screenshot", "tv probe does not take capture's flag");
+  assert.equal(checkFlags("screens", ["--config=x"]).equalsForm, true, "the = form of a real flag is reported as such");
+  assert.throws(
+    () => checkFlags("nosuch", []),
+    /no flag table for subcommand "nosuch"/,
+    "a subcommand with no table is a wiring error, not user input",
+  );
 });
 
 test("row 4: a value flag consumes only an argument that is not itself a flag", () => {

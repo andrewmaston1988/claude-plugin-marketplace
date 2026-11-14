@@ -55,7 +55,12 @@ export function wantsHelp(argv) {
 
 /** `{ ok: true }`, or the first flag the subcommand does not take and the ones it does. */
 export function checkFlags(subcommand, args) {
-  const table = SUBCOMMAND_FLAGS[subcommand] ?? {};
+  // A subcommand with no table is a wiring error: refusing everything against an empty list
+  // would hide the missing key behind a plausible-looking refusal.
+  if (!Object.hasOwn(SUBCOMMAND_FLAGS, subcommand)) {
+    throw new Error(`no flag table for subcommand ${JSON.stringify(subcommand)}`);
+  }
+  const table = SUBCOMMAND_FLAGS[subcommand];
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
     // The same rule as getFlag: a value is consumed only when it does not start with `--`, so
@@ -65,6 +70,12 @@ export function checkFlags(subcommand, args) {
       continue;
     }
     if (arg.startsWith("-") && !Object.hasOwn(table, arg)) {
+      // `--name=value` names a flag the table has, in a form getFlag cannot read. Say that
+      // instead of calling the whole token unknown.
+      const eq = arg.startsWith("--") ? arg.indexOf("=") : -1;
+      if (eq > 0 && Object.hasOwn(table, arg.slice(0, eq))) {
+        return { unknown: arg, known: Object.keys(table), equalsForm: true };
+      }
       return { unknown: arg, known: Object.keys(table) };
     }
   }

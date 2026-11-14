@@ -53,9 +53,14 @@ const err = (line) => process.stderr.write(line + "\n");
 const settle = (code) => { setTimeout(() => process.exit(code), 150); };
 // Refuse a flag the subcommand does not take before it loads a config or touches a device.
 function refuseUnknown(subcommand, args) {
-  const { unknown, known } = checkFlags(subcommand, args);
+  const { unknown, known, equalsForm } = checkFlags(subcommand, args);
   if (!unknown) return false;
-  err(`unknown flag ${unknown} for ${subcommand} — its flags are: ${known.join(", ")}`);
+  if (equalsForm) {
+    const eq = unknown.indexOf("=");
+    err(`${unknown} is not supported — write ${unknown.slice(0, eq)} ${unknown.slice(eq + 1)}`);
+  } else {
+    err(`unknown flag ${unknown} for ${subcommand} — its flags are: ${known.join(", ")}`);
+  }
   process.stdout.write(HELP);
   settle(64);
   return true;
