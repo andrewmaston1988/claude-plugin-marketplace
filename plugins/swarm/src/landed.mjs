@@ -179,12 +179,23 @@ export function absorbed(base, branch, repo, gitRunner) {
 
 // 0 when the branch's work is held elsewhere; otherwise a count (at least 1) of
 // what destroying it would lose; Infinity when git cannot answer.
-export function unlandedCount(branch, repo, { prefix, gitRunner } = {}) {
+// `extraBases` are caller-supplied commits to try as absorption bases — the porting
+// checkout's HEAD, which no ref on this repo's default branch holds after a
+// cherry-pick. The caller picks them; the guard on what may be a base lives there.
+export function unlandedCount(branch, repo, { prefix, gitRunner, extraBases } = {}) {
   if (typeof prefix !== "string" || !prefix) throw new TypeError("unlandedCount requires the branch prefix");
   if (typeof gitRunner !== "function") throw new TypeError("unlandedCount requires a gitRunner");
+  if (!Array.isArray(extraBases)) throw new TypeError("unlandedCount requires an extraBases array");
   try {
     if (reachable(branch, repo, prefix, gitRunner)) return 0;
     const bases = candidateBases(repo, prefix, gitRunner);
+    const seen = new Set(bases);
+    for (const sha of extraBases) {
+      const r = gitOf(gitRunner, ["rev-parse", "--verify", `${sha}^{commit}`], repo);
+      if (r.status !== 0 || !r.stdout || seen.has(r.stdout)) continue;
+      seen.add(r.stdout);
+      bases.push(r.stdout);
+    }
     for (const base of bases) {
       if (absorbed(base, branch, repo, gitRunner)) return 0;
     }

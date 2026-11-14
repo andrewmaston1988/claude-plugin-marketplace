@@ -60,7 +60,8 @@ test("prune finds a tree in the run's scratch dir that neither a record nor summ
     equal(wt.path, scratchTree("prune-scratch-discovery", "impl"), "the tree must be under treeRoot, not the run dir");
     finishRun(dir, { kept: [] });
 
-    const { rows } = plan({ live: false, repos: [repo], resultsDir: dir, worktreesKept: [] }, makeGit(spawnSync), nodeFs);
+    const { rows } = plan({ live: false, repos: [repo], resultsDir: dir, worktreesKept: [] }, makeGit(spawnSync), nodeFs,
+      { extraBases: [], measureBytes: true });
     ok(rows.some((r) => r.path === wt.path),
       `prune must discover ${wt.path} — the run dir no longer contains its trees: ${JSON.stringify(rows)}`);
     equal(rows[0].repo, resolve(repo), "the repo comes from the tree itself when no record names one");
@@ -81,7 +82,8 @@ test("prune's refusal is unchanged: unlanded work in a scratch-dir tree still bl
     commitAll(wt.path, "unlanded work");
     finishRun(dir, { kept: [] });
 
-    const { rows } = plan({ live: false, repos: [repo], resultsDir: dir, worktreesKept: [] }, makeGit(spawnSync), nodeFs);
+    const { rows } = plan({ live: false, repos: [repo], resultsDir: dir, worktreesKept: [] }, makeGit(spawnSync), nodeFs,
+      { extraBases: [], measureBytes: true });
     equal(rows.length, 1, "the scratch-dir tree is a row");
     equal(rows[0].unlanded, 1, "the unlanded commit is measured against the tree's own repo");
     ok(rows[0].unlanded > 0, "a tree carrying work must be a blocker wherever it lives");
@@ -101,7 +103,8 @@ test("prune still discovers and removes a legacy <run>/wt-* tree — the pre-upg
     equal(status, 0, "legacy tree registered");
     finishRun(dir, { kept: [] });
 
-    const { rows } = plan({ live: false, repos: [repo], resultsDir: dir, worktreesKept: [] }, makeGit(spawnSync), nodeFs);
+    const { rows } = plan({ live: false, repos: [repo], resultsDir: dir, worktreesKept: [] }, makeGit(spawnSync), nodeFs,
+      { extraBases: [], measureBytes: true });
     ok(rows.some((r) => r.path === resolve(legacy)), `a legacy tree is still a row: ${JSON.stringify(rows)}`);
     equal(rows[0].branch, "swarm/impl");
   } finally {

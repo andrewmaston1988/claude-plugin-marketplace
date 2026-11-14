@@ -1,6 +1,6 @@
 import { join, resolve, dirname } from "node:path";
 import { existsSync, readdirSync } from "node:fs";
-import { unlandedCount } from "./landed.mjs";
+import { unlandedCount, isSwarmRef } from "./landed.mjs";
 import { treeDirFor, runOfTree, listTreeRecords, legacyTreeDirs, treeRecordPath, treeRootFor } from "./worktree.mjs";
 import { isUnderRoot, normalizeForCompare } from "./roots.mjs";
 import { getConfig } from "./config.mjs";
@@ -79,6 +79,49 @@ export function reposFromManifest(fs, dir) {
   } catch {
     return [];
   }
+}
+
+// One builder for the `run` object `plan()` measures, shared by the CLI and the port
+// nudge so the two can never disagree about which trees a run holds. The missing-run
+// and liveness checks stay with each caller: the CLI has messages for them, the nudge
+// only ever builds runs it already knows are finished.
+// Returns `{ run, summary, hadSummary }`, or `{ error }` when the run names no repo or
+// its summary will not parse.
+export function runForPrune(dir, { fs, spawnSync }) {
+  const target = resolve(dir);
+  const summaryFile = join(target, "summary.json");
+  const hadSummary = fs.existsSync(summaryFile);
+  let summary = null;
+  if (hadSummary) {
+    try { summary = JSON.parse(fs.readFileSync(summaryFile, "utf8")); }
+    catch (e) { return { error: `could not read ${summaryFile}: ${e.message}` }; }
+  }
+  const worktreesKept = Array.isArray(summary?.worktreesKept) ? summary.worktreesKept : [];
+  // Resolve each tree's own repo: one scalar attributed a second repo's tree to the
+  // first and `git worktree remove` then silently failed against the wrong cwd.
+  const keptWithRepo = worktreesKept.map((wt) => ({ ...wt, repo: wt.repo || repoOfWorktree(spawnSync, wt.path) }));
+  const repos = [...new Set([...keptWithRepo.map((wt) => wt.repo), ...reposFromManifest(fs, target), ...reposOfTrees(fs, target, spawnSync)].filter(Boolean))];
+  if (!repos.length) {
+    return { error: `could not resolve the repo for ${target} — no kept worktree survives and manifest.json has no cwd.` };
+  }
+  return { run: { live: false, repos, resultsDir: target, worktreesKept: keptWithRepo }, summary, hadSummary };
+}
+
+// The HEAD of the checkout `prune` was invoked from, as an extra landing base. Only a
+// checkout that belongs to one of the run's repos and sits on a named branch outside
+// the swarm prefix qualifies: a leaf worktree's own HEAD is a swarm branch, and
+// absorbing against it would free the very branch being decided.
+export function checkoutBase(git, path, repos, prefix) {
+  const common = git(["rev-parse", "--git-common-dir"], path);
+  if (common.status !== 0 || !common.stdout) return null;
+  const repo = dirname(resolve(path, common.stdout));
+  const same = (r) => typeof r === "string" && normalizeForCompare(r) === normalizeForCompare(repo);
+  if (!repos.some(same)) return null;
+  const head = git(["symbolic-ref", "-q", "HEAD"], path);
+  if (head.status !== 0 || !head.stdout || isSwarmRef(head.stdout, prefix)) return null;
+  const sha = git(["rev-parse", "HEAD"], path);
+  if (sha.status !== 0 || !sha.stdout) return null;
+  return sha.stdout;
 }
 
 // The config the tree root is read from. A caller that already holds one passes it; the
@@ -169,7 +212,9 @@ function treeFacts(git, path) {
 // which attributed every tree to whichever repo resolved first.
 // `live` short-circuits before any git/fs call — a live run is never inspected,
 // only refused, so the cost of asking must be zero.
-export function plan(run, git, fs, { cfg } = {}) {
+export function plan(run, git, fs, { cfg, extraBases, measureBytes } = {}) {
+  if (!Array.isArray(extraBases)) throw new TypeError("plan requires an extraBases array");
+  if (typeof measureBytes !== "boolean") throw new TypeError("plan requires measureBytes");
   if (run.live) return { live: true };
 
   const prefix = cfg?.worktreeBranchPrefix || "swarm/";
@@ -182,7 +227,8 @@ export function plan(run, git, fs, { cfg } = {}) {
     const key = normalizeForCompare(path);
     if (seen.has(key)) return;
     seen.add(key);
-    rows.push(measureRow({ path, branch, bytes: dirSize(fs, path), repo }, git, fs, prefix));
+    const bytes = measureBytes ? dirSize(fs, path) : null;
+    rows.push(measureRow({ path, branch, bytes, repo }, git, fs, prefix, extraBases));
   };
 
   // summary.json's own list: how the run reported what it left, and the only source that
@@ -230,10 +276,10 @@ function detachedUnlanded(git, path) {
   return Number.isFinite(n) ? n : Infinity;
 }
 
-function measureRow(row, git, fs, prefix) {
+function measureRow(row, git, fs, prefix, extraBases) {
   if (!fs.existsSync(row.repo)) return { ...row, unlanded: Infinity, dirty: Infinity };
   const unlanded = row.branch
-    ? unlandedCount(row.branch, row.repo, { prefix, gitRunner: git })
+    ? unlandedCount(row.branch, row.repo, { prefix, gitRunner: git, extraBases })
     : detachedUnlanded(git, row.path);
   const status = git(["status", "--porcelain", "--untracked-files=all"], row.path);
   const dirty = status.status === 0

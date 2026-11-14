@@ -6,7 +6,7 @@ import { join, resolve } from "node:path";
 import { getConfig } from "../src/config.mjs";
 import { runLiveness } from "../src/runlog.mjs";
 import { writeSummary } from "../src/results.mjs";
-import { plan as planPrune, execute as executePrune, formatPrune, workCounts, blockers as pruneBlockers, repoOfWorktree, reposOfTrees, makeGit, reposFromManifest } from "../src/prune.mjs";
+import { plan as planPrune, execute as executePrune, formatPrune, workCounts, blockers as pruneBlockers, makeGit, runForPrune, checkoutBase } from "../src/prune.mjs";
 import { out, err } from "../src/ui.mjs";
 
 export async function cmdPrune(rest, { usage }) {
@@ -30,21 +30,17 @@ export async function cmdPrune(rest, { usage }) {
 
   const { spawnSync } = await import("node:child_process");
   // A killed run wrote no summary.json; prune must tolerate that and never invent one.
-  const summaryFile = join(dir, "summary.json");
-  const hadSummary = fs.existsSync(summaryFile);
-  const summary = hadSummary ? JSON.parse(fs.readFileSync(summaryFile, "utf8")) : null;
-  const worktreesKept = Array.isArray(summary?.worktreesKept) ? summary.worktreesKept : [];
-  // Resolve each tree's own repo: one scalar attributed a second repo's tree to the
-  // first and `git worktree remove` then silently failed against the wrong cwd.
-  const keptWithRepo = worktreesKept.map((wt) => ({ ...wt, repo: wt.repo || repoOfWorktree(spawnSync, wt.path) }));
-  const repos = [...new Set([...keptWithRepo.map((wt) => wt.repo), ...reposFromManifest(fs, dir), ...reposOfTrees(fs, dir, spawnSync)].filter(Boolean))];
-  if (!repos.length) {
-    err(`swarm: could not resolve the repo for ${dir} — no kept worktree survives and manifest.json has no cwd.`);
-    return 1;
-  }
+  const built = runForPrune(dir, { fs, spawnSync });
+  if (built.error) { err(`swarm: ${built.error}`); return 1; }
+  const { run, summary, hadSummary } = built;
+  const kept = Array.isArray(summary?.worktreesKept) ? summary.worktreesKept : [];
   const git = makeGit(spawnSync);
+  const prefix = cfg.worktreeBranchPrefix || "swarm/";
+  // The invoking checkout's HEAD is the one base a port made in a separate worktree
+  // leaves behind — but only when it is this repo on a named non-swarm branch.
+  const extraBases = [checkoutBase(git, process.cwd(), run.repos, prefix)].filter(Boolean);
 
-  const { rows } = planPrune({ live: false, repos, resultsDir: dir, worktreesKept: keptWithRepo }, git, fs, { cfg });
+  const { rows } = planPrune(run, git, fs, { cfg, extraBases, measureBytes: true });
   if (!rows.length) {
     out(`swarm: ${dir} has no kept worktrees — nothing to prune.`);
     return 0;
@@ -64,7 +60,7 @@ export async function cmdPrune(rest, { usage }) {
   if (!dryRun) {
     executePrune(rows, git, fs, { resultsDir: dir, cfg });
     // survivors: whatever wasn't just removed and wasn't already gone before we started
-    if (hadSummary) writeSummary(dir, { ...summary, worktreesKept: worktreesKept.filter((wt) => fs.existsSync(wt.path)) });
+    if (hadSummary) writeSummary(dir, { ...summary, worktreesKept: kept.filter((wt) => fs.existsSync(wt.path)) });
   }
   return 0;
 }

@@ -14,7 +14,7 @@ test("plan: a live run short-circuits before any git call", () => {
   let gitCalled = false;
   const git = () => { gitCalled = true; return { status: 0, stdout: "", stderr: "" }; };
   const fs = { existsSync: () => true, readdirSync: () => [], statSync: () => ({ size: 0 }) };
-  const result = plan({ live: true }, git, fs);
+  const result = plan({ live: true }, git, fs, { extraBases: [], measureBytes: true });
   deepEqual(result, { live: true });
   equal(gitCalled, false, "git must never be consulted when the run is live");
 });
@@ -27,7 +27,7 @@ test("plan: a kept tree becomes a row with path, branch, measured bytes and repo
     statSync: () => ({ size: 1024 }),
   };
   const run = { repos: ["/repo"], resultsDir: "/results", worktreesKept: [{ branch: "swarm/impl", path: "/results/wt-impl", repo: "/repo" }] };
-  const { rows } = plan(run, git, fs);
+  const { rows } = plan(run, git, fs, { extraBases: [], measureBytes: true });
   deepEqual(rows, [{ path: "/results/wt-impl", branch: "swarm/impl", bytes: 1024, repo: "/repo", unlanded: Infinity, dirty: Infinity }]);
 });
 
@@ -57,7 +57,7 @@ test("plan: a tree registered in git under resultsDir but absent from worktreesK
     statSync: () => ({ size: 7 }),
   };
   const run = { repos: ["/repo"], resultsDir: "/results", worktreesKept: [] };
-  const { rows } = plan(run, git, fs);
+  const { rows } = plan(run, git, fs, { extraBases: [], measureBytes: true });
   equal(rows.length, 1);
   equal(rows[0].path, orphanPath);
   equal(rows[0].branch, "swarm/orphan");
@@ -74,7 +74,7 @@ test("plan: a repo that no longer exists is never asked for its orphaned worktre
     statSync: () => ({ size: 512 }),
   };
   const run = { repos: ["/gone-repo"], resultsDir: "/results", worktreesKept: [{ branch: "swarm/gone", path: "/results/wt-gone", repo: "/gone-repo" }] };
-  const { rows } = plan(run, git, fs);
+  const { rows } = plan(run, git, fs, { extraBases: [], measureBytes: true });
   deepEqual(rows, [{ path: "/results/wt-gone", branch: "swarm/gone", bytes: 512, repo: "/gone-repo", unlanded: Infinity, dirty: Infinity }]);
   equal(calls.length, 0, "must not run git against a repo that doesn't exist");
 });
@@ -173,12 +173,34 @@ test("plan measures unlanded commits and dirty porcelain; blockers include unkno
     existsSync: (p) => p === "/repo" || p === "/tree",
     readdirSync: () => [], statSync: () => ({ size: 0 }),
   };
-  const { rows } = plan({ worktreesKept: [{ path: "/tree", branch: "topic", repo: "/repo" }] }, git, fs);
+  const { rows } = plan({ worktreesKept: [{ path: "/tree", branch: "topic", repo: "/repo" }] }, git, fs,
+    { extraBases: [], measureBytes: true });
   equal(rows[0].unlanded, 1);
   equal(rows[0].dirty, 2);
   ok(calls.some(({ args }) => args[0] === "cherry"));
   ok(calls.some(({ args }) => args[0] === "status" && args.includes("--untracked-files=all")));
   deepEqual(blockers(rows), [rows[0]]);
+});
+
+test("row 11: measureBytes: false skips the tree walk and rows carry bytes: null", () => {
+  const reads = [];
+  const fs = {
+    existsSync: (p) => p === "/repo" || p === "/tree",
+    readdirSync: (p) => { reads.push(p); return p === "/tree" ? [{ name: "a.bin", isDirectory: () => false }] : []; },
+    statSync: () => ({ size: 4096 }),
+  };
+  const git = (args) => (args[0] === "rev-list"
+    ? { status: 0, stdout: "1", stderr: "" }
+    : { status: 1, stdout: "", stderr: "" });
+  const run = { repos: [], resultsDir: null, worktreesKept: [{ branch: null, path: "/tree", repo: "/repo" }] };
+
+  const unmeasured = plan(run, git, fs, { extraBases: [], measureBytes: false });
+  equal(unmeasured.rows[0].bytes, null, "an unmeasured row must say so, not claim zero bytes");
+  ok(!reads.includes("/tree"), `measureBytes: false must never walk the tree: ${reads.join(", ")}`);
+
+  const measured = plan(run, git, fs, { extraBases: [], measureBytes: true });
+  equal(measured.rows[0].bytes, 4096, "a measured row still carries its byte count for the CLI report");
+  ok(reads.includes("/tree"), "the report's sizes come from the walk");
 });
 
 test("formatPrune reports nonzero work counts", () => {
@@ -190,7 +212,8 @@ test("formatPrune reports nonzero work counts", () => {
 test("plan: failed cherry and status measurements fail closed as blockers", () => {
   const git = () => ({ status: 1, stdout: "", stderr: "git unavailable" });
   const fs = { existsSync: () => true, readdirSync: () => [], statSync: () => ({ size: 0 }) };
-  const { rows } = plan({ worktreesKept: [{ path: "/tree", branch: "topic", repo: "/repo" }] }, git, fs);
+  const { rows } = plan({ worktreesKept: [{ path: "/tree", branch: "topic", repo: "/repo" }] }, git, fs,
+    { extraBases: [], measureBytes: true });
   equal(rows[0].unlanded, Infinity);
   equal(rows[0].dirty, Infinity);
   deepEqual(blockers(rows), [rows[0]]);
