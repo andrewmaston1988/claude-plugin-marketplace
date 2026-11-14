@@ -44,7 +44,7 @@ export async function cmdPrune(rest, { usage }) {
   }
   const git = makeGit(spawnSync);
 
-  const { rows } = planPrune({ live: false, repos, resultsDir: dir, worktreesKept: keptWithRepo }, git, fs);
+  const { rows } = planPrune({ live: false, repos, resultsDir: dir, worktreesKept: keptWithRepo }, git, fs, { cfg });
   if (!rows.length) {
     out(`swarm: ${dir} has no kept worktrees — nothing to prune.`);
     return 0;

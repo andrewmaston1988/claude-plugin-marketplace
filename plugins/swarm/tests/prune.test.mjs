@@ -1,8 +1,14 @@
 import "./helpers/isolate-home.mjs";
 import { test } from "node:test";
 import { equal, deepEqual, ok } from "node:assert/strict";
-import { resolve } from "node:path";
+import { spawnSync } from "node:child_process";
+import { writeFileSync } from "node:fs";
+import { join, resolve } from "node:path";
 import { plan, execute, formatPrune, blockers } from "../src/prune.mjs";
+import { prepareIsolation, WORKTREE_ADD_TIMEOUT_MS } from "../src/worktree.mjs";
+import { runCli } from "./helpers/cli.mjs";
+import { commitAll, gitOut } from "./helpers/cli-fixture.mjs";
+import { dropSnapPrune, pruneFixture, writeFinishedRun } from "./helpers/prune-fixture.mjs";
 
 test("plan: a live run short-circuits before any git call", () => {
   let gitCalled = false;
@@ -187,4 +193,31 @@ test("plan: failed cherry and status measurements fail closed as blockers", () =
   equal(rows[0].unlanded, Infinity);
   equal(rows[0].dirty, Infinity);
   deepEqual(blockers(rows), [rows[0]]);
+});
+
+test("row 15: the CLI measures through a custom worktreeBranchPrefix, so a sibling agents/ branch is not a landing place", () => {
+  const f = pruneFixture();
+  const cfg = { worktreeBranchPrefix: "agents/", treeRoot: join(f.dir, "home", "worktrees") };
+  let wt;
+  try {
+    wt = prepareIsolation({ id: "impl", originalCwd: f.repo, cwd: f.repo }, cfg, f.resultsDir,
+      { addTimeoutMs: WORKTREE_ADD_TIMEOUT_MS, base: gitOut(["rev-parse", "HEAD"], f.repo) });
+    writeFileSync(join(wt.path, "work.txt"), "x\n");
+    commitAll(wt.path, "work");
+    // The only ref that reaches the leaf's tip is another branch under the same custom
+    // prefix. Under the default `swarm/` it would read as a landing place.
+    spawnSync("git", ["branch", "agents/sibling", wt.branch], { cwd: f.repo, windowsHide: true });
+    writeFinishedRun(f.resultsDir, [{ branch: wt.branch, path: wt.path }]);
+
+    const r = runCli(["prune", f.resultsDir, "--dry-run"], {
+      cwd: f.dir,
+      env: { SWARM_HOME: join(f.dir, "home") },
+      config: cfg,
+    });
+    equal(r.status, 0, r.stdout + r.stderr);
+    ok(r.stdout.includes("1 unlanded"), `a sibling agents/ branch is not a landing place: ${r.stdout}${r.stderr}`);
+  } finally {
+    if (wt) spawnSync("git", ["worktree", "remove", "--force", wt.path], { cwd: f.repo, windowsHide: true });
+    dropSnapPrune(f);
+  }
 });
