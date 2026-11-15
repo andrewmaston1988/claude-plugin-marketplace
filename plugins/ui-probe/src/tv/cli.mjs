@@ -4,7 +4,7 @@
 import { mkdirSync, renameSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { attach, AttachInconclusive } from './attach.mjs';
-import { findSdb, listedDevices, sdb } from './sdb.mjs';
+import { appIds, findSdb, listedDevices, sdb } from './sdb.mjs';
 import { platformPath, tvProbe } from './probe.mjs';
 import { DEFAULT_LISTEN_WAIT_SECONDS, listenLabel, parseListenKeys, registerNote } from './listen.mjs';
 import { interceptionKind, inTvScope, NO_PROTOCOL, tvWritePolicy } from '../guard.mjs';
@@ -374,16 +374,6 @@ export async function tvProbeBranch({ config, rest, getFlag, resolveOutDir, out,
     for (const line of lines) out(line);
     return {};
   });
-}
-
-/** `'Torrent Hub' 'torrenthub.main'` -> torrenthub.main, for each line applist prints. */
-export function appIds(stdout) {
-  const ids = [];
-  for (const line of String(stdout ?? '').split(/\r?\n/)) {
-    const quoted = [...line.matchAll(/'([^']*)'/g)].map((match) => match[1]).filter(Boolean);
-    if (quoted.length) ids.push(quoted[quoted.length - 1]);
-  }
-  return ids;
 }
 
 /**
