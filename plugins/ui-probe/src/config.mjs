@@ -2,6 +2,7 @@ import { readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { DEFAULT_FOCUS_SELECTOR } from './focus.mjs';
+import { APP_ID } from './tv/rest.mjs';
 
 export class ConfigError extends Error {
   constructor(errors) {
@@ -17,7 +18,7 @@ export const BUILTIN_VIEWPORTS = Object.freeze({
 });
 
 const TOP_LEVEL_KEYS = ['baseUrl', 'viewports', 'screens', 'auth', 'outDir', 'browser', 'tv'];
-const TV_KEYS = ['host', 'appid', 'sdb', 'testOrigin', 'focusSelector'];
+const TV_KEYS = ['host', 'appid', 'sdb', 'testOrigin', 'focusSelector', 'returnApps', 'returnToApp'];
 const SCREEN_KEYS = ['url', 'steps', 'measure'];
 const VIEWPORT_KEYS = ['width', 'height', 'dpr', 'touch'];
 const COOKIE_KEYS = ['name', 'command', 'domain'];
@@ -86,7 +87,7 @@ function validateTv(value, errors) {
   if (!hostMatch || port < 1 || port > 65535) {
     errors.push(err('tv.host', `must be "host:port" with a port of 1-65535, got ${JSON.stringify(host)}`, 'set host to the TV address and debug port, e.g. from sdb devices', '{ "tv": { "host": "192.0.2.10:26101", "appid": "myapp.main" } }'));
   }
-  if (typeof value.appid !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(value.appid)) {
+  if (typeof value.appid !== 'string' || !APP_ID.test(value.appid)) {
     errors.push(err('tv.appid', `must be a Tizen app id like "myapp.main", got ${JSON.stringify(value.appid)}`, 'set appid to the id from sdb shell 0 applist', '{ "tv": { "host": "192.0.2.10:26101", "appid": "myapp.main" } }'));
   }
   if (value.sdb !== undefined && (typeof value.sdb !== 'string' || !value.sdb.trim())) {
@@ -97,6 +98,23 @@ function validateTv(value, errors) {
   }
   if (value.focusSelector !== undefined && (typeof value.focusSelector !== 'string' || !value.focusSelector.trim())) {
     errors.push(err('tv.focusSelector', `must be a non-empty CSS selector, got ${JSON.stringify(value.focusSelector)}`, 'set focusSelector to the class your app moves on focus, or omit it for ".focused"', '{ "tv": { "host": "192.0.2.10:26101", "appid": "myapp.main", "focusSelector": ".focused" } }'));
+  }
+  if (value.returnApps !== undefined) {
+    if (!Array.isArray(value.returnApps)) {
+      errors.push(err('tv.returnApps', `must be an array of app ids, got ${JSON.stringify(value.returnApps)}`, 'set returnApps to the REST ids of the apps you want put back, in order', '{ "tv": { "host": "192.0.2.10:26101", "appid": "myapp.main", "returnApps": ["3201807016597"] } }'));
+    } else {
+      value.returnApps.forEach((id, i) => {
+        const field = `tv.returnApps[${i}]`;
+        if (typeof id !== 'string' || !APP_ID.test(id)) {
+          errors.push(err(field, `must be a Tizen or store app id like "3201807016597", got ${JSON.stringify(id)}`, 'use the id REST answers for that app — letters, digits, dots, underscores and hyphens, starting with a letter or digit', '{ "tv": { "host": "192.0.2.10:26101", "appid": "myapp.main", "returnApps": ["3201807016597"] } }'));
+        } else if (id === value.appid) {
+          errors.push(err(field, `names tv.appid ${JSON.stringify(id)}, the widget under test — it is never put back`, 'list only the household apps a probe may restore, not the app being tested', '{ "tv": { "host": "192.0.2.10:26101", "appid": "myapp.main", "returnApps": ["3201807016597"] } }'));
+        }
+      });
+    }
+  }
+  if (value.returnToApp !== undefined && typeof value.returnToApp !== 'boolean') {
+    errors.push(err('tv.returnToApp', `must be a boolean, got ${JSON.stringify(value.returnToApp)}`, 'set returnToApp to false to leave the set on the widget, or omit it to put the app back', '{ "tv": { "host": "192.0.2.10:26101", "appid": "myapp.main", "returnToApp": false } }'));
   }
 }
 

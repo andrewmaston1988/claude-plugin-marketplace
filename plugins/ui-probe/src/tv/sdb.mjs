@@ -99,6 +99,16 @@ export function listedDevices(stdout) {
     .map((parts) => parts[0]);
 }
 
+/** `'Torrent Hub' 'torrenthub.main'` -> torrenthub.main, for each line applist prints. */
+export function appIds(stdout) {
+  const ids = [];
+  for (const line of String(stdout ?? '').split(/\r?\n/)) {
+    const quoted = [...line.matchAll(/'([^']*)'/g)].map((match) => match[1]).filter(Boolean);
+    if (quoted.length) ids.push(quoted[quoted.length - 1]);
+  }
+  return ids;
+}
+
 /** `... successfully launched pid = 921 with debug 1 port: 46770` -> 46770. */
 export function parseDebugPort(stdout) {
   const match = String(stdout ?? "").match(/port[:\s]+(\d{2,5})/i);

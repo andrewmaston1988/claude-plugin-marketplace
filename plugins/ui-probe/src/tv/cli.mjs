@@ -1,16 +1,17 @@
-// TV branches of the CLI: attach for run and capture, `tv probe`, and doctor's TV checks.
+// TV branches of the CLI: attach for run and capture, and `tv probe`. The doctor's TV checks live
+// in doctor.mjs and are re-exported here so every TV consumer keeps one import path.
 // Loaded by dynamic import only, so a web user never pays for sdb or the attach path.
 
 import { mkdirSync, renameSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { attach, AttachInconclusive } from './attach.mjs';
-import { findSdb, listedDevices, sdb } from './sdb.mjs';
+import { doctorTv } from './doctor.mjs';
 import { platformPath, tvProbe } from './probe.mjs';
 import { DEFAULT_LISTEN_WAIT_SECONDS, listenLabel, parseListenKeys, registerNote } from './listen.mjs';
 import { interceptionKind, inTvScope, NO_PROTOCOL, tvWritePolicy } from '../guard.mjs';
 import { expandIncludes } from '../ir.mjs';
 
-export { AttachInconclusive };
+export { AttachInconclusive, doctorTv };
 
 /** A refusal the CLI reports as exit 64: the request cannot be honoured as asked. */
 export class TvRefusal extends Error {
@@ -61,12 +62,85 @@ export function scenarioOpens(doc, { baseDir = null, file = null } = {}) {
   return opens;
 }
 
-/** Attach for run or capture. The caller always detaches; the protocol picks the guard. */
-export async function tvSession(config, { attachPort = null, _attach = attach } = {}) {
+/** Whether this invocation puts back the app the widget launched over: config policy, less --stay. */
+export function restoreEnabled(config, stay = false) {
+  return config?.tv?.returnToApp !== false && !stay;
+}
+
+/** `tv return: Apple TV (3201807016597) — returned`, or the bare outcome. Null for a join. */
+export function tvReturnLine(record) {
+  if (record == null) return null;
+  const outcome = record.outcome ?? 'unknown';
+  if (!record.id) return `tv return: ${outcome}`;
+  const app = record.name ? `${record.name} (${record.id})` : record.id;
+  return `tv return: ${app} — ${outcome}`;
+}
+
+/** The record beside the command's other output; a joined session has none to write. */
+export function writeTvReturn(dir, record, _write = writeJson) {
+  if (!dir || record == null) return;
+  _write(join(dir, 'tv-return.json'), record);
+}
+
+/** A TV capture's artefact directory: capture writes everything under `<outDir>/tv`. */
+export function tvCaptureDir(outDir) {
+  return outDir == null ? null : join(outDir, 'tv');
+}
+
+/** A TV command's stdout: what the command wrote, then the return line last. */
+export function tvCommandLines(output, record) {
+  const lines = Array.isArray(output) ? [...output] : output ? [output] : [];
+  const line = tvReturnLine(record);
+  if (line) lines.push(line);
+  return lines;
+}
+
+/** A command that threw: its record written beside the output, its line last. */
+export function tvFailureOutput(dir, error, _write = writeJson) {
+  if (!error?.tvReturn) return [];
+  writeTvReturn(dir, error.tvReturn, _write);
+  return tvCommandLines(null, error.tvReturn);
+}
+
+/**
+ * Attach for run or capture; the caller always detaches. The signal handler is registered before
+ * the attach, so a Ctrl-C in the launch or settle wait reaches the same memoised detach.
+ */
+export async function tvSession(config, {
+  attachPort = null,
+  returnToApp = null,
+  _attach = attach,
+  _process = process,
+} = {}) {
   if (!config?.tv?.host || !config?.tv?.appid) {
     throw new TvRefusal('the tv device needs a tv block with host and appid in .ui-probe.json');
   }
-  const session = await _attach(config, { attachPort });
+  const restore = returnToApp ?? restoreEnabled(config);
+  // Set the moment the widget is up: a signal before that has nothing this tool displaced.
+  let detachOnce = null;
+
+  async function onSignal() {
+    try { if (detachOnce) await detachOnce(); } catch { /* the process is leaving either way */ }
+    removeHandlers();
+    _process.exit(130);
+  }
+  function removeHandlers() {
+    _process.removeListener?.('SIGINT', onSignal);
+    _process.removeListener?.('SIGTERM', onSignal);
+  }
+  _process.once('SIGINT', onSignal);
+  _process.once('SIGTERM', onSignal);
+
+  const session = await _attach(config, {
+    attachPort,
+    returnToApp: restore,
+    onLaunch: (detach) => { detachOnce ??= detach; },
+  }).catch((error) => {
+    removeHandlers();
+    throw error;
+  });
+  detachOnce ??= () => session.detach();
+
   return {
     cdp: session.cdp,
     port: session.port,
@@ -74,8 +148,20 @@ export async function tvSession(config, { attachPort = null, _attach = attach } 
     // A protocol the set would not serve is unknown, not a modern browser: no interception.
     intercepted: interceptionKind(session.protocol ?? NO_PROTOCOL) !== null,
     timings: session.timings ?? null,
-    detach: session.detach,
+    async detach() {
+      try {
+        return await session.detach();
+      } finally {
+        removeHandlers();
+      }
+    },
   };
+}
+
+/** The run's error, with the tv record riding along so the bin prints its line on the way out. */
+function withReturn(error, tvReturn) {
+  if (error && typeof error === 'object') error.tvReturn = tvReturn;
+  return error;
 }
 
 /**
@@ -86,6 +172,7 @@ export async function runOnTv({
   doc,
   config,
   attachPort = null,
+  stay = false,
   allowWrites = false,
   cookies = [],
   baseUrl = null,
@@ -99,7 +186,13 @@ export async function runOnTv({
   const device = 'tv';
   assertTvPolicy(config, { backend: doc?.backend ?? null, device, allowWrites, opens });
 
-  const session = await tvSession(config, { attachPort, _attach });
+  const session = await tvSession(config, {
+    attachPort,
+    returnToApp: restoreEnabled(config, stay),
+    _attach,
+  });
+  let outcome;
+  let failure = null;
   try {
     assertTvPolicy(config, { backend: doc?.backend ?? null, device, allowWrites, hasInterception: session.intercepted, opens });
     const run = _run ?? (await import('../runner.mjs')).run;
@@ -115,10 +208,14 @@ export async function runOnTv({
       baseDir,
       file,
     });
-    return { result, port: session.port, timings: session.timings };
-  } finally {
-    await session.detach();
+    outcome = { result, port: session.port, timings: session.timings };
+  } catch (error) {
+    failure = error;
   }
+  // The record is assembled after the detach: it is the return's outcome, not the journey's.
+  const tvReturn = await session.detach();
+  if (failure) throw withReturn(failure, tvReturn);
+  return { ...outcome, tvReturn };
 }
 
 /**
@@ -128,6 +225,7 @@ export async function captureOnTv({
   screen,
   config,
   attachPort = null,
+  stay = false,
   allowWrites = false,
   screenshot = false,
   includeBackground = false,
@@ -136,17 +234,24 @@ export async function captureOnTv({
   baseDir = null,
   file = null,
   _attach = attach,
+  _capture = null,
 } = {}) {
   // A screen's steps live in the config file, so its includes resolve beside it.
   const includeBase = baseDir ?? config.configDir ?? null;
   const opens = scenarioOpens({ steps: screen?.steps ?? [] }, { baseDir: includeBase, file });
   assertTvPolicy(config, { device: 'tv', allowWrites, opens });
 
-  const session = await tvSession(config, { attachPort, _attach });
+  const session = await tvSession(config, {
+    attachPort,
+    returnToApp: restoreEnabled(config, stay),
+    _attach,
+  });
+  let outcome;
+  let failure = null;
   try {
     assertTvPolicy(config, { device: 'tv', allowWrites, hasInterception: session.intercepted, opens });
-    const { capture } = await import('../capture.mjs');
-    return await capture(screen, {
+    const runCapture = _capture ?? (await import('../capture.mjs')).capture;
+    outcome = await runCapture(screen, {
       config,
       cdp: session.cdp,
       protocol: session.protocol,
@@ -160,9 +265,13 @@ export async function captureOnTv({
       file,
       timings: session.timings,
     });
-  } finally {
-    await session.detach();
+  } catch (error) {
+    failure = error;
   }
+  const tvReturn = await session.detach();
+  if (failure) throw withReturn(failure, tvReturn);
+  // The artefacts land under `<outDir>/tv`, so the record does too: `done.outDir` is that dir.
+  return { ...outcome, outDir: tvCaptureDir(outcome.outDir ?? outDir ?? config.outDir), tvReturn };
 }
 
 /** Write the platform record to the out dir and to the copy capture reads. */
@@ -176,29 +285,38 @@ export async function tvProbeCommand({
   fetch = null,
   exit = false,
   attachPort = null,
+  stay = false,
   _note = null,
   _attach = attach,
   _tvProbe = tvProbe,
 } = {}) {
   if (!config?.tv?.appid) throw new TvRefusal('tv probe needs a tv block with host and appid in .ui-probe.json');
 
-  const session = await tvSession(config, { attachPort, _attach });
+  const session = await tvSession(config, {
+    attachPort,
+    returnToApp: restoreEnabled(config, stay),
+    _attach,
+  });
   let platform;
+  let failure = null;
   try {
     // The guided check prints what to press while the window is still open, not after it closes.
     platform = await _tvProbe(session.cdp, {
       video, navigate, listenKeys, listenWaitSeconds, fetch, exit, _note,
       testOrigin: config?.tv?.testOrigin ?? null,
     });
-  } finally {
-    await session.detach();
+  } catch (error) {
+    failure = error;
   }
+  const tvReturn = await session.detach();
+  if (failure) throw withReturn(failure, tvReturn);
 
   const dir = outDir ?? config.outDir;
   const record = { ...platform, timings: session.timings };
   writeJson(join(dir, 'platform.json'), record);
   writeJson(platformPath(config.tv.appid), record);
-  return { platform: record, outDir: dir, lines: probeLines(record, dir) };
+  writeTvReturn(dir, tvReturn);
+  return { platform: record, outDir: dir, lines: tvCommandLines(probeLines(record, dir), tvReturn), tvReturn };
 }
 
 function writeJson(file, value) {
@@ -284,8 +402,8 @@ async function branch(work) {
   try {
     return { exitCode: 0, ...(await work()) };
   } catch (error) {
-    if (error instanceof TvRefusal) return { exitCode: 64, stderr: error.message };
-    if (error instanceof AttachInconclusive) return { exitCode: 2, stderr: `inconclusive: tv: ${error.message}` };
+    if (error instanceof TvRefusal) return { exitCode: 64, stderr: error.message, tvReturn: error.tvReturn };
+    if (error instanceof AttachInconclusive) return { exitCode: 2, stderr: `inconclusive: tv: ${error.message}`, tvReturn: error.tvReturn };
     throw error;
   }
 }
@@ -298,11 +416,12 @@ export function runTvBranch({
   const { port, problem } = portFrom(getFlag, rest);
   if (problem) return { exitCode: 64, stderr: problem };
   return branch(async () => {
-    const { result, timings } = await runOnTv({
-      doc, config, attachPort: port, allowWrites: rest.includes("--allow-writes"),
+    const { result, timings, tvReturn } = await runOnTv({
+      doc, config, attachPort: port, stay: rest.includes("--stay"),
+      allowWrites: rest.includes("--allow-writes"),
       cookies, baseUrl, source, baseDir, file, _attach, _run,
     });
-    return { result, timings };
+    return { result, timings, tvReturn };
   });
 }
 
@@ -311,10 +430,11 @@ export function captureTvBranch({ screen, config, rest, getFlag, source = null, 
   const { port, problem } = portFrom(getFlag, rest);
   if (problem) return { exitCode: 64, stderr: problem };
   return branch(async () => {
-    const { digest } = await captureOnTv({
+    const { digest, outDir, tvReturn } = await captureOnTv({
       screen,
       config,
       attachPort: port,
+      stay: rest.includes("--stay"),
       allowWrites: rest.includes("--allow-writes"),
       screenshot: rest.includes("--screenshot"),
       includeBackground: rest.includes("--include-background"),
@@ -324,7 +444,7 @@ export function captureTvBranch({ screen, config, rest, getFlag, source = null, 
       file,
       _attach,
     });
-    return { digest };
+    return { digest, outDir, tvReturn };
   });
 }
 
@@ -359,7 +479,7 @@ export async function tvProbeBranch({ config, rest, getFlag, resolveOutDir, out,
     return { exitCode: 64 };
   }
   return branch(async () => {
-    const { lines } = await tvProbeCommand({
+    const { lines, tvReturn } = await tvProbeCommand({
       config,
       outDir: resolveOutDir(config, getFlag("--out", rest)),
       video: getFlag("--video", rest),
@@ -369,72 +489,11 @@ export async function tvProbeBranch({ config, rest, getFlag, resolveOutDir, out,
       fetch: getFlag("--fetch", rest),
       exit: rest.includes("--exit"),
       attachPort: port,
+      stay: rest.includes("--stay"),
       _note: out,
     });
     for (const line of lines) out(line);
-    return {};
+    return { tvReturn };
   });
 }
 
-/** `'Torrent Hub' 'torrenthub.main'` -> torrenthub.main, for each line applist prints. */
-export function appIds(stdout) {
-  const ids = [];
-  for (const line of String(stdout ?? '').split(/\r?\n/)) {
-    const quoted = [...line.matchAll(/'([^']*)'/g)].map((match) => match[1]).filter(Boolean);
-    if (quoted.length) ids.push(quoted[quoted.length - 1]);
-  }
-  return ids;
-}
-
-/**
- * The TV's three checks. Skipped entirely when the config has no tv block, so a web-only machine
- * or CI never needs the Tizen SDK.
- */
-export function doctorTv(config, { out, err, _findSdb = findSdb, _sdb = null } = {}) {
-  const callSdb = _sdb ?? ((args) => sdb(args, { config }));
-  const exe = _findSdb(config);
-  if (!exe) {
-    err('FAIL tv.sdb: sdb not found — set tv.sdb in .ui-probe.json, put sdb on PATH, or install the Tizen SDK');
-    return false;
-  }
-  out(`ok   tv.sdb: ${exe}`);
-
-  let devices;
-  try {
-    devices = callSdb(['devices']);
-  } catch (error) {
-    err(`FAIL tv.device: ${error.message}`);
-    return false;
-  }
-  if (!listedDevices(devices.stdout).includes(config.tv.host)) {
-    // attach() connects a host sdb has not seen yet; doctor does the same, then reads again.
-    try { callSdb(['connect', config.tv.host]); } catch { /* the check below reports it */ }
-    try {
-      devices = callSdb(['devices']);
-    } catch (error) {
-      err(`FAIL tv.device: ${error.message}`);
-      return false;
-    }
-    if (!listedDevices(devices.stdout).includes(config.tv.host)) {
-      err(`FAIL tv.device: ${config.tv.host} is not listed by sdb — developer mode may have expired (it lasts two weeks), or the TV is off`);
-      return false;
-    }
-  }
-  out(`ok   tv.device: ${config.tv.host}`);
-
-  let list;
-  try {
-    list = callSdb(['shell', '0', 'applist']);
-  } catch (error) {
-    err(`FAIL tv.appid: ${error.message}`);
-    return false;
-  }
-  const ids = appIds(list.stdout);
-  if (!ids.includes(config.tv.appid)) {
-    const installed = ids.length ? ids.join(', ') : '(none)';
-    err(`FAIL tv.appid: ${config.tv.appid} is not installed — sdb applist has: ${installed}`);
-    return false;
-  }
-  out(`ok   tv.appid: ${config.tv.appid}`);
-  return true;
-}

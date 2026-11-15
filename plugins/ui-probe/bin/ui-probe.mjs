@@ -7,45 +7,12 @@ import { readFileSync, writeFileSync, mkdirSync, renameSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { checkFlags, deviceFlag, getFlag, hasFlag, positionals, varsFrom, wantsHelp } from "../src/flags.mjs";
-
-const HELP = [
-  "usage: ui-probe <command> [options]",
-  "",
-  "commands:",
-  "  capture <screen>|--url <url>   capture a configured screen (or a bare url)",
-  "  run <scenario.yaml|json>       run a scenario; exit 0 passed, 1 failed, 2 inconclusive,",
-  "                                 3 needs_review, 64 invalid scenario/config/arguments",
-  "  validate [<file>] [--config]   validate a scenario file and/or the config",
-  "  screens                        list the config's screens",
-  "  doctor                         check config, and then whichever of the tv, browser",
-  "                                 and baseUrl checks the config needs",
-  "  tv probe                       measure the TV platform; see its options below",
-  "",
-  "options:",
-  "  --config <path>        config file (default: .ui-probe.json found walking up from cwd)",
-  "  --url <url>            capture this url instead of a named screen",
-  "  --viewport <a,b>       viewport names (capture default: phone,desktop)",
-  "  --var k=value          variable for auth commands; repeatable",
-  "  --out <dir>            output directory",
-  "  --allow-writes         permit writes for this one invocation",
-  "  --include-background   observe the page behind a modal dialog",
-  "  --device tv|desktop    where a tv-backend journey or capture runs (default: desktop)",
-  "  --attach-port <n>      join a TV debug forward already running instead of relaunching",
-  "  --screenshot           capture on the TV: also replay a screenshot (slow on the set)",
-  "  --video <url>          tv probe: a same-origin clip for the video checks",
-  "  --navigate <url>       tv probe: test what the app may navigate to",
-  "  --listen [keys]        tv probe: guided physical-press check, one key at a time; a",
-  "                         comma-separated key list, defaults to Left,Right,Digit1,MediaPlay",
-  "                         plus Enter and Back only on the --navigate fixture grid",
-  "  --listen-wait <s>      tv probe: seconds to wait for each key (default 8)",
-  "  --fetch <url>          tv probe: one credentialed GET from the settled page",
-  "  --exit                 tv probe: exit the app last and report whether it closed",
-  "  --help, -h             this text",
-  "",
-].join("\n");
+import { HELP } from "../src/help.mjs";
 
 const argv = process.argv.slice(2);
 const cmd = argv[0];
+// Where a TV command's record belongs if the command throws before it can report its own dir.
+let tvOutDir = null;
 
 const out = (line) => process.stdout.write(line + "\n");
 const err = (line) => process.stderr.write(line + "\n");
@@ -103,10 +70,15 @@ function refuseUnknown(subcommand, args) {
     if (device.problem) { err(device.problem); settle(64); return; }
 
     if (device.value === "tv") {
-      const { captureTvBranch } = await import("../src/tv/cli.mjs");
+      const { captureTvBranch, tvCaptureDir, tvCommandLines, writeTvReturn } = await import("../src/tv/cli.mjs");
+      // Resolved before the call so a thrown capture still has somewhere to write its record.
+      const captureDir = tvCaptureDir(getFlag("--out", rest) ?? config.outDir);
+      tvOutDir = captureDir;
       const done = await captureTvBranch({ screen, config, rest, getFlag, source: name ?? url });
       if (done.stderr) err(done.stderr);
-      if (done.digest) process.stdout.write(done.digest.endsWith("\n") ? done.digest : `${done.digest}\n`);
+      if (done.tvReturn) writeTvReturn(done.outDir ?? captureDir, done.tvReturn);
+      // The return is reported last, after the digest, and never changes the exit code.
+      for (const line of tvCommandLines(done.digest, done.tvReturn)) out(line);
       settle(done.exitCode);
       return;
     }
@@ -177,6 +149,7 @@ function refuseUnknown(subcommand, args) {
     const device = deviceFlag(rest);
     if (device.problem) { err(device.problem); settle(64); return; }
     const outDir = resolveOutDir(config, getFlag("--out", rest));
+    tvOutDir = outDir;
     // An include resolves beside the file that names it, so every loader gets that file's path.
     const scenarioPath = path.resolve(file);
 
@@ -192,15 +165,24 @@ function refuseUnknown(subcommand, args) {
     }
 
     let result;
+    let tvReturn;
+    let assemble = null;
     if (device.value === "tv") {
-      const { runTvBranch } = await import("../src/tv/cli.mjs");
+      const { runTvBranch, tvCommandLines, writeTvReturn } = await import("../src/tv/cli.mjs");
+      assemble = tvCommandLines;
       const done = await runTvBranch({
         doc, config, rest, getFlag, cookies,
         baseUrl: config?.baseUrl ?? null, source: path.basename(file),
         baseDir: path.dirname(scenarioPath), file: scenarioPath,
       });
       if (done.stderr) err(done.stderr);
-      if (done.exitCode !== 0) { settle(done.exitCode); return; }
+      if (done.tvReturn) writeTvReturn(outDir, done.tvReturn);
+      tvReturn = done.tvReturn;
+      if (done.exitCode !== 0) {
+        for (const line of tvCommandLines(null, done.tvReturn)) out(line);
+        settle(done.exitCode);
+        return;
+      }
       // What the set cost to reach, before any step is judged.
       if (done.timings) out(attachLine(done.timings));
       result = done.result;
@@ -255,14 +237,17 @@ function refuseUnknown(subcommand, args) {
       if (session) await session.close();
     }
 
+    const said = [];
     for (const problem of result.problems ?? []) printProblem(problem);
     const counts = { passed: 0, failed: 0, inconclusive: 0, not_run: 0 };
     for (const step of result.steps) {
       counts[step.outcome] = (counts[step.outcome] ?? 0) + 1;
-      out(digestLine(step));
+      said.push(digestLine(step));
     }
-    out(`run: ${result.outcome} (${counts.passed} passed, ${counts.failed} failed, ${counts.inconclusive} inconclusive, ${counts.not_run} not run) → ${outDir}`);
+    said.push(`run: ${result.outcome} (${counts.passed} passed, ${counts.failed} failed, ${counts.inconclusive} inconclusive, ${counts.not_run} not run) → ${outDir}`);
     writeResults(outDir, result);
+    // The set's return is the command's last line, after the journey's verdict.
+    for (const line of assemble ? assemble(said, tvReturn) : said) out(line);
     settle(result.exitCode);
     return;
   }
@@ -279,9 +264,17 @@ function refuseUnknown(subcommand, args) {
     try {
       loaded = await loadConfig(getFlag("--config", rest), true);
     } catch (e) { if (reportConfigError(e)) return; throw e; }
-    const { tvProbeBranch } = await import("../src/tv/cli.mjs");
+    // Resolved before the call so a thrown probe still has somewhere to write its record.
+    const outDir = resolveOutDir(loaded.config, getFlag("--out", rest));
+    tvOutDir = outDir;
+    const { tvProbeBranch, tvCommandLines, writeTvReturn } = await import("../src/tv/cli.mjs");
     const done = await tvProbeBranch({ config: loaded.config, rest, getFlag, resolveOutDir, out, err });
     if (done.stderr) err(done.stderr);
+    if (done.exitCode !== 0 && done.tvReturn) {
+      // A probe that threw wrote no output; its record still gets a file and the last line.
+      writeTvReturn(outDir, done.tvReturn);
+      for (const line of tvCommandLines(null, done.tvReturn)) out(line);
+    }
     settle(done.exitCode);
     return;
   }
@@ -395,9 +388,14 @@ function refuseUnknown(subcommand, args) {
   err(`unknown command: ${cmd}`);
   process.stdout.write(HELP);
   settle(64);
-})().catch((e) => {
+})().catch(async (e) => {
   process.stderr.write(`${(e && e.message) || String(e)}\n`);
-  process.exit(1);
+  // An unexpected TV failure still reports where the set was left: a file, then the last line.
+  if (e && e.tvReturn) {
+    const { tvFailureOutput } = await import("../src/tv/cli.mjs");
+    for (const line of tvFailureOutput(tvOutDir, e)) out(line);
+  }
+  settle(1);
 });
 
 // -- helpers ----------------------------------------------------------------

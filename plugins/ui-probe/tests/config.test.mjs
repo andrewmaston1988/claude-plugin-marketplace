@@ -219,6 +219,62 @@ test('rejects unknown keys inside tv, naming the key', (t) => {
   assert.ok(err.errors.some((e) => e.field === 'tv.bogus'));
 });
 
+test('row 13: accepts returnApps as an ordered id list and returnToApp as a boolean', (t) => {
+  const config = loadConfig(tmpCase(t, {
+    baseUrl: 'http://x.test',
+    tv: { host: '192.0.2.10:26101', appid: 'torrenthub.main', returnApps: ['3201807016597', '9Ur5IzDKqV.TizenYouTube'], returnToApp: false },
+  }));
+  assert.deepEqual(config.tv.returnApps, ['3201807016597', '9Ur5IzDKqV.TizenYouTube']);
+  assert.equal(config.tv.returnToApp, false);
+});
+
+test('row 13: both return keys absent still load', (t) => {
+  const config = loadConfig(tmpCase(t, { baseUrl: 'http://x.test', tv: { host: '192.0.2.10:26101', appid: 'torrenthub.main' } }));
+  assert.equal(config.tv.returnApps, undefined);
+  assert.equal(config.tv.returnToApp, undefined);
+});
+
+test('row 13: rejects a returnApps that is not an array, or holds an empty or non-string id', (t) => {
+  for (const returnApps of ['3201807016597', {}, [''], ['   '], [42], ['ok.id', null]]) {
+    const err = loadError(t, { baseUrl: 'http://x.test', tv: { host: '192.0.2.10:26101', appid: 'torrenthub.main', returnApps } });
+    const named = err.errors.some((e) => e.field === 'tv.returnApps' || e.field.startsWith('tv.returnApps['));
+    assert.ok(named, `expected a tv.returnApps error for ${JSON.stringify(returnApps)}`);
+  }
+});
+
+test('row 13: a returnApps entry outside the REST id shape is refused, naming the key', (t) => {
+  for (const id of ['Apple TV', ' 3201807016597', '3201807016597 ', 'myapp/main', 'myapp.main?x=1']) {
+    const err = loadError(t, { baseUrl: 'http://x.test', tv: { host: '192.0.2.10:26101', appid: 'torrenthub.main', returnApps: [id] } });
+    const e = err.errors.find((item) => item.field === 'tv.returnApps[0]');
+    assert.ok(e, `expected tv.returnApps[0] for ${JSON.stringify(id)}`);
+    assert.equal(typeof e.fix, 'string');
+    assert.match(e.example, /returnApps/, 'the example shows the key inline');
+  }
+});
+
+test('row 13: a returnApps entry that names tv.appid is refused, with the fix and an example', (t) => {
+  const err = loadError(t, {
+    baseUrl: 'http://x.test',
+    tv: { host: '192.0.2.10:26101', appid: 'torrenthub.main', returnApps: ['3201807016597', 'torrenthub.main'] },
+  });
+  const e = err.errors.find((item) => item.field === 'tv.returnApps[1]');
+  assert.ok(e, 'the offending entry is named by its index');
+  assert.match(e.problem, /tv\.appid/);
+  assert.match(e.problem, /never put back/, 'the message says why');
+  assert.equal(typeof e.fix, 'string');
+  assert.match(e.example, /returnApps/, 'the example shows the key inline');
+});
+
+test('row 13: rejects a non-boolean returnToApp, naming the key, the fix and an example', (t) => {
+  for (const returnToApp of ['false', 0, null]) {
+    const err = loadError(t, { baseUrl: 'http://x.test', tv: { host: '192.0.2.10:26101', appid: 'torrenthub.main', returnToApp } });
+    const e = err.errors.find((item) => item.field === 'tv.returnToApp');
+    assert.ok(e, `expected a tv.returnToApp error for ${JSON.stringify(returnToApp)}`);
+    assert.equal(typeof e.fix, 'string');
+    assert.equal(typeof e.example, 'string');
+  }
+});
+
 test('tv errors carry fix and example like the rest of the teaching errors', (t) => {
   const err = loadError(t, { baseUrl: 'http://x.test', tv: { host: 'nope' } });
   for (const e of err.errors) {
