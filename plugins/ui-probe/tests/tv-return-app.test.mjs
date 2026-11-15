@@ -22,10 +22,14 @@ const APPLIST = [
 ].join("\n");
 
 // The set that hides Apple TV behind a dummy id: applist names the dummy, REST 404s it.
+// The 404 leads a first batch of four; the app that is showing waits in the second batch.
 const HIDDEN_APPLE_TV = [
   "PkgId                                    Ver       Name",
   "------------------------------------------------------------------------",
   `'Apple TV'\t                             '1.0'\t    'com.samsung.tv.aria-dummy'`,
+  `'Netflix'\t                              '1.0'\t    'abc.netflix'`,
+  `'Tubi'\t                                  '1.0'\t    '3KA0pm7a7V.TubiTV'`,
+  `'Prime Video'\t                          '1.0'\t    'abc.primevideo'`,
   `'YouTube'\t                              '1.0'\t    '${YOUTUBE}'`,
   `'Torrent Test'\t                         '1.0'\t    '${WIDGET}'`,
 ].join("\n");
@@ -147,6 +151,9 @@ test("the applist scan keeps at most 4 reads in flight", async () => {
 test("a candidate answering 404 is skipped, and a later visible app is still found", async () => {
   const stub = fetchStub({
     "com.samsung.tv.aria-dummy": () => answer({ code: 404, message: "Not Found" }, 404),
+    "abc.netflix": () => hidden("abc.netflix", "Netflix"),
+    "3KA0pm7a7V.TubiTV": () => hidden("3KA0pm7a7V.TubiTV", "Tubi"),
+    "abc.primevideo": () => hidden("abc.primevideo", "Prime Video"),
     [YOUTUBE]: () => showing(YOUTUBE, "YouTube"),
     [WIDGET]: () => showing(WIDGET, "Torrent Test"),
   });
@@ -158,7 +165,11 @@ test("a candidate answering 404 is skipped, and a later visible app is still fou
   });
 
   assert.deepEqual(found, { id: YOUTUBE, name: "YouTube" });
-  assert.deepEqual(stub.ids(), ["com.samsung.tv.aria-dummy", YOUTUBE], "the 404 is skipped, the widget never asked");
+  assert.deepEqual(
+    stub.ids(),
+    ["com.samsung.tv.aria-dummy", "abc.netflix", "3KA0pm7a7V.TubiTV", "abc.primevideo", YOUTUBE],
+    "the 404 is skipped and the search goes on into the next batch; the widget is never asked",
+  );
 });
 
 // ── Row 6: detection never fails the run ──────────────────────────────────────────────
@@ -198,7 +209,7 @@ test("detection gives up at its 8 s budget", async () => {
     _now: () => clock,
   });
 
-  assert.match(found.error, /ran out of time/);
+  assert.match(String(found?.error), /ran out of time/, "the budget ends the search rather than walking every id");
 });
 
 test("an applist sdb will not answer is not read, not fatal", async () => {
