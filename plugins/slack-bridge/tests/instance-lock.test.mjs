@@ -49,11 +49,7 @@ test("different stateDirs lock independently", async (t) => {
   await b.release();
 });
 
-test("the Windows pipe name ignores case in the stateDir path",
-  { skip: process.platform !== "win32" ? "windows pipe naming" : false }, () => {
-    assert.equal(lockPath("C:\\Users\\X\\claude-slack"), lockPath("c:/users/x/CLAUDE-SLACK"));
-    assert.match(lockPath("C:\\Users\\X\\claude-slack"), /^\\\\\.\\pipe\\claude-slack-[0-9a-f]{16}$/);
-  });
+// The Windows pipe-naming case lives in instance-lock.win.test.mjs.
 
 // A crashed bridge leaves its socket file behind; nothing answers on it.
 function leaveStaleSocket(stateDir) {

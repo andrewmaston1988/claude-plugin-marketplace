@@ -215,21 +215,7 @@ test("Codex: writeRoots de-duplicate against the primary cwd and against each ot
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
-// Casing is folded by normalizeForCompare on win32 only; on posix two cased
-// spellings are genuinely two directories.
-test("Codex: win32 casing cannot produce a duplicate --add-dir", { skip: process.platform !== "win32" }, () => {
-  const dir = mkdtempSync(join(tmpdir(), "swarm-codex-roots-"));
-  try {
-    const run = join(dir, "run");
-    const invocation = buildCodexInvocation({
-      model: "gpt-5-codex", allowedTools: "Read,Write",
-      cwd: join(dir, "repo"), originalCwd: join(dir, "repo"),
-      additionalDirs: [run.toUpperCase()],
-      writeRoots: [{ path: join(run.toLowerCase(), "report.md"), kind: "file" }],
-    }, "write the report", {});
-    deepEqual(addDirsOf(invocation.argv), [run.toUpperCase()]);
-  } finally { rmSync(dir, { recursive: true, force: true }); }
-});
+// The win32 case-folding case lives in codex.win.test.mjs.
 
 // Ordinary leaves must keep their argv byte-for-byte: configured entries first,
 // in order, and the write-target directories appended after them.

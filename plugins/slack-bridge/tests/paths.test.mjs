@@ -16,12 +16,7 @@ test("paths — all dirs include app name 'claude-slack'", () => {
   }
 });
 
-test("paths — win32: configDir is under APPDATA", () => {
-  if (process.platform !== "win32") return;
-  const paths = getPaths();
-  const appData = process.env.APPDATA;
-  assert.ok(paths.configDir.startsWith(appData), `configDir should be under APPDATA, got: ${paths.configDir}`);
-});
+// The win32 case lives in paths.win.test.mjs.
 
 test("paths — darwin: configDir is under ~/Library/Application Support", () => {
   if (process.platform !== "darwin") return;
