@@ -5,19 +5,20 @@ import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { loadConfig, swarmHome, getConfig } from "../src/config.mjs";
 import { costOfFor } from "../src/run-cost.mjs";
-import { loadManifest, effectivePlanDoc, matchDenylist, isAgentless, ValidationError } from "../src/manifest.mjs";
+import { loadManifest, effectivePlanDoc, matchDenylist, ValidationError } from "../src/manifest.mjs";
 import { resolveRef, listManifests } from "../src/registry.mjs";
-import { modelRoster, refreshRoster } from "../src/roster.mjs";
-import { collapseRoster, visibleModels, probeTopModels } from "../src/discovery.mjs";
-import { enabledProviderIds, providerConfig } from "../src/providers.mjs";
-import { costBands, costSettings } from "../src/cost-settings.mjs";
+import { modelRoster, refreshRoster, providerEnabled, visibleProviderModels } from "../src/roster.mjs";
+import { collapseRoster, probeTopModels } from "../src/discovery.mjs";
+import { providerConfig, enabledProviderIds } from "../src/providers.mjs";
+import { costBands, costSettings, meterCostRows } from "../src/cost-settings.mjs";
+import { seatCheck, launchableRoster } from "../src/seat-check.mjs";
 import { defaultProviderRegistry } from "../src/default-providers.mjs";
 import { loadCorpus, estimateRun, formatEstimate, leafCounts, integrateCaps } from "../src/estimate.mjs";
 import { citationPaths } from "../src/citations.mjs";
 import { listLeaves, displayIdentity } from "../src/results.mjs";
-import { identityOf, identityKey } from "../src/contracts.mjs";
+import { identityKey } from "../src/contracts.mjs";
 import { dim, out, err } from "../src/ui.mjs";
-import { markValidated } from "../src/validated.mjs";
+import { markValidated, clearValidated } from "../src/validated.mjs";
 import { cmdRun, refuseLiveEngine } from "../src/cmd-run.mjs";
 import { cmdServe } from "./cmd-serve.mjs";
 import { cmdStatus } from "./cmd-status.mjs";
@@ -91,21 +92,6 @@ async function usageHeadroom(cfg, { env = process.env, fetchImpl = globalThis.fe
   return (await import("../src/ollama-usage.mjs")).getUsage(cfg, { env, _fetch: fetchImpl });
 }
 
-// The OLLAMA METER rows, for joins against the Ollama roster and the dispatch
-// frontier. Deliberately not the provider walk: `swarm perf` and the seat report
-// rank on the meter's own axis and its bands, and a published-price weight from
-// another provider's rate card would be a cross-provider rank — the one thing
-// the units forbid. `swarm cost` asks cost.mjs for all three lists instead.
-//
-// The history banks the meter's own names (the page's `data-model`);
-// deriveCloudName is the same mapping discovery uses — never a second rule. Both
-// reads are cheap and a missing file reads as empty, so a fresh install is
-// simply "unmeasured".
-async function meterCostRows(env = process.env) {
-  const { ollamaCloudCostRows, readSnapshots, usageHistoryPath } = await import("../src/cost.mjs");
-  return ollamaCloudCostRows(readSnapshots(usageHistoryPath(env)));
-}
-
 // Read usage through registered provider capabilities. `live` lets an adapter
 // fetch at all — the cache still governs whether it does; `force` is the
 // operator's refresh, which only `swarm usage --provider` asks for.
@@ -129,21 +115,6 @@ export async function readProviderUsage(cfg, { registry = defaultProviderRegistr
     }
   }
   return { usages, errors };
-}
-
-function visibleProviderModels(rows, options) {
-  const groups = new Map();
-  for (const row of rows) {
-    const provider = row?.provider || "ollama";
-    if (!groups.has(provider)) groups.set(provider, []);
-    groups.get(provider).push(row);
-  }
-  return [...groups.values()].flatMap((group) => visibleModels(group, options));
-}
-
-function providerEnabled(registry, cfg, value) {
-  const provider = value?.provider || "ollama";
-  try { return registry.get(provider).enabled(cfg); } catch { return false; }
 }
 
 async function cmdModels(rest = [], {
@@ -224,75 +195,16 @@ async function cmdModels(rest = [], {
   return 0;
 }
 
-// Distinct seated models in manifest order, each with its leaf ids — the walk
-// leafCounts uses (agentless skipped, childPlan descended), ids instead of
-// counts. A forEach lane names its template id: the per-item instances do not
-// exist yet at validate time.
-function seatedModels(plan) {
-  const byModel = new Map();
-  const add = (value, leaf) => {
-    const identity = identityOf(value);
-    if (!identity.model) return;
-    const key = identityKey(identity);
-    if (!byModel.has(key)) byModel.set(key, { identity, leaves: [] });
-    byModel.get(key).leaves.push(leaf);
-  };
-  for (const t of plan.tasks) {
-    if (isAgentless(t)) continue;
-    if (t.childPlan) {
-      for (const c of t.childPlan.tasks) {
-        if (isAgentless(c)) continue;
-        add(c, c.id);
-      }
-      continue;
-    }
-    add(t, t.id);
-  }
-  if (plan.digest?.model) add(plan.digest, "__digest");
-  return [...byModel.values()].map(({ identity, leaves }) => ({
-    ...(identity.provider ? { provider: identity.provider } : {}),
-    model: identity.model,
-    leaves,
-  }));
-}
-
-// The launchable roster `swarm models` prints, from the roster the one reader
-// serves — never a fresh probe: validate must not gain a network call.
-async function launchableRoster(cfg, { env = process.env, registry = defaultProviderRegistry() } = {}) {
-  const isDenylisted = (name) => !!matchDenylist(name, cfg);
-  const cached = modelRoster({ config: cfg, env, registry }).models;
-  const enabled = collapseRoster(cached.filter((m) => providerEnabled(registry, cfg, m)),
-    { cloudSuffix: providerConfig(cfg, "ollama")?.cloudSuffix });
-  const visible = new Set(visibleProviderModels(enabled, { isDenylisted }).map(identityKey));
-  const offered = enabled.filter((m) => !isDenylisted(m.model));
-  return offered.filter((m) => visible.has(identityKey(m)));
-}
-
-// The seats block: the graded record for the manifest's seats, printed so the
-// seating decision is made in front of the evidence. Silent when grading is
-// off or the store is empty (a user who has never graded meets nothing), and
-// the store read is skipped entirely in both cases, not just the print.
-async function seatBlock(plan, cfg) {
-  if (cfg.grading?.enabled !== true) return [];
-  const models = seatedModels(plan);
-  if (!models.length) return [];
-  const { readRows, scoresPath } = await import("../src/scores.mjs");
-  const rows = readRows(scoresPath());
-  if (!rows.length) return [];
-  const { seatReport } = await import("../src/seats.mjs");
-  return seatReport({
-    models,
-    rows,
-    costRows: await meterCostRows(),
-    roster: await launchableRoster(cfg),
-    ...(await costSettings()),
-  });
-}
-
 // The reader never throws, so a roster it could not read or hydrate says so here.
 function writeRosterErrors(errors, write) {
   for (const [provider, message] of Object.entries(errors)) write(`roster: ${provider} — ${message}`);
 }
+
+// A refused seat's own teaching line: the record, who beats it, and the two ways out.
+const seatRefusalText = (r) =>
+  `task '${r.leaf}': seats ${r.model} (overall ${r.wtd.toFixed(2)} n=${r.n}), dominated by ${r.dominatedBy} — `
+  + `seat ${r.dominatedBy} or a frontier model, or add "seatReason": "<why this seat>" to ${r.digest ? "the digest block" : "the task"}, `
+  + `e.g. "seatReason": "cross-family verifier: every non-deepseek ollama model is dominated"`;
 
 async function cmdValidate(rest) {
   const cfg = getConfig();
@@ -302,7 +214,10 @@ async function cmdValidate(rest) {
   const roster = modelRoster({ config: cfg, env: process.env, registry: defaultProviderRegistry() });
   writeRosterErrors(roster.errors, err);
   const plan = loadManifest(ref.path, cfg, process.cwd(), { args, fromRegistry, headroom: await usageHeadroom(cfg), cache: roster.models, ...(fromRegistry && { ref: rest[0] }) });
-  out(`manifest OK: ${plan.tasks.length} task(s)${plan.digest ? " + digest" : ""}`);
+  // The seats are read before the first line: `manifest OK` is the approval, and
+  // a refused seat is not approved — so it is never printed above the refusal.
+  const seats = await seatCheck(plan, cfg);
+  if (!seats.refusals.length) out(`manifest OK: ${plan.tasks.length} task(s)${plan.digest ? " + digest" : ""}`);
   for (const warning of plan.warnings || []) out(`warning: ${warning}`);
   // The preview IS the approval: with forEach or composition in play, show the
   // worst-case leaf count the caps permit before anything runs.
@@ -347,7 +262,15 @@ async function cmdValidate(rest) {
   }
   // The consent line: worst-case leaves × historical per-model medians.
   out(formatEstimate(estimateRun(plan.tasks, plan.digest, loadCorpus(join(swarmHome(), "runs")))));
-  for (const line of await seatBlock(plan, cfg)) out(line);
+  for (const line of seats.lines) out(line);
+  // A refusal stops here and revokes any earlier pass: the marker `run` reads is
+  // written only past this point, so the same bytes are refused by `run` too.
+  if (seats.refusals.length) {
+    clearValidated(plan, args);
+    err("manifest validation failed:");
+    for (const refusal of seats.refusals) err(`  - ${seatRefusalText(refusal)}`);
+    return 1;
+  }
   out(`resultsDir: ${plan.resultsDir}`);
   // The gate-preview contract for named/parameterized runs: print the fully
   // resolved document (args substituted, children expanded) LAST, so the whole
@@ -366,7 +289,7 @@ function getFlag(name, args) {
 }
 
 async function cmdPerf(rest) {
-  const { readRows, hideDisabledRows, aggregate, dedupe, scoresPath, frontier, PRIOR_WEIGHT } = await import("../src/scores.mjs");
+  const { readRows, hideDisabledRows, aggregate, overall, dedupe, scoresPath, frontier, PRIOR_WEIGHT } = await import("../src/scores.mjs");
   const { outcomeTail, infraFooter } = await import("../src/perf-tail.mjs");
   const aspect = getFlag("aspect", rest);
   const model = getFlag("model", rest);
@@ -424,6 +347,9 @@ async function cmdPerf(rest) {
     out(dim(LEGEND));
     return 0;
   }
+  // A column's n is not the model's n: one `search` row on a model with 25
+  // overall reads as a gap seat until the overall n sits beside it.
+  const overallN = new Map(overall(rows, { model, domain, combineProviders: true }).cells.map((c) => [c.model, c.n]));
   for (const a of report.aspects) {
     out(`${a.aspect}${a.universal ? dim("  (universal)") : ""}`);
     if (!a.cells.length) {
@@ -443,7 +369,9 @@ async function cmdPerf(rest) {
         : costCols(candidate);
       const flag = c.n === 0 ? dim("  [no grades — outcomes only]") : c.provisional ? dim("  [provisional n<5]") : "";
       const tail = outcomeTail(c, report, { includeInfra: false });
-      out(`    ${c.model.padEnd(w)}  n=${String(c.n).padStart(3)}  mean ${mean.padStart(5)}  wtd ${wtd.padStart(5)}  cost ${cost.padEnd(3)}  ${fm}${flag}${tail ? dim(tail) : ""}`);
+      const total = overallN.get(c.model);
+      const totalPart = Number.isFinite(total) ? `  overall n=${total}` : "";
+      out(`    ${c.model.padEnd(w)}  n=${String(c.n).padStart(3)}${totalPart}  mean ${mean.padStart(5)}  wtd ${wtd.padStart(5)}  cost ${cost.padEnd(3)}  ${fm}${flag}${tail ? dim(tail) : ""}`);
     }
     // Both columns show, ranked on wtd: the raw mean is the evidence, the
     // weighted score is what it is worth given how much of it there is.

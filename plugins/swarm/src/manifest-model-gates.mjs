@@ -33,9 +33,9 @@ export function checkDenylist(model, l, cfg, errors) {
 // governance rejection — reported after it, since a cwd that isn't even
 // allowed to dispatch open models is the more fundamental rejection.
 // FAILS only on a LIVE `exhausted` — the leaf would only park in `quota`, and
-// a cached 100% may describe a window that has since reset. Any other
-// non-live reading (cached, none) WARNS with the banner text: the figure
-// still shows, but no reader mistakes it for a fetch that just happened.
+// a cached 100% may describe a window that has since reset. Every other reading
+// warns only when `provenanceBanner` flags it: that function is the one place
+// that decides a figure is untrustworthy, and a fresh in-TTL cache is not.
 // Nothing on `unknown` without provenance (the provider is off).
 export function checkHeadroom(provider, model, l, headroom, errors, warnings) {
   if (provider !== "ollama") return;
@@ -46,13 +46,13 @@ export function checkHeadroom(provider, model, l, headroom, errors, warnings) {
       `(${headroom.weeklyPctUsed}%, resets ${resets}) — every :cloud leaf will park in ` +
       `\`quota\`. Recast these leaves onto Claude tiers, or re-run after the reset.`
     );
-  } else if (headroom?.provenance && headroom.provenance !== "live" && warnings) {
-    const banner = provenanceBanner(headroom);
-    warnings.push(
-      `${l}: seats ':cloud' model '${model}', but the weekly-allowance figure is not live — ` +
-      (banner.length ? banner.join(" ") : "run `swarm ollama-usage` to refresh it before trusting this run.")
-    );
+    return;
   }
+  // Nothing task-specific in it, so it is one line per manifest however many
+  // :cloud seats and fallbacks the manifest has.
+  const banner = warnings ? provenanceBanner(headroom) : [];
+  const warning = `the weekly-allowance figure for :cloud seats is not live — ${banner.join(" ")}`;
+  if (banner.length && !warnings.includes(warning)) warnings.push(warning);
 }
 
 export function resolveProvider(task, cfg, cache, l, errors, providerRegistry = PROVIDERS) {

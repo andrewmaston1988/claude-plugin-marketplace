@@ -12,6 +12,7 @@ import { isCloudModel, isClaudeModel, CLAUDE_ALIASES } from "./models.mjs";
 import { band, DEFAULT_COST_BANDS } from "./cost.mjs";
 import { identityOf, identityKey } from "./contracts.mjs";
 import { isSentinelModel } from "./manifest.mjs";
+import { costEntry, costIndex } from "./cost-match.mjs";
 
 export function scoresPath(env = process.env) {
   return join(swarmHome(env), "model-scores.jsonl");
@@ -461,19 +462,10 @@ export const dominates = (a, b) => a.wtd >= b.wtd && a.multiplier <= b.multiplie
 // a measured-but-thin one — is UNMEASURED: neither on the frontier nor
 // dominated, and it dominates nothing. Missing is not 0 (free) and not
 // Infinity (dear); absence is not evidence in either direction.
-export function frontier(rows, costs, { aspect, model, provider, domain, costDomain, bands = DEFAULT_COST_BANDS } = {}) {
-  const costOf = new Map();
-  for (const cost of costs || []) {
-    const identity = identityOf(cost);
-    const key = identityKey(identity);
-    const list = costOf.get(key) || [];
-    list.push({
-      ...cost,
-      ...identity,
-      costDomain: cost.costDomain || `${identity.provider || "legacy"}:${cost.unit || "meter-points"}:${cost.classification || "legacy"}`,
-    });
-    costOf.set(key, list);
-  }
+// `canDominate(entry)` limits which participants may dominate, so the seats
+// block can name only a model the reader can actually seat.
+export function frontier(rows, costs, { aspect, model, provider, domain, costDomain, bands = DEFAULT_COST_BANDS, canDominate } = {}) {
+  const costOf = costIndex(costs);
   const cells = aspect
     ? aggregate(rows, { aspect, model, ...(provider !== undefined && { provider }), domain }).aspects[0].cells
     : overall(rows, { model, ...(provider !== undefined && { provider }), domain }).cells;
@@ -489,15 +481,7 @@ export function frontier(rows, costs, { aspect, model, provider, domain, costDom
     onFrontier: false,
     dominatedBy: null,
   }));
-  const costFor = (entry) => {
-    const identity = identityOf(entry);
-    const candidates = (costOf.get(identityKey(identity)) || [])
-      .filter((cost) => costDomain === undefined || cost.costDomain === costDomain);
-    if (!candidates.length) return null;
-    const domains = new Set(candidates.map((cost) => cost.costDomain));
-    if (costDomain === undefined && domains.size > 1) return null;
-    return candidates.find((cost) => cost.mult != null) || candidates[0];
-  };
+  const costFor = (entry) => costEntry(costOf, entry, costDomain);
   for (const entry of entries) {
     const cost = costFor(entry);
     if (!cost) continue;
@@ -508,10 +492,14 @@ export function frontier(rows, costs, { aspect, model, provider, domain, costDom
     }
   }
   const participants = entries.filter((e) => e.wtd != null && e.multiplier != null);
+  // `canDominate` narrows who may BEAT a row, never which rows are scored: the
+  // prior is the mean of every model's mean, so filtering rows would move every
+  // score in the table.
+  const dominators = canDominate ? participants.filter(canDominate) : participants;
   for (const e of participants) {
     // The first dominator in aggregate order is the highest-quality one, so a
     // dominated row names the best model that beat it, not just any.
-    const dominator = participants.find((p) => p !== e && p.costDomain === e.costDomain && dominates(p, e));
+    const dominator = dominators.find((p) => p !== e && p.costDomain === e.costDomain && dominates(p, e));
     if (dominator) e.dominatedBy = displayIdentity(identityOf(dominator));
     else e.onFrontier = true;
   }

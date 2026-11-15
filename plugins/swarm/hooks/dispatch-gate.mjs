@@ -25,6 +25,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
+import { swarmSubcommandRe } from "./swarm-command.mjs";
 
 const SWARM_HOME = process.env.SWARM_HOME || path.join(os.homedir(), ".swarm");
 const CONFIG = path.join(SWARM_HOME, "config.json");
@@ -45,14 +46,9 @@ export function shapeMarkerPath(sessionId, home = SWARM_HOME) {
   return path.join(home, `.shape-ack-${sessionId}`);
 }
 
-// Two spellings reach the engine: `node … swarm.mjs run` and the PATH shim `swarm run`
-// (swarm.cmd / swarm.ps1), bare or path-qualified. Anchored on command position — start,
-// or after `;`, `&&`, `||`, `|`, `(` — so the phrase inside a `git commit -m` argument
-// (observed 2026-09-06) is not a dispatch.
-const DISPATCH_WORD = String.raw`(?:node(?:\.exe)?\s+["']?[^"'\s]*swarm\.mjs["']?|["']?(?:[^"'\s]*[\\/])?swarm(?:\.cmd|\.ps1)?["']?)`;
-const DISPATCH_RE = new RegExp(
-  String.raw`(?:^|;|&&|\|\||\||\()\s*(?:nohup\s+)?${DISPATCH_WORD}\s+run\b`,
-);
+// The engine word and its anchor live in swarm-command.mjs, shared with output-guard.
+// No line-break position: a multi-line commit body can start a line with `swarm run:`.
+const DISPATCH_RE = swarmSubcommandRe("run", { lineBreak: false });
 
 // Shell decorations that steal the stream from the operator.
 const PIPE_RE = /\|/;

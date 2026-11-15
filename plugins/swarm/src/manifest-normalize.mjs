@@ -86,6 +86,9 @@ export function normalizeTasks(rawTasks, { cwd, resultsDir, cfg, defaultTimeoutM
       if (provider) checkGovernance(provider, t.model, originalCwd, l, cfg, errors, io);
       checkDenylist(t.model, l, cfg, errors);
       if (provider) checkHeadroom(provider, t.model, l, headroom, errors, warnings);
+      if (t.seatReason !== undefined && (typeof t.seatReason !== "string" || !t.seatReason.trim())) {
+        errors.push(`${l}: seatReason must say why this seat is used, as a non-empty string — e.g. "seatReason": "cross-family verifier"`);
+      }
       if (t.fallbackModel !== undefined) {
         if (typeof t.fallbackModel !== "string" || !t.fallbackModel) {
           errors.push(`${l}: fallbackModel must be a model name string`);
@@ -181,6 +184,7 @@ export function normalizeTasks(rawTasks, { cwd, resultsDir, cfg, defaultTimeoutM
       ...(!isCompute && !isManifest && !isIntegrate && { provider }),
       fallbackModel: !isCompute && !isManifest && typeof t.fallbackModel === "string" ? t.fallbackModel : undefined,
       ...(!isCompute && !isManifest && !isIntegrate && fallbackProvider && { fallbackProvider }),
+      ...(!isCompute && !isManifest && !isIntegrate && typeof t.seatReason === "string" && { seatReason: t.seatReason }),
       effort: isCompute || isManifest || isIntegrate ? undefined : resolvedEffort,
       // An authored list wins whole. The default is filled in HERE — not appended at
       // dispatch — so the snapshot and the leaf's own result record the list it got.

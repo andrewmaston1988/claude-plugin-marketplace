@@ -636,11 +636,22 @@ replaces its rows rather than double-weighting the model.
 `n=0` rather than being omitted.
 
 **`swarm validate`** prints the record the seating is decided on when grading is on: a
-`seats:` block per seated model (leaf ids, scores, cost band, frontier verdict) plus one
+`seats:` block per seated model (leaf ids, scores, cost band, seatable-frontier verdict) plus one
 line for launchable models it didn't seat. `never graded` / `cost unmeasured` are written
 in words, never a number — absence is not zero. When the manifest seats no launchable model
 below 20 graded rows, one `gap seat available:` line names the strongest candidate — seat it
 on one bounded leaf; a grade at n<20 is not a verdict.
+
+It also **refuses a dominated seat**: a model with an overall record of n ≥ 40 that a model
+this machine can launch, over canon, beats on both quality and cost — unless the task carries
+`"seatReason": "<why this seat>"` (`digest.seatReason` for the digest). `dominated by` therefore
+only ever names a launchable model, and a per-column count never decides it: the verdict is the
+overall record. Exit 1 writes no validated marker, so `run` refuses the same bytes.
+
+**Validate and perf output is read whole.** It IS the seating record, so it **MUST NOT** be
+piped through `grep`, `head`, `tail`, `Select-String` or any filter — to keep it, redirect to a
+file with `> out.txt` and read that file whole. A PreToolUse hook denies the pipe; the prose says
+it first.
 
 **Context fit.** `swarm validate` refuses a seat whose `mustRead` reads (bytes/4, plus the prompt) exceed 50% of the seated model's declared `contextLength` — the other half is left for tool framing, output and a schema re-ask. It checks `fallbackModel` seats against their own windows, and counts only the ranges a `{path, lines}` entry names. A `:cloud` seat runs through the claude CLI, so its window is the CLI default (200k) unless the task sets `"contextWindow": "1m"`. A model whose roster row declares no `contextLength` is not checked; when its mustRead estimate is at least 100k tokens, `validate` warns with the seat and estimate, but never refuses it. When some reads cannot be sized — a `{{resultPath:…}}` entry, or a worktree leaf whose tree is cut at dispatch — the estimate prints as a `≥` floor; a task with nothing sizeable at all is not checked.
 

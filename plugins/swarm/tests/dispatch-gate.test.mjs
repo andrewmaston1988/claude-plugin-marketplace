@@ -201,6 +201,14 @@ test("gate fails open on a missing or empty command", () => {
   equal(gateDispatch({ command: "", runInBackground: true, markerExists: false }).block, false);
 });
 
+// A multi-line commit body can start a line with `swarm run:` — a line break is not a
+// command position here, so that is not a dispatch.
+test("gate does NOT fire on a commit body line that starts `swarm run:`", () => {
+  const command = 'git commit -m "Fix the gate\n\nswarm run: refuse a results dir whose engine is alive"';
+  const r = gateDispatch({ command, runInBackground: true, markerExists: false });
+  equal(r.block, false, command);
+});
+
 // The marker writer — the other half of the contract. The payload shape is the one
 // the working commit-skill marker uses: tool_name "Skill", skill at tool_input.skill.
 // A plugin skill may arrive namespaced or bare, so accept both.
