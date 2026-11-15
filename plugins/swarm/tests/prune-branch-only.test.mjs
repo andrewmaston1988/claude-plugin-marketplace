@@ -80,12 +80,12 @@ test("row 3: the run's own branches are rows with no tree — landed ones go, un
     ok(dry.stdout.includes(landed) && dry.stdout.includes(open), dry.stdout);
     ok(dry.stdout.includes("1 unlanded"), dry.stdout);
 
-    const refused = runCli(["prune", f.resultsDir], { cwd: f.dir, env, config });
-    equal(refused.status, 1, refused.stdout + refused.stderr);
-    ok(refused.stderr.includes("(no tree)") && refused.stderr.includes(open), refused.stderr);
-    ok(!/freed/.test(refused.stdout), refused.stdout);
-    ok(gitOut(["branch", "--list", landed], f.repo), "a refused prune deletes nothing");
-    ok(gitOut(["branch", "--list", open], f.repo), "a refused prune deletes nothing");
+    const partial = runCli(["prune", f.resultsDir], { cwd: f.dir, env, config });
+    equal(partial.status, 1, partial.stdout + partial.stderr);
+    ok(partial.stderr.includes("(no tree)") && partial.stderr.includes(open), partial.stderr);
+    ok(/freed .* across 0 worktrees and 1 branch/.test(partial.stdout), partial.stdout);
+    equal(gitOut(["branch", "--list", landed], f.repo), "", "the landed branch-only row goes");
+    ok(gitOut(["branch", "--list", open], f.repo), "the unlanded branch-only row is kept");
 
     const discarded = runCli(["prune", f.resultsDir, "--discard-unlanded"], { cwd: f.dir, env, config });
     equal(discarded.status, 0, discarded.stdout + discarded.stderr);

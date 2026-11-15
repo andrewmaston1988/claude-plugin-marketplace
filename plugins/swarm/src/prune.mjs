@@ -374,29 +374,42 @@ export function blockers(rows) {
 }
 
 // Destroy in order: the worktree directory, then the branch it sat on — a row
-// whose repo is gone skips git entirely and is just removed from disk.
+// whose repo is gone skips git entirely and is just removed from disk. Returns the
+// rows git refused with its own words, so a caller reports what happened, not what
+// it asked for.
 export function execute(rows, git, fs, { resultsDir, cfg } = {}) {
   const records = resultsDir ? listTreeRecords(resultsDir) : [];
+  const failed = [];
+  const fail = (row, r) => failed.push({ row, reason: r.stderr || r.stdout || `git exited ${r.status}` });
   for (const row of rows) {
     // A branch-only row has nothing on disk: its repo's own ref is the whole row.
     if (row.path == null) {
       if (!fs.existsSync(row.repo)) continue;
-      git(["branch", "-D", row.branch], row.repo);
+      const del = git(["branch", "-D", row.branch], row.repo);
+      if (del.status !== 0) fail(row, del);
       continue;
     }
     if (!fs.existsSync(row.repo)) {
       fs.rmSync(row.path, { recursive: true, force: true });
     } else if (row.missing) {
       // A missing tree may be locked by a killed `worktree add`; only -f -f removes one.
-      git(["worktree", "remove", "-f", "-f", row.path], row.repo);
-      if (row.branch) git(["branch", "-D", row.branch], row.repo);
+      const rm = git(["worktree", "remove", "-f", "-f", row.path], row.repo);
+      // A tree git kept still holds the branch; asking for it adds only a second error.
+      if (rm.status !== 0) { fail(row, rm); continue; }
+      if (row.branch) {
+        const del = git(["branch", "-D", row.branch], row.repo);
+        if (del.status !== 0) fail(row, del);
+      }
     } else {
       // A detached tree has no branch, and may be left locked by a killed `worktree add`.
       if (row.branch) {
-        git(["worktree", "remove", "--force", row.path], row.repo);
-        git(["branch", "-D", row.branch], row.repo);
+        const rm = git(["worktree", "remove", "--force", row.path], row.repo);
+        if (rm.status !== 0) { fail(row, rm); continue; }
+        const del = git(["branch", "-D", row.branch], row.repo);
+        if (del.status !== 0) fail(row, del);
       } else {
-        git(["worktree", "remove", "-f", "-f", row.path], row.repo);
+        const rm = git(["worktree", "remove", "-f", "-f", row.path], row.repo);
+        if (rm.status !== 0) fail(row, rm);
       }
     }
     if (resultsDir && !fs.existsSync(row.path)) {
@@ -408,6 +421,7 @@ export function execute(rows, git, fs, { resultsDir, cfg } = {}) {
     }
   }
   if (resultsDir) removeEmptyTreeParents(resultsDir, cfg, fs);
+  return { failed };
 }
 
 function removeEmptyTreeParents(resultsDir, cfg, fs) {
