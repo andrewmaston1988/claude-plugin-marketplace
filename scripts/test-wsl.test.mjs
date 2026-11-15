@@ -64,7 +64,7 @@ function makeFake(options = {}) {
     if (inner.startsWith("git clone ")) return step({ status: 0 });
     if (inner === "git config core.fileMode false") return step({ status: 0 });
     if (inner === "git fetch --quiet origin") return step({ status: 0 });
-    if (inner.startsWith("git checkout --force --detach ")) return step({ status: 0 });
+    if (inner.startsWith("git checkout ")) return step({ status: 0 });
     if (inner.startsWith("rsync ")) return step({ status: 0 });
     if (inner.startsWith("node ")) return { status: runStatus };
     throw new Error(`unexpected wsl.exe call: ${line}`);
@@ -235,6 +235,14 @@ test("wsl.exe is never given a shell string", async () => {
         assert.equal(typeof arg, "string");
         assert.doesNotMatch(arg, /(^|\s)(bash|sh|cmd|powershell)\s+-c/, `shell string in ${arg}`);
         assert.doesNotMatch(arg, /^["'].*["']$/, `quoted command string in ${arg}`);
+      }
+      // A command handed over as one string is what wsl.exe re-quotes.
+      for (const arg of args.slice(args.indexOf("--") + 1)) {
+        assert.doesNotMatch(
+          arg,
+          /^(git|rsync|node|rm|mkdir|test|printenv)\s+\S/,
+          `a whole command reached wsl.exe as one argument: ${arg}`,
+        );
       }
     }
   }
