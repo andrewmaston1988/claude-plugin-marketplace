@@ -2,6 +2,7 @@
 // Composable statusline segment: prints 🔥 (warm) / ❄️ (busted/cold) + context %.
 // Reads the statusline JSON on stdin (needs transcript_path + model). Ambient, not an alert.
 import { cacheState, readRecentAssistantTurns, contextUtilization, contextWindowFor } from '../hooks/lib/context.mjs';
+import { catalogModels } from '../hooks/lib/claude-catalog.mjs';
 
 let stdin = '';
 process.stdin.setEncoding('utf8');
@@ -15,7 +16,7 @@ process.stdin.on('end', () => {
   if (!last) { process.stdout.write(''); process.exit(0); }
   const glyph = { warm: '🔥', busted: '❄️', cold: '❄️' }[cacheState(last.usage)];
   const model = (p.model && (p.model.id || p.model)) || last.model;
-  const pct = contextUtilization(last.usage, contextWindowFor(model));
+  const pct = contextUtilization(last.usage, contextWindowFor(model, catalogModels()));
   process.stdout.write(`${glyph} ${pct}%`);
   process.exit(0);
 });

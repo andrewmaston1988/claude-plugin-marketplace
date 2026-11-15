@@ -6,6 +6,9 @@
     "UserPromptSubmit": [
       { "hooks": [ { "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/prompt-submit-checkpoint.mjs\"" } ] }
     ],
+    "PostToolUse": [
+      { "hooks": [ { "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/post-tool-checkpoint.mjs\"" } ] }
+    ],
     "SessionStart": [
       { "matcher": "startup|clear", "hooks": [ { "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/session-start-resume.mjs\"" } ] },
       { "matcher": "compact", "hooks": [ { "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/session-start-compact.mjs\"" } ] }

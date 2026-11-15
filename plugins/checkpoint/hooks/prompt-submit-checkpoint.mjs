@@ -12,17 +12,15 @@ import {
 import {
   nextDelay, keepaliveAction, cadenceFor, resolveTtlSource, offerOverdue,
 } from './lib/cadence.mjs';
-import {
-  contextWindowFor, contextUtilization, decideCheckpointNudge, readRecentAssistantTurns,
-} from './lib/context.mjs';
-import { SKILL_DISAMBIGUATION } from './lib/skill-ref.mjs';
+import { readRecentAssistantTurns } from './lib/context.mjs';
+import { checkpointNudge } from './lib/nudge.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const TEMPLATES_DIR = path.resolve(HERE, 'templates');
 const SETTINGS = path.join(os.homedir(), '.claude', 'settings.json');
 
-// Byte-fallback threshold (used only when no usage row is available yet).
-const BYTES_THRESHOLD = 2_000_000;
+// Byte fallback (no usage row yet). A token is ~4 transcript bytes.
+export const BYTES_PER_TOKEN = 4;
 
 // Honest provenance for the {ttlNote} template slot, keyed by resolveTtlSource().source.
 export const TTL_NOTES = {
@@ -38,19 +36,6 @@ function readTemplate(name) {
 
 // --- testable pure helpers (exported) ---
 
-// Prefer usage-derived utilisation; fall back to a coarse byte estimate.
-export function resolveUtilisation(recentTurns, transcriptBytes) {
-  const last = recentTurns[recentTurns.length - 1];
-  if (last && last.usage) {
-    const pct = contextUtilization(last.usage, contextWindowFor(last.model));
-    if (pct > 0) return { pct, source: 'usage' };
-  }
-  const pct = transcriptBytes >= BYTES_THRESHOLD
-    ? Math.min(100, 75 + Math.floor((transcriptBytes - BYTES_THRESHOLD) / 200_000))
-    : Math.floor((transcriptBytes / BYTES_THRESHOLD) * 75);
-  return { pct, source: 'bytes' };
-}
-
 // Third-party providers expose no prompt-cache TTL — there is no cache window
 // to keep warm, so the keepalive is Claude-model-only. Substring, not prefix:
 // Bedrock/Vertex ids wrap the family name (us.anthropic.claude-*). Unknown
@@ -61,12 +46,6 @@ export function isThirdPartyModel(recentTurns) {
     if (typeof m === 'string' && m && m !== '<synthetic>') return !m.includes('claude');
   }
   return false;
-}
-
-export function buildCheckpointNudge(pct) {
-  return `Context is ~${pct}% full. No need to stop — at your next natural pause, call the Skill `
-    + `tool with skill="checkpoint:checkpoint" to write a STATE.md handover so a fresh session can `
-    + `pick up cleanly. ${SKILL_DISAMBIGUATION}`;
 }
 
 function emitContext(ctx) {
@@ -163,16 +142,18 @@ async function main() {
   // Ticks are for cache warmth only — skip the real-work jobs.
   if (isTick) { writeJSON(STATE_DB, state); emitContext(ctx); return; }
 
-  // --- 1. Context-pressure nudge ---
+  // --- 1. Context-pressure nudge (token bands against the real compact trigger) ---
   let transcriptBytes = 0;
   try { if (transcriptPath) transcriptBytes = fs.statSync(transcriptPath).size; } catch {}
-  const { pct } = resolveUtilisation(recent, transcriptBytes);
-  if (sState && decideCheckpointNudge(pct, sState.lastFiredPct)) {
-    sState.lastFiredPct = pct;
-    state[sessionId] = sState;
-    const nudge = buildCheckpointNudge(pct);
-    ctx = ctx ? `${ctx}\n\n${nudge}` : nudge;
-  }
+  const nudge = checkpointNudge({
+    recentTurns: recent,
+    cwd: String(payload.cwd || ''),
+    env: process.env,
+    sessionId,
+    settings,
+    fallbackUsed: Math.floor(transcriptBytes / BYTES_PER_TOKEN),
+  });
+  if (nudge) ctx = ctx ? `${ctx}\n\n${nudge}` : nudge;
 
   writeJSON(STATE_DB, state);
   emitContext(ctx);

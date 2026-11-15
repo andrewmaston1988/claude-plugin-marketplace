@@ -4,6 +4,9 @@ import os from 'node:os';
 
 export const STATE_DB = path.join(os.homedir(), '.claude', '.checkpoint-state.json');
 export const KEEPALIVE_LOG = path.join(os.homedir(), '.claude', '.checkpoint-keepalive.jsonl');
+// Per-session nudge state and band claims. Its own dir, never STATE_DB: the
+// PostToolUse hook must not race the keepalive's whole-map read-modify-write.
+export const NUDGE_DIR = path.join(os.homedir(), '.claude', '.checkpoint-nudge');
 
 export function encodeProject(p) { return p.replace(/[\\/:]/g, '-'); }
 
@@ -177,8 +180,62 @@ export function docsDirForStatePath(statePath) {
   return m[1] + '-docs';
 }
 
-// True if `body` has user-meaningful content (not empty, not just whitespace).
-// Used by the snapshot hook to refuse self-clobber of a non-empty STATE.
+// Absolute sibling docs dir for a resolved STATE path (docsDirForStatePath is
+// only the dir *name*; the caller joins it to the STATE's own directory).
+// '' when the STATE basename does not match STATE_FILE_RE (CLAUDE_STATE_PATH
+// override), in which case callers skip the snapshot.
+export function docsDirPath(statePath) {
+  const name = docsDirForStatePath(statePath);
+  return name ? path.join(path.dirname(statePath), name) : '';
+}
+
+// Header block (frontmatter) + the NEXT ACTIONS section of a STATE file,
+// verbatim, truncated to maxChars with a pointer line when cut. '' when the
+// file is unreadable. The frontmatter is the compaction-risky part a reader
+// needs first; NEXT ACTIONS is the ordered resume list.
+export function readStateHead(statePath, maxChars = Infinity) {
+  let body = '';
+  try { body = fs.readFileSync(statePath, 'utf8'); } catch { return ''; }
+  const lines = body.split('\n');
+  let headerEnd = -1;
+  if (lines.length && lines[0].trim() === '---') {
+    for (let i = 1; i < lines.length; i++) {
+      if (lines[i].trim() === '---') { headerEnd = i; break; }
+    }
+  }
+  const header = headerEnd >= 0 ? lines.slice(0, headerEnd + 1).join('\n') : '';
+  let nextStart = -1;
+  for (let i = 0; i < lines.length; i++) {
+    if (/^## NEXT ACTIONS\b/.test(lines[i])) { nextStart = i; break; }
+  }
+  let section = '';
+  if (nextStart >= 0) {
+    let nextEnd = lines.length;
+    for (let i = nextStart + 1; i < lines.length; i++) {
+      if (/^## /.test(lines[i])) { nextEnd = i; break; }
+    }
+    section = lines.slice(nextStart, nextEnd).join('\n').replace(/\n+$/, '');
+  }
+  let out = [header, section].filter(Boolean).join('\n\n');
+  if (out.length > maxChars) {
+    const pointer = '\n…read the file for the rest';
+    out = out.slice(0, Math.max(0, maxChars - pointer.length)).replace(/\n+$/, '') + pointer;
+  }
+  return out;
+}
+
+// Newest `precompact-<stamp>.md` in the docs dir, by filename stamp (they sort
+// lexicographically). '' when the dir is missing or holds no snapshots.
+export function latestPrecompactSnapshot(docsDir) {
+  if (!docsDir) return '';
+  let names;
+  try { names = fs.readdirSync(docsDir); } catch { return ''; }
+  const snaps = names
+    .filter(n => /^precompact-\d{8}T\d{6}Z\.md$/.test(n))
+    .sort();
+  return snaps.length ? path.join(docsDir, snaps[snaps.length - 1]) : '';
+}
+
 // Rename a STATE file to embed the *current* UTC stamp. The sessionId portion
 // of the filename is preserved; only the trailing `YYYYMMDDTHHMMSSZ` advances.
 // If the target name already exists in the same directory (e.g. another
@@ -215,6 +272,8 @@ export function isSkeletonState(body) {
   return typeof body === 'string' && body.includes(SKELETON_MARKER);
 }
 
+// True if `body` has user-meaningful content (not empty, not just whitespace).
+// Used by the snapshot hook to refuse self-clobber of a non-empty STATE.
 export function isMeaningfulState(body) {
   if (typeof body !== 'string') return false;
   const stripped = body.replace(/[\s ]+/g, '');
@@ -228,7 +287,8 @@ export function readJSON(p, fallback) {
 export function writeJSON(p, obj) {
   try {
     fs.mkdirSync(path.dirname(p), { recursive: true });
-    const tmp = p + '.tmp';
+    // Unique tmp: concurrent writers sharing one name rename each other's bytes.
+    const tmp = `${p}.${process.pid}.${Math.random().toString(36).slice(2)}.tmp`;
     fs.writeFileSync(tmp, JSON.stringify(obj, null, 2), 'utf8');
     fs.renameSync(tmp, p);
   } catch { /* non-fatal */ }
@@ -238,8 +298,8 @@ export function writeJSON(p, obj) {
 export function getSessionState(state, sid) {
   const cur = state[sid];
   if (cur && typeof cur === 'object') return cur;
-  if (typeof cur === 'number') return { lastSize: cur, userTs: 0, lastActivityTs: 0, lastTickTs: 0, lastInjectedDelay: 0, lastFiredPct: null, lastInjectTs: 0, injectPending: false };
-  return { lastSize: 0, userTs: 0, lastActivityTs: 0, lastTickTs: 0, lastInjectedDelay: 0, lastFiredPct: null, lastInjectTs: 0, injectPending: false };
+  if (typeof cur === 'number') return { lastSize: cur, userTs: 0, lastActivityTs: 0, lastTickTs: 0, lastInjectedDelay: 0, lastInjectTs: 0, injectPending: false };
+  return { lastSize: 0, userTs: 0, lastActivityTs: 0, lastTickTs: 0, lastInjectedDelay: 0, lastInjectTs: 0, injectPending: false };
 }
 
 export function appendJSONL(p, obj) {
