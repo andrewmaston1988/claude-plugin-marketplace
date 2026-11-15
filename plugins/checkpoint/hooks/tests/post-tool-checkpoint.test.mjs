@@ -141,6 +141,9 @@ test('eight concurrent hook processes at a band produce exactly one nudge', asyn
   const f = fixture(t);
   const transcript = path.join(f.root, 'session.jsonl');
   usageTranscript(transcript, 407_000, 100_000);
+  // A directory where the state file would be: every process reads empty state
+  // and writes nothing, so the exclusive claim is the only thing deduping.
+  fs.mkdirSync(nudgeStatePath('pt-d', f.nudgeDir), { recursive: true });
   const payload = { cwd: f.cwd, session_id: 'pt-d', transcript_path: transcript };
 
   const results = await Promise.all(Array.from({ length: 8 }, () => runHookAsync(f.home, payload)));
