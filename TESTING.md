@@ -29,7 +29,7 @@ node scripts/test.mjs --wsl
 - `--wsl`: sync the mirror and run `node scripts/test.mjs --all` there. Other selection flags, including `--list`, do not narrow or preview this run.
 - `--help` or `-h`: print usage.
 
-Exit 0 means success, including an empty selection. Exit 1 means a test run failed or timed out. Exit 2 means a request or prerequisite failed, such as an unknown suite, unresolved diff base, or unavailable WSL distro. WSL returns the remote runner's exit code once it starts.
+Exit 0 means success, including an empty diff selection. Exit 1 means a test run failed or timed out, or a whole-suite run matched no file. Exit 2 means a request or prerequisite failed, such as an unknown suite, unresolved diff base, or unavailable WSL distro. WSL returns the remote runner's exit code once it starts.
 
 ## Diff selection
 
@@ -51,7 +51,7 @@ Pipeline has core, parity, and script runs. Core and parity load `.env.test`. Pi
 
 Runs execute sequentially with explicit test-file arguments and stream output. Each prints a result and duration. Swarm has a 20-minute test-process timeout; other runs have 10 minutes. Timeout handling kills the process tree on Windows or process group on Linux. Installation happens before that timer.
 
-Empty CLI selections are skipped, including suites with no matching files. The runner never launches bare `node --test` for an empty selection.
+In diff mode, a run with nothing selected is skipped. A whole-suite run (`--suite`, `--all`) whose globs match no file fails and names the glob. Either way the runner never launches a bare `node --test`.
 
 ## The plugin-dev distro
 
