@@ -16,9 +16,9 @@ for it.
 ## Procedure
 
 0. **Install**: `swarm install`. Writes `~/.local/bin/swarm-resolver.mjs`, `~/.local/bin/swarm`,
-   and `~/.local/bin/swarm.cmd`; `~/.local/bin` must be on PATH. Skip if the command is already
-   available. Re-run after any plugin update to refresh the resolver copy; it is idempotent and
-   overwrites the same three paths.
+   and — on Windows only — `~/.local/bin/swarm.cmd`; `~/.local/bin` must be on PATH. Skip if the
+   command is already available. Re-run after any plugin update to refresh the resolver copy; it
+   is idempotent and overwrites the same paths.
 1. **Materialise**: `swarm config init`. Creates the file with every shipped key, or
    fills in keys a newer plugin version added; values already set are never touched. Say what
    it did in one line (created / added N / up to date).
@@ -44,9 +44,10 @@ for it.
 ### Stage 0 — put `swarm` on PATH
 
 The `swarm` command is the only supported way to invoke the engine. `swarm install` writes
-`~/.local/bin/swarm-resolver.mjs`, `~/.local/bin/swarm`, and `~/.local/bin/swarm.cmd`, and expects
-`~/.local/bin` to be on PATH. Re-running refreshes the resolver copy; it is idempotent and
-overwrites the same three paths. Once installed, every later stage uses `swarm <subcommand>`.
+`~/.local/bin/swarm-resolver.mjs`, `~/.local/bin/swarm`, and — on Windows only —
+`~/.local/bin/swarm.cmd`, and expects `~/.local/bin` to be on PATH. Re-running refreshes the
+resolver copy; it is idempotent and overwrites the same paths. Once installed, every later stage
+uses `swarm <subcommand>`.
 
 **If `swarm` is not on PATH yet** — the first-run case, and the one thing that cannot go through
 the command itself — invoke the engine directly, once. You already hold the authoritative
@@ -406,15 +407,19 @@ from the appendix. If no, close.
 | `providers.ollama.cloud.ollama.enabled` | `false` | Stage 1b. Gates the whole meter: off, `models`/`validate`/`modeFor` never read the cache and the feature is invisible. |
 | `providers.ollama.cloud.ollama.cookiePath` | `null` | Stage 1b. Where `ollama-usage --cookie` writes the browser token; falls back to `~/.swarm/ollama-cookie.json` when unset. Never `config.json` itself. |
 | `providers.ollama.cloud.ollama.settingsUrl` | `https://ollama.com/settings` | Where the usage fetch reads the meter; a test hook like `quotaUsageUrl`. |
+| `providers.ollama.cloud.ollama.costBands` / `valueMargin` | `[2, 5]` / `0.5` | Band edges for `swarm cost`'s 1/2/3 cost band, and the "near the top" margin `perf --overall` allows a gap candidate. Malformed values fall back to the defaults. |
 | `providers.ollama.usageTimeoutMs` | `5000` | Bound on the usage fetch; a hung ollama.com times out into the cached reading (banner: `/!\ Fetch Timed Out`) instead of wedging `validate`. |
 | `providers.codex.enabled` / `path` / `sandbox` | `false` / `codex` / `workspace-write` | Opt-in Codex app-server provider; model discovery uses `model/list`, and live usage is explicit. |
 | `concurrency` | `4` | Ceiling on leaves alive at once (each is a full headless `claude` session). A manifest may run narrower, never wider — asking for more fails `validate`. A rate-limited leaf frees its slot while it backs off. |
 | `timeoutMs` | `3600000` | Per-leaf wall clock; past it the leaf is `timeout`, slot freed. |
+| `minFreeMemMb` / `valveFreeMemMb` | `2048` / `1024` | Machine headroom, in MB free. Below `minFreeMemMb` a leaf does not spawn — it parks as `retrying` with `⏸ low memory` and is re-driven once memory recovers (or once nothing else runs at all); below `valveFreeMemMb` the newest running leaf is stopped rather than the whole run dying to an OOM, and never when it is the only one running. `0` disables that half; a `valveFreeMemMb` above `minFreeMemMb` fails the config load. |
 | `disable1mContext` | `true` | Stage 7b. `false` gives every Claude leaf the 1M context window by default (a wall-clock lever, ~+45% cost, same quality); a task's own `settings` always wins. |
 | `retry.rateLimited` / `retry.backoffMs` | `2` / `30000` | Retries after a rate-limit failure, exponential from the backoff; the slot frees while waiting. |
 | `retry.spawnError` | `1` | Retries when the leaf process fails to start. |
+| `retry.lookupFailed` | `3` | Retries when the leaf's own repository lookup fails, on the same exponential backoff. |
 | `resultInlineCap` | `4000` | Between leaves, during a run: when leaf B's prompt says `{{result:A}}`, the engine pastes A's output text into B's prompt before launching B — up to this many characters, then cuts (flagged on the leaf, in `run.log` and the closing block). `{{resultPath:A}}` pastes the file path instead, uncapped; verifiers must use that. Not the digest — the digest reads every result file from disk after the run. |
 | `worktreeBranchPrefix` | `swarm/` | Branch prefix for worktree-isolated leaves. |
+| `treeRoot` | `null` | Where isolated trees are cut — `<treeRoot>/<project>/<run>/<name>`. Unset = `~/.swarm/worktrees`. Moving it affects new trees only; an existing run's trees are still found through the records it wrote. |
 | `modelDenylist` | `[]` | Case-insensitive substrings; matching models fail `validate` and vanish from `models`. |
 | `notifyCmd` | `null` | Stage 6. |
 | `quotaPreflight` | `true` | Before dispatch, read usage for every enabled provider with its own credentials; refuse when usage is exhausted. `false` skips every provider's usage preflight, including Codex. |
@@ -427,11 +432,13 @@ from the appendix. If no, close.
 | `dashboard.port` | `7331` | Listen port; also the firewall rule's port. |
 | `dashboard.https` | `false` | Stage 4. Serves TLS on that same port from a CA swarm generates under `~/.swarm/tls/`. On buys a phone app (Chrome mints a standalone one only for a secure origin); on costs the old `http://` bookmarks and every phone's one-time CA install. |
 | `dashboard.livenessPollMs` | `10000` | How often the server re-checks which runs are live and tells connected browsers. Two things produce no filesystem event and are only ever caught by this clock: a run finishing (its `summary.json` lands in a path nothing watches) and an engine dying. It also rebuilds file watchers, so one that silently stops delivering recovers instead of leaving the page deaf until a manual refresh. Ticks only while a dashboard is actually open — nothing runs with no client connected. Lower it for a snappier list at the cost of more directory scans. |
+| `dashboard.clockMs` / `uiPollMs` / `usagePollMs` / `statsPollMs` | `1000` / `5000` / `60000` / `300000` | Browser-side cadence, handed to the page by the server: the clock that moves elapsed timers, the full-view revalidation, and the usage and stats tabs' own refresh. Nothing runs server-side on these. |
 | `dashboard.finishedPerProject` | `10` | How many finished runs each displayed project keeps on the runs list, newest first. A repo and its worktree keys are one group — the cap is per displayed project, not per run directory — and a truncated section header reads `N of M finished`. A `Show all N` row at the foot of an expanded stack fetches that project in full when you want the rest. |
 | `dashboard.autoRestartOnUpdate` | `true` | A running daemon hands the port to a shim-started replacement when the installed version moves; `false` reports the mismatch instead — `status` and `doctor` show the running version as stale, `serve restart` applies it by hand. |
 | `dashboard.tray` | `true` | Windows only: the tray icon, titled `swarm`, that polls the pid record so it follows the daemon across restarts and re-execs — Open dashboard / Restart / Stop, the running version, and a status line. With `dashboard.enabled: false` it still appears, in its disabled state: `Open dashboard (Disabled)` greyed, `Enable dashboard` in place of Stop. `false` spawns no tray at all. |
 | `swarm.always` | `false` | Stage 3. |
 | `swarm.workflowNudge` | `true` | One-time "consider swarm" on the first `Workflow` call of a session on an armed machine. |
+| `swarm.agentNudge` / `swarm.pruneNudge` | `true` / `true` | The sibling nudges: one on the first `Agent` call of a session, one reminding you to `prune` when finished runs have piled up. `false` silences either. |
 | `grading.enabled` | `false` | Stage 7. |
 | `display.money` | *(unset = off)* | Stage 7d. `true` adds dollar figures (`$` billed, `≈$… api-eq` estimate) beside the work tokens; a non-boolean fails the config load. |
 | `mcp` | `{ "off": [] }` | Stage 7e. Machine-wide servers leaves do not start; absent or empty = every server on. `projects[].mcp.on` turns one back on for a repo's leaves, and a task naming a server's tool turns it on for that one leaf. Names are the CLI's own (`blender`, `plugin:<plugin>:<server>`). |
