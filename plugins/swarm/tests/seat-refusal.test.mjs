@@ -120,7 +120,9 @@ test("validate: a seat is judged per task — the reason covers its own task, an
     const r = validate(digest);
     equal(r.status, 1, r.stdout + r.stderr);
     ok(r.stderr.includes("task 'digest'"), r.stderr);
-    ok(r.stderr.includes("digest.seatReason"), r.stderr);
+    ok(r.stderr.includes('"seatReason"'), r.stderr);
+    ok(r.stderr.includes("to the digest block"), r.stderr);
+    ok(!r.stderr.includes("digest.seatReason"), r.stderr);
     ok(!r.stderr.includes("__digest"), r.stderr);
   } finally { cleanup(digest); }
 

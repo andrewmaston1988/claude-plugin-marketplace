@@ -203,7 +203,7 @@ function writeRosterErrors(errors, write) {
 // A refused seat's own teaching line: the record, who beats it, and the two ways out.
 const seatRefusalText = (r) =>
   `task '${r.leaf}': seats ${r.model} (overall ${r.wtd.toFixed(2)} n=${r.n}), dominated by ${r.dominatedBy} — `
-  + `seat ${r.dominatedBy} or a frontier model, or add "${r.digest ? "digest.seatReason" : "seatReason"}": "<why this seat>" to ${r.digest ? "the digest block" : "the task"}, `
+  + `seat ${r.dominatedBy} or a frontier model, or add "seatReason": "<why this seat>" to ${r.digest ? "the digest block" : "the task"}, `
   + `e.g. "seatReason": "cross-family verifier: every non-deepseek ollama model is dominated"`;
 
 async function cmdValidate(rest) {
