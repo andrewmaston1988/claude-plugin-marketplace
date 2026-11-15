@@ -7,12 +7,17 @@ import { equal, deepEqual, ok } from "node:assert/strict";
 import { mkdtempSync, mkdirSync, writeFileSync, appendFileSync, utimesSync, rmSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { spawnSync } from "node:child_process";
 import { gateDispatch, isCodexPayload, markerPath, groupingMarkerPath, shapeMarkerPath } from "../hooks/dispatch-gate.mjs";
 import { shouldAck, ackTargets } from "../hooks/skill-ack.mjs";
 import { launcherSession } from "../src/scheduler.mjs";
 import { decidePruneNudge } from "../src/prune-nudge.mjs";
 import { renderStatus } from "../src/results.mjs";
 import { enginePath, runsKeyFor } from "../src/config.mjs";
+import { portFixture } from "./helpers/port-fixture.mjs";
+
+const PORT_HOOK = fileURLToPath(new URL("../hooks/port-nudge.mjs", import.meta.url));
 
 const CODEX = { session_id: "s", turn_id: "t", model: "gpt-6-luna", tool_name: "Bash" };
 const CLAUDE = { session_id: "s", tool_name: "Bash" };
@@ -119,4 +124,34 @@ test("swarm status on a finished run prints its kept trees and the prune command
 test("the runs key is one rule, shared by the run filer and the prune scan", () => {
   equal(runsKeyFor("C:/code/repo"), "C--code-repo");
   equal(runsKeyFor(String.raw`C:\code\repo`), "C--code-repo");
+});
+
+test("a Codex PostToolUse payload is measured and answered by the port nudge", () => {
+  const f = portFixture();
+  const port = f.porting();
+  try {
+    const leaf = f.leaf("run-1", "leaf");
+    f.cherryPick(port, leaf.sha);
+    f.run("run-1", { launcher: "codex", leaves: [leaf] });
+    const env = { ...process.env, SWARM_HOME: f.home };
+    delete env.SWARM_LEAF;
+    delete env.CORRELATION_ID;
+    const r = spawnSync(process.execPath, [PORT_HOOK], {
+      input: JSON.stringify({
+        ...CODEX,
+        session_id: "codex",
+        cwd: port,
+        hook_event_name: "PostToolUse",
+        tool_input: { command: `git cherry-pick ${leaf.sha}` },
+      }),
+      encoding: "utf8",
+      timeout: 60_000,
+      windowsHide: true,
+      env,
+    });
+    equal(r.status, 0, r.stderr);
+    const output = JSON.parse(r.stdout);
+    equal(output.hookSpecificOutput.hookEventName, "PostToolUse");
+    ok(output.hookSpecificOutput.additionalContext.includes("`run-1` is ported"), r.stdout);
+  } finally { f.cleanup(); }
 });

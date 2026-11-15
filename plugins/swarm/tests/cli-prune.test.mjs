@@ -398,6 +398,64 @@ test("prune: a second repo's leftover tree is removed too, not just the first re
   }
 });
 
+test("row 10: prune from the porting worktree frees a cherry-picked run; from the main checkout it refuses", () => {
+  const f = pruneFixture();
+  const portTree = join(f.dir, "porting");
+  try {
+    const wt = prepareIsolation({ id: "impl", originalCwd: f.repo, cwd: f.repo }, cliCfg(f.dir), f.resultsDir, { addTimeoutMs: WORKTREE_ADD_TIMEOUT_MS, base: gitOut(["rev-parse", "HEAD"], f.repo) });
+    writeFileSync(join(wt.path, "a.txt"), "ported\n");
+    commitAll(wt.path, "leaf work");
+    // A feature branch in its own worktree receives the leaf's patch as a new SHA:
+    // nothing git can see from the main checkout holds the leaf's tip.
+    spawnSync("git", ["worktree", "add", "-q", "-b", "feat", portTree, "master"], { cwd: f.repo, windowsHide: true });
+    // Diverge first: a pick onto the leaf's own parent replays the identical commit
+    // and lands the leaf's own SHA, proving nothing about the porting tree's base.
+    writeFileSync(join(portTree, "port-base.txt"), "port base\n");
+    commitAll(portTree, "port base");
+    const leafTip = gitOut(["rev-parse", "HEAD"], wt.path);
+    const picked = spawnSync("git", ["-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false",
+      "cherry-pick", leafTip], { cwd: portTree, windowsHide: true });
+    equal(picked.status, 0, String(picked.stderr));
+    ok(gitOut(["rev-parse", "HEAD"], portTree) !== leafTip,
+      "precondition: the cherry-pick is a new commit, not the leaf's own SHA");
+    writeFinishedRun(f.resultsDir, [{ branch: wt.branch, path: wt.path }]);
+    const env = { SWARM_HOME: join(f.dir, "home") };
+
+    const refused = runCli(["prune", f.resultsDir], { cwd: f.repo, env });
+    equal(refused.status, 1, refused.stdout + refused.stderr);
+    ok(refused.stderr.includes("1 unlanded"), `the main checkout's HEAD does not hold the cherry-pick: ${refused.stderr}`);
+    ok(existsSync(wt.path), "the refusal keeps the tree");
+
+    const freed = runCli(["prune", f.resultsDir], { cwd: portTree, env });
+    equal(freed.status, 0, freed.stdout + freed.stderr);
+    ok(!existsSync(wt.path), "the ported run's tree is pruned");
+    ok(!gitOut(["branch", "--list", wt.branch], f.repo), "the ported run's branch is deleted");
+  } finally {
+    spawnSync("git", ["worktree", "remove", "--force", portTree], { cwd: f.repo, windowsHide: true });
+    dropSnapPrune(f);
+  }
+});
+
+test("row 17: prune from inside a leaf worktree still refuses the leaf's unlanded branch", () => {
+  const f = pruneFixture();
+  try {
+    const wt = prepareIsolation({ id: "impl", originalCwd: f.repo, cwd: f.repo }, cliCfg(f.dir), f.resultsDir, { addTimeoutMs: WORKTREE_ADD_TIMEOUT_MS, base: gitOut(["rev-parse", "HEAD"], f.repo) });
+    writeFileSync(join(wt.path, "a.txt"), "unlanded\n");
+    commitAll(wt.path, "leaf work");
+    writeFinishedRun(f.resultsDir, [{ branch: wt.branch, path: wt.path }]);
+
+    // The leaf's own HEAD must never be a base: it would absorb the very branch
+    // the prune is about to destroy.
+    const r = runCli(["prune", f.resultsDir], { cwd: wt.path, env: { SWARM_HOME: join(f.dir, "home") } });
+    equal(r.status, 1, r.stdout + r.stderr);
+    ok(r.stderr.includes("1 unlanded"), r.stderr);
+    ok(existsSync(wt.path), "the leaf tree survives the refusal");
+    ok(gitOut(["branch", "--list", wt.branch], f.repo), "the leaf branch survives the refusal");
+  } finally {
+    dropSnapPrune(f);
+  }
+});
+
 test("prune: a killed run with leftover trees in two repos removes both, and invents no summary", () => {
   const f = pruneFixture();
   const repo2 = initPruneRepo();
