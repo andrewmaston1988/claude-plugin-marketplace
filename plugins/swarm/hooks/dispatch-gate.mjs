@@ -47,7 +47,8 @@ export function shapeMarkerPath(sessionId, home = SWARM_HOME) {
 }
 
 // The engine word and its anchor live in swarm-command.mjs, shared with output-guard.
-const DISPATCH_RE = swarmSubcommandRe("run");
+// No line-break position: a multi-line commit body can start a line with `swarm run:`.
+const DISPATCH_RE = swarmSubcommandRe("run", { lineBreak: false });
 
 // Shell decorations that steal the stream from the operator.
 const PIPE_RE = /\|/;

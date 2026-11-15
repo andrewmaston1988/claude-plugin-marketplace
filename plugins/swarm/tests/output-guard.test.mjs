@@ -46,17 +46,32 @@ test("row 16: a guarded call after a line break is denied", () => {
   }
 });
 
-test("row 17: the pipe scan stops at the statement separator", () => {
+test("row 17: the pipe scan ends at `;`, `&&` or `||`", () => {
   for (const command of [
     "swarm validate m.json && npm test | head",
     "swarm validate m.json; ls | head",
     "swarm validate m.json || npm test | head",
-    "swarm validate m.json\nnpm test | head",
   ]) {
     equal(decide({ env: {}, payload: call("Bash", command) }), null, `must allow: ${command}`);
   }
   const out = decide({ env: {}, payload: call("Bash", "swarm validate m.json 2>&1 | head") });
   equal(out?.hookSpecificOutput?.permissionDecision, "deny");
+});
+
+// Bash continues with `\`, PowerShell with a backtick or a leading `|`; a line break
+// is no separator, so the guard fails closed across lines.
+test("row 17: a line break does not end the scan", () => {
+  for (const tool of ["Bash", "PowerShell"]) {
+    for (const command of [
+      "swarm validate m.json\nnpm test | head",
+      "swarm validate m.json \\\n| grep OK",
+      "swarm validate m.json `\n| Select-String OK",
+      "swarm validate m.json\n | grep OK",
+    ]) {
+      const out = decide({ env: {}, payload: call(tool, command) });
+      equal(out?.hookSpecificOutput?.permissionDecision, "deny", `${tool} must deny: ${JSON.stringify(command)}`);
+    }
+  }
 });
 
 test("row 18: a >( process substitution in the same statement is denied", () => {

@@ -51,11 +51,12 @@ function blankQuoted(command) {
   return out.join("");
 }
 
-// Offset of the next statement separator (`;`, `&&`, `||`, line break), or end of input.
+// Offset of the next statement separator (`;`, `&&`, `||`), or end of input. A line
+// break is not one: a pipeline can continue onto the next line, so a later pipe denies.
 function statementEnd(cmd, from) {
   for (let i = from; i < cmd.length; i++) {
     const c = cmd[i];
-    if (c === ";" || c === "\n" || c === "\r") return i;
+    if (c === ";") return i;
     if ((c === "&" || c === "|") && cmd[i + 1] === c) return i;
   }
   return cmd.length;
@@ -98,7 +99,7 @@ export function decide({ env = process.env, payload } = {}) {
 
   const blanked = blankQuoted(command);
   for (const sub of GUARDED) {
-    const re = new RegExp(swarmSubcommandRe(sub).source, "g");
+    const re = new RegExp(swarmSubcommandRe(sub, { lineBreak: true }).source, "g");
     for (const m of blanked.matchAll(re)) {
       const from = m.index + m[0].length;
       if (piped(blanked, from) || processSub(blanked, from)) return deny();

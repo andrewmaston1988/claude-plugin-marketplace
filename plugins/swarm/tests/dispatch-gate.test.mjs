@@ -201,9 +201,12 @@ test("gate fails open on a missing or empty command", () => {
   equal(gateDispatch({ command: "", runInBackground: true, markerExists: false }).block, false);
 });
 
-test("gate fires on a dispatch after a line break", () => {
-  const r = gateDispatch({ command: "cd x\nnode scripts/swarm.mjs run m.json", runInBackground: true, markerExists: false });
-  equal(r.block, true);
+// A multi-line commit body can start a line with `swarm run:` — a line break is not a
+// command position here, so that is not a dispatch.
+test("gate does NOT fire on a commit body line that starts `swarm run:`", () => {
+  const command = 'git commit -m "Fix the gate\n\nswarm run: refuse a results dir whose engine is alive"';
+  const r = gateDispatch({ command, runInBackground: true, markerExists: false });
+  equal(r.block, false, command);
 });
 
 // The marker writer — the other half of the contract. The payload shape is the one
