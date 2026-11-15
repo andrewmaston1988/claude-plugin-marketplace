@@ -440,17 +440,20 @@ into the default branch or the live checkout changes no file at the base's tip o
 first-parent commits that touched the branch's files — which covers squash, rebase and traditional
 merges alike; telling a squash apart needs git 2.38 or later, and below that only reachability and
 patch matching answer. When the engine reuses or resets one of its own worktrees, a branch that
-has not landed is never force-reset — it refuses rather than lose the work. `swarm prune <resultsDir>` is
-not that path: it removes each kept tree and its branch together with `git branch -D`, so push
-under a name outside `swarm/`, or merge, before pruning. It never destroys results. There is no
+has not landed is never force-reset — it refuses rather than lose the work. `swarm prune <resultsDir>` deletes at once — run `--dry-run` to preview. It is
+not the reset path: it removes each kept tree with its branch, plus every branch of the run
+that no tree holds, all with `git branch -D` — a branch a task named explicitly goes only
+with its tree. Push under a name outside `swarm/`, or merge, before pruning. It never destroys results. There is no
 detach option; push a branch under a name outside `swarm/` to preserve its remote copy, because
-`origin/swarm/…` is never a landing place. It refuses a live run, and any tree with unlanded commits or uncommitted
-changes, printing every tree first, `--dry-run` for a no-op preview; `--discard-unlanded`
-explicitly destroys that blocked work, whether or not the branch landed. `swarm status --mine`
+`origin/swarm/…` is never a landing place. It refuses a live run. Work that has not landed is
+kept and named, not refused: every row with unlanded commits or uncommitted changes stays, named on
+stderr with its counts, and the command exits 1; a later prune takes the rest once its work
+lands. `--dry-run` previews which rows would go and which would stay and removes nothing;
+`--discard-unlanded` destroys the blocked work too, whether or not the branch landed. `swarm status --mine`
 lists this session's finished runs still
 holding worktrees. The dispatching session takes what it needs from each finished run only after its work has landed (merged) or been taken (pushed or merged into your branch), then
-prunes it with `swarm prune`; it does not ask the operator. A refusal names each blocked row
-and why: work landed nowhere it can see (including a detached HEAD), uncommitted changes, or a
+prunes it with `swarm prune`; it does not ask the operator. Each kept row is named with why:
+work landed nowhere it can see (including a detached HEAD), uncommitted changes, or a
 measurement git could not make. Land, take or commit that work before retrying, and never pass
 `--discard-unlanded` without the operator deciding the work can be lost. The per-turn nudge hook
 (Claude: `UserPromptSubmit`; Codex: `Stop`) names each finished
