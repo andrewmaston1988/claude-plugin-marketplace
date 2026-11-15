@@ -120,10 +120,12 @@ test("--wsl rejects a selection flag instead of silently running everything", as
   ];
   for (const [argv, flag] of flags) {
     const errors = [];
+    const refuse = () => {
+      throw new Error(`a rejected combination spawned a process: ${argv.join(" ")}`);
+    };
     const code = await main(argv, {
-      _spawn: () => {
-        throw new Error(`a rejected combination spawned a process: ${argv.join(" ")}`);
-      },
+      _spawn: refuse,
+      _spawnSync: refuse,
       _suites: [{ name: "repo", runs: [] }],
       _log: () => {},
       _err: (line) => errors.push(line),

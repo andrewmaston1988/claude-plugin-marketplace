@@ -1,15 +1,15 @@
 // WSL mode: mirror the working tree onto plugin-dev's ext4 disk, then run the
 // suite there. Linux-only failures surface before the PR instead of in CI.
-//
+
 // The mirror is a git clone of the repository's COMMON dir (`--git-common-dir`,
 // so a linked worktree works) plus an rsync of the tree that is running now.
 // /mnt/c reports every file as mode 777, so the rsync copies no permissions
 // (-rlt, never -a) and the clone keeps git's own modes; with `-a` every file
 // reads as mode-dirty in the mirror.
-//
+
 // Every wsl.exe call is an argument array with no shell: wsl.exe re-quotes a
 // single command string, which mangles it.
-//
+
 // Exit codes: the suite's own code, or 2 when WSL mode could not run at all.
 
 export const DISTRO = "plugin-dev";
