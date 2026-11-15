@@ -1,10 +1,10 @@
 // Resolve the token count at which Claude Code compacts this session.
 // Pure: the caller supplies the model, the env and the settings chain.
-import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 
 import { contextWindowFor } from './context.mjs';
+import { readJSON } from './paths.mjs';
 
 // Claude Code compacted ~33k below the configured window in every measured run.
 export const COMPACT_BUFFER_TOKENS = 33_000;
@@ -12,16 +12,12 @@ export const COMPACT_BUFFER_TOKENS = 33_000;
 const MIN_WINDOW = 100_000;
 const MAX_WINDOW = 1_000_000;
 
-function readSettingsFile(p) {
-  try { return JSON.parse(fs.readFileSync(p, 'utf8')); } catch { return {}; }
-}
-
 // Local, project, user — the order Claude Code resolves a key through.
 export function readSettingsChain(cwd = process.cwd(), home = os.homedir()) {
   return [
-    readSettingsFile(path.join(cwd, '.claude', 'settings.local.json')),
-    readSettingsFile(path.join(cwd, '.claude', 'settings.json')),
-    readSettingsFile(path.join(home, '.claude', 'settings.json')),
+    readJSON(path.join(cwd, '.claude', 'settings.local.json'), {}),
+    readJSON(path.join(cwd, '.claude', 'settings.json'), {}),
+    readJSON(path.join(home, '.claude', 'settings.json'), {}),
   ];
 }
 
