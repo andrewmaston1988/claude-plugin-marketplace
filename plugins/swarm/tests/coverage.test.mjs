@@ -232,11 +232,7 @@ test("checkCoverage: whole-file entry with NOTHING read → bare '<path>' in mis
   deepEqual(cov.missed, ["C:/a.mjs"]);
 });
 
-test("checkCoverage: path match is case-insensitive + separator-normalised on win32 (namesEqual)", () => {
-  if (process.platform !== "win32") return;
-  const cov = checkCoverage([req("C:\\a\\b.md", [[1, 10]])], [{ file: "C:/a/b.md", offset: 1, limit: 10 }]);
-  equal(cov.status, "complete"); // mutation: strict string compare on win32
-});
+// The win32 path-matching case lives in coverage.win.test.mjs.
 
 test("checkCoverage: read/required counts per item; status complete iff missed empty", () => {
   const cov = checkCoverage([req("C:/a.mjs", [[1, 10]]), req("C:/b.mjs", [[1, 10]])], [{ file: "C:/a.mjs", offset: 1, limit: 10 }]);
