@@ -36,6 +36,7 @@ export function launcherSession(env = process.env) {
 
 export { makeDefaultIo };
 export { classifyFailure, pickNewestRunning, runTask, substituteItems, substituteTemplates } from "./scheduler/run-task.mjs";
+export { loopStallMs, nextStallCredit } from "./scheduler/loop-stall.mjs";
 
 // Execute the plan's dependency graph under the concurrency cap.
 // Returns { summary, summaryPath, digestPath, digestFailed, worktreesKept }.
@@ -320,6 +321,9 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), {
         // first leaf of a run must never be gated by the machine's headroom.
         if (ctx.running.size > 0 && ctx.memLow(cfg.minFreeMemMb)) { ctx.parkForMemory(t); continue; }
         ctx.launch(t);
+        // A launch blocks the loop in prepareIsolation (git worktree add is sync), so
+        // without a turn between seats a running leaf's armed callbacks starve.
+        await new Promise((resume) => setImmediate(resume));
       }
     }
     if (progressed) continue;
