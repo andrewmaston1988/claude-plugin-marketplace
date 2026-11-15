@@ -12,7 +12,7 @@ import { defaultProviderRegistry } from "./default-providers.mjs";
 import { providerConfig } from "./providers.mjs";
 import { costSettings, meterCostRows } from "./cost-settings.mjs";
 import { readRows, scoresPath } from "./scores.mjs";
-import { seatRefusals, seatReport } from "./seats.mjs";
+import { seatRefusals, seatReport, seatableFrontier } from "./seats.mjs";
 
 // Distinct seats in manifest order, each with its leaf ids — the walk
 // leafCounts uses (agentless skipped, childPlan descended), ids instead of
@@ -22,12 +22,12 @@ import { seatRefusals, seatReport } from "./seats.mjs";
 export function seatedModels(plan) {
   const byModel = new Map();
   const seats = [];
-  const add = (value, leaf) => {
+  const add = (value, leaf, extra = {}) => {
     const identity = identityOf(value);
     if (!identity.model) return;
     const reason = typeof value.seatReason === "string" && value.seatReason.trim()
       ? value.seatReason.trim() : undefined;
-    seats.push({ identity, leaf, seatReason: reason });
+    seats.push({ identity, leaf, seatReason: reason, ...extra });
     const key = identityKey(identity);
     if (!byModel.has(key)) byModel.set(key, { identity, leaves: [], reason: undefined });
     const model = byModel.get(key);
@@ -50,7 +50,7 @@ export function seatedModels(plan) {
     }
     addTask(t);
   }
-  if (plan.digest?.model) add(plan.digest, "__digest");
+  if (plan.digest?.model) add(plan.digest, "digest", { digest: true });
   return {
     models: [...byModel.values()].map(({ identity, leaves, reason }) => ({
       ...(identity.provider ? { provider: identity.provider } : {}),
@@ -86,8 +86,9 @@ export async function seatCheck(plan, cfg) {
   const costRows = await meterCostRows();
   const roster = await launchableRoster(cfg);
   const settings = await costSettings(cfg);
+  const seatable = seatableFrontier({ seats, rows, costRows, roster, ...settings });
   return {
-    lines: seatReport({ models, rows, costRows, roster, ...settings }),
-    refusals: seatRefusals({ seats, rows, costRows, roster, ...settings }),
+    lines: seatReport({ models, seatable, rows, costRows, roster, ...settings }),
+    refusals: seatRefusals({ seats, seatable }),
   };
 }

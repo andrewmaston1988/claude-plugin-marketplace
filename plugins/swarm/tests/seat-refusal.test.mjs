@@ -12,6 +12,7 @@ import { runCli } from "./helpers/cli.mjs";
 import { gateHome, tmp } from "./helpers/cli-fixture.mjs";
 import { snap, seg } from "./helpers/cost-snapshots.mjs";
 import { writeRosterEntry } from "../src/roster.mjs";
+import { REFUSAL_N } from "../src/seats.mjs";
 
 const SEAT = "dom:cloud"; // a poor record on the meter's dearest band
 const CHAMP = "champ:cloud"; // strictly better and cheaper, and launchable
@@ -118,7 +119,9 @@ test("validate: a seat is judged per task — the reason covers its own task, an
   try {
     const r = validate(digest);
     equal(r.status, 1, r.stdout + r.stderr);
-    ok(r.stderr.includes("task '__digest'"), r.stderr);
+    ok(r.stderr.includes("task 'digest'"), r.stderr);
+    ok(r.stderr.includes("digest.seatReason"), r.stderr);
+    ok(!r.stderr.includes("__digest"), r.stderr);
   } finally { cleanup(digest); }
 
   const reasoned = world({ tasks: [task({ model: CHAMP })], digest: { provider: "ollama", model: SEAT, seatReason: "digest voice" } });
@@ -150,6 +153,25 @@ test("run: after a refused validate the same bytes are refused as unvalidated, a
     ok(r.stderr.includes(REFUSAL), r.stderr);
     ok(!existsSync(envOf(w).SWARM_SHIM_LOG), "nothing may spawn");
     ok(!existsSync(join(w.dir, "out")), "no run dir may be created");
+  } finally { cleanup(w); }
+});
+
+test("validate: a refused re-validate revokes the earlier marker, so run refuses the same bytes", () => {
+  const w = world();
+  const scores = (n) => [...store(SEAT, 6, n), ...store(CHAMP, 9, REFUSAL_N)].join("\n") + "\n";
+  try {
+    // n=39 sits in the fair-shot band, so this pass is approved and marks the bytes.
+    writeFileSync(join(w.home, "model-scores.jsonl"), scores(REFUSAL_N - 1));
+    equal(validate(w).status, 0);
+    equal(markers(w).length, 1);
+    // More grades land: the same seat is now over the refusal canon and dominated.
+    writeFileSync(join(w.home, "model-scores.jsonl"), scores(REFUSAL_N));
+    const refused = validate(w);
+    equal(refused.status, 1, refused.stdout + refused.stderr);
+    deepEqual(markers(w), [], "a refused re-validate revokes the earlier marker");
+    const r = run(w);
+    equal(r.status, 1, r.stdout + r.stderr);
+    ok(r.stderr.includes(REFUSAL), r.stderr);
   } finally { cleanup(w); }
 });
 

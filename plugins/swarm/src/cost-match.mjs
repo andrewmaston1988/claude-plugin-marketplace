@@ -1,7 +1,5 @@
-// Cost rows resolved onto a graded model — the identity+domain match the
-// frontier reads, kept beside the aggregation instead of inside it.
-//
-// A model may hold several rows per provider and cost domain, so a lookup
+// Cost rows resolved onto a graded model — the identity+domain match the frontier
+// reads. A model may hold several rows per provider and cost domain, so a lookup
 // returns the first row that carries a multiplier, or the row itself when none
 // does: a priced row is evidence, an unpriced one is a classification.
 
