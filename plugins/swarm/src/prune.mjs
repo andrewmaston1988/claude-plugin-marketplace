@@ -318,9 +318,12 @@ export function plan(run, git, fs, { cfg, extraBases, measureBytes, stopAtBlocke
       // A branch a tree holds is either already a tree row or checked out somewhere
       // prune does not own; `branch -D` would refuse it either way.
       const held = new Set((worktreeList(git, repo) || []).map((t) => t.branch).filter(Boolean));
+      // Rows are keyed repo + branch: another repo's same-named branch is a different
+      // row, and suppressing it by name alone leaks that ref on every prune.
+      const onRow = (branch) => rows.some((row) => row.branch === branch && row.repo && normalizeForCompare(row.repo) === normalizeForCompare(repo));
       for (const branch of listed.stdout.split(/\r?\n/).map((s) => s.trim()).filter(Boolean)) {
         if (stopped) break;
-        if (held.has(branch) || rows.some((row) => row.branch === branch)) continue;
+        if (held.has(branch) || onRow(branch)) continue;
         addBranchRow(branch, repo);
       }
     }

@@ -1,7 +1,8 @@
-// `swarm prune` — destroy a finished run's kept worktrees and branches, refusing
-// anything live, unlanded or dirty. Split out of swarm.mjs, which now just
-// dispatches to it. The CLI-wide usage text stays in swarm.mjs and is passed in,
-// so a bare `prune` still prints the same block as every other bad invocation.
+// `swarm prune` — delete a finished run's kept worktrees and branches at once, keeping
+// and naming every row that still holds unlanded or uncommitted work. A live run is
+// refused. Split out of swarm.mjs, which now just dispatches to it. The CLI-wide usage
+// text stays in swarm.mjs and is passed in, so a bare `prune` still prints the same
+// block as every other bad invocation.
 import { join, resolve } from "node:path";
 import { getConfig } from "../src/config.mjs";
 import { runLiveness } from "../src/runlog.mjs";
@@ -64,22 +65,30 @@ export async function cmdPrune(rest, { usage }) {
   const { failed } = executePrune(go, git, fs, { resultsDir: dir, cfg });
   const failure = new Map(failed.map(({ row, reason }) => [row, reason]));
   const removed = [];
-  const keptRows = stay.map((row) => ({ row, reason: null }));
+  const refused = [];
   for (const row of go) {
     if (!failure.has(row) && gone(row, git, fs)) removed.push(row);
-    else keptRows.push({ row, reason: failure.get(row) ?? null });
+    else refused.push({ row, reason: failure.get(row) ?? null });
   }
   // survivors: whatever wasn't just removed and wasn't already gone before we started
   if (hadSummary) writeSummary(dir, { ...summary, worktreesKept: kept.filter((wt) => fs.existsSync(wt.path)) });
   // The report follows execute: a removal git refused is kept, never printed as freed.
   if (removed.length) out(formatPrune(removed));
-  for (const { row, reason } of keptRows) {
+  for (const row of stay) err(`  ${rowLabel(row)}: ${workCounts(row).join(", ")}`);
+  for (const { row, reason } of refused) {
     err(`  ${rowLabel(row)}: ${workCounts(row).join(", ") || firstLine(reason) || "still present"}`);
   }
-  if (keptRows.length) {
-    err(`swarm: kept ${rowCount(keptRows.length)} that still ${keptRows.length === 1 ? "holds" : "hold"} work — land or take it and prune again, or pass --discard-unlanded to destroy it`);
+  // Two unrelated causes, two remedies: `stay` rows hold work the operator must land or
+  // take, and `--discard-unlanded` is the word that overrides that. A `refused` row is one
+  // git itself would not remove (a locked worktree, say) — retrying with the flag re-runs
+  // the same removal, so it is never offered there.
+  if (stay.length) {
+    err(`swarm: kept ${rowCount(stay.length)} that still ${stay.length === 1 ? "holds" : "hold"} work — land or take it and prune again, or pass --discard-unlanded to destroy it`);
   }
-  return keptRows.length ? 1 : 0;
+  if (refused.length) {
+    err(`swarm: kept ${rowCount(refused.length)} that git refused to remove — clear what git names above and prune again`);
+  }
+  return stay.length || refused.length ? 1 : 0;
 }
 
 const rowLabel = (row) => `${row.path ?? "(no tree)"} ${row.branch ?? "(detached)"}`;

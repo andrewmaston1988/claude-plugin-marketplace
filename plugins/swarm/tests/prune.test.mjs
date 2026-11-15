@@ -400,6 +400,35 @@ test("row 7: formatPrune labels a path-less row and counts worktrees and branche
   ok(/freed 1\.00 GB across 1 worktree and 3 branches/.test(out), out);
 });
 
+test("row 21: a branch row is keyed by repo, so the same branch name in another repo is still a row", () => {
+  const branch = `swarm/${runScopeKey("/results")}/x`;
+  const git = (args, cwd) => {
+    if (args[0] === "worktree" && args[1] === "list") {
+      return {
+        status: 0,
+        stdout: cwd === "/repo-a" ? ["worktree /wt-a", "HEAD aaaaaaaa", `branch refs/heads/${branch}`].join("\n") : "",
+        stderr: "",
+      };
+    }
+    if (args[0] === "for-each-ref" && !args.includes("--contains")) {
+      return { status: 0, stdout: cwd === "/repo-b" ? branch : "", stderr: "" };
+    }
+    return { status: 1, stdout: "", stderr: "" };
+  };
+  const fs = {
+    existsSync: (p) => p === "/repo-a" || p === "/repo-b" || p === "/wt-a",
+    readdirSync: () => [],
+    statSync: () => ({ size: 0 }),
+  };
+  const run = { repos: ["/repo-a", "/repo-b"], resultsDir: "/results", worktreesKept: [{ path: "/wt-a", branch, repo: "/repo-a" }] };
+  const { rows } = plan(run, git, fs, { extraBases: [], measureBytes: true, stopAtBlocker: false, deadline: Infinity });
+  equal(rows.length, 2, JSON.stringify(rows));
+  equal(rows.find((row) => row.path != null)?.repo, "/repo-a");
+  const orphan = rows.find((row) => row.path == null);
+  equal(orphan?.repo, "/repo-b", "repo B's own branch is a row, not suppressed by repo A's tree row");
+  equal(orphan?.branch, branch);
+});
+
 test("row 8: a blocking branch-only row stops the plan, and a passed deadline measures none", () => {
   const branches = ["a", "b", "c"].map((n) => `swarm/${runScopeKey("/results")}/${n}`).join("\n");
   const calls = [];

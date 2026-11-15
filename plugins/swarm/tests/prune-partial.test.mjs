@@ -107,8 +107,36 @@ test("row 12: a removal git refuses is reported kept with git's reason, never fr
     ok(!/freed/.test(r.stdout), `a row git refused must never read as freed: ${r.stdout}`);
     ok(r.stderr.includes(wt.path), r.stderr);
     ok(/locked working tree/i.test(r.stderr), `git's own reason is what is printed: ${r.stderr}`);
+    ok(/kept 1 row that git refused to remove/.test(r.stderr), `a refused removal is named as git's refusal: ${r.stderr}`);
+    ok(!r.stderr.includes("--discard-unlanded"),
+      `the flag retries the same removal — it is never the remedy for a refused row: ${r.stderr}`);
     ok(existsSync(wt.path), "the tree git refused to remove is still there");
     ok(gitOut(["branch", "--list", wt.branch], f.repo), "its branch is still there");
+
+    // Still no flag advice when the operator already passed it: `--discard-unlanded` sends
+    // this row down the same removal git just refused.
+    const discarded = runCli(["prune", f.resultsDir, "--discard-unlanded"], { cwd: f.dir, env: { SWARM_HOME: join(f.dir, "home") } });
+    equal(discarded.status, 1, discarded.stdout + discarded.stderr);
+    ok(/kept 1 row that git refused to remove/.test(discarded.stderr), discarded.stderr);
+    ok(!discarded.stderr.includes("--discard-unlanded"), `never suggest the flag that was just passed: ${discarded.stderr}`);
+    ok(existsSync(wt.path), "the locked tree survives --discard-unlanded too");
+  } finally {
+    dropSnapPrune(f);
+  }
+});
+
+test("row 13: a run with both kinds of kept row prints both remedies", () => {
+  const { f, landed, held } = partialRun();
+  try {
+    // The landed tree is locked, so git refuses it; the held tree is blocked on work.
+    equal(spawnSync("git", ["worktree", "lock", landed.path], { cwd: f.repo, windowsHide: true }).status, 0);
+    const r = runCli(["prune", f.resultsDir], { cwd: f.dir, env: { SWARM_HOME: join(f.dir, "home") } });
+    equal(r.status, 1, r.stdout + r.stderr);
+    ok(/kept 1 row that still holds work — .*--discard-unlanded/.test(r.stderr),
+      `the work row keeps the landing advice: ${r.stderr}`);
+    ok(/kept 1 row that git refused to remove/.test(r.stderr),
+      `the refused row gets its own line: ${r.stderr}`);
+    ok(existsSync(landed.path) && existsSync(held.path), "both kinds of row survive");
   } finally {
     dropSnapPrune(f);
   }
