@@ -4,6 +4,9 @@ import os from 'node:os';
 
 export const STATE_DB = path.join(os.homedir(), '.claude', '.checkpoint-state.json');
 export const KEEPALIVE_LOG = path.join(os.homedir(), '.claude', '.checkpoint-keepalive.jsonl');
+// Per-session nudge state and band claims. Its own dir, never STATE_DB: the
+// PostToolUse hook must not race the keepalive's whole-map read-modify-write.
+export const NUDGE_DIR = path.join(os.homedir(), '.claude', '.checkpoint-nudge');
 
 export function encodeProject(p) { return p.replace(/[\\/:]/g, '-'); }
 
@@ -228,7 +231,8 @@ export function readJSON(p, fallback) {
 export function writeJSON(p, obj) {
   try {
     fs.mkdirSync(path.dirname(p), { recursive: true });
-    const tmp = p + '.tmp';
+    // Unique tmp: concurrent writers sharing one name rename each other's bytes.
+    const tmp = `${p}.${process.pid}.${Math.random().toString(36).slice(2)}.tmp`;
     fs.writeFileSync(tmp, JSON.stringify(obj, null, 2), 'utf8');
     fs.renameSync(tmp, p);
   } catch { /* non-fatal */ }
@@ -238,8 +242,8 @@ export function writeJSON(p, obj) {
 export function getSessionState(state, sid) {
   const cur = state[sid];
   if (cur && typeof cur === 'object') return cur;
-  if (typeof cur === 'number') return { lastSize: cur, userTs: 0, lastActivityTs: 0, lastTickTs: 0, lastInjectedDelay: 0, lastFiredPct: null, lastInjectTs: 0, injectPending: false };
-  return { lastSize: 0, userTs: 0, lastActivityTs: 0, lastTickTs: 0, lastInjectedDelay: 0, lastFiredPct: null, lastInjectTs: 0, injectPending: false };
+  if (typeof cur === 'number') return { lastSize: cur, userTs: 0, lastActivityTs: 0, lastTickTs: 0, lastInjectedDelay: 0, lastInjectTs: 0, injectPending: false };
+  return { lastSize: 0, userTs: 0, lastActivityTs: 0, lastTickTs: 0, lastInjectedDelay: 0, lastInjectTs: 0, injectPending: false };
 }
 
 export function appendJSONL(p, obj) {
