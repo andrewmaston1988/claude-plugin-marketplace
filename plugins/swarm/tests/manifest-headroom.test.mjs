@@ -104,7 +104,8 @@ test("headroom: M4 no configured cookie (unknown) does not fail a manifest", () 
 // The default headroom (cache-only usageFromCache) of a reading past its TTL
 // carries provenance stale + the cache's recorded lastError — the warning
 // carries the banner text, which is where `/!\ Cookie Expired` reaches validate.
-test("headroom: M5 a stale figure with a banked failure warns with its banner (age, the refresh command), does not fail", () => {
+// One line for the manifest, naming no task: nothing in it is task-specific.
+test("headroom: M5 a stale figure warns once with its banner (age, the refresh command), naming no task", () => {
   const dir = tmp();
   try {
     const p = writeManifest(dir, { tasks: [{ id: "find-diag", prompt: "p", provider: "ollama", model: "glm-5.3:cloud" }] });
@@ -112,29 +113,31 @@ test("headroom: M5 a stale figure with a banked failure warns with its banner (a
     withHeadroom(dir, { weeklyPctUsed: 42, ageMs: 12 * 60_000, extra: { lastError: "expired-cookie", lastErrorAt: Date.now() - 60_000 } }, () => {
       const plan = loadManifest(p, cfg, dir);
       equal(plan.tasks[0].model, "glm-5.3:cloud");
-      const w = plan.warnings?.find((w) => w.includes("find-diag"));
-      ok(w, JSON.stringify(plan.warnings));
+      const allowance = plan.warnings.filter((w) => w.includes("weekly-allowance"));
+      equal(allowance.length, 1, JSON.stringify(plan.warnings));
+      const w = allowance[0];
       ok(w.includes("/!\\ Cookie Expired"), w);
       ok(/read 12m ago/.test(w), w);
       ok(w.includes("swarm ollama-usage"), w);
+      ok(!w.includes("find-diag"), `the line is the manifest's, not the task's: ${w}`);
     });
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
 });
 
-// A reading inside its TTL was not affected by an older failure: still not live, so it
-// warns, but it never wears the failure's banner.
-test("headroom: M5b a fresh cached figure never wears a banked failure's banner", () => {
+// A reading inside its TTL was not affected by an older failure, so
+// provenanceBanner flags nothing — and the warning's own fix, a successful
+// `swarm ollama-usage`, is the thing that clears it.
+test("headroom: M5b a fresh cached figure never warns — only a flagged reading may", () => {
   const dir = tmp();
   try {
     const p = writeManifest(dir, { tasks: [{ id: "find-diag", prompt: "p", provider: "ollama", model: "glm-5.3:cloud" }] });
     const cfg = { ...CFG, provider: { allowedRoots: [dir], cloud: { ollama: { enabled: true } } } };
     withHeadroom(dir, { weeklyPctUsed: 42, extra: { lastError: "expired-cookie", lastErrorAt: Date.now() - 86_400_000 } }, () => {
-      const w = loadManifest(p, cfg, dir).warnings?.find((w) => w.includes("find-diag"));
-      ok(w, "a non-live figure still warns");
-      ok(!w.includes("Cookie Expired"), w);
-      ok(w.includes("swarm ollama-usage"), w);
+      const warnings = loadManifest(p, cfg, dir).warnings || [];
+      equal(warnings.filter((w) => w.includes("weekly-allowance")).length, 0, JSON.stringify(warnings));
+      ok(!warnings.some((w) => w.includes("Cookie Expired")), JSON.stringify(warnings));
     });
   } finally {
     rmSync(dir, { recursive: true, force: true });
@@ -188,7 +191,8 @@ test("headroom: T5 a live 100% fails; a cached 100% succeeds with the banner in 
     equal(headroom.state, "exhausted");
 
     const plan = loadManifest(p, cfg, dir, { headroom });
-    ok(plan.warnings?.some((w) => w.includes("find-diag") && w.includes("/!\\ Cookie Expired")), JSON.stringify(plan.warnings));
+    ok(plan.warnings?.some((w) => w.includes("/!\\ Cookie Expired")), JSON.stringify(plan.warnings));
+    ok(!plan.warnings.some((w) => w.includes("find-diag")), "one line for the manifest, not one per seat");
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -218,3 +222,45 @@ test("headroom: T6 five :cloud seats fetch the meter exactly once — the cache 
   }
 });
 
+
+// ── one allowance line per manifest ──────────────────────────────────────────
+// The warning has nothing task-specific in it, so a 10-task manifest printed 18
+// copies of the same line above the seats block — which is what invited the
+// reader to grep the block away.
+const cloudTasks = (cwd) => [
+  { id: "a", prompt: "p", provider: "ollama", model: "glm-5.3:cloud", cwd },
+  { id: "b", prompt: "p", provider: "ollama", model: "glm-5.3:cloud", cwd },
+  { id: "c", prompt: "p", provider: "ollama", model: "glm-5.3:cloud", cwd, fallbackModel: "kimi-k2.7-code:cloud", fallbackProvider: "ollama" },
+];
+
+test("headroom: one allowance line however many :cloud seats and fallbacks, and none for a fresh cached reading", () => {
+  const dir = tmp();
+  try {
+    const p = writeManifest(dir, { tasks: cloudTasks(dir) });
+    const cfg = { ...CFG, provider: { allowedRoots: [dir], cloud: { ollama: { enabled: true } } } };
+
+    // Stale: three primaries plus a fallback, one line.
+    withHeadroom(dir, { weeklyPctUsed: 42, ageMs: 12 * 60_000, extra: { lastError: "expired-cookie", lastErrorAt: Date.now() - 60_000 } }, () => {
+      const warnings = loadManifest(p, cfg, dir).warnings;
+      const allowance = warnings.filter((w) => w.includes("weekly-allowance"));
+      equal(allowance.length, 1, JSON.stringify(warnings));
+      ok(allowance[0].includes("swarm ollama-usage"), allowance[0]);
+      for (const id of ["'a'", "'b'", "'c'"]) ok(!allowance[0].includes(id), allowance[0]);
+    });
+
+    // A fresh in-TTL reading: the fix the warning names has just been run.
+    withHeadroom(dir, { weeklyPctUsed: 42, extra: { lastError: "expired-cookie", lastErrorAt: Date.now() - 86_400_000 } }, () => {
+      const warnings = loadManifest(p, cfg, dir).warnings || [];
+      equal(warnings.filter((w) => w.includes("weekly-allowance")).length, 0, JSON.stringify(warnings));
+    });
+
+    // Exhausted still fails per SEAT: every one of those leaves would park.
+    const live = liveHeadroom({ state: "exhausted", weeklyPctUsed: 100, resetsAt: "R" });
+    const errors = errorsOf(() => loadManifest(p, cfg, dir, { headroom: live }));
+    const exhausted = errors.filter((e) => e.includes("weekly allowance is exhausted"));
+    equal(exhausted.length, 4, `three primaries and the fallback seat: ${errors.join("|")}`);
+    ok(exhausted.some((e) => e.includes("task 'c' fallback")), errors.join("|"));
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

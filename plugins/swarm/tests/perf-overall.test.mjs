@@ -194,3 +194,26 @@ test("perf --overall: the successor of a best-value elder sorts ahead of a highe
     ok(block.includes("kimi-k3:cloud  n=0  needs grades — newer generation of kimi-k2:cloud (#2 overall, best value)"), block);
   } finally { rmSync(w.dir, { recursive: true, force: true }); }
 });
+
+// A column's n is not the model's n: one `search` row against a 25-row record
+// read as a gap seat ("n=1 on search") until the overall n sat beside it.
+test("perf --aspect: a thin column prints the model's overall n beside it", () => {
+  const dir = tmp();
+  try {
+    const home = gateHome(join(dir, "home"));
+    writeFileSync(join(home, "model-scores.jsonl"), [
+      ...rowsFor("glm-5.2:cloud", 24, 8),
+      JSON.stringify({
+        resultsDir: "C:/runs/search-1", leaf: "s1", model: "glm-5.2:cloud", domain: "node", outcome: "completed",
+        grades: { adherence: 8, handoff: 8, truthfulness: 8, depth: 8, search: 9 },
+        note: "", assessedBy: { session: "s1", date: "2026-09-10" },
+      }),
+    ].join("\n") + "\n");
+    const r = runCli(["perf", "--aspect", "search"], { cwd: dir, env: { SWARM_HOME: home } });
+    equal(r.status, 0, r.stderr);
+    const line = r.stdout.split("\n").find((l) => /^\s+glm-5\.2:cloud\s/.test(l));
+    ok(line, r.stdout);
+    ok(line.includes("n=  1"), line);
+    ok(line.includes("overall n=25"), line);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});

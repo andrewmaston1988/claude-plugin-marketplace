@@ -397,8 +397,8 @@ test("seatRefusals: over canon and dominated by a seatable model refuses; a reas
   deepEqual(blank, [], "a blank seatReason is not a reason");
 
   // The fair-shot band: over canon, under the refusal canon.
-  deepEqual(refusedBy(store(REFUSAL_N - 1), roster), [], "n=39 is still getting its fair shot");
   deepEqual(refusedBy(store(19), roster), [], "n=19 is the gap rule's, not a verdict");
+  deepEqual(refusedBy(store(REFUSAL_N - 1), roster), [], "n=39 is still getting its fair shot");
   // Never graded, and no cost row (Claude tiers, Codex): nothing to judge.
   const ghost = seatRefusals({ seats: [{ identity: { model: "ghost:cloud" }, leaf: "lane" }], rows: store(REFUSAL_N), roster });
   deepEqual(ghost, []);
