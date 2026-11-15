@@ -1,16 +1,7 @@
-// The Windows half of the notifier: the real end-to-end console measurement.
-//
-// N5. Opt-in only. It spawns real processes and its control deliberately opens a
-// console window, so running it on every suite put one on the operator's desktop
-// each time. `SWARM_NOTIFY_CONSOLE_TEST=1` runs it; the unit rows in
-// notify.test.mjs cover the shape in CI.
-//
-// It is written to be capable of failing: the control asserts the KNOWN-BAD options
-// really do produce a visible console here, and the row skips rather than passes
+// The notifier's real console measurement, Windows only and opt-in
+// (`SWARM_NOTIFY_CONSOLE_TEST=1`): its control opens a visible console window.
+// The control asserts the known-bad options really do show one, and the row skips
 // where the environment cannot tell the two states apart.
-//
-// Its own file so the diff-aware Windows run always exercises it, not only when
-// something in notify.test.mjs's closure changed.
 import "./helpers/isolate-home.mjs";
 import test from "node:test";
 import assert from "node:assert/strict";

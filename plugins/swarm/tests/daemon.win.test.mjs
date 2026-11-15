@@ -1,13 +1,6 @@
-// The Windows half of the tray's launch contract: tray.ps1 must parse, declare
-// no parameter that shadows a read-only automatic variable, and declare every
-// flag the daemon hands it.
-//
-// A parameter named after a read-only automatic variable (`-Home` vs `$HOME`) fails
-// at binding — "Cannot overwrite variable Home because it is read-only or constant" —
-// before a single line runs, so the tray never appeared and nothing said why.
-//
-// Its own file so the diff-aware Windows run always exercises it, not only when
-// something in daemon.test.mjs's closure changed.
+// The tray's launch contract, Windows only: tray.ps1 parses, declares every flag
+// the daemon hands it, and names no parameter after a read-only automatic variable
+// (`-Home` vs `$HOME` fails at binding, before any line runs).
 import "./helpers/isolate-home.mjs";
 import { test } from "node:test";
 import assert from "node:assert/strict";
