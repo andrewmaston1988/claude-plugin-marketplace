@@ -223,10 +223,12 @@ test('writeJSON from eight concurrent writers never leaves invalid JSON', async 
     });
   }
   while (running > 0) {
-    try {
-      JSON.parse(fs.readFileSync(target, 'utf8'));
-    } catch (e) {
-      if (e.code !== 'ENOENT') invalid.push(e.message);
+    // A transient sharing error is the reader's problem, not torn content;
+    // only a payload that does not parse is a writeJSON defect.
+    let text = null;
+    try { text = fs.readFileSync(target, 'utf8'); } catch { /* not published yet */ }
+    if (text !== null) {
+      try { JSON.parse(text); } catch (e) { invalid.push(e.message); }
     }
     await delay(10);
   }
