@@ -5,7 +5,7 @@ import { mkdirSync, writeFileSync, readFileSync, renameSync, statSync } from "no
 import { join } from "node:path";
 import { swarmHome } from "./config.mjs";
 import { createDefaultProviderRegistry } from "./providers.mjs";
-import { mergeProviderModelCaches, providerQualifiedModels } from "./discovery.mjs";
+import { mergeProviderModelCaches, providerQualifiedModels, visibleModels } from "./discovery.mjs";
 
 // One file, one entry per provider: each goes stale for its own reason.
 
@@ -171,6 +171,25 @@ export function modelRoster({ env = process.env, config = {}, registry, now = Da
     });
   }
   return { models: rosterModels(readRosterEnvelope(env).providers), errors };
+}
+
+// A disabled provider keeps its cached roster for a re-enable, and that roster
+// is never launchable.
+export function providerEnabled(registry, cfg, value) {
+  const provider = value?.provider || "ollama";
+  try { return registry.get(provider).enabled(cfg); } catch { return false; }
+}
+
+// Split per provider first: a name two providers share must not chain into the
+// other provider's lineage.
+export function visibleProviderModels(rows, options) {
+  const groups = new Map();
+  for (const row of rows) {
+    const provider = row?.provider || "ollama";
+    if (!groups.has(provider)) groups.set(provider, []);
+    groups.get(provider).push(row);
+  }
+  return [...groups.values()].flatMap((group) => visibleModels(group, options));
 }
 
 // The network half, called only where a network call is already expected:

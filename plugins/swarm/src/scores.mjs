@@ -461,7 +461,9 @@ export const dominates = (a, b) => a.wtd >= b.wtd && a.multiplier <= b.multiplie
 // a measured-but-thin one — is UNMEASURED: neither on the frontier nor
 // dominated, and it dominates nothing. Missing is not 0 (free) and not
 // Infinity (dear); absence is not evidence in either direction.
-export function frontier(rows, costs, { aspect, model, provider, domain, costDomain, bands = DEFAULT_COST_BANDS } = {}) {
+// `canDominate(entry)` limits which participants may dominate, so the seats
+// block can name only a model the reader can actually seat.
+export function frontier(rows, costs, { aspect, model, provider, domain, costDomain, bands = DEFAULT_COST_BANDS, canDominate } = {}) {
   const costOf = new Map();
   for (const cost of costs || []) {
     const identity = identityOf(cost);
@@ -508,10 +510,14 @@ export function frontier(rows, costs, { aspect, model, provider, domain, costDom
     }
   }
   const participants = entries.filter((e) => e.wtd != null && e.multiplier != null);
+  // `canDominate` narrows who may BEAT a row, never which rows are scored: the
+  // prior is the mean of every model's mean, so filtering rows would move every
+  // score in the table.
+  const dominators = canDominate ? participants.filter(canDominate) : participants;
   for (const e of participants) {
     // The first dominator in aggregate order is the highest-quality one, so a
     // dominated row names the best model that beat it, not just any.
-    const dominator = participants.find((p) => p !== e && p.costDomain === e.costDomain && dominates(p, e));
+    const dominator = dominators.find((p) => p !== e && p.costDomain === e.costDomain && dominates(p, e));
     if (dominator) e.dominatedBy = displayIdentity(identityOf(dominator));
     else e.onFrontier = true;
   }

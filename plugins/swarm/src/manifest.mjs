@@ -314,11 +314,16 @@ export function loadManifest(path, cfg, cwd = process.cwd(), { args, fromRegistr
       if (report !== undefined && report !== true && report !== false && typeof report !== "string") {
         errors.push("digest.report must be true, false, or a steering string for the report body");
       }
+      if (raw.digest.seatReason !== undefined
+        && (typeof raw.digest.seatReason !== "string" || !raw.digest.seatReason.trim())) {
+        errors.push("digest: seatReason must say why this seat is used, as a non-empty string — e.g. \"seatReason\": \"cross-family verifier\"");
+      }
       digest = {
         model: raw.digest.model,
         provider: digestIdentity?.provider,
         instructions: raw.digest.instructions || "",
         ...(report && { report }),
+        ...(typeof raw.digest.seatReason === "string" && { seatReason: raw.digest.seatReason }),
       };
     }
   }

@@ -11,7 +11,7 @@ const CLONE_ID_RE = /\[\d+\]$/;
 // so the generic unknown-key error never fires for one and say nothing useful.
 const RETIRED_TASK_KEYS = new Set(["isolation"]);
 const KNOWN_TASK_KEYS = new Set([
-  "id", "prompt", "model", "provider", "fallbackModel", "fallbackProvider", "effort", "allowedTools", "cwd",
+  "id", "prompt", "model", "provider", "seatReason", "fallbackModel", "fallbackProvider", "effort", "allowedTools", "cwd",
   "workspace", "branch", "outputDir", "timeoutMs", "after", "compute", "when", "forEach",
   "returns", "verifyCitations", "manifest", "integrate", "settings", "leafGuard",
   "mustRead", "contextWindow",
