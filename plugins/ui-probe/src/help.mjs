@@ -1,5 +1,5 @@
 // The usage text, kept out of the dispatcher so `bin/ui-probe.mjs` reads as the branches it runs.
-// Every flag a subcommand's table lists must appear here — row 5b of the CLI's test plan.
+// Every flag a subcommand's table lists must appear here.
 
 export const HELP = [
   "usage: ui-probe <command> [options]",

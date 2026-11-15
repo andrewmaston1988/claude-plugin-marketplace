@@ -13,12 +13,9 @@ const VERIFY_MS = 5000; // a relaunched app gets this long to come up visible
 const POLL_MS = 500;
 
 /**
- * The app in front before the widget launched: `{ id, name }`, `null` when nothing was
- * showing (live TV, an HDMI source, the home screen), or `{ error }` when REST would not say.
- *
- * The configured ids are tried first, in order: that is the only route to an app whose
- * applist id REST rejects (Apple TV). Only when none of them is visible does the applist
- * scan run, and it never re-tries an id or the widget's own.
+ * The app in front before the widget launched: `{ id, name }`, `null` when nothing was showing
+ * (live TV, an HDMI source, the home screen), or `{ error }` when REST would not say. Configured
+ * ids are tried first, in order; only when none is visible does the applist scan run.
  */
 export async function detectForeground({ config, callSdb, _fetch = fetch, _now = Date.now } = {}) {
   let base;
@@ -40,8 +37,11 @@ export async function detectForeground({ config, callSdb, _fetch = fetch, _now =
       return status.visible ? { found: { id, name: status.name } } : {};
     } catch (error) {
       // A 404 is this candidate's answer, not the end of the search: Apple TV's applist id
-      // answers 404 on every set. Anything else is the wire itself failing.
-      return error instanceof RestStatus ? {} : { error: error.message };
+      // answers 404 on every set. Any other status means the wire itself is refusing us.
+      if (error instanceof RestStatus) {
+        return error.status === 404 ? {} : { error: `HTTP ${error.status}` };
+      }
+      return { error: error.message };
     }
   };
 

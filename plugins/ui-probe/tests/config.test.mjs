@@ -242,6 +242,16 @@ test('row 13: rejects a returnApps that is not an array, or holds an empty or no
   }
 });
 
+test('row 13: a returnApps entry outside the REST id shape is refused, naming the key', (t) => {
+  for (const id of ['Apple TV', ' 3201807016597', '3201807016597 ', 'myapp/main', 'myapp.main?x=1']) {
+    const err = loadError(t, { baseUrl: 'http://x.test', tv: { host: '192.0.2.10:26101', appid: 'torrenthub.main', returnApps: [id] } });
+    const e = err.errors.find((item) => item.field === 'tv.returnApps[0]');
+    assert.ok(e, `expected tv.returnApps[0] for ${JSON.stringify(id)}`);
+    assert.equal(typeof e.fix, 'string');
+    assert.match(e.example, /returnApps/, 'the example shows the key inline');
+  }
+});
+
 test('row 13: a returnApps entry that names tv.appid is refused, with the fix and an example', (t) => {
   const err = loadError(t, {
     baseUrl: 'http://x.test',

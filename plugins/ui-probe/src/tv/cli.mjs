@@ -82,10 +82,29 @@ export function writeTvReturn(dir, record, _write = writeJson) {
   _write(join(dir, 'tv-return.json'), record);
 }
 
+/** A TV capture's artefact directory: capture writes everything under `<outDir>/tv`. */
+export function tvCaptureDir(outDir) {
+  return outDir == null ? null : join(outDir, 'tv');
+}
+
+/** A TV command's stdout: what the command wrote, then the return line last. */
+export function tvCommandLines(output, record) {
+  const lines = Array.isArray(output) ? [...output] : output ? [output] : [];
+  const line = tvReturnLine(record);
+  if (line) lines.push(line);
+  return lines;
+}
+
+/** A command that threw: its record written beside the output, its line last. */
+export function tvFailureOutput(dir, error, _write = writeJson) {
+  if (!error?.tvReturn) return [];
+  writeTvReturn(dir, error.tvReturn, _write);
+  return tvCommandLines(null, error.tvReturn);
+}
+
 /**
- * Attach for run or capture. The caller always detaches; the protocol picks the guard. The
- * session holds a one-shot SIGINT/SIGTERM handler, so a Ctrl-C kills the widget and restores the
- * app too — the same memoised detach the caller's `finally` reaches.
+ * Attach for run or capture; the caller always detaches. The signal handler is registered before
+ * the attach, so a Ctrl-C in the launch or settle wait reaches the same memoised detach.
  */
 export async function tvSession(config, {
   attachPort = null,
@@ -97,10 +116,11 @@ export async function tvSession(config, {
     throw new TvRefusal('the tv device needs a tv block with host and appid in .ui-probe.json');
   }
   const restore = returnToApp ?? restoreEnabled(config);
-  const session = await _attach(config, { attachPort, returnToApp: restore });
+  // Set the moment the widget is up: a signal before that has nothing this tool displaced.
+  let detachOnce = null;
 
   async function onSignal() {
-    try { await session.detach(); } catch { /* the process is leaving either way */ }
+    try { if (detachOnce) await detachOnce(); } catch { /* the process is leaving either way */ }
     removeHandlers();
     _process.exit(130);
   }
@@ -110,6 +130,16 @@ export async function tvSession(config, {
   }
   _process.once('SIGINT', onSignal);
   _process.once('SIGTERM', onSignal);
+
+  const session = await _attach(config, {
+    attachPort,
+    returnToApp: restore,
+    onLaunch: (detach) => { detachOnce ??= detach; },
+  }).catch((error) => {
+    removeHandlers();
+    throw error;
+  });
+  detachOnce ??= () => session.detach();
 
   return {
     cdp: session.cdp,
@@ -240,7 +270,8 @@ export async function captureOnTv({
   }
   const tvReturn = await session.detach();
   if (failure) throw withReturn(failure, tvReturn);
-  return { ...outcome, tvReturn };
+  // The artefacts land under `<outDir>/tv`, so the record does too: `done.outDir` is that dir.
+  return { ...outcome, outDir: tvCaptureDir(outcome.outDir ?? outDir ?? config.outDir), tvReturn };
 }
 
 /** Write the platform record to the out dir and to the copy capture reads. */
@@ -285,7 +316,7 @@ export async function tvProbeCommand({
   writeJson(join(dir, 'platform.json'), record);
   writeJson(platformPath(config.tv.appid), record);
   writeTvReturn(dir, tvReturn);
-  return { platform: record, outDir: dir, lines: probeLines(record, dir, tvReturn), tvReturn };
+  return { platform: record, outDir: dir, lines: tvCommandLines(probeLines(record, dir), tvReturn), tvReturn };
 }
 
 function writeJson(file, value) {
@@ -295,7 +326,7 @@ function writeJson(file, value) {
   renameSync(tmp, file);
 }
 
-function probeLines(platform, dir, tvReturn = null) {
+function probeLines(platform, dir) {
   const features = platform.features ?? {};
   const navigate = platform.navigate ?? {};
   const video = platform.video ?? {};
@@ -353,8 +384,6 @@ function probeLines(platform, dir, tvReturn = null) {
 
   lines.push(`out: ${dir}`);
   lines.push(platform.verdict);
-  const tvLine = tvReturnLine(tvReturn);
-  if (tvLine) lines.push(tvLine);
   return lines;
 }
 

@@ -148,6 +148,19 @@ test("the applist scan keeps at most 4 reads in flight", async () => {
   assert.ok(peak <= 4, `no more than 4 detection GETs at once, saw ${peak}`);
 });
 
+test("a status other than 404 ends detection as not read, with its status", async () => {
+  const stub = fetchStub({ [APPLE_TV]: () => answer({ code: 403, message: "Forbidden" }, 403) });
+
+  const found = await detectForeground({
+    config: { tv: { ...CONFIG.tv, returnApps: [APPLE_TV] } },
+    callSdb: async () => ({ stdout: APPLIST }),
+    _fetch: stub,
+  });
+
+  assert.deepEqual(found, { error: "HTTP 403" }, "a refusal is not absence: the line says not read");
+  assert.deepEqual(stub.ids(), [APPLE_TV], "it ends the search rather than reading every id");
+});
+
 test("a candidate answering 404 is skipped, and a later visible app is still found", async () => {
   const stub = fetchStub({
     "com.samsung.tv.aria-dummy": () => answer({ code: 404, message: "Not Found" }, 404),

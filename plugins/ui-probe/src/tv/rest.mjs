@@ -2,7 +2,7 @@
 // refused call throws before it reaches the network: a read of one application, and a
 // launch of the one app this session detected.
 
-import { sleep as realSleep } from "../cdp.mjs";
+// The wire stays a leaf module: config.mjs imports it, and only a launch may load the CDP client.
 
 const REST_PORT = 8001; // Samsung's fixed REST port; tv.host's port belongs to sdb
 const GET_TIMEOUT_MS = 5000;
@@ -11,8 +11,8 @@ const LAUNCH_ATTEMPTS = 3;
 const LAUNCH_RETRY_MS = 1000;
 
 const HOST = /^([^\s/:]+)(?::\d{1,5})?$/;
-// The same id shape config.mjs accepts for tv.appid: dotted Tizen ids and store ids.
-const APP_ID = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
+// The one id shape the wire and the config both accept: dotted Tizen ids and store ids.
+export const APP_ID = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 const ROUTE = /^\/api\/v2\/applications\/([A-Za-z0-9][A-Za-z0-9._-]*)$/;
 
 export class RestRefused extends Error {
@@ -62,7 +62,7 @@ function appPath(id, method = "GET") {
 
 /**
  * One request, aborting at `timeoutMs`. The timer is referenced and cleared: an unref'd
- * `AbortSignal.timeout` let Node drain the event loop mid-request (2026-11-13).
+ * `AbortSignal.timeout` lets Node drain the event loop mid-request.
  */
 async function request(url, { method, timeoutMs, _fetch }) {
   const controller = new AbortController();
@@ -109,19 +109,20 @@ export async function appStatus(base, id, { timeoutMs = GET_TIMEOUT_MS, _fetch }
 }
 
 /**
- * POST the launch, retrying an empty or non-JSON answer three times 1 s apart: the first POST
- * after the widget closes sometimes answers nothing before the app starts.
+ * POST the launch, retrying three times 1 s apart on an empty or non-JSON body or a non-2xx
+ * answer: the first POST after the widget closes sometimes answers nothing before the app starts.
  */
-export async function launchApp(base, id, { launchable = null, widget = null, _fetch, _sleep = realSleep } = {}) {
+export async function launchApp(base, id, { launchable = null, widget = null, _fetch, _sleep = null } = {}) {
   const path = appPath(id, "POST");
   allowRest("POST", path, { launchable, widget });
 
   const url = `${base}${path}`;
   const what = `POST ${path}`;
+  const nap = _sleep ?? (await import("../cdp.mjs")).sleep;
   let problem = null;
 
   for (let attempt = 0; attempt < LAUNCH_ATTEMPTS; attempt += 1) {
-    if (attempt > 0) await _sleep(LAUNCH_RETRY_MS);
+    if (attempt > 0) await nap(LAUNCH_RETRY_MS);
     try {
       const response = await request(url, { method: "POST", timeoutMs: LAUNCH_TIMEOUT_MS, _fetch: _fetch ?? fetch });
       if (!response.ok) throw new RestStatus("POST", path, response.status);

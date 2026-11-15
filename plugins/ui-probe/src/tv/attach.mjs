@@ -33,6 +33,7 @@ export async function attach(config, options = {}) {
   const {
     attachPort = null,
     returnToApp,
+    onLaunch = null,
     _connect = connect,
     _evaluate = evaluate,
     _fetch = fetch,
@@ -76,10 +77,23 @@ export async function attach(config, options = {}) {
     if (found.error) return { outcome: `not read: ${found.error}` };
     if (!launched) {
       // Nothing was displaced, so the app found in front is still there: never POST over it.
-      return { id: found.id, name: found.name ?? null, outcome: "already showing" };
+      return { id: found.id, name: found.name ?? null, outcome: "nothing restored: the widget did not launch" };
     }
     const record = await quietly(() => returnTo(found, { config, _fetch, _sleep, _now }));
     return record ?? { id: found.id, name: found.name ?? null, outcome: "failed: the return did not report" };
+  };
+
+  // Memoised: the signal handler, the error path and the caller's `finally` reach the same run, so
+  // the kill, the forward removal and the restore happen once.
+  let detaching = null;
+  const detach = () => {
+    detaching ??= (async () => {
+      try { cdp?.close(); } catch { /* the app may have exited already */ }
+      if (launched) await quietly(() => callSdb(["shell", "0", "kill", pkgid], { timeoutMs }));
+      if (port !== null) await quietly(() => callSdb(["forward", "--remove", `tcp:${port}`], { timeoutMs }));
+      return restoreRecord();
+    })();
+    return detaching;
   };
 
   try {
@@ -97,6 +111,9 @@ export async function attach(config, options = {}) {
         );
       }
       launched = true;
+      // From this moment the widget is up: the caller's signal handler gets the cleanup to run,
+      // even while this call is still waiting for the page to settle.
+      onLaunch?.(detach);
       await callSdb(["forward", `tcp:${port}`, `tcp:${port}`], { timeoutMs });
       // A relaunch costs seconds; this is how many the caller can expect to spend again.
       relaunchMs = _now() - started;
@@ -112,7 +129,6 @@ export async function attach(config, options = {}) {
       holdMs: settleHoldMs,
       pollMs: settlePollMs,
     });
-    let detaching = null;
 
     return {
       cdp,
@@ -120,23 +136,10 @@ export async function attach(config, options = {}) {
       protocol,
       settled,
       timings: { attachMs: socketAt - started, relaunchMs, settleMs: _now() - socketAt },
-      // Memoised: the signal handler and the caller's `finally` reach the same run, so the kill,
-      // the forward removal and the restore happen once.
-      detach() {
-        detaching ??= (async () => {
-          try { cdp.close(); } catch { /* the app may have exited already */ }
-          if (launched) await quietly(() => callSdb(["shell", "0", "kill", pkgid], { timeoutMs }));
-          await quietly(() => callSdb(["forward", "--remove", `tcp:${port}`], { timeoutMs }));
-          return restoreRecord();
-        })();
-        return detaching;
-      },
+      detach,
     };
   } catch (error) {
-    if (cdp) try { cdp.close(); } catch { /* the socket may already be gone */ }
-    if (launched) await quietly(() => callSdb(["shell", "0", "kill", pkgid], { timeoutMs }));
-    if (port !== null) await quietly(() => callSdb(["forward", "--remove", `tcp:${port}`], { timeoutMs }));
-    const record = await restoreRecord();
+    const record = await detach();
     // The run's own failure is what the caller has to see; the record rides along for the line.
     if (error && typeof error === "object") error.tvReturn = record;
     throw error;

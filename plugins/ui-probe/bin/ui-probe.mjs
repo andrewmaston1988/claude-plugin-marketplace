@@ -11,6 +11,8 @@ import { HELP } from "../src/help.mjs";
 
 const argv = process.argv.slice(2);
 const cmd = argv[0];
+// Where a TV command's record belongs if the command throws before it can report its own dir.
+let tvOutDir = null;
 
 const out = (line) => process.stdout.write(line + "\n");
 const err = (line) => process.stderr.write(line + "\n");
@@ -68,15 +70,15 @@ function refuseUnknown(subcommand, args) {
     if (device.problem) { err(device.problem); settle(64); return; }
 
     if (device.value === "tv") {
-      const { captureTvBranch, tvReturnLine, writeTvReturn } = await import("../src/tv/cli.mjs");
+      const { captureTvBranch, tvCaptureDir, tvCommandLines, writeTvReturn } = await import("../src/tv/cli.mjs");
+      // Resolved before the call so a thrown capture still has somewhere to write its record.
+      const captureDir = tvCaptureDir(getFlag("--out", rest) ?? config.outDir);
+      tvOutDir = captureDir;
       const done = await captureTvBranch({ screen, config, rest, getFlag, source: name ?? url });
       if (done.stderr) err(done.stderr);
-      const captureDir = getFlag("--out", rest) ?? config.outDir;
-      if (done.tvReturn) writeTvReturn(captureDir, done.tvReturn);
-      if (done.digest) process.stdout.write(done.digest.endsWith("\n") ? done.digest : `${done.digest}\n`);
+      if (done.tvReturn) writeTvReturn(done.outDir ?? captureDir, done.tvReturn);
       // The return is reported last, after the digest, and never changes the exit code.
-      const tvLine = done.tvReturn === undefined ? null : tvReturnLine(done.tvReturn);
-      if (tvLine) out(tvLine);
+      for (const line of tvCommandLines(done.digest, done.tvReturn)) out(line);
       settle(done.exitCode);
       return;
     }
@@ -147,6 +149,7 @@ function refuseUnknown(subcommand, args) {
     const device = deviceFlag(rest);
     if (device.problem) { err(device.problem); settle(64); return; }
     const outDir = resolveOutDir(config, getFlag("--out", rest));
+    tvOutDir = outDir;
     // An include resolves beside the file that names it, so every loader gets that file's path.
     const scenarioPath = path.resolve(file);
 
@@ -162,9 +165,11 @@ function refuseUnknown(subcommand, args) {
     }
 
     let result;
-    let tvLine = null;
+    let tvReturn;
+    let assemble = null;
     if (device.value === "tv") {
-      const { runTvBranch, tvReturnLine, writeTvReturn } = await import("../src/tv/cli.mjs");
+      const { runTvBranch, tvCommandLines, writeTvReturn } = await import("../src/tv/cli.mjs");
+      assemble = tvCommandLines;
       const done = await runTvBranch({
         doc, config, rest, getFlag, cookies,
         baseUrl: config?.baseUrl ?? null, source: path.basename(file),
@@ -172,9 +177,9 @@ function refuseUnknown(subcommand, args) {
       });
       if (done.stderr) err(done.stderr);
       if (done.tvReturn) writeTvReturn(outDir, done.tvReturn);
-      tvLine = done.tvReturn === undefined ? null : tvReturnLine(done.tvReturn);
+      tvReturn = done.tvReturn;
       if (done.exitCode !== 0) {
-        if (tvLine) out(tvLine);
+        for (const line of tvCommandLines(null, done.tvReturn)) out(line);
         settle(done.exitCode);
         return;
       }
@@ -232,16 +237,17 @@ function refuseUnknown(subcommand, args) {
       if (session) await session.close();
     }
 
+    const said = [];
     for (const problem of result.problems ?? []) printProblem(problem);
     const counts = { passed: 0, failed: 0, inconclusive: 0, not_run: 0 };
     for (const step of result.steps) {
       counts[step.outcome] = (counts[step.outcome] ?? 0) + 1;
-      out(digestLine(step));
+      said.push(digestLine(step));
     }
-    out(`run: ${result.outcome} (${counts.passed} passed, ${counts.failed} failed, ${counts.inconclusive} inconclusive, ${counts.not_run} not run) → ${outDir}`);
+    said.push(`run: ${result.outcome} (${counts.passed} passed, ${counts.failed} failed, ${counts.inconclusive} inconclusive, ${counts.not_run} not run) → ${outDir}`);
     writeResults(outDir, result);
     // The set's return is the command's last line, after the journey's verdict.
-    if (tvLine) out(tvLine);
+    for (const line of assemble ? assemble(said, tvReturn) : said) out(line);
     settle(result.exitCode);
     return;
   }
@@ -258,14 +264,16 @@ function refuseUnknown(subcommand, args) {
     try {
       loaded = await loadConfig(getFlag("--config", rest), true);
     } catch (e) { if (reportConfigError(e)) return; throw e; }
-    const { tvProbeBranch, tvReturnLine, writeTvReturn } = await import("../src/tv/cli.mjs");
+    // Resolved before the call so a thrown probe still has somewhere to write its record.
+    const outDir = resolveOutDir(loaded.config, getFlag("--out", rest));
+    tvOutDir = outDir;
+    const { tvProbeBranch, tvCommandLines, writeTvReturn } = await import("../src/tv/cli.mjs");
     const done = await tvProbeBranch({ config: loaded.config, rest, getFlag, resolveOutDir, out, err });
     if (done.stderr) err(done.stderr);
     if (done.exitCode !== 0 && done.tvReturn) {
       // A probe that threw wrote no output; its record still gets a file and the last line.
-      writeTvReturn(resolveOutDir(loaded.config, getFlag("--out", rest)), done.tvReturn);
-      const tvLine = tvReturnLine(done.tvReturn);
-      if (tvLine) out(tvLine);
+      writeTvReturn(outDir, done.tvReturn);
+      for (const line of tvCommandLines(null, done.tvReturn)) out(line);
     }
     settle(done.exitCode);
     return;
@@ -382,11 +390,10 @@ function refuseUnknown(subcommand, args) {
   settle(64);
 })().catch(async (e) => {
   process.stderr.write(`${(e && e.message) || String(e)}\n`);
-  // An unexpected TV failure still reports where the set was left, as the last line.
+  // An unexpected TV failure still reports where the set was left: a file, then the last line.
   if (e && e.tvReturn) {
-    const { tvReturnLine } = await import("../src/tv/cli.mjs");
-    const tvLine = tvReturnLine(e.tvReturn);
-    if (tvLine) out(tvLine);
+    const { tvFailureOutput } = await import("../src/tv/cli.mjs");
+    for (const line of tvFailureOutput(tvOutDir, e)) out(line);
   }
   settle(1);
 });

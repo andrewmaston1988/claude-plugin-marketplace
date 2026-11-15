@@ -156,7 +156,15 @@ test("row 9: an inconclusive launch and a failed closeApp make zero POSTs", asyn
   const noPort = [];
   await assert.rejects(
     attach(CONFIG, base(noPort, { _sdb: sdbStub(noPort, { debug: ok("") }) })),
-    AttachInconclusive,
+    (error) => {
+      assert.ok(error instanceof AttachInconclusive);
+      assert.deepEqual(error.tvReturn, {
+        id: APPLE_TV,
+        name: "Apple TV",
+        outcome: "nothing restored: the widget did not launch",
+      }, "the app found is named, but no state was read after the widget's life");
+      return true;
+    },
   );
   assert.equal(posts(noPort), 0, "the widget may be up, so nothing is posted over it");
   assert.equal(restGets(noPort), 1, "the screen was still read");
@@ -166,7 +174,11 @@ test("row 9: an inconclusive launch and a failed closeApp make zero POSTs", asyn
     attach(CONFIG, base(closeFailed, {
       _sdb: sdbStub(closeFailed, { kill: { code: 1, stdout: "failed", stderr: "" } }),
     })),
-    AttachInconclusive,
+    (error) => {
+      assert.ok(error instanceof AttachInconclusive);
+      assert.equal(error.tvReturn.outcome, "nothing restored: the widget did not launch");
+      return true;
+    },
   );
   assert.equal(posts(closeFailed), 0, "nothing was displaced, so nothing is relaunched");
 });
