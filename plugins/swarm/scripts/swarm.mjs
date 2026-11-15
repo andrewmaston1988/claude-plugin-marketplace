@@ -18,7 +18,7 @@ import { citationPaths } from "../src/citations.mjs";
 import { listLeaves, displayIdentity } from "../src/results.mjs";
 import { identityKey } from "../src/contracts.mjs";
 import { dim, out, err } from "../src/ui.mjs";
-import { markValidated } from "../src/validated.mjs";
+import { markValidated, clearValidated } from "../src/validated.mjs";
 import { cmdRun, refuseLiveEngine } from "../src/cmd-run.mjs";
 import { cmdServe } from "./cmd-serve.mjs";
 import { cmdStatus } from "./cmd-status.mjs";
@@ -200,11 +200,10 @@ function writeRosterErrors(errors, write) {
   for (const [provider, message] of Object.entries(errors)) write(`roster: ${provider} — ${message}`);
 }
 
-// A refused seat's own teaching line: the record, who beats it, and the two
-// ways out.
+// A refused seat's own teaching line: the record, who beats it, and the two ways out.
 const seatRefusalText = (r) =>
   `task '${r.leaf}': seats ${r.model} (overall ${r.wtd.toFixed(2)} n=${r.n}), dominated by ${r.dominatedBy} — `
-  + `seat ${r.dominatedBy} or a frontier model, or add "seatReason": "<why this seat>" to the task, `
+  + `seat ${r.dominatedBy} or a frontier model, or add "${r.digest ? "digest.seatReason" : "seatReason"}": "<why this seat>" to ${r.digest ? "the digest block" : "the task"}, `
   + `e.g. "seatReason": "cross-family verifier: every non-deepseek ollama model is dominated"`;
 
 async function cmdValidate(rest) {
@@ -264,9 +263,10 @@ async function cmdValidate(rest) {
   // The consent line: worst-case leaves × historical per-model medians.
   out(formatEstimate(estimateRun(plan.tasks, plan.digest, loadCorpus(join(swarmHome(), "runs")))));
   for (const line of seats.lines) out(line);
-  // A refusal stops here: the marker `run` reads is written only past this
-  // point, so the same bytes are refused by `run` too.
+  // A refusal stops here and revokes any earlier pass: the marker `run` reads is
+  // written only past this point, so the same bytes are refused by `run` too.
   if (seats.refusals.length) {
+    clearValidated(plan, args);
     err("manifest validation failed:");
     for (const refusal of seats.refusals) err(`  - ${seatRefusalText(refusal)}`);
     return 1;

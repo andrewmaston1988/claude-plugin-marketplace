@@ -1,7 +1,7 @@
 // The dispatch gate's marker store: `run` refuses a manifest unless `validate`
 // has passed on the very bytes and args it is being given.
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { swarmHome } from "./config.mjs";
 import { canonicalize } from "./manifest.mjs";
@@ -42,6 +42,12 @@ export function markValidated(plan, args) {
   mkdirSync(validatedDir(), { recursive: true });
   writeFileSync(validationMarkerPath(key), JSON.stringify({ validatedAt: new Date().toISOString() }) + "\n");
   return 0;
+}
+
+// A refused re-validate's revocation: the marker is per bytes+args, so removing
+// it makes these bytes unvalidated again. Absent is not an error.
+export function clearValidated(plan, args) {
+  rmSync(validationMarkerPath(validationKey(plan.manifestFiles, args)), { force: true });
 }
 
 // The refusal `run` prints when the marker is missing, or null when it is there.

@@ -28,6 +28,12 @@ const graded = (over) => row({ note: "x", ...over });
 const lineOf = (out, model) =>
   out.split("\n").find((l) => l.startsWith(`  ${model} (`));
 
+// seatCheck computes the seatable frontier once and hands both surfaces the same
+// map; the tests do the same rather than letting each recompute its own answer.
+const seatsOf = (o) => seatableFrontier({ seats: o.seats ?? (o.models || []).map((m) => ({ identity: m })), rows: o.rows, costRows: o.costRows, roster: o.roster, bands: o.bands });
+const report = (o) => seatReport({ ...o, seatable: o.seatable ?? seatsOf(o) });
+const refusals = (o) => seatRefusals({ ...o, seatable: o.seatable ?? seatsOf(o) });
+
 test("seatReport: one row per distinct seated model, naming all its leaf ids", () => {
   const models = [
     { model: "a:cloud", leaves: ["scan", "fix-a", "fix-b"] },
@@ -39,7 +45,7 @@ test("seatReport: one row per distinct seated model, naming all its leaf ids", (
     graded({ leaf: "y", model: "b:cloud" }),
     graded({ leaf: "z", model: "haiku" }),
   ];
-  const out = seatReport({ models, rows, costRows: [], roster: [] }).join("\n");
+  const out = report({ models, rows, costRows: [], roster: [] }).join("\n");
   // RED guard: a per-LEAF row prints a:cloud three times.
   for (const m of models) {
     equal(out.split("\n").filter((l) => l.startsWith(`  ${m.model} (`)).length, 1, `${m.model} must be exactly one row:\n${out}`);
@@ -56,7 +62,7 @@ test("seatReport: n, weighted, cost band and verdict match what scores.mjs and c
   }));
   const rows = [...leaves("dear:cloud", 7, 24), ...leaves("cheap:cloud", 9, 24)];
   const costRows = [{ model: "dear:cloud", mult: 4.0 }, { model: "cheap:cloud", mult: 1.0 }];
-  const out = seatReport({
+  const out = report({
     models: [{ model: "dear:cloud", leaves: ["lane"] }],
     rows,
     costRows,
@@ -83,7 +89,7 @@ test("seatReport: n, weighted, cost band and verdict match what scores.mjs and c
 
 test("seatReport: a never-graded model reads never graded, never a zero or a dash", () => {
   const rows = [graded({ leaf: "a" })]; // someone is graded; ghost is not
-  const lines = seatReport({
+  const lines = report({
     models: [{ model: "ghost:cloud", leaves: ["probe"] }, { model: "glm-5.2:cloud", leaves: ["lane"] }],
     rows,
     costRows: [],
@@ -105,7 +111,7 @@ test("seatReport: a never-graded model reads never graded, never a zero or a das
 test("seatReport: rows but no cost entry reads unmeasured, never 0x or free", () => {
   const rows = [graded({ leaf: "a", model: "half:cloud" })];
   for (const costRows of [[], [{ model: "half:cloud", mult: null }]]) {
-    const out = seatReport({
+    const out = report({
       models: [{ model: "half:cloud", leaves: ["lane"] }],
       rows,
       costRows,
@@ -124,7 +130,7 @@ test("seatReport: n<20 marks under-canon columns; n=20 is unmarked — both side
     model,
   }));
   const rows = [...leaves("thin:cloud", 19), ...leaves("canon:cloud", 20)];
-  const out = seatReport({
+  const out = report({
     models: [{ model: "thin:cloud", leaves: ["l"] }, { model: "canon:cloud", leaves: ["l"] }],
     rows,
     costRows: [],
@@ -139,7 +145,7 @@ test("seatReport: launchable-but-unseated models list with their n; a seated mod
     graded({ leaf: "s1", model: "seated:cloud" }),
     ...Array.from({ length: 7 }, (_, i) => graded({ resultsDir: `C:/runs/o-${i}`, leaf: "o", model: "outsider:cloud" })),
   ];
-  const out = seatReport({
+  const out = report({
     models: [{ model: "seated:cloud", leaves: ["lane"] }],
     rows,
     costRows: [],
@@ -172,17 +178,17 @@ test("seatReport: a gap seat is named when nothing seated is under canon", () =>
   const rows = many("kimi-k2.6:cloud", 8, 24);
   const seated = { model: "kimi-k2.6:cloud", leaves: ["impl-lane"] };
   const roster = [seated, { model: "fresh:cloud" }];
-  const out = seatReport({ models: [seated], rows, costRows: [], roster }).join("\n");
+  const out = report({ models: [seated], rows, costRows: [], roster }).join("\n");
   const gap = out.split("\n").find((l) => l.startsWith("  gap seat available:"));
   ok(gap.includes("fresh:cloud (never graded)"), out);
   ok(gap.includes("needs grades, n=0"), gap);
   ok(gap.includes("seat it on one bounded leaf this run"), `the line carries its own instruction, so no skill has to: ${gap}`);
 
   // A run that already seats the gap model is not nudged twice.
-  const seatedGap = seatReport({ models: [{ model: "fresh:cloud", leaves: ["probe"] }], rows, costRows: [], roster }).join("\n");
+  const seatedGap = report({ models: [{ model: "fresh:cloud", leaves: ["probe"] }], rows, costRows: [], roster }).join("\n");
   ok(!seatedGap.includes("gap seat available"), seatedGap);
   // Nothing launchable outside the seats: nothing to name.
-  const noneLeft = seatReport({ models: [seated], rows, costRows: [], roster: [seated] }).join("\n");
+  const noneLeft = report({ models: [seated], rows, costRows: [], roster: [seated] }).join("\n");
   ok(!noneLeft.includes("gap seat available"), noneLeft);
 });
 
@@ -210,7 +216,7 @@ test("gapCandidates: sells the successor of the best-value elder first, and the 
   equal(candidates[1].rank, 1, "the elder's rank rides along, even when it sorts after a better pitch");
   equal(candidates[2].n, 0);
 
-  const out = seatReport({ models: [seated], rows, costRows, roster }).join("\n");
+  const out = report({ models: [seated], rows, costRows, roster }).join("\n");
   const gap = out.split("\n").find((l) => l.startsWith("  gap seat available:"));
   ok(gap.includes("gap seat available: kimi-k2.7-code:cloud (never graded)"), gap);
   ok(gap.includes("newer generation of kimi-k2.6:cloud (#2 overall, best value)"), gap);
@@ -244,7 +250,7 @@ test("seatReport: a poor seat under the refusal canon is stated, never judged", 
     grades: { adherence: g, handoff: g, truthfulness: g, depth: g, impl: g, code: g },
   }));
   const rows = [...leaves("kimi-k2.7-code:cloud", 7, 24), ...leaves("glm-5.3-flash:cloud", 8, 24)];
-  const out = seatReport({
+  const out = report({
     models: [{ model: "kimi-k2.7-code:cloud", leaves: ["impl-lane"] }],
     rows,
     costRows: [{ model: "kimi-k2.7-code:cloud", mult: 4.0 }, { model: "glm-5.3-flash:cloud", mult: 3.5 }],
@@ -259,9 +265,9 @@ test("seatReport: a poor seat under the refusal canon is stated, never judged", 
 });
 
 test("seatReport: an empty store or nothing seated prints nothing at all", () => {
-  deepEqual(seatReport({ models: [{ model: "a:cloud", leaves: ["x"] }], rows: [], costRows: [], roster: [] }), []);
-  deepEqual(seatReport({ models: [], rows: [graded({})], costRows: [], roster: [] }), []);
-  deepEqual(seatReport({ rows: [graded({})] }), []);
+  deepEqual(report({ models: [{ model: "a:cloud", leaves: ["x"] }], rows: [], costRows: [], roster: [] }), []);
+  deepEqual(report({ models: [], rows: [graded({})], costRows: [], roster: [] }), []);
+  deepEqual(report({ rows: [graded({})] }), []);
 });
 
 test("seatReport: pure — inputs untouched, equal output on repeat", () => {
@@ -270,8 +276,8 @@ test("seatReport: pure — inputs untouched, equal output on repeat", () => {
   const costRows = [{ model: "a:cloud", mult: 1.2 }];
   const roster = [{ model: "b:cloud" }];
   const before = JSON.stringify({ models, rows, costRows, roster });
-  const first = seatReport({ models, rows, costRows, roster });
-  const second = seatReport({ models, rows, costRows, roster });
+  const first = report({ models, rows, costRows, roster });
+  const second = report({ models, rows, costRows, roster });
   deepEqual(first, second);
   equal(JSON.stringify({ models, rows, costRows, roster }), before, "the inputs were mutated");
 });
@@ -288,7 +294,7 @@ test("seatReport: a Claude alias finds its resolved id in the store, and says wh
     ...Array.from({ length: 4 }, (_, i) => graded({ model: "claude-opus-4-8", leaf: `o${i}` })),
     ...Array.from({ length: 9 }, (_, i) => graded({ model: "claude-opus-5", leaf: `p${i}` })),
   ];
-  const out = seatReport({ models: [{ model: "sonnet", leaves: ["d"] }], rows, costRows: [], roster: [] }).join("\n");
+  const out = report({ models: [{ model: "sonnet", leaves: ["d"] }], rows, costRows: [], roster: [] }).join("\n");
   const line = out.split("\n").find((l) => l.includes("sonnet"));
   ok(!line.includes("never graded"), `alias must resolve, got: ${line}`);
   ok(line.includes("n=30"), `must carry the store's real n, got: ${line}`);
@@ -322,20 +328,20 @@ test("a claude-provided id containing a family token is not that family (substri
     ...Array.from({ length: 3 }, (_, i) => graded({ provider: "claude", model: "not-opus-9b", leaf: `g${i}` })),
     graded({ provider: "claude", model: "claude-opus-5", leaf: "p0" }),
   ];
-  const out = seatReport({ models: [{ model: "opus", leaves: ["d"] }], rows, costRows: [], roster: [] }).join("\n");
+  const out = report({ models: [{ model: "opus", leaves: ["d"] }], rows, costRows: [], roster: [] }).join("\n");
   ok(out.includes("opus -> claude/claude-opus-5"), `the seat must resolve to the real family id, got: ${out}`);
 });
 
 test("seatReport: an alias with genuinely no rows still reads never graded", () => {
   const rows = [graded({ model: "claude-sonnet-5" })];
-  const out = seatReport({ models: [{ model: "fable", leaves: ["d"] }], rows, costRows: [], roster: [] }).join("\n");
+  const out = report({ models: [{ model: "fable", leaves: ["d"] }], rows, costRows: [], roster: [] }).join("\n");
   ok(out.includes("never graded"), `unmeasured must stay unmeasured, got: ${out}`);
   ok(!out.includes("->"), "nothing was resolved, so nothing is shown as resolved");
 });
 
 test("seatReport: the unseated roster resolves aliases too", () => {
   const rows = Array.from({ length: 12 }, (_, i) => graded({ model: "claude-haiku-4-5-20251001", leaf: `h${i}` }));
-  const out = seatReport({
+  const out = report({
     models: [{ model: "glm-5.3:cloud", leaves: ["a"] }],
     rows: [...rows, graded({ model: "glm-5.3:cloud" })],
     costRows: [],
@@ -371,7 +377,7 @@ test("gapCandidates: verdicts follow the configured valueMargin, as costView's d
 // refusal canon that a seatable model beats on both quality and cost, with no
 // seatReason saying why it is seated anyway.
 const refusedBy = (rows, roster, costRows = [{ model: "dom:cloud", mult: 5 }, { model: "champ:cloud", mult: 1 }]) =>
-  seatRefusals({ seats: [{ identity: { model: "dom:cloud" }, leaf: "lane" }], rows, costRows, roster });
+  refusals({ seats: [{ identity: { model: "dom:cloud" }, leaf: "lane" }], rows, costRows, roster });
 
 test("seatRefusals: over canon and dominated by a seatable model refuses; a reason, a thin record or no cost does not", () => {
   const roster = [{ model: "champ:cloud" }];
@@ -385,12 +391,12 @@ test("seatRefusals: over canon and dominated by a seatable model refuses; a reas
 
   // The escape: the task says why this seat is used. A blank string is not one.
   deepEqual(refusedBy(store(REFUSAL_N), roster, undefined), out, "the same call twice names the same refusal");
-  const withReason = seatRefusals({
+  const withReason = refusals({
     seats: [{ identity: { model: "dom:cloud" }, leaf: "lane", seatReason: "cross-family verifier" }],
     rows: store(REFUSAL_N), roster,
   });
   deepEqual(withReason, []);
-  const blank = seatRefusals({
+  const blank = refusals({
     seats: [{ identity: { model: "dom:cloud" }, leaf: "lane", seatReason: "   " }],
     rows: store(REFUSAL_N), roster,
   });
@@ -400,7 +406,7 @@ test("seatRefusals: over canon and dominated by a seatable model refuses; a reas
   deepEqual(refusedBy(store(19), roster), [], "n=19 is the gap rule's, not a verdict");
   deepEqual(refusedBy(store(REFUSAL_N - 1), roster), [], "n=39 is still getting its fair shot");
   // Never graded, and no cost row (Claude tiers, Codex): nothing to judge.
-  const ghost = seatRefusals({ seats: [{ identity: { model: "ghost:cloud" }, leaf: "lane" }], rows: store(REFUSAL_N), roster });
+  const ghost = refusals({ seats: [{ identity: { model: "ghost:cloud" }, leaf: "lane" }], rows: store(REFUSAL_N), roster });
   deepEqual(ghost, []);
   deepEqual(refusedBy(store(REFUSAL_N), roster, [{ model: "champ:cloud", mult: 1 }]), []);
   deepEqual(refusedBy([], roster), [], "an empty store refuses nothing");
@@ -432,18 +438,27 @@ test("seatableFrontier: only a launchable model over canon may dominate — the 
   ];
   const seat = { identity: { model: "seat:cloud" }, leaf: "lane" };
   const thin = { rows, costRows, roster: [{ model: "young:cloud" }] };
-  deepEqual(seatRefusals({ seats: [seat], ...thin }), [], "no seatable dominator, no refusal");
-  const line = seatReport({ models: [{ model: "seat:cloud", leaves: ["lane"] }], ...thin }).join("\n");
+  deepEqual(refusals({ seats: [seat], ...thin }), [], "no seatable dominator, no refusal");
+  const line = report({ models: [{ model: "seat:cloud", leaves: ["lane"] }], ...thin }).join("\n");
   ok(!line.includes("dominated by"), `a dominator nobody can seat is never named: ${line}`);
-  ok(line.includes("frontier"), line);
+  ok(line.includes("seatable frontier"), line);
 
   const full = {
     rows: [...rows, ...many("champ:cloud", 9, 40)],
     costRows: [...costRows, { model: "champ:cloud", mult: 1 }],
     roster: [{ model: "young:cloud" }, { model: "champ:cloud" }],
   };
-  deepEqual(seatRefusals({ seats: [seat], ...full }).map((r) => [r.leaf, r.dominatedBy]), [["lane", "champ:cloud"]]);
-  ok(seatReport({ models: [{ model: "seat:cloud", leaves: ["lane"] }], ...full }).join("\n").includes("dominated by champ:cloud"));
+  deepEqual(refusals({ seats: [seat], ...full }).map((r) => [r.leaf, r.dominatedBy]), [["lane", "champ:cloud"]]);
+  ok(report({ models: [{ model: "seat:cloud", leaves: ["lane"] }], ...full }).join("\n").includes("dominated by champ:cloud"));
+});
+
+test("seatableFrontier: a second SEAT at n=5 that beats S never dominates it", () => {
+  const rows = [...many("seat:cloud", 6, REFUSAL_N), ...many("youngseat:cloud", 9, 5)];
+  const costRows = [{ model: "seat:cloud", mult: 5 }, { model: "youngseat:cloud", mult: 1 }];
+  const seats = [{ identity: { model: "seat:cloud" }, leaf: "lane" }, { identity: { model: "youngseat:cloud" }, leaf: "young" }];
+  deepEqual(refusals({ seats, rows, costRows, roster: [] }), [], "a seat under canon is not a dominator");
+  const line = report({ seats, models: [{ model: "seat:cloud", leaves: ["lane"] }], rows, costRows, roster: [] }).join("\n");
+  ok(!line.includes("dominated by"), `the block names no dominator: ${line}`);
 });
 
 test("seatableFrontier: rows are never filtered, so no score moves — the prior is the mean of every model's mean", () => {
@@ -469,8 +484,8 @@ test("seatableFrontier: rows are never filtered, so no score moves — the prior
     equal(scored.n, entry.n, `${entry.model} n`);
     equal(scored.wtd, entry.wtd, `${entry.model} wtd moved — rows were filtered before scoring`);
   }
-  const refusal = seatRefusals({ seats: [seat], rows, costRows, roster })[0];
+  const refusal = seatRefusals({ seats: [seat], seatable })[0];
   ok(refusal, "the fixture is a refused seat");
-  const line = seatReport({ models: [{ model: "seat:cloud", leaves: ["lane"] }], rows, costRows, roster }).join("\n");
+  const line = seatReport({ models: [{ model: "seat:cloud", leaves: ["lane"] }], seatable, rows, costRows, roster }).join("\n");
   ok(line.includes(`dominated by ${refusal.dominatedBy}`), `the block and the refusal name one dominator: ${line}`);
 });

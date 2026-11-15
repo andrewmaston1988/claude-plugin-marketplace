@@ -1,12 +1,8 @@
 // The seats block `swarm validate` prints, and the refusal behind it: the graded
-// record of every seated model, from the same store `swarm perf` reads, at the
-// moment the seating is being decided. It judges exactly one thing — a seat over
-// the refusal canon that a launchable model beats on both quality and cost is
-// refused, unless the task says why it is seated. Nothing under canon is judged:
-// the seating rule deliberately gives an under-canon model the seat, and a grade
-// at n<20 is not a verdict. On 2026-11-15 a session seated four cost-dominated
-// models as builders and standing verifiers and nothing stopped it. Pure over
-// injected rows: no I/O, no store path.
+// record of every seated model at the moment the seating is decided. It judges
+// one thing — a seat over the refusal canon that a launchable model beats on
+// both quality and cost, refused unless the task says why. Under canon the
+// seating rule gives the seat, so it is not judged. Pure over injected rows.
 
 import { aggregate, frontier, overall } from "./scores.mjs";
 import { band, DEFAULT_COST_BANDS } from "./cost.mjs";
@@ -118,16 +114,17 @@ export function seatableFrontier({ seats = [], rows = [], costRows = [], roster 
 // the roster can launch, with no reason given. Everything else is left alone:
 // a never-graded model, one still inside the fair-shot band, one with no cost
 // record (Claude tiers, Codex — no frontier verdict at all).
-export function seatRefusals({ seats = [], rows = [], costRows = [], roster = [], bands = DEFAULT_COST_BANDS } = {}) {
-  if (!rows.length) return [];
-  const byKey = seatableFrontier({ seats, rows, costRows, roster, bands });
+export function seatRefusals({ seats = [], seatable } = {}) {
   const refusals = [];
   for (const seat of seats) {
     const identity = identityOf(seat.identity ?? seat);
-    const entry = byKey.get(identityKey(identity));
+    const entry = seatable.get(identityKey(identity));
     if (!entry || entry.n < REFUSAL_N || !entry.dominatedBy) continue;
     if (typeof seat.seatReason === "string" && seat.seatReason.trim()) continue;
-    refusals.push({ leaf: seat.leaf, model: shown(identity), n: entry.n, wtd: entry.wtd, dominatedBy: entry.dominatedBy });
+    refusals.push({
+      leaf: seat.leaf, model: shown(identity), n: entry.n, wtd: entry.wtd, dominatedBy: entry.dominatedBy,
+      ...(seat.digest && { digest: true }),
+    });
   }
   return refusals;
 }
@@ -182,7 +179,7 @@ export function gapCandidates({ roster = [], rows = [], costRows = [], bands = D
 // the seating canon is exactly what a fresh author has not read.
 const GAP_INSTRUCTION = "seat it on one bounded leaf this run; a grade at n<20 is not a verdict";
 
-export function seatReport({ models = [], rows = [], costRows = [], roster = [], bands = DEFAULT_COST_BANDS, valueMargin, cloudSuffix } = {}) {
+export function seatReport({ models = [], seatable, rows = [], costRows = [], roster = [], bands = DEFAULT_COST_BANDS, valueMargin, cloudSuffix } = {}) {
   if (!models.length || !rows.length) return [];
 
   // One record per model straight from the source aggregators: frontier's wtd
@@ -203,7 +200,6 @@ export function seatReport({ models = [], rows = [], costRows = [], roster = [],
   };
 
   const lines = ["seats:"];
-  const seatable = seatableFrontier({ seats: models.map((m) => ({ identity: identityOf(m) })), rows, costRows, roster, bands });
   const seated = new Set(models.map((m) => identityKey(identityOf(m))));
   for (const modelEntry of models) {
     const target = identityOf(modelEntry);
@@ -229,7 +225,7 @@ export function seatReport({ models = [], rows = [], costRows = [], roster = [],
       costPart(resolvedIdentity),
     ];
     if (verdict?.dominatedBy) parts.push(`dominated by ${verdict.dominatedBy}`);
-    else if (verdict?.onFrontier) parts.push("frontier");
+    else if (verdict?.onFrontier) parts.push("seatable frontier");
     if (reason) parts.push(`reason: ${reason}`);
     lines.push(`${head} · ${parts.join(" · ")}`);
   }

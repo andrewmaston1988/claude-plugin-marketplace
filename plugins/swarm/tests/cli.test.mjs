@@ -151,7 +151,7 @@ test("validate: the seats block sits between the existing lines and never distur
     // the CLI fed the seam: seated leaf ids, the never-graded digest seat, and
     // the unseated roster model the store has a record for.
     ok(r.stdout.includes("ollama/glm-5.2:cloud (lane) · overall"), r.stdout);
-    ok(r.stdout.includes("claude/claude-haiku-4-5-20251001 (audit, __digest) · never graded"), r.stdout);
+    ok(r.stdout.includes("claude/claude-haiku-4-5-20251001 (audit, digest) · never graded"), r.stdout);
     ok(r.stdout.includes("launchable, not seated: ollama/glm-5.3-flash:cloud n=1"), r.stdout);
 
     // a bad manifest keeps its existing failure: the plan never loads, so the

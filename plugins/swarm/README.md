@@ -636,7 +636,7 @@ replaces its rows rather than double-weighting the model.
 `n=0` rather than being omitted.
 
 **`swarm validate`** prints the record the seating is decided on when grading is on: a
-`seats:` block per seated model (leaf ids, scores, cost band, frontier verdict) plus one
+`seats:` block per seated model (leaf ids, scores, cost band, seatable-frontier verdict) plus one
 line for launchable models it didn't seat. `never graded` / `cost unmeasured` are written
 in words, never a number — absence is not zero. When the manifest seats no launchable model
 below 20 graded rows, one `gap seat available:` line names the strongest candidate — seat it
