@@ -9,7 +9,7 @@ Drive a narrated walkthrough of the pipeline. Claude engineers all the commands 
 Confirm `pipeline` resolves:
 
 ```bash
-pipeline --version
+pipeline --help
 ```
 
 If it errors with command-not-found: hand off to `/pipeline setup` and resume here once setup reports success.

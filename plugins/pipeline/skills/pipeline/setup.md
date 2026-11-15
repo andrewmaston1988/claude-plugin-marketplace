@@ -18,7 +18,7 @@ Path-shaped values must go through `resolveTemplate(value, vars, { resolveBase, 
 
 The two environment-check values this skill always surfaces:
 
-- **pipeline-home** — `paths.configDir` for this platform. Mac/Windows: `~/.pipeline`. Linux: `$XDG_CONFIG_HOME/pipeline` (fallback `~/.config/pipeline`). Tell the user the resolved value and that orchestrator state, queue DB, and notification drop files land there.
+- **pipeline-home** — `paths.configDir` for this platform. Mac/Windows: `~/.pipeline`. Linux: `$XDG_CONFIG_HOME/pipeline` (fallback `~/.config/pipeline`). Tell the user the resolved value. Config itself is always `~/.pipeline/config.json`; on Linux orchestrator state and notification drops live in `paths.stateDir`, the queue DB in `paths.dataDir`.
 - **CLAUDE_SLACK_PLUGIN** — env override for the claude-slack notifier binary. Print resolved path + source (`env` / `cache` / `path` / not found). Explain that without it (and without a channel set) all Slack alerts silently no-op.
 
 ## Step 0 — Find the binary
@@ -60,7 +60,7 @@ Options:
 
 **What this does**: pipeline posts failure / park / orchestrator-error alerts to a Slack channel via [claude-slack](https://github.com/anthropics/claude-slack). Two channel slots: `pipeline` (per-row events) and `governance` (reports). Today they default to the same value if you give one.
 
-**Default**: disabled (no channel set). All alerts stay in `~/.pipeline/notifications/` as JSON files.
+**Default**: disabled (no channel set). All alerts stay in the state dir's `notifications/` as JSON files (`~/.pipeline/notifications/` on Mac/Windows).
 
 **If you skip**: you'll have to watch the dashboard or notifications dir to see when work parks at `manual`. With Slack wired, you get a ping the moment a row blocks or an orchestrator poll throws.
 
@@ -82,14 +82,13 @@ Env vars win over config values. For production, set secrets in env; put non-sec
 
 ### Question 3 — Model defaults
 
-**What this does**: chooses which Claude model the orchestrator launches for each session type. The defaults are tuned for cost-vs-quality:
+**What this does**: chooses which Claude model the orchestrator launches when a row carries no per-stage model pin. The defaults are tuned for cost-vs-quality:
 
-| Session | Default | Why |
+| Config key | Default | Why |
 |---|---|---|
-| **queue** (`q`) | Haiku | Fast/cheap — runs frequently to scan plans + decide spawns. |
-| **research** (`r`) | Sonnet | Mid-tier — reading the codebase and synthesising notes. |
-| **dev** (`d`) | Sonnet | Mid-tier — code edits, test runs. Bumping to Opus is fine if you want extra rigour, but costs ~5× more. |
-| **review** (`rvw`) | Opus | Top-tier — review is roughly 1:1 with dev (every dev session gets reviewed, and a BLOCKER kicks the row back for another dev→review loop). A miss here is expensive: undetected issues become re-work cycles or land bugs in main. Paying for stronger model on review usually saves more than it costs. |
+| **`dev_default`** | Haiku | Fallback for every non-review session — research, dev, test. Fast and cheap; raise it if dev work needs more reasoning. |
+| **`review_default`** | Sonnet | Review is roughly 1:1 with dev (every dev session gets reviewed, and a BLOCKER kicks the row back for another dev→review loop). A miss here is expensive: undetected issues become re-work cycles or land bugs in main. |
+| **`governor`** | Sonnet | Governor reports read `pipeline.db` and synthesise spend — mid-tier reasoning. |
 
 **Default**: keep the defaults above.
 
@@ -101,7 +100,7 @@ Env vars win over config values. For production, set secrets in env; put non-sec
 
 **Always ASK this question** — alongside Slack (Q2), the merge-workflow hooks are how pipeline integrates with the user's day-to-day. Most users want a real PR-based workflow rather than the default local squash-and-push to the target branch, so don't bury this as a skippable sub-question of Q3 (models).
 
-**What this does**: runs a script/executable whenever a pipeline row reaches `stage=merge` — fires for all projects, regardless of whether `autoMerge` is enabled. The hook receives four env vars: `PIPELINE_PROJECT`, `PIPELINE_FEATURE`, `PIPELINE_BRANCH`, `PIPELINE_TARGET_BRANCH`. Common use: open a PR on GitHub/Bitbucket when a branch is ready to merge, or post a Slack ping.
+**What this does**: runs a script/executable whenever a pipeline row reaches `stage=merge` — fires for all projects, regardless of whether `autoMerge` is enabled. The hook receives six env vars: `PIPELINE_PROJECT`, `PIPELINE_FEATURE`, `PIPELINE_BRANCH`, `PIPELINE_TARGET_BRANCH`, `PIPELINE_PROJECT_ROOT`, `PLUGIN_DIR`. Common use: open a PR on GitHub/Bitbucket when a branch is ready to merge, or post a Slack ping.
 
 **Default**: disabled (no hook set).
 
@@ -137,7 +136,7 @@ Pass the hook path as `--merge-hook <abs-path>` (or omit to leave unset).
 
 **Always ASK this question** — pairs with Q3b. If the user wired up `on_merge_ready` to open a PR, they almost certainly want `on_merge` to merge that PR via the platform's API rather than fall back to a local squash. Asking the two as a related cluster keeps the merge workflow coherent.
 
-**What this does**: replaces the pipeline's local squash merge with a custom script. The hook receives the same four env vars as `on_merge_ready` (`PIPELINE_PROJECT`, `PIPELINE_FEATURE`, `PIPELINE_BRANCH`, `PIPELINE_TARGET_BRANCH`) and is responsible for performing the actual merge. When unset, the pipeline squash-merges locally as usual.
+**What this does**: replaces the pipeline's local squash merge with a custom script. The hook receives four env vars (`PIPELINE_PROJECT`, `PIPELINE_FEATURE`, `PIPELINE_BRANCH`, `PIPELINE_TARGET_BRANCH`) and is responsible for performing the actual merge. When unset, the pipeline squash-merges locally as usual.
 
 **Default**: disabled (local squash merge used).
 
@@ -172,7 +171,7 @@ Pass the hook path as `--on-merge <abs-path>` (or omit to keep local squash).
 
 **Ask this whenever the user wired up PR-based merge hooks (3b/3c).** It closes the last gap in the PR workflow: a PR merged in the platform's UI (rather than via `/merge`) is invisible to the orchestrator, so the row sits at `stage=merge` forever.
 
-**What this does**: `hooks.merge_check` is invoked once per `merge`-stage row each orchestrator poll, with the same env vars as the other merge hooks plus `PIPELINE_PROJECT_ROOT`. Exit 0 = "this branch's PR is merged" -> the row advances to `done` automatically. Non-zero = not merged; re-checked next poll. 20s timeout. This is the sole UI-merge detection mechanism — platform-agnostic by design.
+**What this does**: `hooks.merge_check` is invoked once per `merge`-stage row each orchestrator poll, with the same six env vars as `on_merge_ready`. Exit 0 = "this branch's PR is merged" -> the row advances to `done` automatically. Non-zero = not merged; re-checked next poll. 20s timeout. This is the sole UI-merge detection mechanism — platform-agnostic by design.
 
 **Default**: disabled — no UI-merge detection; rows merged in the UI stay at `merge` until `/merge` or `pipeline done`.
 
@@ -198,6 +197,7 @@ For any case where you write a new script: make it self-contained, show the user
 | `{root_parent}` | `dirname(root)` |
 | `{root_grandparent}` | `dirname(dirname(root))` |
 | `{project}` | the project name |
+| `{config_dir}` | the pipeline config dir (`paths.configDir`) |
 
 Leading `~/` expands to the home directory; absolute paths pass through unchanged. Unknown placeholders are left literal so a typo (`{projetc}/plans`) produces a directory whose name visibly contains the broken token.
 
@@ -222,7 +222,7 @@ Leading `~/` expands to the home directory; absolute paths pass through unchange
 }
 ```
 
-`pipeline project-add <name> <root> --plans-dir <template>` and `pipeline project-update <name> --plans-dir <template>` write the entry into `cfg.plansDirs[<name>]`. `pipeline project-update <name> --clear-plans-dir` removes it. The full placeholder vocabulary (`{root}`, `{root_parent}`, `{root_grandparent}`, `{project}`) applies to both the global `plansDir` template and per-project `plansDirs[<name>]` entries.
+`pipeline project-add <name> <root> --plans-dir <template>` and `pipeline project-update <name> --plans-dir <template>` write the entry into `cfg.plansDirs[<name>]`. `pipeline project-update <name> --clear-plans-dir` removes it. The full placeholder vocabulary (`{root}`, `{root_parent}`, `{root_grandparent}`, `{project}`, `{config_dir}`) applies to both the global `plansDir` template and per-project `plansDirs[<name>]` entries.
 
 Precedence (first hit wins): `cfg.plansDirs[<project>]` > legacy `projects.plans_dir` DB column (read-only, deprecated) > `cfg.plansDir` template > `<projectRoot>/plans`. No on-disk migration is performed when the value changes -- point the value at where the plans already are.
 
@@ -283,7 +283,7 @@ This block covers three related config keys: `worktree_base`, `report_subpath`, 
 
 **What this does**: the template that produces the on-disk directory where the agent for this feature runs. Every dev, review, test, and merge session for this feature uses this same path.
 
-**Resolved default for this machine**: `<root_parent>/.worktrees/<project>/<feature>` — e.g. for project `myapp` at `C:\code\myapp`, feature `add-login`, the resolver returns `C:\code\.worktrees\myapp\add-login`. Run `pipeline doctor` after setup to see the materialised path.
+**Resolved default for this machine**: `<root_parent>/.worktrees/<project>/<feature>` — e.g. for project `myapp` at `C:\code\myapp`, feature `add-login`, the resolver returns `C:\code\.worktrees\myapp\add-login`. `pipeline doctor`'s `worktree-layout-stale` check flags any on-disk worktree that diverges from it.
 
 **Placeholder vocabulary**:
 
@@ -294,7 +294,6 @@ This block covers three related config keys: `worktree_base`, `report_subpath`, 
 | `{root_grandparent}` | `dirname(dirname(root))` |
 | `{project}` | the project name |
 | `{feature}` | the row's feature slug |
-| `{kind}` | session kind (`dev`, `review`, `qa-test`, etc) |
 
 Leading `~/` expands to the home directory; absolute paths pass through unchanged. Unknown placeholders are left literal so a typo (`{projetc}/...`) produces a directory whose name visibly contains the broken token.
 
@@ -304,7 +303,7 @@ Leading `~/` expands to the home directory; absolute paths pass through unchange
 - `{root_grandparent}/worktrees/{project}/{feature}` → shared worktrees parent two levels above
 - `~/wt/{project}/{feature}` → absolute path under the home directory
 
-**Consequences**: every session resolves through `orchestratorWorktreePath` and sees the same answer. Existing on-disk worktrees from a previous layout aren't migrated — `pipeline doctor`'s `worktree-layout-stale` check prints a `git worktree remove <path>` command per stale entry so the operator can clean them up by paste.
+**Consequences**: every session resolves through `featureWorktreePath` and sees the same answer. Existing on-disk worktrees from a previous layout aren't migrated — `pipeline doctor`'s `worktree-layout-stale` check prints a `git worktree remove <path>` command per stale entry so the operator can clean them up by paste.
 
 #### `report_subpath`
 
@@ -363,7 +362,7 @@ Pass the answer as `--worktree-layout 1` (default) or `--worktree-layout 2 --wor
 
 **Config key**: `orch.max_concurrent` in `~/.pipeline/config.json`. Verify the live value with `pipeline doctor` (`Max concurrent: <n>` line).
 
-**Wizard flag**: `--max-concurrent <n>` (integer ≥ 1).
+**Wizard flag**: none — `setup` does not parse `--max-concurrent`. Set the config key, or pass `--max-concurrent <n>` to the orchestrator for a single launch.
 
 **SKIP** if the user is happy with the default (3) — it's a fine choice for most setups.
 
@@ -446,12 +445,17 @@ pipeline setup --non-interactive
   [--register-project <name>:<absolute-path>]
   [--worktree-layout 1|2] [--worktree-base "<template>"]
   [--slack <channel>]
-  [--models r=...,d=...,q=...,rvw=...]
+  [--pipeline-channel <channel>]
+  [--governance-channel <channel>]
+  [--models dev_default=...,review_default=...,governor=...]
   [--review-skill <name>]
   [--review-deep-flag <flag>]
+  [--plans-dir <template>]
   [--merge-hook <abs-path>]
   [--on-merge <abs-path>]
   [--merge-check <abs-path>]
+  [--recognised-branch-types <list>]
+  [--no-deps]
   [--no-autostart]
   [--no-path-alias]
   [--continue-on-failed-prechecks]
@@ -465,7 +469,7 @@ Wait for confirmation before running. The setup writes to `~/.pipeline/config.js
 node "$PIPELINE_BIN" setup --non-interactive <flags>
 ```
 
-Stream the output (it walks the 10 wizard steps). It should end with:
+Stream the output (it walks the 11 wizard steps). It should end with:
 
 > All checks passed.
 > Setup complete!

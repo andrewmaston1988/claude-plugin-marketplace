@@ -52,7 +52,7 @@ If the project isn't in the list, tell the user and offer:
 pipeline rows <project> --format plain
 ```
 
-Group the output by stage (merge / manual / test / dev / research / queued / backlog / done) and tell the user:
+Group the output by stage (merge / manual / test / review / dev / research / queued / backlog / done) and tell the user:
 
 - How many rows are in each stage
 - Any rows whose `notes_extra` starts with `blocked:` — surface those first
