@@ -128,8 +128,7 @@ test("setup routes an empty graded record to model descriptions", () => {
   ok(!setup.includes("the tier guide routes models"), "setup must retire the tier-guide fallback");
 });
 
-test("swarm procedure preserves the Claude capability exception", () => {
-  const step = skill().split("\n").find((line) => line.startsWith("1. **Discover models**")) || "";
+test("swarm procedure preserves the Claude capability exception", () => {  const step = skill().split("\n").find((line) => line.startsWith("1. **Discover models**")) || "";
   ok(step.includes("Claude tier") && step.includes("capability"), `step 1 lacks the Claude-tier capability exception: ${step}`);
 });
 
@@ -157,6 +156,15 @@ test("setup's projects row describes the optional hooks and mcp keys", () => {
   ok(setup.includes("{ name, hooks?, mcp? }"), "the projects appendix row must describe all three fields");
   ok(setup.includes("| `mcp` |"), "the appendix must carry its own `mcp` row");
   ok(setup.includes("Stage 7e"), "the projects row must point at the MCP stage");
+});
+
+test("row 13: README names the port nudge and that pruneNudge silences both", () => {
+  const readme = readFileSync(new URL("../README.md", import.meta.url), "utf8");
+  const paragraph = readme.split(/\r?\n\r?\n/).find((p) => p.includes("port nudge")) || "";
+  ok(paragraph, "README must name the port nudge");
+  ok(paragraph.includes("PostToolUseFailure"), "the port nudge's events must be named");
+  ok(paragraph.includes("pruneNudge"), "the silencing switch must be named");
+  ok(/silences both/.test(paragraph), "the switch must be said to silence both nudges");
 });
 
 for (const [level, description] of [

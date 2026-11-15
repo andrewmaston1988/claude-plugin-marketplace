@@ -137,8 +137,9 @@ and setting it suppresses the Codex lookup.
 `hooks/hooks.json` Claude loads. Codex asks you to trust a plugin's hooks once, in an interactive
 session; headless `codex exec` — every Codex leaf — silently skips untrusted hooks, so trust
 them before dispatching Codex leaves and they inherit it. The session-start notice,
-`dispatch-gate`, `foreground-guard`, `leaf-guard`, `grade-nudge` and `prune-nudge` then run on
-both hosts. Codex tasks accept `settings` with only an `env` key: per-leaf env vars reach the
+`dispatch-gate`, `foreground-guard`, `leaf-guard`, `grade-nudge`, `prune-nudge` and
+`port-nudge` then run on both hosts. Codex has no `PostToolUseFailure` event, so a failed
+shell call is measured only through `PostToolUse` there. Codex tasks accept `settings` with only an `env` key: per-leaf env vars reach the
 Codex process, and any other settings key is refused by name. Codex writer leaves are confined
 to their own worktree plus `outputDir` by the same leaf write guard Claude writers get; on
 Codex, `hooks/hooks.json` runs `leaf-write-guard.mjs` for `apply_patch`, reading those roots
@@ -432,8 +433,15 @@ and why: work landed nowhere it can see (including a detached HEAD), uncommitted
 measurement git could not make. Land, take or commit that work before retrying, and never pass
 `--discard-unlanded` without the operator deciding the work can be lost. The per-turn nudge hook
 (Claude: `UserPromptSubmit`; Codex: `Stop`) names each finished
-run once, in one line counting this session's worktrees and other sessions'. The setting
-`"swarm": { "pruneNudge": false }` silences it.
+run once, in one line counting this session's worktrees and other sessions'. The port nudge
+(`PostToolUse` and `PostToolUseFailure`, on `Bash` and `PowerShell`) fires straight after any
+command that can move HEAD and names a finished run only when every branch is landed and every
+tree clean under the same check — this session's runs, plus any run whose branch a command named.
+It measures from the porting checkout's HEAD, so a cherry-pick or replay onto a feature branch
+counts while the proof is still there, and it prints the `cd "<porting checkout>" && …` form
+because `swarm prune` takes that same base from its own cwd. A porting checkout on a detached
+HEAD or on a `swarm/` branch is never a base, and a run that is only partly landed says nothing.
+The setting `"swarm": { "pruneNudge": false }` silences both nudges.
 
 Leaves dispatch with `--output-format stream-json`; a provider that emits plain text
 instead degrades gracefully (raw stdout becomes `output`, token columns stay empty).
