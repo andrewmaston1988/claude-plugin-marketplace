@@ -16,7 +16,7 @@ try { chmodSync(join(SHIMS, "codex"), 0o755); } catch { /* windows */ }
 // 0 is the documented "disabled" sentinel for both floors. Pinned here — the one
 // place a CLI child's config is built — so every engine test inherits it; a row that
 // exercises the gate overrides it through `config`.
-export const ENGINE_FLOORS_OFF = { minFreeMemMb: 0, valveFreeMemMb: 0 };
+const ENGINE_FLOORS_OFF = { minFreeMemMb: 0, valveFreeMemMb: 0 };
 
 // Writes a throwaway config carrying `quotaPreflight` and any row-specific `config`
 // unless the caller pinned SWARM_CONFIG itself. Returns the dir so the caller can
