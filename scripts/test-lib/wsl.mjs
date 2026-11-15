@@ -76,15 +76,8 @@ function repoNameOf(commonDir) {
 }
 
 /**
- * Sync the mirror and run `command` (an argv array) inside it.
- *
- * @param {object}   options
- * @param {string}   options.repoRoot  the tree to mirror, and the local git cwd
- * @param {string[]} options.command   argv run in the mirror, e.g. `["node","scripts/test.mjs","--all"]`
- * @param {Function} options._spawnSync node's `spawnSync`, injected for tests
- * @param {object}   options._fs       node's `fs`, injected for tests
- * @param {Function} options.log       progress printer, one line per call
- * @returns {Promise<number>} the command's exit code, or 2 when it never ran
+ * Mirror `repoRoot` and run `command` (an argv array, e.g. `["node","scripts/test.mjs","--all"]`)
+ * inside it. Resolves to the command's exit code, or 2 when it never ran.
  */
 export async function runWsl({ repoRoot, command, _spawnSync, _fs, log }) {
   const wsl = (argv, opts = {}) => {

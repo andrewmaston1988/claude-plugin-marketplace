@@ -35,14 +35,9 @@ function refExists(ref, cwd, _spawnSync) {
   return Boolean(r) && !r.error && r.status === 0;
 }
 
-/** The commit the diff is measured from.
- *
- *  `--against <ref>` wins. Otherwise the merge-base with `origin/master`, then
- *  with `master` -- the merge-base, not the ref itself, so a base branch that
- *  moved since the fork does not report its own commits as this branch's work.
- *
- *  Neither ref and no `--against` raises: there is no honest answer, and
- *  guessing one would report a whole history as changed or nothing at all. */
+/** The commit the diff is measured from: `--against <ref>`, else the merge-base with
+ *  `origin/master`, then `master`, so a base that moved since the fork reports none of
+ *  its own commits. Neither ref and no `--against` throws rather than guess. */
 export function resolveBase({ repoRoot, against = null, _spawnSync = spawnSync }) {
   if (against) {
     if (!refExists(against, repoRoot, _spawnSync)) {
