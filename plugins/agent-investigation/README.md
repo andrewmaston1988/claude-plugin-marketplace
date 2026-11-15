@@ -5,7 +5,7 @@ Investigate agent transcripts — locate, summarize, find errors, retries, pivot
 ## Installation
 
 ```bash
-claude plugins install agent-investigation
+claude plugin install agent-investigation@andrewmaston1988-claude-plugins
 ```
 
 ## Usage
@@ -39,6 +39,7 @@ claude-investigate <subcommand> [args...]
 - `compare <a.jsonl> <b.jsonl>` — Tool trajectory diff
 - `patterns <jsonl> [--out FILE]` — Candidate skill patterns (JSON)
 - `slice <jsonl> --turn N [--ctx N]` — Extract turn ± context
+- `doctor` — Check dependencies
 
 ### Slash Command
 
