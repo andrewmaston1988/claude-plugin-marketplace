@@ -14,7 +14,8 @@ import {
   PORT_RE, portingTree, namedSwarmBranches, recordTouched, readTouched, touchedPath, portMarkerPath,
   foreignTouchedRuns, portedRuns, portReason, runPortNudge,
 } from "../src/port-nudge.mjs";
-import { portFixture, must } from "./helpers/port-fixture.mjs";
+import { portFixture, must, writeCommit } from "./helpers/port-fixture.mjs";
+import { runScopeKey } from "../src/worktree.mjs";
 
 const SESSION = "sess-A";
 const OTHER = "sess-B";
@@ -392,4 +393,36 @@ test("namedSwarmBranches reads the configured prefix out of a command", () => {
   deepEqual(namedSwarmBranches("git merge agents/run-1/leaf", "agents/"), ["agents/run-1/leaf"]);
   deepEqual(namedSwarmBranches("git merge agents/run-1/leaf", "swarm/"), []);
   deepEqual(namedSwarmBranches("git cherry-pick swarm/a/b; git log swarm/c/d", "swarm/"), ["swarm/a/b", "swarm/c/d"]);
+});
+
+test("row 9: a branch-only row counts as a branch, and one unlanded row silences the run", () => {
+  const f = portFixture();
+  const port = f.porting();
+  try {
+    const leaf = f.leaf("run-1", "leaf");
+    f.cherryPick(port, leaf.sha);
+    const dir = f.run("run-1", { launcher: SESSION, leaves: [leaf] });
+    const scope = runScopeKey(dir);
+    // A branch of the run's own namespace that no tree holds — landed on main.
+    const swept = `swarm/${scope}/swept`;
+    must(["branch", swept, "main"], f.repo);
+    const args = {
+      home: f.home, toplevel: f.toplevel, sessionId: SESSION, base: must(["rev-parse", "HEAD"], port),
+      branch: "feat", portingTree: port, touched: [], cfg: f.cfg, git: f.git, fs, spawnSync: f.spawn, budgetMs: 20_000,
+    };
+
+    const reported = portedRuns(args);
+    equal(reported.length, 1);
+    equal(reported[0].rows.length, 2, "the tree row and the branch-only row");
+    ok(reported[0].rows.some((r) => r.path == null && r.branch === swept), "the branch-only row is measured");
+    ok(portReason(reported[0]).includes("all 2 branches landed"), portReason(reported[0]));
+
+    // The same shape carrying a commit nothing has landed.
+    const open = `swarm/${scope}/open`;
+    const openTree = join(f.home, "open-tree");
+    must(["worktree", "add", "-q", "-b", open, openTree, "main"], f.repo);
+    writeCommit(openTree, "open.txt", "x\n", "open work");
+    must(["worktree", "remove", "--force", openTree], f.repo);
+    deepEqual(portedRuns(args), [], "one unlanded branch-only row keeps the whole run silent");
+  } finally { f.cleanup(); }
 });

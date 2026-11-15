@@ -1,7 +1,7 @@
 import { join, resolve, dirname } from "node:path";
 import { existsSync, readdirSync } from "node:fs";
 import { unlandedCount, isSwarmRef } from "./landed.mjs";
-import { treeDirFor, runOfTree, listTreeRecords, legacyTreeDirs, treeRecordPath, treeRootFor } from "./worktree.mjs";
+import { treeDirFor, runOfTree, listTreeRecords, legacyTreeDirs, treeRecordPath, treeRootFor, runScopeKey } from "./worktree.mjs";
 import { isUnderRoot, normalizeForCompare } from "./roots.mjs";
 import { getConfig } from "./config.mjs";
 
@@ -172,22 +172,32 @@ function subdirs(dir) {
 // not a prefix test: a tree lives under <treeRoot>/<project>/<run> now, so "starts with
 // resultsDir" stopped matching the moment creation moved — and would meanwhile sweep a
 // sibling run's tree into this run's prune.
-export function registeredForRun(git, repo, resultsDir, { cfg } = {}) {
+// The one parser for `git worktree list --porcelain` — `head` is what a missing detached
+// tree has left to measure. Null when git cannot answer.
+export function worktreeList(git, repo) {
   const r = git(["worktree", "list", "--porcelain"], repo);
-  if (r.status !== 0) return [];
-  const dir = resolve(resultsDir);
-  const runsRoot = dirname(dirname(dir));
+  if (r.status !== 0) return null;
   const rows = [];
   let cur = null;
   for (const line of r.stdout.split("\n")) {
     if (line.startsWith("worktree ")) {
       if (cur) rows.push(cur);
-      cur = { path: resolve(line.slice("worktree ".length).trim()), branch: null };
+      cur = { path: resolve(line.slice("worktree ".length).trim()), branch: null, head: null };
     } else if (cur && line.startsWith("branch ")) {
       cur.branch = line.slice("branch ".length).trim().replace(/^refs\/heads\//, "");
+    } else if (cur && line.startsWith("HEAD ")) {
+      cur.head = line.slice("HEAD ".length).trim();
     }
   }
   if (cur) rows.push(cur);
+  return rows;
+}
+
+export function registeredForRun(git, repo, resultsDir, { cfg } = {}) {
+  const rows = worktreeList(git, repo);
+  if (!rows) return [];
+  const dir = resolve(resultsDir);
+  const runsRoot = dirname(dirname(dir));
   const key = (p) => normalizeForCompare(p);
   const want = key(dir);
   const root = treeCfg(cfg);
@@ -224,20 +234,43 @@ export function plan(run, git, fs, { cfg, extraBases, measureBytes, stopAtBlocke
   const prefix = cfg?.worktreeBranchPrefix || "swarm/";
   const rows = [];
   const seen = new Set();
+  const seenBranches = new Set();
   let stopped = false;
+  // A row's clock and stop budget belong to the caller, not to the shape of the row:
+  // a branch-only row must honour exactly what a tree row does.
+  const beginRow = () => {
+    if (stopped) return false;
+    if (Date.now() >= deadline) { stopped = true; return false; }
+    return true;
+  };
+  const finishRow = (row) => {
+    rows.push(row);
+    if (stopAtBlocker && blockers([row]).length) stopped = true;
+  };
   // The path is kept AS GIVEN — the injected `fs` keys on it, and a summary's own
   // spelling is what the report prints. Only the dedupe key is normalised, so the three
   // sources agree about a path however each of them spelled it.
-  const addRow = (path, branch, repo) => {
-    if (stopped) return;
-    if (Date.now() >= deadline) { stopped = true; return; }
+  const addRow = (path, branch, repo, { missing = false, head = null } = {}) => {
+    if (!beginRow()) return;
     const key = normalizeForCompare(path);
     if (seen.has(key)) return;
     seen.add(key);
-    const bytes = measureBytes ? dirSize(fs, path) : null;
-    const row = measureRow({ path, branch, bytes, repo }, git, fs, prefix, extraBases);
-    rows.push(row);
-    if (stopAtBlocker && blockers([row]).length) stopped = true;
+    // A missing directory holds no bytes to measure.
+    const bytes = measureBytes ? (missing ? 0 : dirSize(fs, path)) : null;
+    finishRow(measureRow({ path, branch, bytes, repo, ...(missing && { missing: true, ...(head && { head }) }) }, git, fs, prefix, extraBases));
+  };
+  // Deduped on repo + branch, never on a path: there is none.
+  const addBranchRow = (branch, repo) => {
+    if (!beginRow()) return;
+    const key = `${normalizeForCompare(repo)}\n${branch}`;
+    if (seenBranches.has(key)) return;
+    seenBranches.add(key);
+    finishRow({
+      path: null, branch, repo,
+      bytes: measureBytes ? 0 : null,
+      dirty: 0,
+      unlanded: unlandedCount(branch, repo, { prefix, gitRunner: git, extraBases }),
+    });
   };
 
   // summary.json's own list: how the run reported what it left, and the only source that
@@ -267,10 +300,29 @@ export function plan(run, git, fs, { cfg, extraBases, measureBytes, stopAtBlocke
     for (const reg of registeredForRun(git, repo, run.resultsDir, { cfg })) {
       if (stopped) break;
       if (seen.has(reg.path)) continue;
-      // Registered but gone from disk: `git status` against a missing cwd would fail
-      // closed and block the run forever, so it is not a row to measure.
-      if (!fs.existsSync(reg.path)) continue;
-      addRow(reg.path, reg.branch, repo);
+      // Registered but gone from disk: a missing directory holds no uncommitted work,
+      // and its registration must go before `branch -D` can take the branch.
+      addRow(reg.path, reg.branch, repo, { missing: !fs.existsSync(reg.path), head: reg.head });
+    }
+  }
+
+  // The run's OWN branches, whether or not a tree still holds one. An explicitly named
+  // `branch` has no scope key and is never found here: its name can be any branch at all.
+  if (run.resultsDir) {
+    const scope = `refs/heads/${prefix}${runScopeKey(run.resultsDir)}/`;
+    for (const repo of run.repos || []) {
+      if (stopped) break;
+      if (!fs.existsSync(repo)) continue;
+      const listed = git(["for-each-ref", "--format=%(refname:short)", scope], repo);
+      if (listed.status !== 0) continue;
+      // A branch a tree holds is either already a tree row or checked out somewhere
+      // prune does not own; `branch -D` would refuse it either way.
+      const held = new Set((worktreeList(git, repo) || []).map((t) => t.branch).filter(Boolean));
+      for (const branch of listed.stdout.split(/\r?\n/).map((s) => s.trim()).filter(Boolean)) {
+        if (stopped) break;
+        if (held.has(branch) || rows.some((row) => row.branch === branch)) continue;
+        addBranchRow(branch, repo);
+      }
     }
   }
 
@@ -289,8 +341,24 @@ function detachedUnlanded(git, path) {
   return Number.isFinite(n) ? n : Infinity;
 }
 
+// The same question for a tree whose directory is gone: its porcelain HEAD sha is the
+// only handle left, and it is asked in the repo because there is no tree to stand in.
+function headUnlanded(git, repo, head) {
+  if (!head) return Infinity;
+  const r = git(["rev-list", "--count", head, "--not", "--branches", "--remotes"], repo);
+  if (r.status !== 0) return Infinity;
+  const n = Number.parseInt(r.stdout, 10);
+  return Number.isFinite(n) ? n : Infinity;
+}
+
 function measureRow(row, git, fs, prefix, extraBases) {
   if (!fs.existsSync(row.repo)) return { ...row, unlanded: Infinity, dirty: Infinity };
+  if (row.missing) {
+    const unlanded = row.branch
+      ? unlandedCount(row.branch, row.repo, { prefix, gitRunner: git, extraBases })
+      : headUnlanded(git, row.repo, row.head);
+    return { ...row, unlanded, dirty: 0 };
+  }
   const unlanded = row.branch
     ? unlandedCount(row.branch, row.repo, { prefix, gitRunner: git, extraBases })
     : detachedUnlanded(git, row.path);
@@ -310,8 +378,18 @@ export function blockers(rows) {
 export function execute(rows, git, fs, { resultsDir, cfg } = {}) {
   const records = resultsDir ? listTreeRecords(resultsDir) : [];
   for (const row of rows) {
+    // A branch-only row has nothing on disk: its repo's own ref is the whole row.
+    if (row.path == null) {
+      if (!fs.existsSync(row.repo)) continue;
+      git(["branch", "-D", row.branch], row.repo);
+      continue;
+    }
     if (!fs.existsSync(row.repo)) {
       fs.rmSync(row.path, { recursive: true, force: true });
+    } else if (row.missing) {
+      // A missing tree may be locked by a killed `worktree add`; only -f -f removes one.
+      git(["worktree", "remove", "-f", "-f", row.path], row.repo);
+      if (row.branch) git(["branch", "-D", row.branch], row.repo);
     } else {
       // A detached tree has no branch, and may be left locked by a killed `worktree add`.
       if (row.branch) {
@@ -359,12 +437,17 @@ export function workCounts(row) {
 
 export function formatPrune(rows, { dryRun = false } = {}) {
   const lines = rows.map((r) => {
-    let line = `  ${r.path}  ${gb(r.bytes)} GB  ${r.branch ?? "(detached)"}`;
+    let line = `  ${r.path ?? "(no tree)"}  ${gb(r.bytes ?? 0)} GB  ${r.branch ?? "(detached)"}`;
     for (const cell of workCounts(r)) line += `  ${cell}`;
     return line;
   });
-  const total = rows.reduce((s, r) => s + r.bytes, 0);
+  const total = rows.reduce((s, r) => s + (r.bytes ?? 0), 0);
+  const trees = rows.filter((r) => r.path != null).length;
+  const branches = rows.length - trees;
+  // A path-less row frees no bytes, so counting it as a worktree would misreport both.
+  const treeWord = `${trees} worktree${trees === 1 ? "" : "s"}`;
+  const what = branches ? `${treeWord} and ${branches} branch${branches === 1 ? "" : "es"}` : treeWord;
   const verb = dryRun ? "would free" : "freed";
-  lines.push(`${verb} ${gb(total)} GB across ${rows.length} worktree${rows.length === 1 ? "" : "s"}`);
+  lines.push(`${verb} ${gb(total)} GB across ${what}`);
   return lines.join("\n");
 }

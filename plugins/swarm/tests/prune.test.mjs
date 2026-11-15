@@ -5,7 +5,7 @@ import { spawnSync } from "node:child_process";
 import { writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { plan, execute, formatPrune, blockers } from "../src/prune.mjs";
-import { prepareIsolation, WORKTREE_ADD_TIMEOUT_MS } from "../src/worktree.mjs";
+import { prepareIsolation, runScopeKey, WORKTREE_ADD_TIMEOUT_MS } from "../src/worktree.mjs";
 import { runCli } from "./helpers/cli.mjs";
 import { commitAll, gitOut } from "./helpers/cli-fixture.mjs";
 import { dropSnapPrune, pruneFixture, writeFinishedRun } from "./helpers/prune-fixture.mjs";
@@ -279,4 +279,148 @@ test("row 15: the CLI measures through a custom worktreeBranchPrefix, so a sibli
     if (wt) spawnSync("git", ["worktree", "remove", "--force", wt.path], { cwd: f.repo, windowsHide: true });
     dropSnapPrune(f);
   }
+});
+
+// --- rows 2, 7, 8: a tree whose directory is gone, and the run's branches no tree holds ---
+
+// A registered tree that is no longer on disk measures from what git still knows about
+// it: the branch it was on, or the HEAD sha porcelain carries for a detached one.
+function missingTreePlan(porcelain, gitFallback) {
+  const calls = [];
+  const git = (args, cwd) => {
+    calls.push({ args, cwd });
+    if (args[0] === "worktree" && args[1] === "list") return { status: 0, stdout: porcelain, stderr: "" };
+    if (args[0] === "for-each-ref" && !args.includes("--contains")) return { status: 0, stdout: "", stderr: "" };
+    return gitFallback(args, cwd);
+  };
+  const fs = { existsSync: (p) => p === "/repo", readdirSync: () => [], statSync: () => ({ size: 0 }) };
+  const run = { repos: ["/repo"], resultsDir: "/results", worktreesKept: [] };
+  const result = plan(run, git, fs, { extraBases: [], measureBytes: true, stopAtBlocker: false, deadline: Infinity });
+  return { ...result, calls };
+}
+
+test("row 2: a missing tree measures its branch and reports no uncommitted work", () => {
+  const sha = "a".repeat(40);
+  const { rows, calls } = missingTreePlan(
+    ["worktree /results/wt-gone", `HEAD ${sha}`, "branch refs/heads/swarm/k/leaf"].join("\n"),
+    (args) => (args.includes("--contains")
+      ? { status: 0, stdout: "refs/heads/master", stderr: "" }
+      : { status: 1, stdout: "", stderr: "" }),
+  );
+  equal(rows.length, 1);
+  equal(rows[0].path, resolve("/results/wt-gone"));
+  equal(rows[0].missing, true);
+  equal(rows[0].unlanded, 0, "the branch tip is on master, so the row is landed");
+  equal(rows[0].dirty, 0, "a directory that is gone holds no uncommitted work");
+  equal(rows[0].bytes, 0);
+  ok(!calls.some(({ args }) => args[0] === "status"), "never run git status against a missing cwd");
+});
+
+test("row 2: a missing detached tree measures the HEAD porcelain recorded, and an absent HEAD blocks", () => {
+  const sha = "b".repeat(40);
+  const measured = missingTreePlan(
+    ["worktree /results/wt-gone", `HEAD ${sha}`].join("\n"),
+    (args) => (args[0] === "rev-list" ? { status: 0, stdout: "2", stderr: "" } : { status: 1, stdout: "", stderr: "" }),
+  );
+  equal(measured.rows.length, 1);
+  equal(measured.rows[0].unlanded, 2, "commits no branch or remote reaches");
+  deepEqual(blockers(measured.rows), measured.rows);
+  const revList = measured.calls.find(({ args }) => args[0] === "rev-list");
+  equal(revList.cwd, "/repo", "there is no tree to stand in — the repo is the cwd");
+  ok(revList.args.includes(sha), `the recorded HEAD is what is measured: ${revList.args.join(" ")}`);
+
+  const unrecorded = missingTreePlan(
+    "worktree /results/wt-gone",
+    (args) => (args[0] === "rev-list" ? { status: 0, stdout: "0", stderr: "" } : { status: 1, stdout: "", stderr: "" }),
+  );
+  equal(unrecorded.rows[0].unlanded, Infinity, "no HEAD line is no measurement, never a clean zero");
+  deepEqual(blockers(unrecorded.rows), unrecorded.rows);
+});
+
+test("row 7: execute gives a path-less row branch -D alone, and a gone repo nothing at all", () => {
+  const calls = [];
+  const git = (args, cwd) => { calls.push({ args, cwd }); return { status: 0, stdout: "", stderr: "" }; };
+  const rmCalls = [];
+  const fs = { existsSync: () => true, rmSync: (p, opts) => rmCalls.push({ p, opts }) };
+  execute([{ path: null, branch: "swarm/k/leaf", repo: "/repo", bytes: 0, dirty: 0, unlanded: 0 }], git, fs);
+  deepEqual(calls, [{ args: ["branch", "-D", "swarm/k/leaf"], cwd: "/repo" }],
+    "no worktree remove for a tree that does not exist");
+  equal(rmCalls.length, 0, "execute must never rm anything for a branch-only row");
+
+  const goneCalls = [];
+  const gone = (args) => { goneCalls.push(args); return { status: 0, stdout: "", stderr: "" }; };
+  const goneFs = { existsSync: () => false, rmSync: (p) => rmCalls.push({ p }) };
+  execute([{ path: null, branch: "swarm/k/leaf", repo: "/gone", bytes: 0, dirty: 0, unlanded: 0 }], gone, goneFs);
+  deepEqual(goneCalls, [], "a path-less row whose repo is gone runs nothing");
+  equal(rmCalls.length, 0, "and rms nothing — there is no path to remove");
+});
+
+test("row 7: execute removes a missing tree with -f -f, then its branch", () => {
+  const calls = [];
+  const git = (args, cwd) => { calls.push({ args, cwd }); return { status: 0, stdout: "", stderr: "" }; };
+  const fs = { existsSync: () => true, rmSync: () => {} };
+  execute([{ path: "/results/wt-gone", branch: "swarm/k/leaf", repo: "/repo", missing: true, bytes: 0, dirty: 0, unlanded: 0 }], git, fs);
+  deepEqual(calls, [
+    { args: ["worktree", "remove", "-f", "-f", "/results/wt-gone"], cwd: "/repo" },
+    { args: ["branch", "-D", "swarm/k/leaf"], cwd: "/repo" },
+  ], "a locked missing tree refuses a single --force; both must go, in that order");
+});
+
+test("row 7: a branch-only row is measured from its ref alone — no git status, no byte walk", () => {
+  const branch = `swarm/${runScopeKey("/results")}/leaf`;
+  const calls = [];
+  const git = (args, cwd) => {
+    calls.push({ args, cwd });
+    if (args[0] === "worktree") return { status: 0, stdout: "", stderr: "" };
+    if (args[0] === "for-each-ref" && !args.includes("--contains")) return { status: 0, stdout: branch, stderr: "" };
+    if (args[0] === "for-each-ref") return { status: 0, stdout: "refs/heads/master", stderr: "" };
+    return { status: 1, stdout: "", stderr: "" };
+  };
+  const reads = [];
+  const fs = { existsSync: (p) => p === "/repo", readdirSync: (p) => { reads.push(p); return []; }, statSync: () => ({ size: 0 }) };
+  const { rows } = plan({ repos: ["/repo"], resultsDir: "/results", worktreesKept: [] }, git, fs,
+    { extraBases: [], measureBytes: true, stopAtBlocker: false, deadline: Infinity });
+
+  deepEqual(rows, [{ path: null, branch, repo: "/repo", bytes: 0, dirty: 0, unlanded: 0 }]);
+  ok(!calls.some(({ args }) => args[0] === "status"), "there is no tree to ask for a working state");
+  ok(!reads.includes(null), `a branch-only row must never be walked for bytes: ${reads.join(", ")}`);
+  const scan = calls.find(({ args }) => args[0] === "for-each-ref" && !args.includes("--contains"));
+  equal(scan.args[2], `refs/heads/swarm/${runScopeKey("/results")}/`, "the run's own namespace is the scan");
+});
+
+test("row 7: formatPrune labels a path-less row and counts worktrees and branches apart", () => {
+  const rows = [
+    { path: "/r/wt-a", branch: "swarm/a", bytes: 1073741824 },
+    { path: null, branch: "swarm/b", bytes: 0, unlanded: 0, dirty: 0 },
+    { path: null, branch: "swarm/c", bytes: 0, unlanded: 0, dirty: 0 },
+    { path: null, branch: "swarm/d", bytes: 0, unlanded: 0, dirty: 0 },
+  ];
+  const out = formatPrune(rows);
+  ok(out.includes("(no tree)"), out);
+  ok(/freed 1\.00 GB across 1 worktree and 3 branches/.test(out), out);
+});
+
+test("row 8: a blocking branch-only row stops the plan, and a passed deadline measures none", () => {
+  const branches = ["a", "b", "c"].map((n) => `swarm/${runScopeKey("/results")}/${n}`).join("\n");
+  const calls = [];
+  const git = (args) => {
+    calls.push(args);
+    if (args[0] === "worktree") return { status: 0, stdout: "", stderr: "" };
+    if (args[0] === "for-each-ref" && !args.includes("--contains")) return { status: 0, stdout: branches, stderr: "" };
+    // Every measurement fails closed, so the first row is a blocker.
+    return { status: 1, stdout: "", stderr: "" };
+  };
+  const fs = { existsSync: (p) => p === "/repo", readdirSync: () => [], statSync: () => ({ size: 0 }) };
+  const run = { repos: ["/repo"], resultsDir: "/results", worktreesKept: [] };
+  const measured = () => calls.filter((args) => args.includes("--contains")).length;
+
+  const stopped = plan(run, git, fs, { extraBases: [], measureBytes: true, stopAtBlocker: true, deadline: Infinity });
+  equal(stopped.stopped, true);
+  equal(stopped.rows.length, 1);
+  equal(measured(), 1, "the first blocking branch row ends the plan");
+
+  calls.length = 0;
+  const expired = plan(run, git, fs, { extraBases: [], measureBytes: true, stopAtBlocker: false, deadline: Date.now() - 1 });
+  deepEqual(expired, { rows: [], stopped: true });
+  equal(measured(), 0, "a passed deadline measures no branch-only row");
 });

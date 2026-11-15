@@ -43,7 +43,7 @@ export async function cmdPrune(rest, { usage }) {
   // The report describes every row, so it never stops at a blocker or a clock.
   const { rows } = planPrune(run, git, fs, { cfg, extraBases, measureBytes: true, stopAtBlocker: false, deadline: Infinity });
   if (!rows.length) {
-    out(`swarm: ${dir} has no kept worktrees — nothing to prune.`);
+    out(`swarm: ${dir} has no kept worktrees or branches — nothing to prune.`);
     return 0;
   }
   // The guard decides the run BEFORE the report describes it: a refused call must
@@ -52,7 +52,7 @@ export async function cmdPrune(rest, { usage }) {
   const blocked = pruneBlockers(rows);
   if (!dryRun && blocked.length && !rest.includes("--discard-unlanded")) {
     for (const row of blocked) {
-      err(`  ${row.path} ${row.branch ?? "(detached)"}: ${workCounts(row).join(", ")}`);
+      err(`  ${row.path ?? "(no tree)"} ${row.branch ?? "(detached)"}: ${workCounts(row).join(", ")}`);
     }
     err("swarm: refusing — land or take this work first, or pass --discard-unlanded to destroy it");
     return 1;
