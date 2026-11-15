@@ -15,6 +15,7 @@ import { refreshRateCards } from "../src/rate-card.mjs";
 import { refreshPrices, refreshStaleRateCards } from "../src/rate-card-cli.mjs";
 import { costSections } from "../src/cost.mjs";
 import { createServer } from "../src/serve/server.mjs";
+import { refreshStubs } from "./helpers/serve-fixture.mjs";
 import { runCli } from "./helpers/cli.mjs";
 import { loadPerfViews, H } from "./helpers/perf-views-harness.mjs";
 import { hub, COST } from "./helpers/overview-hub.mjs";
@@ -158,6 +159,7 @@ async function getCost(cfg, refreshLog) {
   const server = createServer({ tls: null,
     home, cfg: { dashboard: { port: 0, bind: "127.0.0.1", token: null }, ...cfg }, _estate: estate,
     _watch: () => ({ close() {} }), _heartbeatMs: 60_000, _pollMs: 60_000,
+    ...refreshStubs,
     // The dashboard's own refresh, its network swapped for the recorder.
     _refreshPrices: (opts) => refreshStaleRateCards({ ...opts, _fetch: refreshLog._fetch }),
   });

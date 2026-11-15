@@ -21,6 +21,7 @@ import { readRunLog } from "../src/runlog.mjs";
 import { readResult, readSummary } from "../src/results.mjs";
 import { buildSnapshot } from "../src/serve/estate.mjs";
 import { createServer } from "../src/serve/server.mjs";
+import { refreshStubs } from "./helpers/serve-fixture.mjs";
 import { costView } from "../src/cost-view.mjs";
 import { identityLabel } from "../statusline/swarm-statusline.mjs";
 
@@ -160,6 +161,7 @@ test("a fourth provider crosses discovery, usage, manifest, scheduler, persisten
       home,
       cfg: { ...cfg, grading: { enabled: true }, dashboard: { port: 0, bind: "127.0.0.1", token: null } },
       _estate: estate,
+      ...refreshStubs,
     });
     try {
       await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));

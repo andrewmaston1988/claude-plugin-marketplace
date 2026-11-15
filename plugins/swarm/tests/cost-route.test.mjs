@@ -9,6 +9,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import http from "node:http";
 import { createServer } from "../src/serve/server.mjs";
+import { refreshStubs } from "./helpers/serve-fixture.mjs";
 import { PAGE, loadPage, listData, listRow } from "./helpers/page-harness.mjs";
 import { loadPerfViews, H } from "./helpers/perf-views-harness.mjs";
 
@@ -21,7 +22,7 @@ async function getCost(grading) {
     weeklyModels: [{ model: "m-b", requests: 200, meterSharePct: 10 }, { model: "m-a", requests: 100, meterSharePct: 20 }],
   }) + "\n", "utf8");
   const cfg = { dashboard: { port: 0, bind: "127.0.0.1", token: null }, grading: { enabled: grading } };
-  const server = createServer({ tls: null, home, cfg, _estate: estate, _watch: () => ({ close() {} }), _heartbeatMs: 60_000, _pollMs: 60_000 });
+  const server = createServer({ tls: null, home, cfg, _estate: estate, _watch: () => ({ close() {} }), _heartbeatMs: 60_000, _pollMs: 60_000, ...refreshStubs });
   await new Promise((r) => server.listen(0, "127.0.0.1", r));
   try {
     return await new Promise((resolve, reject) => http.get({ host: "127.0.0.1", port: server.address().port, path: "/api/cost" }, (res) => {
