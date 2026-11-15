@@ -62,8 +62,8 @@ globalThis.fetch = (input, init) => {
   return Promise.reject(new Error(`network access in a swarm test: ${url.href}`));
 };
 
-// A hook, not an exit code: the runner keeps a child's stderr but a thrown hook
-// lands in the test report, where the failure names the URLs.
+// A hook, not an exit code: the thrown error lands in the test report naming the
+// URLs it refused, where a non-zero exit is reported as a bare `test failed`.
 after(() => {
   if (blocked.length) throw new Error(`network access in a swarm test: ${blocked.join(", ")}`);
 });
