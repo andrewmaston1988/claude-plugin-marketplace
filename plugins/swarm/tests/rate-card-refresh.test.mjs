@@ -1,12 +1,12 @@
 import "./helpers/isolate-home.mjs";
 import { test } from "node:test";
 import { deepEqual, equal, ok, rejects, throws } from "node:assert/strict";
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import {
-  assertPlausible, diffPrices, isRateCardStale, overlayRateCard, readRateCardStore,
+  assertPlausible, diffPrices, isRateCardStale, overlayRateCard, rateCards, readRateCardStore,
   refreshRateCards, reportCardChanges, resolveRatePrice,
   CODEX_RATE_CARD_SEED, CLAUDE_RATE_CARD_SEED, RATE_CARD_SOURCES,
 } from "../src/rate-card.mjs";
@@ -340,6 +340,26 @@ test("refreshStaleRateCards: a failed attempt backs that provider off for an hou
   const quiet = await refreshStaleRateCards({ enabled: ALL, ...io, path, _fetch: offline, now: Date.parse("2026-10-02T19:00:00Z") });
   deepEqual(quiet, { refreshed: [], failed: [], skipped: true });
   equal(calls, 3);
+});
+
+test("rateCards: a store write the mtime cannot distinguish is still read", async () => {
+  // The automatic refresh reads the cards through a memo keyed on the store's mtime,
+  // and a write plus the read after it can land inside one timestamp tick — tmpfs
+  // reports whole milliseconds. Pinning both writes to one mtime is that collision,
+  // made deterministic.
+  const path = storePath();
+  const pinned = new Date("2026-01-01T00:00:00Z");
+  await refreshRateCards({ providers: RATE_CARD_SOURCES, path, _fetch: servePages(), now: new Date("2026-10-01T12:00:00Z") });
+  utimesSync(path, pinned, pinned);
+  const key = statSync(path).mtimeMs;
+  equal(rateCards(path).codex.asOf, "2026-10-01T12:00:00.000Z", "the first read caches the card");
+
+  await refreshRateCards({ providers: RATE_CARD_SOURCES, path, _fetch: servePages(), now: new Date("2026-10-02T12:00:00Z") });
+  utimesSync(path, pinned, pinned);
+  equal(statSync(path).mtimeMs, key, "premise: the two writes must look identical to a stat");
+
+  equal(rateCards(path).codex.asOf, "2026-10-02T12:00:00.000Z",
+    "RED: a write the mtime cannot distinguish was served from the cache");
 });
 
 test("refreshStaleRateCards: a refresh banks the card and reports what moved", async () => {

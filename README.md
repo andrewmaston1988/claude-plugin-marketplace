@@ -38,3 +38,5 @@ claude --plugin-dir /path/to/claude-plugin-marketplace/plugins/slack-bridge
 ## Contributing
 
 Each plugin lives under `plugins/<name>/`. Add a `README.md` with setup instructions and a `plugin.json` manifest. See `plugins/slack-bridge/` as a reference.
+
+See [TESTING.md](./TESTING.md) for test commands and contribution gates.

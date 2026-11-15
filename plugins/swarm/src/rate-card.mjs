@@ -108,6 +108,9 @@ export function readRateCardStore(path = rateCardStorePath()) {
   }
 }
 
+// rateCards' memo, declared up here because a write has to drop its entry.
+const cache = new Map();
+
 function writeRateCardStore(store, path = rateCardStorePath()) {
   mkdirSync(dirname(path), { recursive: true });
   // Per-writer temp: the daemon and the CLI both bank here, and a shared name
@@ -115,6 +118,11 @@ function writeRateCardStore(store, path = rateCardStorePath()) {
   const tmp = `${path}.${process.pid}.tmp`;
   writeFileSync(tmp, JSON.stringify(store, null, 2), "utf8");
   renameSync(tmp, path);
+  // A write and the read after it can land inside the filesystem's timestamp tick —
+  // tmpfs reports whole milliseconds — so the new mtime can equal the cached one and
+  // rateCards would serve the pre-write cards. This process's own writes are always
+  // visible; another process's in the same tick still needs the next tick.
+  cache.delete(path);
 }
 
 /**
@@ -250,8 +258,6 @@ export function loadRateCards(path = rateCardStorePath()) {
   const store = readRateCardStore(path);
   return Object.fromEntries(RATE_CARD_SOURCES.map(({ provider, seed }) => [provider, overlayRateCard(seed, store[provider])]));
 }
-
-const cache = new Map();
 
 /**
  * The cards in force, cached per store path and re-read when that file's mtime

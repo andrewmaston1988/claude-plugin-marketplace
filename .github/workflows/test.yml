@@ -26,6 +26,11 @@ jobs:
         # yields an empty ref, which the checker fails closed on (exit 2).
         run: node scripts/check-file-size.mjs --against "${{ github.event.pull_request.base.sha || github.event.before }}"
 
+  # Every test job below runs the runner, so CI and a local `node
+  # scripts/test.mjs --suite <name>` execute the same commands. The suites and
+  # their commands live in scripts/test-suites.mjs; only CI-only steps -- git
+  # identity, the read-only home sentinels, the file-type check -- stay here.
+
   checkpoint:
     name: checkpoint
     runs-on: ubuntu-latest
@@ -35,7 +40,7 @@ jobs:
         with:
           node-version: "22"
       - name: Run tests
-        run: node --test plugins/checkpoint/hooks/tests/*.test.mjs
+        run: node scripts/test.mjs --suite checkpoint
 
   slack-bridge:
     name: slack-bridge
@@ -46,7 +51,7 @@ jobs:
         with:
           node-version: "22"
       - name: Unit tests
-        run: node --test plugins/slack-bridge/tests/*.test.mjs plugins/slack-bridge/tests/*/*.test.mjs
+        run: node scripts/test.mjs --suite slack-bridge
 
   claude-peers:
     name: claude-peers
@@ -57,7 +62,7 @@ jobs:
         with:
           node-version: "22"
       - name: Run tests
-        run: node --test plugins/claude-peers/tests/*.test.mjs
+        run: node scripts/test.mjs --suite claude-peers
 
   swarm:
     name: swarm
@@ -86,11 +91,11 @@ jobs:
           chmod -R a-w ~/.swarm ~/.claude
           find ~/.swarm ~/.claude -printf '%y %m %p\n' | sort > "$RUNNER_TEMP/sentinel-listing"
           find ~/.swarm ~/.claude \( -type f -o -type l \) -print0 | sort -z | xargs -0 sha256sum > "$RUNNER_TEMP/sentinel-hashes"
-      # Every test file imports tests/helpers/isolate-home.mjs first, so the suite
-      # resolves the throwaway home whether it is run by npm or by hand.
+      # Every test file imports tests/helpers/isolate-home.mjs first, so the
+      # suite resolves the throwaway home whether the runner or a person starts
+      # it. The suite's cwd (plugins/swarm) comes from the registry.
       - name: Run tests
-        run: npm test
-        working-directory: plugins/swarm
+        run: node scripts/test.mjs --suite swarm
       - name: Verify home sentinels untouched
         if: always()
         run: |
@@ -119,7 +124,7 @@ jobs:
             exit 1
           fi
       - name: Run tests
-        run: node --test plugins/ui-probe/tests/*.test.mjs
+        run: node scripts/test.mjs --suite ui-probe
 
   pipeline:
     name: pipeline
@@ -131,17 +136,40 @@ jobs:
           node-version: "22"
           cache: npm
           cache-dependency-path: plugins/pipeline/package-lock.json
-      - name: Install dependencies
-        run: npm ci
-        working-directory: plugins/pipeline
-      - name: Core tests
-        working-directory: plugins/pipeline
-        run: |
-          FILES=$(ls tests/*.mjs | grep -v parity-runner)
-          node --env-file=.env.test --test $FILES
-      - name: Parity tests
-        working-directory: plugins/pipeline
-        run: node --env-file=.env.test --test tests/parity-runner.mjs
-      - name: Script tests
-        working-directory: plugins/pipeline
-        run: node --test src/hooks/*.test.mjs src/db/*.test.mjs skills/merge/scripts/*.test.mjs
+      # The suite's runs carry `install: npm ci`, hash-gated, so CI's own
+      # install step is gone rather than duplicated.
+      - name: Run tests
+        run: node scripts/test.mjs --suite pipeline
+
+  agent-investigation:
+    name: agent-investigation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Run tests
+        run: node scripts/test.mjs --suite agent-investigation
+
+  discipline:
+    name: discipline
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Run tests
+        run: node scripts/test.mjs --suite discipline
+
+  repo:
+    name: repo
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Run tests
+        run: node scripts/test.mjs --suite repo
