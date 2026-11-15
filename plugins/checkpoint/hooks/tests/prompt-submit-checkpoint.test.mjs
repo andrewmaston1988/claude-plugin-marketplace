@@ -11,10 +11,12 @@ import {
   DEFAULT_COMPACT_RESERVE_TOKENS,
 } from '../lib/nudge.mjs';
 import { resolveTtlSource } from '../lib/cadence.mjs';
+import { writeCatalog } from './helpers/catalog.mjs';
 
 const OPUS = 'claude-opus-5-5';
 const DEEPSEEK = 'deepseek-v4.1-flash:1017-cloud';
-const SONNET = 'claude-sonnet-5';
+const SONNET = 'claude-sonnet-5-5';
+const HAIKU = 'claude-haiku-4-5-20251001';
 
 // The operator's own settings: 400k top level, 500k for Opus.
 const OPERATOR = { autoCompactWindow: 400_000, modelSettings: { [OPUS]: { autoCompactWindow: 500_000 } } };
@@ -34,6 +36,7 @@ function fixture(t) {
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   const home = path.join(root, 'home');
   write(path.join(home, '.claude', 'settings.json'), JSON.stringify(OPERATOR));
+  writeCatalog(home);
   return { root, home, cwd: path.join(root, 'repo'), nudgeDir: path.join(root, 'nudge') };
 }
 
@@ -71,12 +74,19 @@ test('operator settings: deepseek compacts at 367k, nudges at 247k and 307k', (t
   assert.match(nudgeAt(f, 307_000, DEEPSEEK), /Compaction in ~60k tokens/);
 });
 
-test('operator settings: Sonnet compacts at 167k, reserve clamped to 41,750', (t) => {
+test('operator settings: Sonnet 5.5 compacts at 367k, nudges at 247k and 307k', (t) => {
   const f = fixture(t);
-  assert.equal(nudgeAt(f, 83_499, SONNET), null);
+  assert.equal(nudgeAt(f, 246_999, SONNET), null);
+  assert.match(nudgeAt(f, 247_000, SONNET), /~247k of ~367k/);
+  assert.match(nudgeAt(f, 307_000, SONNET), /Compaction in ~60k tokens/);
+});
+
+test('operator settings: Haiku 4.5 compacts at 167k, reserve clamped to 41,750', (t) => {
+  const f = fixture(t);
+  assert.equal(nudgeAt(f, 83_499, HAIKU), null);
   // 83,500 rounds to ~84k in the display.
-  assert.match(nudgeAt(f, 83_500, SONNET), /~84k of ~167k/);
-  assert.match(nudgeAt(f, 125_250, SONNET), /Compaction in ~42k tokens/);
+  assert.match(nudgeAt(f, 83_500, HAIKU), /~84k of ~167k/);
+  assert.match(nudgeAt(f, 125_250, HAIKU), /Compaction in ~42k tokens/);
 });
 
 // ---- one fire per band per cycle; the claim is the gate (row 3) ----

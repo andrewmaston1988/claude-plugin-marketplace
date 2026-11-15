@@ -7,6 +7,7 @@ import path from 'node:path';
 
 import { NUDGE_DIR, readJSON, writeJSON, sanitizeSid } from './paths.mjs';
 import { compactTrigger, readSettingsChain } from './compact-trigger.mjs';
+import { catalogModels } from './claude-catalog.mjs';
 import { decideCheckpointNudge, usageInputTotal } from './context.mjs';
 import { SKILL_INVOCATION, SKILL_DISAMBIGUATION } from './skill-ref.mjs';
 
@@ -83,7 +84,10 @@ export function checkpointNudge({
   if (!point) return null;
 
   const { tokens: trigger } = compactTrigger({
-    model: point.model, env, settingsChain: readSettingsChain(cwd || process.cwd(), home),
+    model: point.model,
+    env,
+    settingsChain: readSettingsChain(cwd || process.cwd(), home),
+    catalog: catalogModels({ HOME: home, USERPROFILE: home }),
   });
   const prev = readNudgeState(statePath);
   const { band, state } = decideCheckpointNudge({

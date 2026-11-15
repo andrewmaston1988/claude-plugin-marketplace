@@ -8,6 +8,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 
 import { GROWTH_THROTTLE_BYTES } from '../post-tool-checkpoint.mjs';
 import { checkpointNudge, nudgeStatePath, readNudgeState } from '../lib/nudge.mjs';
+import { writeCatalog } from './helpers/catalog.mjs';
 
 const OPUS = 'claude-opus-5-5';
 const OPERATOR = { autoCompactWindow: 400_000, modelSettings: { [OPUS]: { autoCompactWindow: 500_000 } } };
@@ -28,6 +29,7 @@ function fixture(t) {
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   const home = path.join(root, 'home');
   write(path.join(home, '.claude', 'settings.json'), JSON.stringify(OPERATOR));
+  writeCatalog(home);
   return { root, home, cwd: path.join(root, 'repo'), nudgeDir: path.join(home, '.claude', '.checkpoint-nudge') };
 }
 

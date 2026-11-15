@@ -4,6 +4,7 @@ import path from 'node:path';
 import os from 'node:os';
 
 import { contextWindowFor } from './context.mjs';
+import { maxInputTokens } from './claude-catalog.mjs';
 import { readJSON } from './paths.mjs';
 
 // Claude Code compacted ~33k below the configured window in every measured run.
@@ -61,10 +62,11 @@ function fromChain(chain, key) {
 }
 
 // { tokens, window, source }: `source` names the input that set the window.
-export function compactTrigger({ model, env = process.env, settingsChain = [] } = {}) {
+// `catalog` is the model rows; a configured window is capped at the model's own
+// only where the catalog or a `[1m]` id states it — an unlisted model's window
+// is unknown, so capping would be a guess.
+export function compactTrigger({ model, env = process.env, settingsChain = [], catalog } = {}) {
   const chain = Array.isArray(settingsChain) ? settingsChain : [];
-  const isClaude = typeof model === 'string' && model.includes('claude');
-  const modelWindow = contextWindowFor(model);
 
   let configured = parseWindow(env && env.CLAUDE_CODE_AUTO_COMPACT_WINDOW);
   let source = 'env';
@@ -72,10 +74,12 @@ export function compactTrigger({ model, env = process.env, settingsChain = [] } 
   if (configured == null) { configured = fromChain(chain, 'autoCompactWindow'); source = 'settings'; }
   if (configured == null) source = 'model';
 
-  // A third-party model's window is unknown, so only Claude families are capped.
+  const modelWindow = contextWindowFor(model, catalog);
+  const known = maxInputTokens(catalog, model) != null
+    || (typeof model === 'string' && model.endsWith('[1m]'));
   const window = configured == null
     ? modelWindow
-    : (isClaude ? Math.min(configured, modelWindow) : configured);
+    : (known ? Math.min(configured, modelWindow) : configured);
 
   let tokens = window - COMPACT_BUFFER_TOKENS;
 

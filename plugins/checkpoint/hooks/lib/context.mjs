@@ -2,25 +2,16 @@
 // Pure functions + one transcript-tail reader. No injection, no API calls.
 import fs from 'node:fs';
 
+import { maxInputTokens } from './claude-catalog.mjs';
+
 const DEFAULT_CONTEXT_WINDOW = 200_000;
 export const WARM_RATIO          = 0.5;  // cache_read share that counts as "warm"
 
-// [substring, window]. First match wins; unknown -> default.
-// Family names, not versioned ids — 'claude-sonnet' matches claude-sonnet-4-5,
-// claude-sonnet-5, and future family members alike.
-const MODEL_WINDOWS = [
-  ['claude-opus',   1_000_000],
-  ['claude-sonnet',   200_000],
-  ['claude-haiku',    200_000],
-  ['claude-fable',  1_000_000],
-];
-
-export function contextWindowFor(model) {
-  if (typeof model === 'string') {
-    if (model.endsWith('[1m]')) return 1_000_000;
-    for (const [sub, win] of MODEL_WINDOWS) if (model.includes(sub)) return win;
-  }
-  return DEFAULT_CONTEXT_WINDOW;
+// The window Claude Code ships for the model. `[1m]` is an explicit opt-in to 1M
+// whatever the catalog says; an id the catalog does not list gets the default.
+export function contextWindowFor(model, rows) {
+  if (typeof model === 'string' && model.endsWith('[1m]')) return 1_000_000;
+  return maxInputTokens(rows, model) ?? DEFAULT_CONTEXT_WINDOW;
 }
 
 export function usageInputTotal(usage) {
