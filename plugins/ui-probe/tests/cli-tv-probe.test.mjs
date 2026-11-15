@@ -106,6 +106,54 @@ test("row 26: tv probe hands --exit and --fetch to the probe and detaches afterw
   assert.match(result.lines.at(-1), /^shell: /);
 });
 
+// Row 11, probe path: the probe's digest ends on the return line, and the record lands beside
+// platform.json so a later capture or report can read what happened to the app underneath.
+test("row 11: tv probe ends its digest on the return line and writes tv-return.json", async () => {
+  const { tvProbeCommand } = await import("../src/tv/cli.mjs");
+  const dir = scratchDir("ui-probe-tv-probe-return");
+  const seen = [];
+  const _attach = async (config, options) => {
+    seen.push(options);
+    return {
+      cdp: {},
+      port: 1,
+      protocol: null,
+      timings: { attachMs: 5, relaunchMs: 40 },
+      detach: async () => (options.returnToApp
+        ? { id: "3201807016597", name: "Apple TV", outcome: "returned" }
+        : { outcome: "off" }),
+    };
+  };
+  const _tvProbe = async () => ({
+    schema: "ui-probe-platform@1",
+    page: { href: "http://127.0.0.1/tv", origin: "http://127.0.0.1" },
+    fetch: { status: "skipped" },
+    exit: { status: "skipped" },
+    verdict: "shell: tizen 6.5, webapis 2.0",
+  });
+
+  const result = await tvProbeCommand({
+    config: { tv: { host: "192.0.2.10:26101", appid: "example.app" }, outDir: dir },
+    outDir: dir,
+    _attach,
+    _tvProbe,
+  });
+
+  assert.equal(seen[0].returnToApp, true, "the probe puts the app back by default");
+  assert.equal(result.lines.at(-1), "tv return: Apple TV (3201807016597) — returned");
+  assert.deepEqual(JSON.parse(readFileSync(path.join(dir, "tv-return.json"), "utf8")), result.tvReturn);
+
+  const stayed = await tvProbeCommand({
+    config: { tv: { host: "192.0.2.10:26101", appid: "example.app" }, outDir: dir },
+    outDir: dir,
+    stay: true,
+    _attach,
+    _tvProbe,
+  });
+  assert.equal(seen[1].returnToApp, false, "--stay reaches the attach");
+  assert.equal(stayed.lines.at(-1), "tv return: off");
+});
+
 // The key list and the per-key wait are printed before the first banner, so the operator knows
 // what to press and how long they have.
 test("row 27: tv probe --listen prints the key list and wait, then runs the guided check", async () => {

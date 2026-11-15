@@ -33,12 +33,15 @@ Add a `tv` block to `.ui-probe.json`:
     "appid": "example.app",
     "sdb": "C:/tizen-studio/tools/sdb.exe",
     "testOrigin": "http://127.0.0.1:8001",
-    "focusSelector": ".focused"
+    "focusSelector": ".focused",
+    "returnApps": ["3201807016597"]
   }
 }
 ```
 
-`tv.host` is the TV's developer-mode address and port. `tv.appid` is the installed widget application id. `tv.sdb` is optional; omit it when `sdb` is on PATH or in a standard Tizen SDK location. `tv.testOrigin` is the origin allowed to receive writes when a TV journey uses `--allow-writes`; use a test server, not a live service. `tv.focusSelector` is optional and defaults to `.focused`; it selects the app element whose focus marker should be shown in observations.
+`tv.host` is the TV's developer-mode address and port. `tv.appid` is the installed widget application id. `tv.sdb` is optional; omit it when `sdb` is on PATH or in a standard Tizen SDK location. `tv.testOrigin` is the origin allowed to receive writes when a TV journey uses `--allow-writes`; use a test server, not a live service. `tv.focusSelector` is optional and defaults to `.focused`; it selects the app element whose focus marker should be shown in observations. `tv.returnApps` lists the apps, in order, that may be put back after the widget closes; the worked example is Apple TV, whose REST id `3201807016597` is the one sdb's `applist` never prints. `tv.returnToApp` defaults to `true`; set it to `false` to turn the return off for a repository.
+
+On a launching attach the tool reads which app is in front before it closes yours, then kills the widget, removes the forward and relaunches that app over REST. The digest's last line says what happened — `tv return: Apple TV (3201807016597) — returned` — and the same record is written to `tv-return.json`. The outcomes are `returned`, `already showing`, `launched, not visible after 5 s`, `launched, not confirmed: <why>`, `failed: <why>`, `nothing was showing`, `not read: <why>` and `off`. The outcome never changes a run's exit code: the verdict is about the app under test. Pass `--stay` to leave the widget up instead; the line then reads `tv return: off`. A session joined with `--attach-port` launched over nothing and returns nothing.
 
 Run `/ui-probe doctor` to check `sdb`, the connected TV, and the configured app id. `/ui-probe run journey.yaml --device tv` attaches to the set. Use `--device desktop` (the default) to run the same TV journey in desktop Chromium for faster iteration. `/ui-probe tv probe --navigate http://127.0.0.1:8001` records the platform probe and its shell verdict, waiting for the app's page to settle first and naming that page in every step and in the verdict; add `--listen` for the guided physical-press check, `--fetch <url>` for one credentialed GET from the page, and `--exit` to exit the app last and report whether the inspector closed.
 
@@ -56,7 +59,7 @@ The TV write guard blocks and records intercepted write requests outside the con
 | `auth.cookies` | array | Cookie entries `{name, command: [argv...], domain?}`. The command's stdout supplies the cookie value. |
 | `outDir` | string | Output directory; defaults to `<os tmpdir>/ui-probe/<stamp>`. |
 | `browser` | string | Browser executable path, overriding discovery. |
-| `tv` | object | Optional TV settings: `host`, `appid`, optional `sdb`, `testOrigin`, and `focusSelector`. |
+| `tv` | object | Optional TV settings: `host`, `appid`, optional `sdb`, `testOrigin`, `focusSelector`, `returnApps`, and `returnToApp`. |
 
 Cookie commands run as argv arrays without a shell, from the config directory. `{var}` substitution is forbidden in the executable and substituted values cannot contain path separators or shell metacharacters. Pass variables with `--var k=v`.
 
@@ -67,6 +70,8 @@ Cookie commands run as argv arrays without a shell, from the config directory. `
 Browser capture produces `screenshot.png`, `dom.html`, `measure.json`, `console.json`, `network.json`, `assets.json`, `env.json`, and `observation.txt` per viewport. TV capture writes these outputs under `<outDir>/tv/`; it writes `screenshot.png` only when `--screenshot` is supplied. The TV screenshot is an operator artifact, not an input for agent analysis. Measurements contain boxes for each matching selector; the environment records the page's reported pointer and hover capabilities. The stdout digest reports viewport dimensions, pointer and hover, measured widths, blocked request count, and output directory. Traffic records contain method, URL, status, and whether blocked, without headers. Cookie values are not written to outputs or the digest.
 
 Scenario runs write `results.json` with each step's source, operation, optional target, outcome, failure, measured and expected values, and duration. A step's source is `<file>:<line>` where the step is written, or `<file>#step<n>` — its position in that file — when no line is known; a step spliced from an include names the include as written, with its line in that file. A browser-backed run also writes `console.json` and `network.json` beside `results.json`, in the shape a capture writes them; a TV run records from its start, once the app is attached and settled. The digest reports each step and the overall outcome and output directory. Runs return 0 for passed, 1 for failed, 2 for inconclusive, 3 for needs review, and 64 for invalid input.
+
+A TV run, capture or probe also writes `tv-return.json` beside its other output, holding the app it put back and the outcome. `results.json` and `platform.json` keep their shape; a joined `--attach-port` session writes no `tv-return.json`, because it launched over nothing.
 
 ## Read-only guard
 

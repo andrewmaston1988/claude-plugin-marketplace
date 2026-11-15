@@ -7,42 +7,7 @@ import { readFileSync, writeFileSync, mkdirSync, renameSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { checkFlags, deviceFlag, getFlag, hasFlag, positionals, varsFrom, wantsHelp } from "../src/flags.mjs";
-
-const HELP = [
-  "usage: ui-probe <command> [options]",
-  "",
-  "commands:",
-  "  capture <screen>|--url <url>   capture a configured screen (or a bare url)",
-  "  run <scenario.yaml|json>       run a scenario; exit 0 passed, 1 failed, 2 inconclusive,",
-  "                                 3 needs_review, 64 invalid scenario/config/arguments",
-  "  validate [<file>] [--config]   validate a scenario file and/or the config",
-  "  screens                        list the config's screens",
-  "  doctor                         check config, and then whichever of the tv, browser",
-  "                                 and baseUrl checks the config needs",
-  "  tv probe                       measure the TV platform; see its options below",
-  "",
-  "options:",
-  "  --config <path>        config file (default: .ui-probe.json found walking up from cwd)",
-  "  --url <url>            capture this url instead of a named screen",
-  "  --viewport <a,b>       viewport names (capture default: phone,desktop)",
-  "  --var k=value          variable for auth commands; repeatable",
-  "  --out <dir>            output directory",
-  "  --allow-writes         permit writes for this one invocation",
-  "  --include-background   observe the page behind a modal dialog",
-  "  --device tv|desktop    where a tv-backend journey or capture runs (default: desktop)",
-  "  --attach-port <n>      join a TV debug forward already running instead of relaunching",
-  "  --screenshot           capture on the TV: also replay a screenshot (slow on the set)",
-  "  --video <url>          tv probe: a same-origin clip for the video checks",
-  "  --navigate <url>       tv probe: test what the app may navigate to",
-  "  --listen [keys]        tv probe: guided physical-press check, one key at a time; a",
-  "                         comma-separated key list, defaults to Left,Right,Digit1,MediaPlay",
-  "                         plus Enter and Back only on the --navigate fixture grid",
-  "  --listen-wait <s>      tv probe: seconds to wait for each key (default 8)",
-  "  --fetch <url>          tv probe: one credentialed GET from the settled page",
-  "  --exit                 tv probe: exit the app last and report whether it closed",
-  "  --help, -h             this text",
-  "",
-].join("\n");
+import { HELP } from "../src/help.mjs";
 
 const argv = process.argv.slice(2);
 const cmd = argv[0];
@@ -103,10 +68,15 @@ function refuseUnknown(subcommand, args) {
     if (device.problem) { err(device.problem); settle(64); return; }
 
     if (device.value === "tv") {
-      const { captureTvBranch } = await import("../src/tv/cli.mjs");
+      const { captureTvBranch, tvReturnLine, writeTvReturn } = await import("../src/tv/cli.mjs");
       const done = await captureTvBranch({ screen, config, rest, getFlag, source: name ?? url });
       if (done.stderr) err(done.stderr);
+      const captureDir = getFlag("--out", rest) ?? config.outDir;
+      if (done.tvReturn) writeTvReturn(captureDir, done.tvReturn);
       if (done.digest) process.stdout.write(done.digest.endsWith("\n") ? done.digest : `${done.digest}\n`);
+      // The return is reported last, after the digest, and never changes the exit code.
+      const tvLine = done.tvReturn === undefined ? null : tvReturnLine(done.tvReturn);
+      if (tvLine) out(tvLine);
       settle(done.exitCode);
       return;
     }
@@ -192,15 +162,22 @@ function refuseUnknown(subcommand, args) {
     }
 
     let result;
+    let tvLine = null;
     if (device.value === "tv") {
-      const { runTvBranch } = await import("../src/tv/cli.mjs");
+      const { runTvBranch, tvReturnLine, writeTvReturn } = await import("../src/tv/cli.mjs");
       const done = await runTvBranch({
         doc, config, rest, getFlag, cookies,
         baseUrl: config?.baseUrl ?? null, source: path.basename(file),
         baseDir: path.dirname(scenarioPath), file: scenarioPath,
       });
       if (done.stderr) err(done.stderr);
-      if (done.exitCode !== 0) { settle(done.exitCode); return; }
+      if (done.tvReturn) writeTvReturn(outDir, done.tvReturn);
+      tvLine = done.tvReturn === undefined ? null : tvReturnLine(done.tvReturn);
+      if (done.exitCode !== 0) {
+        if (tvLine) out(tvLine);
+        settle(done.exitCode);
+        return;
+      }
       // What the set cost to reach, before any step is judged.
       if (done.timings) out(attachLine(done.timings));
       result = done.result;
@@ -263,6 +240,8 @@ function refuseUnknown(subcommand, args) {
     }
     out(`run: ${result.outcome} (${counts.passed} passed, ${counts.failed} failed, ${counts.inconclusive} inconclusive, ${counts.not_run} not run) → ${outDir}`);
     writeResults(outDir, result);
+    // The set's return is the command's last line, after the journey's verdict.
+    if (tvLine) out(tvLine);
     settle(result.exitCode);
     return;
   }
@@ -279,9 +258,15 @@ function refuseUnknown(subcommand, args) {
     try {
       loaded = await loadConfig(getFlag("--config", rest), true);
     } catch (e) { if (reportConfigError(e)) return; throw e; }
-    const { tvProbeBranch } = await import("../src/tv/cli.mjs");
+    const { tvProbeBranch, tvReturnLine, writeTvReturn } = await import("../src/tv/cli.mjs");
     const done = await tvProbeBranch({ config: loaded.config, rest, getFlag, resolveOutDir, out, err });
     if (done.stderr) err(done.stderr);
+    if (done.exitCode !== 0 && done.tvReturn) {
+      // A probe that threw wrote no output; its record still gets a file and the last line.
+      writeTvReturn(resolveOutDir(loaded.config, getFlag("--out", rest)), done.tvReturn);
+      const tvLine = tvReturnLine(done.tvReturn);
+      if (tvLine) out(tvLine);
+    }
     settle(done.exitCode);
     return;
   }
@@ -395,9 +380,15 @@ function refuseUnknown(subcommand, args) {
   err(`unknown command: ${cmd}`);
   process.stdout.write(HELP);
   settle(64);
-})().catch((e) => {
+})().catch(async (e) => {
   process.stderr.write(`${(e && e.message) || String(e)}\n`);
-  process.exit(1);
+  // An unexpected TV failure still reports where the set was left, as the last line.
+  if (e && e.tvReturn) {
+    const { tvReturnLine } = await import("../src/tv/cli.mjs");
+    const tvLine = tvReturnLine(e.tvReturn);
+    if (tvLine) out(tvLine);
+  }
+  settle(1);
 });
 
 // -- helpers ----------------------------------------------------------------

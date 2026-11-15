@@ -166,6 +166,21 @@ test("row 5a: every quoted flag literal in the source is listed by a subcommand 
   }
 });
 
+test("row 12: --stay belongs to run, capture and tv probe and to no other subcommand", async () => {
+  for (const subcommand of ["run", "capture", "tv probe"]) {
+    assert.deepEqual(checkFlags(subcommand, ["--stay"]), { ok: true }, `${subcommand} takes --stay`);
+  }
+  for (const subcommand of ["validate", "screens", "doctor"]) {
+    assert.equal(checkFlags(subcommand, ["--stay"]).unknown, "--stay", `${subcommand} refuses --stay`);
+  }
+
+  // The refusal a user gets, through the same guard the dispatch runs.
+  const { configPath, env } = tvSetup("ui-probe-flags-stay");
+  const screens = await probe(["screens", "--stay", "--config", configPath], { env });
+  assert.equal(screens.status, 64, `screens --stay exited ${screens.status}: ${screens.stderr}`);
+  assert.match(screens.stderr, /unknown flag --stay for screens/, screens.stderr);
+});
+
 test("row 5b: every flag a table lists is printed by --help", async () => {
   const help = await probe(["--help"]);
   assert.equal(help.status, 0, `--help exited ${help.status}: ${help.stderr}`);
@@ -180,13 +195,13 @@ test("row 5b: every flag a table lists is printed by --help", async () => {
 test("row 5c: each table is exactly the flags its subcommand reads", () => {
   const expected = {
     capture: ["--config", "--url", "--viewport", "--var", "--out", "--device",
-      "--allow-writes", "--include-background", "--attach-port", "--screenshot"],
-    run: ["--config", "--viewport", "--var", "--out", "--device", "--allow-writes", "--attach-port"],
+      "--allow-writes", "--include-background", "--attach-port", "--screenshot", "--stay"],
+    run: ["--config", "--viewport", "--var", "--out", "--device", "--allow-writes", "--attach-port", "--stay"],
     validate: ["--config"],
     screens: ["--config"],
     doctor: ["--config"],
     "tv probe": ["--config", "--out", "--video", "--navigate", "--listen",
-      "--listen-wait", "--fetch", "--exit", "--attach-port"],
+      "--listen-wait", "--fetch", "--exit", "--attach-port", "--stay"],
   };
   assert.deepEqual(Object.keys(SUBCOMMAND_FLAGS).sort(), Object.keys(expected).sort(), "every subcommand has a table");
   for (const [subcommand, flags] of Object.entries(expected)) {

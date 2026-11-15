@@ -17,7 +17,7 @@ export const BUILTIN_VIEWPORTS = Object.freeze({
 });
 
 const TOP_LEVEL_KEYS = ['baseUrl', 'viewports', 'screens', 'auth', 'outDir', 'browser', 'tv'];
-const TV_KEYS = ['host', 'appid', 'sdb', 'testOrigin', 'focusSelector'];
+const TV_KEYS = ['host', 'appid', 'sdb', 'testOrigin', 'focusSelector', 'returnApps', 'returnToApp'];
 const SCREEN_KEYS = ['url', 'steps', 'measure'];
 const VIEWPORT_KEYS = ['width', 'height', 'dpr', 'touch'];
 const COOKIE_KEYS = ['name', 'command', 'domain'];
@@ -97,6 +97,23 @@ function validateTv(value, errors) {
   }
   if (value.focusSelector !== undefined && (typeof value.focusSelector !== 'string' || !value.focusSelector.trim())) {
     errors.push(err('tv.focusSelector', `must be a non-empty CSS selector, got ${JSON.stringify(value.focusSelector)}`, 'set focusSelector to the class your app moves on focus, or omit it for ".focused"', '{ "tv": { "host": "192.0.2.10:26101", "appid": "myapp.main", "focusSelector": ".focused" } }'));
+  }
+  if (value.returnApps !== undefined) {
+    if (!Array.isArray(value.returnApps)) {
+      errors.push(err('tv.returnApps', `must be an array of app ids, got ${JSON.stringify(value.returnApps)}`, 'set returnApps to the REST ids of the apps you want put back, in order', '{ "tv": { "host": "192.0.2.10:26101", "appid": "myapp.main", "returnApps": ["3201807016597"] } }'));
+    } else {
+      value.returnApps.forEach((id, i) => {
+        const field = `tv.returnApps[${i}]`;
+        if (typeof id !== 'string' || !id.trim()) {
+          errors.push(err(field, `must be a non-empty app id, got ${JSON.stringify(id)}`, 'use a Tizen or store app id, e.g. the one REST answers for that app', '{ "tv": { "host": "192.0.2.10:26101", "appid": "myapp.main", "returnApps": ["3201807016597"] } }'));
+        } else if (id === value.appid) {
+          errors.push(err(field, `names tv.appid ${JSON.stringify(id)}, the widget under test — it is never put back`, 'list only the household apps a probe may restore, not the app being tested', '{ "tv": { "host": "192.0.2.10:26101", "appid": "myapp.main", "returnApps": ["3201807016597"] } }'));
+        }
+      });
+    }
+  }
+  if (value.returnToApp !== undefined && typeof value.returnToApp !== 'boolean') {
+    errors.push(err('tv.returnToApp', `must be a boolean, got ${JSON.stringify(value.returnToApp)}`, 'set returnToApp to false to leave the set on the widget, or omit it to put the app back', '{ "tv": { "host": "192.0.2.10:26101", "appid": "myapp.main", "returnToApp": false } }'));
   }
 }
 

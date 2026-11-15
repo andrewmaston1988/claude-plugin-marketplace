@@ -14,6 +14,7 @@ export const SUBCOMMAND_FLAGS = {
     "--include-background": false,
     "--attach-port": true,
     "--screenshot": false,
+    "--stay": false,
   },
   run: {
     "--config": true,
@@ -23,6 +24,7 @@ export const SUBCOMMAND_FLAGS = {
     "--device": true,
     "--allow-writes": false,
     "--attach-port": true,
+    "--stay": false,
   },
   validate: { "--config": true },
   screens: { "--config": true },
@@ -37,6 +39,7 @@ export const SUBCOMMAND_FLAGS = {
     "--fetch": true,
     "--exit": false,
     "--attach-port": true,
+    "--stay": false,
   },
 };
 

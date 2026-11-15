@@ -66,6 +66,10 @@ function launchAnswers(overrides = {}) {
 
 const instant = async () => {};
 
+// Every sequence here is about the launch and the kill, so the return is off: the sdb calls and
+// the timings stay exactly what they were before the return existed.
+const attachOff = (config, options) => attach(config, { returnToApp: false, ...options });
+
 const SETTLED = { href: "http://192.0.2.30:8000/tv?tizen=1", origin: "http://192.0.2.30:8000", ready: "complete", hasBody: true };
 // Every attach waits for the settled page. Tests that are about another part of the sequence
 // hand it a page that is already settled, so the wait costs them nothing.
@@ -76,7 +80,7 @@ test("attach connects, closes, launches, forwards, then reads the page target an
   const fetchStub = stubFetch({ ...LIST, ...PROTOCOL });
   const connectStub = stubConnect();
 
-  const attached = await attach(CONFIG, {
+  const attached = await attachOff(CONFIG, {
     _sdb: sdbStub,
     _fetch: fetchStub,
     _connect: connectStub,
@@ -108,7 +112,7 @@ test("attach connects the TV first when sdb devices does not list it", async () 
     }),
   );
 
-  await attach(CONFIG, { _sdb: sdbStub, _fetch: stubFetch({ ...LIST, ...PROTOCOL }), _connect: stubConnect(), _sleep: instant, ...settledOptions });
+  await attachOff(CONFIG, { _sdb: sdbStub, _fetch: stubFetch({ ...LIST, ...PROTOCOL }), _connect: stubConnect(), _sleep: instant, ...settledOptions });
 
   assert.deepEqual(sdbStub.text().slice(0, 3), ["devices", `connect ${HOST}`, "devices"]);
 });
@@ -116,7 +120,7 @@ test("attach connects the TV first when sdb devices does not list it", async () 
 test("attach is inconclusive when the TV never appears", async () => {
   const sdbStub = stubSdb({ devices: ok(NO_DEVICES), [`connect ${HOST}`]: ok() });
   await assert.rejects(
-    attach(CONFIG, { _sdb: sdbStub, _fetch: stubFetch({ ...LIST, ...PROTOCOL }), _connect: stubConnect(), _sleep: instant, ...settledOptions }),
+    attachOff(CONFIG, { _sdb: sdbStub, _fetch: stubFetch({ ...LIST, ...PROTOCOL }), _connect: stubConnect(), _sleep: instant, ...settledOptions }),
     (error) => {
       assert.ok(error instanceof AttachInconclusive);
       assert.match(error.message, /developer mode/);
@@ -130,7 +134,7 @@ test("no debug port within the bound leaves the attach inconclusive, and no forw
   const sdbStub = stubSdb(launchAnswers({ [`shell 0 debug ${APPID}`]: { code: 2, stdout: "", stderr: "" } }));
 
   await assert.rejects(
-    attach(CONFIG, { _sdb: sdbStub, _fetch: stubFetch({ ...LIST, ...PROTOCOL }), _connect: stubConnect(), _sleep: instant, ...settledOptions }),
+    attachOff(CONFIG, { _sdb: sdbStub, _fetch: stubFetch({ ...LIST, ...PROTOCOL }), _connect: stubConnect(), _sleep: instant, ...settledOptions }),
     (error) => {
       assert.ok(error instanceof AttachInconclusive);
       assert.match(error.message, /press EXIT on the remote, then re-run/);
@@ -150,7 +154,7 @@ test("a kill that fails is inconclusive and never launches", async () => {
   );
 
   await assert.rejects(
-    attach(CONFIG, { _sdb: sdbStub, _fetch: stubFetch({ ...LIST, ...PROTOCOL }), _connect: stubConnect(), _sleep: instant, ...settledOptions }),
+    attachOff(CONFIG, { _sdb: sdbStub, _fetch: stubFetch({ ...LIST, ...PROTOCOL }), _connect: stubConnect(), _sleep: instant, ...settledOptions }),
     (error) => {
       assert.ok(error instanceof AttachInconclusive);
       assert.match(error.message, /press EXIT on the remote, then re-run/);
@@ -163,7 +167,7 @@ test("a kill that fails is inconclusive and never launches", async () => {
 test("detach after launch kills the package id, then removes the forward", async () => {
   const sdbStub = stubSdb(launchAnswers());
   const connectStub = stubConnect();
-  const attached = await attach(CONFIG, {
+  const attached = await attachOff(CONFIG, {
     _sdb: sdbStub,
     _fetch: stubFetch({ ...LIST, ...PROTOCOL }),
     _connect: connectStub,
@@ -185,7 +189,7 @@ test("attach reports the socket's attachMs, the relaunch's share, and the settle
   let clock = 1000;
   const sdbStub = stubSdb(launchAnswers());
   const fetchStub = stubFetch({ ...LIST, ...PROTOCOL });
-  const attached = await attach(CONFIG, {
+  const attached = await attachOff(CONFIG, {
     _sdb: async (...args) => { clock += 10; return sdbStub(...args); },
     _fetch: async (...args) => { clock += 5; return fetchStub(...args); },
     _connect: async () => { clock += 100; return { close() {} }; },
@@ -199,7 +203,7 @@ test("attach reports the socket's attachMs, the relaunch's share, and the settle
 
 test("a join has no relaunch to time", async () => {
   let clock = 0;
-  const attached = await attach(CONFIG, {
+  const attached = await attachOff(CONFIG, {
     attachPort: PORT,
     _sdb: stubSdb({ [`forward --remove tcp:${PORT}`]: ok() }),
     _fetch: async (...args) => { clock += 5; return stubFetch({ ...LIST, ...PROTOCOL })(...args); },
@@ -213,7 +217,7 @@ test("a join has no relaunch to time", async () => {
 
 test("an attach-port join never kills the app and only removes the forward", async () => {
   const sdbStub = stubSdb({ [`forward --remove tcp:${PORT}`]: ok() });
-  const attached = await attach(CONFIG, {
+  const attached = await attachOff(CONFIG, {
     attachPort: PORT,
     _sdb: sdbStub,
     _fetch: stubFetch({ ...LIST, ...PROTOCOL }),
@@ -239,7 +243,7 @@ test("a failed forward still closes the app it launched", async () => {
   );
 
   await assert.rejects(
-    attach(CONFIG, { _sdb: sdbStub, _fetch: stubFetch({ ...LIST, ...PROTOCOL }), _connect: stubConnect(), _sleep: instant, ...settledOptions }),
+    attachOff(CONFIG, { _sdb: sdbStub, _fetch: stubFetch({ ...LIST, ...PROTOCOL }), _connect: stubConnect(), _sleep: instant, ...settledOptions }),
     /sdb died/,
   );
   assert.deepEqual(sdbStub.text().slice(-2), [`shell 0 kill ${PKGID}`, `forward --remove tcp:${PORT}`]);
@@ -250,7 +254,7 @@ test("a failure after the forward cleans up the forward and the app it launched"
   const fetchStub = stubFetch({ "/json/list": [], ...PROTOCOL });
 
   await assert.rejects(
-    attach(CONFIG, { _sdb: sdbStub, _fetch: fetchStub, _connect: stubConnect(), _sleep: instant, ...settledOptions }),
+    attachOff(CONFIG, { _sdb: sdbStub, _fetch: fetchStub, _connect: stubConnect(), _sleep: instant, ...settledOptions }),
     (error) => {
       assert.ok(error instanceof AttachInconclusive);
       assert.match(error.message, /no page target/);
@@ -273,7 +277,7 @@ test("attach polls for the page target while the inspector comes up", async () =
     return { ok: true, json: async () => list[Math.min(attempts++, list.length - 1)]() };
   };
 
-  const attached = await attach(CONFIG, {
+  const attached = await attachOff(CONFIG, {
     _sdb: stubSdb(launchAnswers()),
     _fetch: fetchStub,
     _connect: stubConnect(),
@@ -285,7 +289,7 @@ test("attach polls for the page target while the inspector comes up", async () =
 });
 
 test("a protocol the target will not serve leaves protocol null instead of failing the attach", async () => {
-  const attached = await attach(CONFIG, {
+  const attached = await attachOff(CONFIG, {
     _sdb: stubSdb(launchAnswers()),
     _fetch: stubFetch(LIST),
     _connect: stubConnect(),
@@ -307,7 +311,7 @@ test("attach waits through a redirect and returns the page it settled on", async
       : SETTLED;
   };
 
-  const attached = await attach(CONFIG, {
+  const attached = await attachOff(CONFIG, {
     _sdb: stubSdb(launchAnswers()),
     _fetch: stubFetch({ ...LIST, ...PROTOCOL }),
     _connect: stubConnect(),
@@ -324,7 +328,7 @@ test("attach waits through a redirect and returns the page it settled on", async
 test("an attach-port join waits for the page it joined to settle too", async () => {
   let polls = 0;
   let clock = 0;
-  const attached = await attach(CONFIG, {
+  const attached = await attachOff(CONFIG, {
     attachPort: PORT,
     _sdb: stubSdb({ [`forward --remove tcp:${PORT}`]: ok() }),
     _fetch: stubFetch({ ...LIST, ...PROTOCOL }),
@@ -344,7 +348,7 @@ test("a page that never settles leaves the attach inconclusive naming the last h
   const sdbStub = stubSdb(launchAnswers());
 
   await assert.rejects(
-    attach(CONFIG, {
+    attachOff(CONFIG, {
       _sdb: sdbStub,
       _fetch: stubFetch({ ...LIST, ...PROTOCOL }),
       _connect: stubConnect(),
@@ -370,7 +374,7 @@ test("a page that never settles leaves the attach inconclusive naming the last h
 test("a document with no body yet is waited out, not read", async () => {
   let polls = 0;
   let clock = 0;
-  const attached = await attach(CONFIG, {
+  const attached = await attachOff(CONFIG, {
     _sdb: stubSdb(launchAnswers()),
     _fetch: stubFetch({ ...LIST, ...PROTOCOL }),
     _connect: stubConnect(),
@@ -392,7 +396,7 @@ test("a settle that never completes closes the socket it opened", async () => {
   const connectStub = stubConnect();
 
   await assert.rejects(
-    attach(CONFIG, {
+    attachOff(CONFIG, {
       _sdb: stubSdb(launchAnswers()),
       _fetch: stubFetch({ ...LIST, ...PROTOCOL }),
       _connect: connectStub,
@@ -410,6 +414,10 @@ test("a settle that never completes closes the socket it opened", async () => {
 });
 
 test("attach without tv.host and tv.appid names both config keys", async () => {
-  await assert.rejects(attach({ tv: { host: HOST } }, {}), /tv\.host and tv\.appid/);
-  await assert.rejects(attach({}, {}), /tv\.host and tv\.appid/);
+  await assert.rejects(attachOff({ tv: { host: HOST } }, {}), /tv\.host and tv\.appid/);
+  await assert.rejects(attachOff({}, {}), /tv\.host and tv\.appid/);
+});
+
+test("attach without returnToApp is a wiring error, not a silent return", async () => {
+  await assert.rejects(attach(CONFIG, {}), /attach needs returnToApp/);
 });
