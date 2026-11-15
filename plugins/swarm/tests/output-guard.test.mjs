@@ -4,11 +4,8 @@ import { equal, ok } from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { decide } from "../hooks/output-guard.mjs";
 
-// `swarm validate` and `swarm perf` print the seating record. 2026-11-15: every
-// validate in one session was piped through `grep -E "manifest OK|error|estimated|  - "`
-// and the run it authorised seated four cost-dominated models. The guard keys on the
-// pipe, not on the filter's name: `head`, `tail` and `Select-String` hide output the
-// same way `grep` does.
+// The guard keys on the pipe, not the filter's name: `head`, `tail` and
+// `Select-String` hide output the same way `grep` does.
 
 const call = (tool, command) => ({ tool_name: tool, tool_input: { command } });
 

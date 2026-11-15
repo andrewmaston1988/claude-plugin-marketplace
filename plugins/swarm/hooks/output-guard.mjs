@@ -1,20 +1,8 @@
 #!/usr/bin/env node
-// PreToolUse hook on Bash and PowerShell: deny a PIPED `swarm validate` or `swarm perf`.
-//
-// Those two print the seating record — each seat's n, score and frontier verdict — and
-// a filter (`grep`, `head`, `tail`, `Select-String`, `Select-Object -First`) can hide
-// the one line that says the manifest seats a dominated model. 2026-11-15: seven
-// validate calls in one session all ran through `grep -E "manifest OK|error|…"`, and
-// the run they authorised seated four cost-dominated models.
-//
-// A redirect is allowed: the file holds everything and Read-ing it whole is the
-// intended use. `||` is not a pipe. Quoted spans are blanked first, on the raw text
-// before anything else, so a commit message or an `--args` JSON blob that mentions
-// the command is not a filter.
-//
-// Silent inside a swarm leaf, on the same signal foreground-guard.mjs uses: a leaf's
-// own tooling may legitimately parse the record, and a broken guard must never wedge
-// it. Fail-open everywhere.
+// PreToolUse hook on Bash and PowerShell: deny a PIPED `swarm validate` or `swarm perf` —
+// they print the seating record, and a filter can hide the one line that matters.
+// A redirect is allowed; quoted spans are blanked first so a mention is no match.
+// Silent inside a swarm leaf. Fail-open everywhere.
 
 import { pathToFileURL } from "node:url";
 import { swarmSubcommandRe } from "./swarm-command.mjs";
