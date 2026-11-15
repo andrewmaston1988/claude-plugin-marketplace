@@ -3,9 +3,9 @@
 Injects a short behavioral addendum ("discipline pack") into every user prompt,
 **keyed on the running model**. Ships with Sonnet 5, Opus 4.8, Opus 5 and
 GLM-5.2 packs, each targeting that model's measured failure modes; other models
-run untouched. Includes the measurement tooling: a mechanical baseline scanner
-over session transcripts and a blind judge grader, so the pack's effect is
-benchmarked rather than assumed.
+run untouched. Includes the measurement
+tooling: a mechanical baseline scanner over session transcripts and a blind
+judge grader, so the pack's effect is benchmarked rather than assumed.
 
 Design records: `repos/claude-plugin-marketplace/plans/sonnet5-discipline.md`,
 `plans/complete/opus48-discipline.md` and `plans/complete/opus5-discipline.md`

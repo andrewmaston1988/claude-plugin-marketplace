@@ -283,7 +283,7 @@ This block covers three related config keys: `worktree_base`, `report_subpath`, 
 
 **What this does**: the template that produces the on-disk directory where the agent for this feature runs. Every dev, review, test, and merge session for this feature uses this same path.
 
-**Resolved default for this machine**: `<root_parent>/.worktrees/<project>/<feature>` — e.g. for project `myapp` at `C:\code\myapp`, feature `add-login`, the resolver returns `C:\code\.worktrees\myapp\add-login`. `pipeline doctor`'s `worktree-layout-stale` check flags any on-disk worktree that diverges from it.
+**Resolved default for this machine**: `<root_parent>/.worktrees/<project>/<feature>` — e.g. for project `myapp` at `C:\code\myapp`, feature `add-login`, the resolver returns `C:\code\.worktrees\myapp\add-login`. `pipeline doctor`'s `worktree-layout-stale` check compares the Git worktrees of each registered project against the resolved path and flags any that diverges.
 
 **Placeholder vocabulary**:
 

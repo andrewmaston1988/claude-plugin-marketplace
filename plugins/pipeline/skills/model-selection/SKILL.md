@@ -18,7 +18,7 @@ Two contexts need explicit model decisions: `claude -p` callers (scripts spawnin
 
 ## Tier guide
 
-Use this for both `claude -p` and pipeline-row decisions. Model IDs are config-driven — `cfg.tiers` in `~/.pipeline/config.json` holds the live values for this install.
+Use this for both `claude -p` and pipeline-row decisions. Model IDs are config-driven — `cfg.tiers` holds the live values for this install. `~/.pipeline/config.json` may omit `tiers`: the loaded config fills any missing key from the code defaults in `src/config-defaults.mjs`, and `pipeline doctor` does not print the tier values.
 
 - **Haiku tier** (whatever `cfg.tiers.haiku` resolves to) — micro-summarisation, JSON extraction from deterministic prompts, one-liner annotations, commit-message bodies, plan Current-Status line rewrites, pattern-fill. Fast, cheap, weak at independent reasoning. Avoid when the task asks for synthesis or skeptical analysis — Haiku will pattern-match the prompt's examples instead of doing the work.
 - **Sonnet tier** (whatever `cfg.tiers.sonnet` resolves to) — single-file judgement, most dev sessions, single-row pipeline reasoning, governor cache analysis. The default for any task that needs real reasoning.
@@ -78,7 +78,7 @@ Not every effort level is valid for every model tier. Pinning an unsupported lev
 | Sonnet | `low`, `medium`, `high`, `max` | No `xhigh` |
 | Opus / Fable | `low`, `medium`, `high`, `xhigh`, `max` | Full scale |
 
-The pipeline's escalation logic (`src/orchestrator/spawn.mjs`) honours this asymmetry. The queue command currently does not — a (model, effort) pair that passes the queue form will fail at spawn time if the combination is unsupported. The live matrix is `cfg.tier_efforts` in `~/.pipeline/config.json`.
+The pipeline's escalation logic (`src/orchestrator/spawn.mjs`) honours this asymmetry. The queue command currently does not — a (model, effort) pair that passes the queue form will fail at spawn time if the combination is unsupported. The live matrix is `cfg.tier_efforts`: `~/.pipeline/config.json` when it sets the key, otherwise the code defaults in `src/config-defaults.mjs`.
 
 ## `claude -p` call sites
 
@@ -88,7 +88,7 @@ When a `claude -p` call site needs a new pin, inline it at the call site (no cen
 
 ## Pipeline-row models
 
-Model selection for pipeline rows is a **human decision made at `/queue` time**. Four stage-specific columns (`R-Model`, `D-Model`, `Q-Model`, `Rvw-Model`) pin a model per stage.
+Model selection for pipeline rows is a **human decision made at `/queue` time**. Four model columns exist (`R-Model`, `D-Model`, `Q-Model`, `Rvw-Model`), but only `D-Model` and `Rvw-Model` drive sessions — the other two pin no separate stage.
 
 - `R-Model` — model for research session (use `—` if research stage is skipped).
 - `D-Model` — model for development session.

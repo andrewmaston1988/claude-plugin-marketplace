@@ -46,8 +46,10 @@ The shipped keys (`providers.<name>.*`, `concurrency`, `timeoutMs`, `minFreeMemM
 `modelDenylist`, `resultInlineCap`, `treeRoot`, `worktreeBranchPrefix`, `notifyCmd`,
 `grading.enabled`, `dashboard.*`, `swarm.*`) are documented in `config.default.json` with
 their defaults — `setup` walks the ones worth touching. `allowedRoots`,
-`providers.<name>.allowedRoots`, and `display.money` are optional keys with no shipped
-default; without roots configured, dispatch is denied, and money is off unless enabled.
+`providers.<name>.allowedRoots`, `display.money`, `claudePath`, `models`/`modelCache`,
+`quotaUsageUrl`, `costWarn`/`costWarnUsd`/`costWarnTokens`, `providers.codex.additionalDirs`
+and `providers.codex.appServerArgs` are optional keys with no shipped default; without roots
+configured, dispatch is denied, and money is off unless enabled.
 Swarm never manages credentials; auth is your provider app's ambient sign-in.
 
 **Provenance:** every fetched figure (`validate`, `run`, `models`, `ollama-usage`) says
@@ -156,9 +158,9 @@ foreground.
 
 ```bash
 swarm models [--all]       # discover launchable rows from enabled providers — run first
-swarm list                 # saved manifests (<cwd>/.swarm/manifests + ~/.swarm/manifests)
+swarm list                # saved manifests (<cwd>/.swarm/manifests + ~/.swarm/manifests)
 swarm validate <plan.json | name> [--args '<json>'] [--resolved]  # lint ids, deps, template refs, governance roots, effort pairs, context fit, forEach/when/compute shapes + expressions
-swarm run <plan.json | name> [--args '<json>'] [--force]  # execute; designed for Bash run_in_background. Refuses unless `validate` passed on the same bytes + args (markers in ~/.swarm/validated/)
+swarm run <plan.json | name> [--args '<json>'] [--force]    # execute; designed for Bash run_in_background. Refuses unless `validate` passed on the same bytes + args (markers in ~/.swarm/validated/)
 swarm status <resultsDir> [--watch [--interval <secs>]]  # progress view; --mine lists this session's kept runs
 swarm status --mine       # list this session's finished runs still holding kept worktrees
 swarm wait <resultsDir> [--timeout <secs>]  # wait for settlement (exit 0 clean, 1 leaf not ok, 2 engine died, 3 timed out)
@@ -166,11 +168,11 @@ swarm stop <resultsDir>    # cooperatively stop a live engine
 swarm prune <resultsDir> [--dry-run] [--discard-unlanded]  # destroy kept trees and branches
 swarm mcp list [--json]    # list leaf MCP servers and off/on state
 swarm mcp set --off <a,b> [--repo <repo>=<servers>]…  # set leaf MCP configuration
-swarm ask <resultsDir> <leaf-id> "follow-up?" [--model <m>]  # interrogate a finished leaf
+swarm ask <resultsDir> <leaf-id> "follow-up?" [--model <m>]   # interrogate a finished leaf
 swarm report <resultsDir>   # render the run's digest.md/report.md → digest.html/report.html (backfill for old runs)
 swarm quota                # Anthropic plus cached cloud-provider utilization
 swarm usage [--provider X] # live usage from enabled provider capabilities
-swarm ollama-usage [--cookie '<value>']  # ollama.com session/weekly usage
+swarm ollama-usage [--cookie '<value>']  # ollama.com session/weekly usage — see below
 swarm grade --init <resultsDir>   # write grades.json — one skeleton row per model leaf, no model names on it
 swarm grade --file <grades.json>  # validate the filled batch and append it to the score store
 swarm grade --waive <resultsDir> --reason "<text>"  # excuse a run from grading

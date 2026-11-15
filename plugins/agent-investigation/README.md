@@ -12,9 +12,13 @@ claude plugin install agent-investigation@andrewmaston1988-claude-plugins
 
 ### CLI Entry Point
 
+Nothing puts `claude-investigate` on `PATH` — the plugin declares no `bin` field — so invoke the script directly:
+
 ```bash
-claude-investigate <subcommand> [args...]
+node <plugin-dir>/bin/claude-investigate.mjs <subcommand> [args...]
 ```
+
+`/investigate <agent-id>` runs the same entry point.
 
 #### Agent-id subcommands (auto-locates transcript)
 

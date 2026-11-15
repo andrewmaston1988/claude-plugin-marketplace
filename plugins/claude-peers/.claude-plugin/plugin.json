@@ -1,6 +1,6 @@
 {
   "name": "claude-peers",
-  "description": "Peer discovery and real-time messaging between local Claude Code sessions — per-session stdio MCP server plus a self-healing singleton localhost broker.",
+  "description": "Deprecated — Peer discovery and real-time messaging between local Claude Code sessions — per-session stdio MCP server plus a self-healing singleton localhost broker.",
   "author": {
     "name": "Andrew Maston",
     "email": "andrew.maston1988@gmail.com"

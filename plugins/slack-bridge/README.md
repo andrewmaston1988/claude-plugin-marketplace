@@ -151,7 +151,7 @@ This registers the bridge as:
 claude-slack [start] [--daemon|-d] [--config <path>]       Start the bridge (default command)
 claude-slack stop                                    Stop a running daemon
 claude-slack status                                  Show running status (PID if alive)
-claude-slack notify [--config <path>] [--title T] [--channel C] [--message M | --message-file F] [--priority P]
+claude-slack notify [--config <path>] [--title T] [--channel C] [--message M | --message-file F]
     or <channel> <message>                           Post a one-shot notification
 claude-slack manifest [--display-name X] [--include-user-scopes]  Print Slack app manifest YAML
 claude-slack doctor [--json] [--config <path>]       Run diagnostic checks
@@ -161,7 +161,7 @@ claude-slack uninstall-autostart                     Remove autostart entry
 claude-slack import-sessions <file.json>             Import sessions from another bridge
 claude-slack broker <start|stop|status|run> [--port P] [--config <path>]  Manage remote-control broker
 claude-slack remote-mcp [--config <path>]             Run remote-control MCP server
-claude-slack --help                                    Show this help
+claude-slack --help                                  Show this help
 ```
 
 **In Slack:**
@@ -274,4 +274,4 @@ The broker self-starts (and self-heals) when the first live session's MCP server
 
 **`claude-slack: command not found`:** The binary path isn't on your PATH. Follow the alias instructions in Installation above, or re-run `claude-slack setup` — the wizard adds a PATH step.
 
-**Windows: process exits with code 127:** Update to the latest version — this was a Windows-specific exit bug fixed after Plan 2.
+**Windows: process exits with code 127:** Update to the latest version — this was a Windows-specific exit bug, since fixed.

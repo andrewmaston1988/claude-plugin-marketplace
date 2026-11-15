@@ -61,8 +61,8 @@ Browser runs use both guards unless you pass `--allow-writes`; TV runs use the n
    records the failure type `write_blocked`.
 
 Neither layer stops a **GET that has a side effect**. So point the probe at a fixture or a local dev server,
-never at a live service. For browser runs, `--allow-writes` turns both layers off. On TV it allows
-intercepted writes to `tv.testOrigin` only. Use it only on a page you own and can reset.
+never at a live service. For browser runs, `--allow-writes` turns both layers off; on TV it allows
+intercepted writes to `tv.testOrigin` only: use it only on a page you own and can reset.
 
 ## Tizen TV
 
@@ -322,7 +322,7 @@ steps:
 | "The viewport was set, so touch is on." | Read `hover` and `pointer` in `env.json`. One real tool reported `hover:hover` at 390×844 — the viewport took, the pointer did not. |
 | "The step failed, so the app is broken." | `inconclusive` and the typed failures mean the probe could not judge. Check the target before blaming the app. |
 | "It's only a GET, the guard can't stop it anyway." | Correct — which is why the URL must be a fixture or a local dev server, never a live service. |
-| "`--allow-writes` will get past the refusal." | Browser runs turn off both layers; TV writes remain limited to `tv.testOrigin`. Only on a page you own and can reset. |
+| "`--allow-writes` will get past the refusal." | Browser runs turn off both layers. On a TV target with request interception, writes stay limited to `tv.testOrigin`; with none, the guard is a no-op and only the open-URL policy constrains the run — every `open` must be on `tv.testOrigin`. Only on a page you own and can reset. |
 | "The tree has no button, so the button is missing." | With an `aria-modal` dialog open the tree holds only the dialog. Re-capture with `--include-background`. |
 | "The scenario validates, so it tests something." | `validate` checks shape, not intent. A run returns `needs_review` when no step asserts. |
 
