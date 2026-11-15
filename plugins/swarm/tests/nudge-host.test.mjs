@@ -1,6 +1,6 @@
 import "./helpers/isolate-home.mjs";
 import { test } from "node:test";
-import { deepEqual, equal } from "node:assert/strict";
+import { deepEqual, equal, ok } from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { nudgeEventFor, nudgeOutput } from "../hooks/nudge-host.mjs";
@@ -29,5 +29,15 @@ test("hooks.json registers both nudges for both events", () => {
     const commands = hooks[event].flatMap((entry) => entry.hooks.map((hook) => hook.command));
     equal(commands.includes('node "${CLAUDE_PLUGIN_ROOT}/hooks/grade-nudge.mjs"'), true, `${event} grade nudge`);
     equal(commands.includes('node "${CLAUDE_PLUGIN_ROOT}/hooks/prune-nudge.mjs"'), true, `${event} prune nudge`);
+  }
+});
+
+test("row 13: hooks.json runs the port nudge after both shell events, with its own timeout", () => {
+  const hooks = JSON.parse(readFileSync(`${ROOT}/hooks/hooks.json`, "utf8")).hooks;
+  for (const event of ["PostToolUse", "PostToolUseFailure"]) {
+    const entry = (hooks[event] || []).find((e) => e.matcher === "Bash|PowerShell"
+      && e.hooks.some((hook) => hook.command === 'node "${CLAUDE_PLUGIN_ROOT}/hooks/port-nudge.mjs"'));
+    ok(entry, `${event} must carry a Bash|PowerShell port-nudge entry`);
+    equal(entry.hooks.find((hook) => hook.command.includes("port-nudge.mjs")).timeout, 30, `${event} timeout`);
   }
 });

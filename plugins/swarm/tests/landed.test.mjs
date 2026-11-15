@@ -1,6 +1,6 @@
 import "./helpers/isolate-home.mjs";
 import { test } from "node:test";
-import { equal, ok } from "node:assert/strict";
+import { equal, ok, throws } from "node:assert/strict";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -61,8 +61,8 @@ function withRepoAndOrigin(fn) {
   try { return fn(repo); } finally { cleanup(repo, bare); }
 }
 
-function landed(repo, branch, gitRunner = git) {
-  return unlandedCount(branch, repo, { prefix: PREFIX, gitRunner });
+function landed(repo, branch, gitRunner = git, extraBases = []) {
+  return unlandedCount(branch, repo, { prefix: PREFIX, gitRunner, extraBases });
 }
 
 function recording(gitRunner = git) {
@@ -157,7 +157,7 @@ test("row 5: a later edit on the default branch does not un-land the squash", ()
   writeCommit(repo, "a.txt", "later a\n", "later edit");
 
   const rec = recording();
-  equal(unlandedCount("swarm/leaf", repo, { prefix: PREFIX, gitRunner: rec.run }), 0);
+  equal(unlandedCount("swarm/leaf", repo, { prefix: PREFIX, gitRunner: rec.run, extraBases: [] }), 0);
   ok(rec.calls.some((args) => args[0] === "merge-tree" && args[2] === squash),
     "the squash commit itself must be one of the scanned bases");
 }));
@@ -241,7 +241,7 @@ test("row 9b: a merge-tree failing any other way, or an unresolvable branch, is 
 
   const poisoned = (args, cwd, opts) =>
     args[0] === "merge-tree" ? { status: 2, stdout: "", stderr: "boom" } : git(args, cwd, opts);
-  equal(unlandedCount("swarm/leaf", repo, { prefix: PREFIX, gitRunner: poisoned }), Infinity);
+  equal(unlandedCount("swarm/leaf", repo, { prefix: PREFIX, gitRunner: poisoned, extraBases: [] }), Infinity);
   equal(landed(repo, "swarm/missing"), Infinity);
 }));
 
@@ -268,11 +268,46 @@ test("row 11: cost is bounded and the cap reports unlanded, never 0", () => with
   for (let i = 0; i < 24; i += 1) writeCommit(repo, "a.txt", `later ${i}\n`, `later ${i}`);
 
   const rec = recording();
-  const n = unlandedCount("swarm/leaf", repo, { prefix: PREFIX, gitRunner: rec.run });
+  const n = unlandedCount("swarm/leaf", repo, { prefix: PREFIX, gitRunner: rec.run, extraBases: [] });
   ok(n >= 1, `the absorbing squash sits past the 20-commit scan cap, so this is unlanded: ${n}`);
   equal(rec.calls.filter((args) => args[0] === "for-each-ref").length, 1);
   ok(rec.calls.filter((args) => args[0] === "merge-base").length <= 3, "at most three candidate bases");
   equal(rec.calls.filter((args) => args[0] === "merge-tree").length, 21, "the tip plus at most 20 touching commits");
+}));
+
+test("row 12: extraBases is required, absorbs a cherry-pick, dedupes, and drops an unresolvable SHA", () => withRepo((repo) => {
+  newBranch(repo, "swarm/leaf", "main");
+  writeCommit(repo, "leaf.txt", "leaf work\n", "leaf work");
+  checkout(repo, "main");
+
+  throws(() => unlandedCount("swarm/leaf", repo, { prefix: PREFIX, gitRunner: git }), TypeError,
+    "extraBases is required, never defaulted");
+  throws(() => unlandedCount("swarm/leaf", repo, { prefix: PREFIX, gitRunner: git, extraBases: "main" }), TypeError,
+    "a bare string is not an array of bases");
+
+  equal(unlandedCount("swarm/leaf", repo, { prefix: PREFIX, gitRunner: git, extraBases: ["f".repeat(40)] }), 1,
+    "an unresolvable extra SHA is skipped, never Infinity");
+
+  // The main checkout's own HEAD is already a candidate base; asking again must not
+  // double the absorption work.
+  const head = must(["rev-parse", "HEAD"], repo);
+  const rec = recording();
+  equal(unlandedCount("swarm/leaf", repo, { prefix: PREFIX, gitRunner: rec.run, extraBases: [head] }), 1);
+  equal(rec.calls.filter((args) => args[0] === "merge-base" && args.includes(head)).length, 1,
+    "a base already among candidateBases() must not be tried twice");
+
+  // The whole point: a cherry-pick onto a feature branch lands nothing git can see
+  // until that branch's HEAD is offered as a base.
+  newBranch(repo, "feat", "main");
+  writeCommit(repo, "port-base.txt", "port base\n", "port base");
+  const leafTip = must(["rev-parse", "swarm/leaf"], repo);
+  must(["cherry-pick", leafTip], repo);
+  const feat = must(["rev-parse", "HEAD"], repo);
+  ok(feat !== leafTip, "precondition: the cherry-pick is a new commit, not the leaf's own SHA");
+  checkout(repo, "main");
+  ok(landed(repo, "swarm/leaf") >= 1, "without the extra base the cherry-picked copy is invisible");
+  equal(unlandedCount("swarm/leaf", repo, { prefix: PREFIX, gitRunner: git, extraBases: [feat] }), 0,
+    "the porting checkout's HEAD absorbs the leaf");
 }));
 
 test("row 16: below git 2.38 absorption is skipped, so an old git reports the cherry count, not Infinity", () => {
@@ -292,7 +327,7 @@ test("row 16: below git 2.38 absorption is skipped, so an old git reports the ch
     must(["merge", "-q", "--squash", "swarm/leaf"], repo);
     must(["commit", "-qm", "squash leaf"], repo);
 
-    const n = unlandedCount("swarm/leaf", repo, { prefix: PREFIX, gitRunner: oldGit });
+    const n = unlandedCount("swarm/leaf", repo, { prefix: PREFIX, gitRunner: oldGit, extraBases: [] });
     ok(Number.isFinite(n) && n >= 1, `an old git answers with the cherry count, never Infinity: ${n}`);
     equal(calls.filter((args) => args[0] === "merge-tree").length, 0, "merge-tree must not be attempted below the floor");
   });
@@ -305,7 +340,7 @@ test("row 16: below git 2.38 absorption is skipped, so an old git reports the ch
     must(["merge", "-q", "--ff-only", "swarm/leaf"], repo);
     checkout(repo, "other");
 
-    equal(unlandedCount("swarm/leaf", repo, { prefix: PREFIX, gitRunner: oldGit }), 0, "reachability needs no merge-tree");
+    equal(unlandedCount("swarm/leaf", repo, { prefix: PREFIX, gitRunner: oldGit, extraBases: [] }), 0, "reachability needs no merge-tree");
   });
 });
 
@@ -327,11 +362,49 @@ test("row 17: a branch touching 1,000 files measures landed, and no git argv nea
   writeCommit(repo, name(500), "later\n", "later edit");
 
   const rec = recording();
-  const n = unlandedCount("swarm/leaf", repo, { prefix: PREFIX, gitRunner: rec.run });
+  const n = unlandedCount("swarm/leaf", repo, { prefix: PREFIX, gitRunner: rec.run, extraBases: [] });
   equal(n, 0);
   const longest = Math.max(...rec.calls.map((args) => args.join(" ").length));
   ok(longest < 30000, `a path list on argv overflows a Windows command line: ${longest} chars`);
   ok(rec.calls.some((args) => args[0] === "check-attr" && args.includes("--stdin")), "the path list travels on stdin");
+}));
+
+test("row 21: extra bases absorb first, and the cherry count keeps the first default base", () => withRepo((repo) => {
+  newBranch(repo, "swarm/leaf", "main");
+  writeCommit(repo, "leaf.txt", "leaf work\n", "leaf work");
+  newBranch(repo, "feat", "main");
+  // The target branch must diverge first, or the pick replays the leaf's own commit
+  // and reachability answers before the extra base is ever consulted.
+  writeCommit(repo, "port-base.txt", "port base\n", "port base");
+  const leafTip = must(["rev-parse", "swarm/leaf"], repo);
+  must(["cherry-pick", leafTip], repo);
+  const feat = must(["rev-parse", "HEAD"], repo);
+  ok(feat !== leafTip, "precondition: the cherry-pick is a new commit, not the leaf's own SHA");
+  checkout(repo, "main");
+
+  const rec = recording();
+  equal(unlandedCount("swarm/leaf", repo, { prefix: PREFIX, gitRunner: rec.run, extraBases: [feat] }), 0);
+  const firstBase = rec.calls.find((args) => args[0] === "merge-base");
+  ok(firstBase && firstBase.includes(feat), `the extra base must be the first absorption base: ${JSON.stringify(firstBase)}`);
+
+  newBranch(repo, "swarm/other", "main");
+  writeCommit(repo, "other.txt", "other work\n", "other work");
+  checkout(repo, "main");
+  const mainTip = must(["rev-parse", "main"], repo);
+  const rec2 = recording();
+  ok(unlandedCount("swarm/other", repo, { prefix: PREFIX, gitRunner: rec2.run, extraBases: [feat] }) >= 1);
+  const cherry = rec2.calls.find((args) => args[0] === "cherry");
+  equal(cherry[1], mainTip, "the cherry count keeps the first default base");
+}));
+
+test("row 22: an extra base equal to the branch's own tip is skipped", () => withRepo((repo) => {
+  newBranch(repo, "swarm/leaf", "main");
+  writeCommit(repo, "leaf.txt", "leaf work\n", "leaf work");
+  const tip = must(["rev-parse", "HEAD"], repo);
+  checkout(repo, "main");
+
+  ok(unlandedCount("swarm/leaf", repo, { prefix: PREFIX, gitRunner: git, extraBases: [tip] }) >= 1,
+    "a branch absorbs its own tip — that proves nothing");
 }));
 
 test("row 12: collect destroys a tree whose branch the squash absorbed, and keeps one it did not", () => {
