@@ -1,7 +1,7 @@
 // Forked from plugins/claude-peers/src/mcp/server.mjs: registers with the internal
-// broker, surfaces slack_seize/release/post (via the daemon's token-guarded control
-// endpoint), and delivers inbound push-or-poll — a session without the --channels
-// allowlist is told to poll, so Slack messages are never silently dropped.
+// broker and surfaces slack_seize/release/post (via the daemon's token-guarded control
+// endpoint). It pushes nothing: inbound Slack messages reach the session through the
+// plugin's asyncRewake Stop hook and PostToolBatch hook; check_messages is the fallback.
 import { spawn, execFile } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
@@ -304,14 +304,14 @@ export function createRemoteMcpServer({
     async check_messages() {
       if (!myId) return text("Not registered with broker yet", true);
       try {
-        // Consume path: returns everything held — pushed or not — so a push
-        // that never rendered (idle session, no allowlist, cloud model) is
-        // still recoverable. May re-show an already-seen message.
+        // Consume path: takes everything still held, so a message no hook
+        // delivered (dead waiter, interrupt, /clear) is recoverable. May
+        // re-show one a hook delivered before its ack landed.
         const result = await broker.takeMessages(myId);
         if (result.messages.length === 0) return text("No new messages.");
         const lines = result.messages.map((m) => `From ${m.from_id} (${m.sent_at}):\n${m.text}`);
         return text(`${result.messages.length} message(s):\n\n${lines.join("\n\n---\n\n")}`
-          + `\n\n(Any of these may already have appeared as a channel notification — reply once.)`);
+          + `\n\n(Any of these may already have reached you through the plugin's hooks — reply once.)`);
       } catch (e) {
         return errText("Error checking messages", e);
       }

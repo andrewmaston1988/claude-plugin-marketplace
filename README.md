@@ -7,7 +7,7 @@ A collection of [Claude Code](https://claude.ai/code) plugins.
 | Plugin | Description | Status | Docs |
 |--------|-------------|--------|------|
 | checkpoint | Durable cross-session handoff via STATE.md. /checkpoint skill, SessionStart resume offer, PreCompact backstop, observable cache-keepalive | beta | [Setup guide](./plugins/checkpoint/README.md) |
-| slack-bridge | Two-way Slack ↔ Claude Code bridge via Socket Mode | beta | [Setup guide](./plugins/slack-bridge/README.md) |
+| slack-bridge | Two-way Slack ↔ Claude Code bridge via Socket Mode, plus remote control of a live session — Slack messages wake it through an async `Stop` hook | beta | [Setup guide](./plugins/slack-bridge/README.md) |
 | pipeline | Pipeline orchestrator — queue plans, autonomous dev/test/review sessions, TUI + web dashboards, spend governance, conversational setup/demo subcommands | beta | [Setup guide](./plugins/pipeline/README.md) |
 | swarm | Alternative-model fan-out engine — manifest-driven parallel runs across capable :cloud models and Claude, with digest compression and worktree isolation | beta | [Setup guide](./plugins/swarm/README.md) |
 | claude-peers | Peer discovery and real-time messaging between local Claude Code sessions — per-session stdio MCP server plus a self-healing singleton localhost broker | beta | [Setup guide](./plugins/claude-peers/README.md) |
