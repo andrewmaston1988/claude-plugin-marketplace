@@ -40,7 +40,8 @@ export async function cmdPrune(rest, { usage }) {
   // leaves behind — but only when it is this repo on a named non-swarm branch.
   const extraBases = [checkoutBase(git, process.cwd(), run.repos, prefix)].filter(Boolean);
 
-  const { rows } = planPrune(run, git, fs, { cfg, extraBases, measureBytes: true });
+  // The report describes every row, so it never stops at a blocker or a clock.
+  const { rows } = planPrune(run, git, fs, { cfg, extraBases, measureBytes: true, stopAtBlocker: false, deadline: Infinity });
   if (!rows.length) {
     out(`swarm: ${dir} has no kept worktrees — nothing to prune.`);
     return 0;

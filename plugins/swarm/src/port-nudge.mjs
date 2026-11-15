@@ -52,6 +52,24 @@ export const touchedPath = (home, sessionId) => join(home, `.port-touched-${sess
 export function recordTouched({ home, sessionId, branches, fs }) {
   if (!branches.length) return;
   fs.appendFileSync(touchedPath(home, sessionId), `${branches.join("\n")}\n`);
+  reapTouched({ home, fs });
+}
+
+const TOUCHED_TTL_MS = 14 * 24 * 60 * 60 * 1000;
+
+// Nothing else ever deletes these logs, so the newest append reaps the rest. Every
+// failure is a lost log, never a lost turn.
+function reapTouched({ home, fs }) {
+  let names;
+  try { names = fs.readdirSync(home); } catch { return; }
+  const cutoff = Date.now() - TOUCHED_TTL_MS;
+  for (const name of names) {
+    if (!name.startsWith(".port-touched-")) continue;
+    const path = join(home, name);
+    try {
+      if (fs.statSync(path).mtimeMs < cutoff) fs.rmSync(path, { force: true });
+    } catch { /* raced with another hook's reap */ }
+  }
 }
 
 export function readTouched({ home, sessionId, fs }) {
@@ -114,7 +132,12 @@ export function portedRuns({ home, toplevel, sessionId, base, branch, portingTre
     if (Date.now() - startedMs > budgetMs) break;
     const built = runForPrune(dir, { fs, spawnSync });
     if (built.error) continue;
-    const rows = plan(built.run, git, fs, { cfg, extraBases: [base], measureBytes: false }).rows;
+    const planned = plan(built.run, git, fs, {
+      cfg, extraBases: [base], measureBytes: false, stopAtBlocker: true, deadline: startedMs + budgetMs,
+    });
+    // A stopped plan proves nothing; the run is measured again on the next port verb.
+    if (planned.stopped) continue;
+    const rows = planned.rows;
     if (!rows.length || blockers(rows).length) continue;
     out.push({
       dir,

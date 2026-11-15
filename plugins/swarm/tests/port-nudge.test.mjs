@@ -11,7 +11,7 @@ import { fileURLToPath } from "node:url";
 import { checkoutBase, plan, blockers, runForPrune } from "../src/prune.mjs";
 import { pruneMarkerPath } from "../src/prune-nudge.mjs";
 import {
-  PORT_RE, portingTree, namedSwarmBranches, readTouched, touchedPath, portMarkerPath,
+  PORT_RE, portingTree, namedSwarmBranches, recordTouched, readTouched, touchedPath, portMarkerPath,
   foreignTouchedRuns, portedRuns, portReason, runPortNudge,
 } from "../src/port-nudge.mjs";
 import { portFixture, must } from "./helpers/port-fixture.mjs";
@@ -98,7 +98,7 @@ test("row 3: a cherry-pick is ported only when the porting checkout's HEAD is a 
     const { run } = runForPrune(dir, { fs, spawnSync: f.spawn });
 
     // Without the extra base the cherry-picked copy is invisible to git.
-    ok(blockers(plan(run, f.git, fs, { extraBases: [], measureBytes: false }).rows).length > 0,
+    ok(blockers(plan(run, f.git, fs, { extraBases: [], measureBytes: false, stopAtBlocker: true, deadline: Infinity }).rows).length > 0,
       "with extraBases empty the run must read unlanded");
 
     const reported = portedRuns({
@@ -329,6 +329,57 @@ test("row 18: a PostToolUseFailure payload is measured and echoed back", () => {
     equal(output.hookSpecificOutput.hookEventName, "PostToolUseFailure");
     ok(output.hookSpecificOutput.additionalContext.includes("`run-1` is ported"), r.stdout);
     ok(output.hookSpecificOutput.additionalContext.includes("prune"), r.stdout);
+  } finally { f.cleanup(); }
+});
+
+test("row 20: a run whose plan stops at the deadline is silent and unmarked", () => {
+  const f = portFixture();
+  const port = f.porting();
+  const realNow = Date.now;
+  try {
+    const one = f.leaf("run-1", "one");
+    const two = f.leaf("run-1", "two");
+    f.cherryPick(port, one.sha);
+    f.cherryPick(port, two.sha);
+    const dir = f.run("run-1", { launcher: SESSION, leaves: [one, two] });
+    const nudge = (budgetMs) => runPortNudge({
+      payload: payload({ cwd: port, tool_input: { command: `git cherry-pick ${one.sha}` } }),
+      env: {}, config: f.cfg, home: f.home, git: f.git, spawn: f.spawn, fs, budgetMs,
+    });
+
+    // 1 ms per clock read, a 3 ms budget: the loop's between-runs check passes, the
+    // first row measures, and the deadline lands before the second. One clean measured
+    // row is not a ported run.
+    let ticks = 0;
+    const start = 1_000_000;
+    Date.now = () => start + (ticks++);
+    equal(nudge(3), "", "a stopped plan proves nothing");
+    ok(!fs.existsSync(portMarkerPath(dir)), "a stopped run must not be marked");
+    Date.now = realNow;
+
+    notEqual(nudge(20_000), "", "precondition: the same run is reported with time to measure it");
+    equal(fs.readFileSync(portMarkerPath(dir), "utf8"), SESSION);
+  } finally {
+    Date.now = realNow;
+    f.cleanup();
+  }
+});
+
+test("row 23: recordTouched reaps a fortnight-old log and keeps fresh ones", () => {
+  const f = portFixture();
+  try {
+    const stale = touchedPath(f.home, "sess-old");
+    const fresh = touchedPath(f.home, "sess-fresh");
+    fs.writeFileSync(stale, "swarm/run-9/leaf\n");
+    fs.writeFileSync(fresh, "swarm/run-8/leaf\n");
+    const longAgo = new Date(Date.now() - 15 * 24 * 60 * 60 * 1000);
+    fs.utimesSync(stale, longAgo, longAgo);
+
+    recordTouched({ home: f.home, sessionId: SESSION, branches: ["swarm/run-1/leaf"], fs });
+
+    ok(!fs.existsSync(stale), "a fortnight-old log is reaped");
+    ok(fs.existsSync(fresh), "a fresh foreign log survives");
+    deepEqual(readTouched({ home: f.home, sessionId: SESSION, fs }), ["swarm/run-1/leaf"], "the session's own log is kept");
   } finally { f.cleanup(); }
 });
 

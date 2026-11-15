@@ -81,12 +81,11 @@ export function reposFromManifest(fs, dir) {
   }
 }
 
-// One builder for the `run` object `plan()` measures, shared by the CLI and the port
-// nudge so the two can never disagree about which trees a run holds. The missing-run
-// and liveness checks stay with each caller: the CLI has messages for them, the nudge
-// only ever builds runs it already knows are finished.
-// Returns `{ run, summary, hadSummary }`, or `{ error }` when the run names no repo or
-// its summary will not parse.
+// One builder for the `run` object `plan()` measures, shared by the CLI and the port nudge
+// so the two can never disagree about which trees a run holds. The missing-run and liveness
+// checks stay with each caller: the CLI has messages for them, the nudge only builds
+// finished runs. Returns `{ run, summary, hadSummary }`, or `{ error }` when the run names
+// no repo or its summary will not parse.
 export function runForPrune(dir, { fs, spawnSync }) {
   const target = resolve(dir);
   const summaryFile = join(target, "summary.json");
@@ -212,23 +211,33 @@ function treeFacts(git, path) {
 // which attributed every tree to whichever repo resolved first.
 // `live` short-circuits before any git/fs call — a live run is never inspected,
 // only refused, so the cost of asking must be zero.
-export function plan(run, git, fs, { cfg, extraBases, measureBytes } = {}) {
+// `deadline` (epoch ms, Infinity for none) and `stopAtBlocker` exist to bound a caller
+// that only needs a verdict, not a full report: a stopped plan returns `stopped: true`
+// and must be read as unmeasured, never as an empty or partial result.
+export function plan(run, git, fs, { cfg, extraBases, measureBytes, stopAtBlocker, deadline } = {}) {
   if (!Array.isArray(extraBases)) throw new TypeError("plan requires an extraBases array");
   if (typeof measureBytes !== "boolean") throw new TypeError("plan requires measureBytes");
+  if (typeof stopAtBlocker !== "boolean") throw new TypeError("plan requires stopAtBlocker");
+  if (typeof deadline !== "number") throw new TypeError("plan requires a deadline");
   if (run.live) return { live: true };
 
   const prefix = cfg?.worktreeBranchPrefix || "swarm/";
   const rows = [];
   const seen = new Set();
+  let stopped = false;
   // The path is kept AS GIVEN — the injected `fs` keys on it, and a summary's own
   // spelling is what the report prints. Only the dedupe key is normalised, so the three
   // sources agree about a path however each of them spelled it.
   const addRow = (path, branch, repo) => {
+    if (stopped) return;
+    if (Date.now() >= deadline) { stopped = true; return; }
     const key = normalizeForCompare(path);
     if (seen.has(key)) return;
     seen.add(key);
     const bytes = measureBytes ? dirSize(fs, path) : null;
-    rows.push(measureRow({ path, branch, bytes, repo }, git, fs, prefix, extraBases));
+    const row = measureRow({ path, branch, bytes, repo }, git, fs, prefix, extraBases);
+    rows.push(row);
+    if (stopAtBlocker && blockers([row]).length) stopped = true;
   };
 
   // summary.json's own list: how the run reported what it left, and the only source that
@@ -236,6 +245,7 @@ export function plan(run, git, fs, { cfg, extraBases, measureBytes } = {}) {
   // run wrote no summary, a summary entry can name a path already moved — so the two
   // scans below add to it rather than replacing it.
   for (const wt of run.worktreesKept || []) {
+    if (stopped) break;
     if (!fs.existsSync(wt.path)) continue; // already gone from disk — not a row to plan or report
     addRow(wt.path, wt.branch, wt.repo);
   }
@@ -243,6 +253,7 @@ export function plan(run, git, fs, { cfg, extraBases, measureBytes } = {}) {
   // Everything else on disk that belongs to the run, wherever the resolver put it.
   if (run.resultsDir) {
     for (const t of heldTrees(run.resultsDir, { cfg })) {
+      if (stopped) break;
       if (seen.has(t.path) || !fs.existsSync(t.path)) continue;
       const facts = t.repo && t.branch ? t : treeFacts(git, t.path);
       if (!facts?.repo) continue; // not a worktree git can speak for — never a row to destroy
@@ -251,8 +262,10 @@ export function plan(run, git, fs, { cfg, extraBases, measureBytes } = {}) {
   }
 
   for (const repo of run.repos || []) {
+    if (stopped) break;
     if (!fs.existsSync(repo)) continue;
     for (const reg of registeredForRun(git, repo, run.resultsDir, { cfg })) {
+      if (stopped) break;
       if (seen.has(reg.path)) continue;
       // Registered but gone from disk: `git status` against a missing cwd would fail
       // closed and block the run forever, so it is not a row to measure.
@@ -261,7 +274,7 @@ export function plan(run, git, fs, { cfg, extraBases, measureBytes } = {}) {
     }
   }
 
-  return { rows };
+  return stopped ? { rows, stopped: true } : { rows };
 }
 
 // Commits a detached tree's HEAD holds that no branch or remote reaches — what

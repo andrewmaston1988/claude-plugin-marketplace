@@ -366,6 +366,39 @@ test("row 17: a branch touching 1,000 files measures landed, and no git argv nea
   ok(rec.calls.some((args) => args[0] === "check-attr" && args.includes("--stdin")), "the path list travels on stdin");
 }));
 
+test("row 21: extra bases absorb first, and the cherry count keeps the first default base", () => withRepo((repo) => {
+  newBranch(repo, "swarm/leaf", "main");
+  writeCommit(repo, "leaf.txt", "leaf work\n", "leaf work");
+  newBranch(repo, "feat", "main");
+  must(["cherry-pick", must(["rev-parse", "swarm/leaf"], repo)], repo);
+  const feat = must(["rev-parse", "HEAD"], repo);
+  checkout(repo, "main");
+
+  const rec = recording();
+  equal(unlandedCount("swarm/leaf", repo, { prefix: PREFIX, gitRunner: rec.run, extraBases: [feat] }), 0);
+  const firstBase = rec.calls.find((args) => args[0] === "merge-base");
+  ok(firstBase && firstBase.includes(feat), `the extra base must be the first absorption base: ${JSON.stringify(firstBase)}`);
+
+  newBranch(repo, "swarm/other", "main");
+  writeCommit(repo, "other.txt", "other work\n", "other work");
+  checkout(repo, "main");
+  const mainTip = must(["rev-parse", "main"], repo);
+  const rec2 = recording();
+  ok(unlandedCount("swarm/other", repo, { prefix: PREFIX, gitRunner: rec2.run, extraBases: [feat] }) >= 1);
+  const cherry = rec2.calls.find((args) => args[0] === "cherry");
+  equal(cherry[1], mainTip, "the cherry count keeps the first default base");
+}));
+
+test("row 22: an extra base equal to the branch's own tip is skipped", () => withRepo((repo) => {
+  newBranch(repo, "swarm/leaf", "main");
+  writeCommit(repo, "leaf.txt", "leaf work\n", "leaf work");
+  const tip = must(["rev-parse", "HEAD"], repo);
+  checkout(repo, "main");
+
+  ok(unlandedCount("swarm/leaf", repo, { prefix: PREFIX, gitRunner: git, extraBases: [tip] }) >= 1,
+    "a branch absorbs its own tip — that proves nothing");
+}));
+
 test("row 12: collect destroys a tree whose branch the squash absorbed, and keeps one it did not", () => {
   const repo = initRepo();
   const results = mkdtempSync(join(tmpdir(), "swarm-landed-res-"));
