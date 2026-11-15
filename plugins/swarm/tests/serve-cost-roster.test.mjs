@@ -11,6 +11,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import http from "node:http";
 import { createServer } from "../src/serve/server.mjs";
+import { refreshStubs } from "./helpers/serve-fixture.mjs";
 
 const noopEstate = {
   current: () => Promise.resolve({ version: 1, projects: [] }),
@@ -25,6 +26,8 @@ async function getPerf(home) {
     cfg: { quietWarnSecs: 60, grading: { enabled: true }, dashboard: { port: 0, bind: "127.0.0.1", token: null } },
     _watch: () => ({ close() {} }),
     _estate: noopEstate,
+    // The real roster reader stays: the corrupt cache is this row's subject.
+    ...refreshStubs,
   });
   await new Promise((r) => server.listen(0, "127.0.0.1", r));
   const port = server.address().port;

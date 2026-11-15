@@ -11,6 +11,7 @@ import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import http from "node:http";
 import { createServer } from "../src/serve/server.mjs";
+import { refreshStubs } from "./helpers/serve-fixture.mjs";
 import { loadPerfViews, H } from "./helpers/perf-views-harness.mjs";
 
 const PAGE = fileURLToPath(new URL("../src/serve/page.html", import.meta.url));
@@ -75,7 +76,7 @@ async function getPerf({ models = [["deepseek-v4-flash:cloud", 8], ["deepseek-v4
   const rows = models.flatMap(([model, s], i) => Array.from({ length: 5 }, (_, n) => row(`leaf${i}-${n}`, model, s)));
   writeFileSync(join(home, "model-scores.jsonl"), rows.join("\n") + "\n", "utf8");
   const cfg = { dashboard: { port: 0, bind: "127.0.0.1", token: null }, grading: { enabled: true } };
-  const server = createServer({ tls: null, home, cfg, _estate: estate, _watch: () => ({ close() {} }), _heartbeatMs: 60_000, _pollMs: 60_000 });
+  const server = createServer({ tls: null, home, cfg, _estate: estate, _watch: () => ({ close() {} }), _heartbeatMs: 60_000, _pollMs: 60_000, ...refreshStubs });
   await new Promise((r) => server.listen(0, "127.0.0.1", r));
   try {
     return await new Promise((resolve, reject) => http.get({ host: "127.0.0.1", port: server.address().port, path: `/api/perf${query}` }, (res) => {
