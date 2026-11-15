@@ -9,5 +9,5 @@ const DISPATCH_WORD = String.raw`(?:node(?:\.exe)?\s+["']?[^"'\s]*swarm\.mjs["']
 
 /** Anchored pattern for `<engine word> <sub>`, e.g. swarmSubcommandRe("run"). */
 export function swarmSubcommandRe(sub) {
-  return new RegExp(String.raw`(?:^|;|&&|\|\||\||\()\s*(?:nohup\s+)?${DISPATCH_WORD}\s+${sub}\b`);
+  return new RegExp(String.raw`(?:^|;|&&|\|\||\||\(|\n)\s*(?:nohup\s+)?${DISPATCH_WORD}\s+${sub}\b`);
 }

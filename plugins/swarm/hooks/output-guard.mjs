@@ -63,14 +63,30 @@ function blankQuoted(command) {
   return out.join("");
 }
 
-// A `|` that is not half of `||`.
-function piped(cmd, from) {
+// Offset of the next statement separator (`;`, `&&`, `||`, line break), or end of input.
+function statementEnd(cmd, from) {
   for (let i = from; i < cmd.length; i++) {
+    const c = cmd[i];
+    if (c === ";" || c === "\n" || c === "\r") return i;
+    if ((c === "&" || c === "|") && cmd[i + 1] === c) return i;
+  }
+  return cmd.length;
+}
+
+// A `|` that is not half of `||`, stopping at the statement separator.
+function piped(cmd, from) {
+  const end = statementEnd(cmd, from);
+  for (let i = from; i < end; i++) {
     if (cmd[i] !== "|") continue;
     if (cmd[i + 1] === "|" || cmd[i - 1] === "|") continue;
     return true;
   }
   return false;
+}
+
+// A `>(` process substitution — a filter without a pipe.
+function processSub(cmd, from) {
+  return cmd.slice(from, statementEnd(cmd, from)).includes(">(");
 }
 
 function deny() {
@@ -96,7 +112,8 @@ export function decide({ env = process.env, payload } = {}) {
   for (const sub of GUARDED) {
     const re = new RegExp(swarmSubcommandRe(sub).source, "g");
     for (const m of blanked.matchAll(re)) {
-      if (piped(blanked, m.index + m[0].length)) return deny();
+      const from = m.index + m[0].length;
+      if (piped(blanked, from) || processSub(blanked, from)) return deny();
     }
   }
   return null;

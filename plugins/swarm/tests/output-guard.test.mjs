@@ -37,6 +37,39 @@ const ALLOWED = [
   "swarm status run | tail",
 ];
 
+test("row 16: a guarded call after a line break is denied", () => {
+  for (const tool of ["Bash", "PowerShell"]) {
+    for (const command of [
+      "cd plugins/swarm\nnode scripts/swarm.mjs validate m.json | grep OK",
+      "cd plugins/swarm\r\nnode scripts/swarm.mjs perf --overall | head -5",
+    ]) {
+      const out = decide({ env: {}, payload: call(tool, command) });
+      equal(out?.hookSpecificOutput?.permissionDecision, "deny", `${tool} must deny: ${JSON.stringify(command)}`);
+    }
+  }
+});
+
+test("row 17: the pipe scan stops at the statement separator", () => {
+  for (const command of [
+    "swarm validate m.json && npm test | head",
+    "swarm validate m.json; ls | head",
+    "swarm validate m.json || npm test | head",
+    "swarm validate m.json\nnpm test | head",
+  ]) {
+    equal(decide({ env: {}, payload: call("Bash", command) }), null, `must allow: ${command}`);
+  }
+  const out = decide({ env: {}, payload: call("Bash", "swarm validate m.json 2>&1 | head") });
+  equal(out?.hookSpecificOutput?.permissionDecision, "deny");
+});
+
+test("row 18: a >( process substitution in the same statement is denied", () => {
+  for (const tool of ["Bash", "PowerShell"]) {
+    const out = decide({ env: {}, payload: call(tool, "swarm perf --overall > >(grep dominated)") });
+    equal(out?.hookSpecificOutput?.permissionDecision, "deny", tool);
+  }
+  equal(decide({ env: {}, payload: call("Bash", "swarm validate m.json; npm test > >(grep x)") }), null);
+});
+
 test("row 13: denies a piped validate or perf, on Bash and on PowerShell", () => {
   for (const tool of ["Bash", "PowerShell"]) {
     for (const command of DENIED) {
