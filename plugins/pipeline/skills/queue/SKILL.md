@@ -12,7 +12,7 @@ Queue a plan file so the orchestrator spawns an autonomous session for it.
 
 **Arguments:** `$ARGUMENTS`
 
-The first word is the plan file path (absolute, or relative to the registered project root). The optional second word is the session type — `dev` (default), `research`, `test`, or `review`.
+The first word is the plan file path (absolute, a cwd-relative path, or a bare filename under the project's `plans/`). The optional second word is the session type — `dev` (default), `research`, `test`, or `review`.
 
 ## Step 1 — Resolve the project
 
@@ -31,7 +31,7 @@ If the current directory's project isn't registered, tell the user and exit:
 
 ## Step 2 — Parse the arguments
 
-- First word → `PLAN_FILE` (add `.md` if missing). If relative, resolve against the project root.
+- First word → `PLAN_FILE` (add `.md` if missing). A bare filename resolves under `<project-root>/plans/`; a path with a separator resolves against the current directory.
 - Second word (optional) → `STYPE`, one of `dev` / `research` / `test` / `review`. Default `dev`.
 
 If the plan file doesn't exist, tell the user the resolved path and stop.
@@ -103,7 +103,7 @@ If `--target-branch` carries a prefix not in `cfg.recognised_branch_types` (defa
 
 A plan can declare it depends on another with a `*Prerequisites:*` annotation (e.g. `*Prerequisites:* \`autonomous/foo-bar\``). When you queue such a plan:
 
-- `queue-plan` auto-sets `waits_on` from the first `*Prerequisites:*` slug. The orchestrator holds the row until that prerequisite is **`done` AND its branch is an ancestor of the target** (the ancestor check catches the case where a remote squash-merge marked the prereq `done` before the commit actually landed).
+- `queue-plan` writes every `*Prerequisites:*` slug to `depends_on` (soft). The orchestrator holds the row until each prerequisite row is **`done`**. A `!`-prefixed slug becomes `waits_on` instead: `done` AND its branch landed on the target (the landing check catches the case where a remote squash-merge marked the prereq `done` before the commit actually landed).
 - **When the plan has a `*Prerequisites:*` annotation, ask the operator:** *"This plan depends on `<slug>` — branch its worktree off `autonomous/<slug>` so it sees that code before the prereq merges? [Y/n]"*. On yes, add `--base-branch autonomous/<slug>`. On no, the dependent branches off the target as usual and only sees the prereq's code once it merges.
 
 Flags (both optional; `--waits-on` overrides the auto-derived value):

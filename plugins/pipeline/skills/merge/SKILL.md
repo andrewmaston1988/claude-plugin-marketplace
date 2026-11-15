@@ -21,7 +21,7 @@ node "$(pipeline plugin-root)/skills/merge/scripts/run-merge.mjs" --branches <b1
 
 ## The loop
 
-Each run ends one of four ways. Branch on which:
+Each run ends one of five ways. Branch on which:
 
 | Driver output | You do |
 |---|---|
@@ -29,6 +29,7 @@ Each run ends one of four ways. Branch on which:
 | `PAUSE: <what>` banner | The judgement it names, then re-run the printed `RE-RUN EXACTLY` command |
 | Non-zero exit | Surface the message verbatim; do not retry blindly |
 | `resolved:` block + `Spawn a background agent running:` | Spawn it (below) |
+| `Nothing to do — this merge is already complete.` | Report it; nothing to spawn |
 
 The driver re-reads reality on every run, so re-running is always safe.
 

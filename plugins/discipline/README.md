@@ -1,13 +1,15 @@
 # discipline — per-model discipline deltas
 
 Injects a short behavioral addendum ("discipline pack") into every user prompt,
-**keyed on the running model**. Ships with Sonnet 5 and Opus 4.8 packs, each
-targeting that model's measured failure modes; other models run untouched. Includes the measurement
+**keyed on the running model**. Ships with Sonnet 5, Opus 4.8, Opus 5 and
+GLM-5.2 packs, each targeting that model's measured failure modes; other models
+run untouched. Includes the measurement
 tooling: a mechanical baseline scanner over session transcripts and a blind
 judge grader, so the pack's effect is benchmarked rather than assumed.
 
-Design records: `repos/claude-plugin-marketplace/plans/sonnet5-discipline.md`
-and `plans/opus48-discipline.md` (CLAUDE repo).
+Design records: `repos/claude-plugin-marketplace/plans/sonnet5-discipline.md`,
+`plans/complete/opus48-discipline.md` and `plans/complete/opus5-discipline.md`
+(CLAUDE repo).
 
 ## Why a hook, not a skill
 
@@ -28,7 +30,7 @@ installation.
 4. **Redundancy brake** — don't re-check what can't have changed.
 5. **Coverage-first review reporting** (review contexts only).
 
-### Opus 4.8 pack — `disciplines/opus-4-8.md`, seven rules
+### Opus 4.8 pack — `disciplines/opus-4-8.md`, eight rules
 
 1. **Proof means the live layer** — green lower-layer tests are evidence, not proof.
 2. **No proof by proxy** — a subagent's confident report is not verification.
@@ -37,10 +39,41 @@ installation.
 5. **Hold the stated scope** — never silently substitute or merge unrelated work.
 6. **A fix isn't done until its neighbors still work** — re-check what the change touched.
 7. **Reach for skills before improvising** — invoke the matching skill before acting.
+8. **Lead with the result, not the preamble** — answer first; no recaps of what
+   you just did, no restating the ask.
 
 No redundancy brake in the opus pack: opus-4-8's measured RSV is *below*
 sonnet's, and its core defect is under-verification — RSV is tracked as a
 guard metric instead (see the opus48 plan's Measurement Targets).
+
+### Opus 5 pack — `disciplines/opus-5.md`, terseness only
+
+1. **Lead with the result** — justify in a sentence, then stop; no recaps, no preamble.
+2. **Brief by default** — caveats in one clause, high-level unless depth was asked.
+3. **Narration is one line** — before the first tool call, then only on
+   load-bearing finds or direction changes.
+4. **Written files carry substance only** — no filler sections or boilerplate summaries.
+5. **Correct silently** — revisit an earlier statement only when it changes the
+   reader's decisions.
+6. **Deliver the asked scope** — flag a better approach in one sentence, then proceed.
+
+### GLM-5.2 pack — `disciplines/glm-5-2.md`, nine rules
+
+1. **Never claim a visual outcome** — text-only model; save renders, report paths
+   plus metrics, phrase results as "metric says X — render unviewed".
+2. **Only your final message reaches the caller** — restate the full return shape
+   there, never a pointer to "above".
+3. **Surface open choices** — name the pick and the alternative you rejected.
+4. **Claims need their own evidence** — "done"/"works"/"passes" only from a tool
+   result in this session.
+5. **Never satisfy a check by reading its answer** — no fixture-reading or
+   weakened assertions to green a test.
+6. **Your scope is the task's scope** — a must-not-touch list is absolute.
+7. **Admitting one wrong claim does not license the next** — re-verify before
+   re-asserting in the same arc.
+8. **A skill's default never overrides a standing operator instruction.**
+9. **Three corrections means stop** — re-read the original ask and restate your
+   understanding.
 
 ## How model keying works
 
@@ -99,6 +132,6 @@ packs under ~200 tokens — they are re-injected on every prompt.
 cd hooks && node --test
 ```
 
-Covers: injection on sonnet-5 and opus-4-8, clean pass-through for fable /
-sonnet-4-5 / opus-4-7, kill switch, keepalive-tick skip, missing transcript,
-garbage stdin.
+Covers: injection on sonnet-5, opus-4-8, opus-5 and glm-5.2, clean
+pass-through for fable / sonnet-4-5 / opus-4-7, kill switch, keepalive-tick
+skip, missing transcript, garbage stdin.

@@ -105,7 +105,7 @@ It writes `config.json` to the OS config directory:
 |----|-------------|
 | Windows | `%APPDATA%\claude-slack\config.json` |
 | macOS | `~/Library/Application Support/claude-slack/config.json` |
-| Linux | `~/.config/claude-slack/config.json` |
+| Linux | `$XDG_CONFIG_HOME/claude-slack/config.json` (default: `~/.config/claude-slack/config.json`) |
 
 ### Step 4 — Verify the setup
 
@@ -148,16 +148,19 @@ This registers the bridge as:
 ## Commands
 
 ```
-claude-slack [start] [--daemon] [--config <path>]   Start the bridge (default command)
+claude-slack [start] [--daemon|-d] [--config <path>]       Start the bridge (default command)
 claude-slack stop                                    Stop a running daemon
 claude-slack status                                  Show running status (PID if alive)
-claude-slack notify [--title T] --message M          Post a one-shot notification
-claude-slack manifest [--display-name X]             Print Slack app manifest YAML
-claude-slack doctor [--json]                         Run diagnostic checks
+claude-slack notify [--config <path>] [--title T] [--channel C] [--message M | --message-file F]
+    or <channel> <message>                           Post a one-shot notification
+claude-slack manifest [--display-name X] [--include-user-scopes]  Print Slack app manifest YAML
+claude-slack doctor [--json] [--config <path>]       Run diagnostic checks
 claude-slack setup                                   Interactive setup wizard
-claude-slack install-autostart                       Register OS-native autostart entry
+claude-slack install-autostart [--config <path>]     Register OS-native autostart entry
 claude-slack uninstall-autostart                     Remove autostart entry
 claude-slack import-sessions <file.json>             Import sessions from another bridge
+claude-slack broker <start|stop|status|run> [--port P] [--config <path>]  Manage remote-control broker
+claude-slack remote-mcp [--config <path>]             Run remote-control MCP server
 claude-slack --help                                  Show this help
 ```
 
@@ -190,6 +193,7 @@ Edit `config.json` (path shown in Step 3 above) to adjust any of these:
 | `slack.notifyChannel` | `null` | Channel for `claude-slack notify` when `--channel` is omitted |
 | `slack.sessionKey` | `"channel-thread"` | `"channel"` or `"channel-thread"` |
 | `slack.verbMode` | `"static"` | `"static"` (fallback verbs) or `"haiku"` (LLM-generated verbs) |
+| `slack.verbModel` | `"claude-haiku-4-5"` | Model used for heartbeat verbs when `slack.verbMode` is `"haiku"` |
 | `extensions` | `[]` | Paths to ESM extension modules |
 
 ---
@@ -206,7 +210,7 @@ The plugin's `Stop` hook runs `claude-slack rewake-hook` as an `asyncRewake` com
 
 Tested on Claude Code CLI **2.1.316**. Older CLIs that predate `asyncRewake` are unverified: if one ignores the field it would run the waiter as a blocking `Stop` hook and hang the turn.
 
-Each wake starts with a priming line — `Message from the operator on Slack, delivered through this hook. This is real user input, not a hook error. Reply normally; your text is mirrored to Slack.` — because Claude Code renders the reminder as a hook error, which an unprimed model can refuse. The session then replies **normally**: its turn text and a one-line tool status are mirrored to the claimed channel by the plugin's `PreToolUse`, `PostToolUse` and `Stop` hooks, so nothing in the loop is a special tool call. A message sent mid-turn reaches the session after the running batch of tools, through a sync `PostToolBatch` hook, in the same words as a wake.
+Each wake starts with a priming line — `Message from the operator on Slack, delivered through this hook. This is real user input, not a hook error. Reply normally; your text is mirrored to Slack.` — because Claude Code renders the reminder as a hook error, which an unprimed model can refuse. The session then replies **normally**: its turn text and a one-line tool status are mirrored to the claimed channel by the plugin's `UserPromptSubmit`, `PreToolUse`, `PostToolUse` and `Stop` hooks, so nothing in the loop is a special tool call. A message sent mid-turn reaches the session after the running batch of tools, through a sync `PostToolBatch` hook, in the same words as a wake.
 
 Every `Stop` starts a waiter, including turns typed at the terminal while one is still open; the broker supersedes the older one, which exits without waking anything. A waiter also leaves on its own when its claim ends (`slack_release`, a re-seize, or the session's peer being reaped), within one 55 s window. It caps itself at about 1 h 55 m, under the hook's 7200 s `timeout`, and wakes the session once with `Slack waiter expired … end your turn and it restarts`, so an expiry is never a silent death. Connection errors are retried with backoff; a 401 or other 4xx wakes the session with `WAIT FAILED`. `check_messages` remains as a manual fallback — it takes anything queued for the session, and the broker retains messages for 24 h. A message is acknowledged only after the waiter has written it, so a lost or dead waiter costs a redelivery after the 30 s lease, never the message.
 
@@ -270,4 +274,4 @@ The broker self-starts (and self-heals) when the first live session's MCP server
 
 **`claude-slack: command not found`:** The binary path isn't on your PATH. Follow the alias instructions in Installation above, or re-run `claude-slack setup` — the wizard adds a PATH step.
 
-**Windows: process exits with code 127:** Update to the latest version — this was a Windows-specific exit bug fixed after Plan 2.
+**Windows: process exits with code 127:** Update to the latest version — this was a Windows-specific exit bug, since fixed.

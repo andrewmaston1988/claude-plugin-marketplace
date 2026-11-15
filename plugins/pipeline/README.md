@@ -18,7 +18,7 @@ In Claude Code:
 /pipeline setup
 ```
 
-Walks through config conversationally. You'll be asked about: project to register, Slack channel (optional), model defaults, autostart, PATH alias. Each choice is explained as it's asked — defaults are sensible, you can press through if unsure.
+Walks through config conversationally. You'll be asked about: project to register, plans dir and recognised branch types, model defaults, review skill, notification channels, merge hooks, dashboard host/port, worktree layout, autostart, PATH alias. Each choice is explained as it's asked — defaults are sensible, you can press through if unsure.
 
 ## Try it (optional)
 

@@ -218,9 +218,9 @@ if (cmd === "import-sessions") {
 }
 
 if (cmd === "remote-mcp") {
-  // stdio MCP server the live interactive session loads (user-scoped). Registers
-  // with the internal broker, polls for inbound Slack messages, surfaces the
-  // slack_seize / slack_release / slack_post tools.
+  // stdio MCP server the live interactive session loads (manifest-declared). Registers
+  // and heartbeats with the internal broker and surfaces the slack_seize /
+  // slack_release / slack_post tools; inbound messages arrive through the hooks.
   const paths = getDefaultPaths();
   const configArg = getFlag("--config", rest) ?? paths.configFile;
   let config;

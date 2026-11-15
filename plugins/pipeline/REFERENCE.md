@@ -1,6 +1,6 @@
 # pipeline
 
-Pipeline orchestrator plugin for Claude Code — manages multi-stage autonomous dev sessions (dev → review → test → merge) via a SQLite-backed queue, spend tracking, and a notifier-agnostic publisher hook.
+Pipeline orchestrator plugin for Claude Code — manages multi-stage autonomous dev sessions (dev → review → merge) via a SQLite-backed queue, spend tracking, and a notifier-agnostic publisher hook.
 
 Requires Node.js 22+ and the `claude` CLI on PATH. Run `pipeline setup` once to install dependencies and configure the orchestrator.
 
@@ -9,7 +9,7 @@ Requires Node.js 22+ and the `claude` CLI on PATH. Run `pipeline setup` once to 
 ## Pipeline stages
 
 ```
-queued → dev → review → test → merge → done
+queued → dev → review → merge → done
                ↓ needs_work (within budget)
                dev (retry, review_retries += 1)
                ↓ needs_work (budget exhausted)
@@ -18,13 +18,13 @@ queued → dev → review → test → merge → done
 
 - **`queued`** — row is waiting; orchestrator will spawn a dev session by default, or research/review/test if type hint is in notes_extra (legacy) or resolved from the queue command.
 - **`dev`** — autonomous dev session implements the plan on `autonomous/<feature>`. The orchestrator spawns this stage directly without needing a `type=` hint. If a dev session dies without handoff (no review verdict), the orchestrator automatically recovers to `review` if within retry budget, otherwise parks at `manual`.
-- **`research`** — autonomous research session spawned directly by the orchestrator when the row stage is `research`. Dies without auto-recovery — parks at `manual` on PID death.
-- **`test`** — autonomous test session spawned directly by the orchestrator when row stage is `test`, runs the suite and sets `qa_pass`.
+- **`research`** — autonomous research session spawned directly by the orchestrator when the row stage is `research`. Dies without auto-recovery — the reaper has no research branch, so a dead session leaves the row at `research`.
+- **`test`** — autonomous test session spawned directly by the orchestrator when row stage is `test`, runs the suite and sets `qa_pass`. Nothing routes a row here by default — see "Session types".
 - **`review`** — autonomous peer-review pass on the dev diff. Emits one of two verdicts:
-  - `ready_to_ship` → advances to `test`.
+  - `ready_to_ship` → advances to `merge` (`qa_pass=1`).
   - `needs_work` → bounces back to `dev` (`review_retries += 1`). After `review_retry_budget` exhausted, parks at `manual`.
 - **`manual`** — operator-actionable parking lot (test failure, reviewer-stuck, budget exhausted, or `[blocked: ...]`).
-- **`merge`** — passed `qa_pass=true`, waiting for squash-merge via `/merge`.
+- **`merge`** — gate verdict recorded (`qa_pass` set), waiting for squash-merge via `/merge`.
 - **`done`** — merged to main; row preserved for audit.
 
 ### Pipeline row columns
@@ -32,8 +32,8 @@ queued → dev → review → test → merge → done
 | Column | Description |
 |--------|-------------|
 | `feature` | Feature slug (primary key) |
-| `stage` | Current stage: queued, dev, review, test, manual, merge, or done |
-| `branch` | Git branch name (null if not yet created) |
+| `stage` | Current stage: backlog, queued, research, dev, review, test, manual, merge, or done |
+| `branch` | Git branch name (`—` placeholder until one is declared) |
 | `pr_title` | PR title for GitHub PR; set at queue time from the `--title` flag, else the plan's `*Title:*` annotation |
 | `qa_pass` | Test result: true, false, or null (untested) |
 | `notes_extra` | Operator notes |
@@ -44,7 +44,7 @@ queued → dev → review → test → merge → done
 
 **Invariant:** A row cannot reach `stage=merge` without a gate verdict — either `qa_pass=true` (test path) or `review_verdict=ready_to_ship`. The merge runner enforces this before squash-merging.
 
-**Auto-spawn:** The orchestrator automatically spawns merge children when a pipeline row reaches `stage=merge` with no `rebase_required` flag and all dependencies satisfied. Each project is limited to one concurrent merge to avoid rebase/commit races. On successful exit (code 0), the merge script advances the row to `done`; on failure, the row remains at `merge` and an operator notification is sent.
+**Auto-spawn:** With `autoMerge: true`, the orchestrator spawns a merge session for the first `merge`-stage row whose dependencies are satisfied; with `autoMerge: false` (the default) it spawns nothing and the row waits for `/merge`. Each project is limited to one concurrent merge to avoid rebase/commit races. On successful exit (code 0), the merge script advances the row to `done`; on failure, the row remains at `merge` and an operator notification is sent.
 
 **Stage-driven spawn:** The orchestrator polls for spawnable rows across multiple stages — `queued`, `dev`, `research`, `test`, and `review` — and spawns the appropriate session type directly from the stage. A row that dies without a session (e.g., dev session with no handoff) can be revived by advancing it to the next stage (e.g., `pipeline stage-set <project> <feature> review`) without needing `type=` hints in notes. This mechanism enables recovery via a single command instead of requiring notes manipulation. For backward compatibility, `queued` rows with `type=` hints in `notes_extra` still route correctly; all other active stages prefer the stage column directly. Spawn attempts are rate-limited by a 60-second grace period per (project, feature) pair to give freshly-spawned sessions time to register in the database.
 
@@ -58,7 +58,7 @@ queued → dev → review → test → merge → done
 | `/pipeline setup` | Conversational setup walkthrough — use instead of the TTY wizard when running inside Claude Code. Covers all 11 wizard steps interactively. |
 | `/pipeline demo` | Narrated hands-on demo in a self-contained sandbox. Spins up a throwaway project + 4 plan files, walks rows through all stages on a ~10-minute timeline, narrates each transition while you watch the dashboard. Good for new users or showing the plugin to someone. |
 | `/queue` | Queue a plan file for orchestration. |
-| `/merge` | Squash-merge one or more tested branches to main. Invokes the `hooks.on_merge` hook if configured (hook owns the git operation when set). |
+| `/merge` | Squash-merge one or more tested branches to main. Merges an open PR with `gh pr merge --squash --admin` when one exists; otherwise invokes the `hooks.on_merge` hook if configured, else squash-merges locally. |
 
 ---
 
@@ -74,15 +74,17 @@ The wizard walks through 11 steps:
 
 | Step | What happens |
 |------|--------------|
-| 1/9 — Environment check | Runs `pipeline doctor` pre-flight; warns if any check fails and prompts to continue |
-| 2/9 — Model defaults | Prompts for per-stage Claude model IDs (press Enter to keep defaults) |
-| 3/9 — Review skill config | Sets the review slash-command and an optional extra-flag string |
-| 4/9 — Slack channel | Optional `#channel` for failure/park notifications; blank to disable |
-| 5/9 — Register first project | Adds the project name + absolute path to the unified DB |
-| 6/9 — Autostart | Installs a platform scheduler entry so the orchestrator starts on login |
-| 7/9 — PATH alias | Appends a `pipeline` function/alias to your shell profile |
-| 8/9 — Smoke test | Re-runs `pipeline doctor` to confirm the environment is clean |
-| 9/9 — Done | Prints the start command and exits |
+| 1/11 — Environment check | Runs `pipeline doctor` pre-flight; warns if any check fails and prompts to continue |
+| 2/11 — Model defaults | Prompts for per-stage Claude model IDs (press Enter to keep defaults) |
+| 3/11 — Review skill config | Sets the review slash-command, an optional extra-flag string, the plans dir, and recognised branch types |
+| 4/11 — Slack notification channels | Optional governance + pipeline channels; blank to disable. Also offers to wire existing `on_merge_ready` / `on_merge` / `merge_check` scripts found under `~/.pipeline/hooks/` |
+| 5/11 — Web dashboard port | Host and port for `pipeline dashboard web` |
+| 6/11 — Register first project | Adds the project name + absolute path to the unified DB |
+| 7/11 — Worktree layout | Picks the `worktree_base` template; 7b (concurrency cap) and 7c (dev retry budget) follow in the same run |
+| 8/11 — Autostart | Installs a platform scheduler entry so the orchestrator starts on login |
+| 9/11 — Add pipeline to PATH | Appends a `pipeline` function/alias to your shell profile |
+| 10/11 — Smoke test | Re-runs `pipeline doctor` to confirm the environment is clean |
+| 11/11 — Done | Prints the start command and exits |
 
 Config is written atomically to `~/.pipeline/config.json` (mode 0o600).
 
@@ -118,7 +120,7 @@ Config key:
 }
 ```
 
-The hook is spawned once per envelope with the file path as its only argv. Stdio inherits.
+The hook is spawned once per envelope with the file path as its only argv. Its stdout/stderr are redirected to `hook.log` in the envelope directory.
 
 > **Legacy:** `notifications.on_write` is still read as a fallback for one release cycle. Migrate to `hooks.on_notification` — `pipeline setup` does this automatically on the next run.
 
@@ -133,7 +135,7 @@ Channel resolution: `pipeline_channel || governance_channel`. So pipeline events
 
 ### Bringing your own forwarder
 
-Replace `hooks.on_notification` with your own executable — anything that takes a JSON envelope path and forwards it. Read `src/forwarders/claude-slack.mjs` as a 50-line reference implementation. Common patterns:
+Replace `hooks.on_notification` with your own executable — anything that takes a JSON envelope path and forwards it. Read `src/forwarders/claude-slack.mjs` as a ~115-line reference implementation. Common patterns:
 
 - **Different notifier** (Discord, MS Teams, email, webhook): substitute the underlying API call; the envelope format stays the same.
 - **Routing**: parse `envelope.priority` or `envelope.title` to choose the destination channel.
@@ -161,11 +163,21 @@ node plugins/pipeline/bin/pipeline.mjs doctor [--timeout <ms>]
 | 4 | pipeline data dir | fail | `mkdirSync(paths.dataDir, { recursive: true })` succeeds |
 | 5 | pipeline DB readable | warn | Open `<dataDir>/pipeline.db` and `SELECT 1` — warns if absent (fresh install); fails if corrupt/locked |
 | 6 | config.json parseable | warn | Parse `~/.pipeline/config.json` if present — warns if absent (defaults apply); fails if malformed |
-| 7 |  Governance channel set | warn | `notifications.governance_channel` is non-null — warns if null (intentional disable) |
-| 8 | claude-slack on PATH | warn | `which claude-slack` resolves, OR `CLAUDE_SLACK_PLUGIN` env var points at an existing file — skipped if Slack disabled |
-| 9 | orchestrator not running | warn | `~/.pipeline/orchestrator.state.json` does not show a live PID — warns informationally if already running |
-| 10 | at least one project | warn | `projectList` returns ≥1 row — warns if zero (orchestrator would idle) |
-| 11 | registered project paths | fail | Each registered project's `root_path` exists and contains `.git/` |
+| 7 | Governance channel set | warn | `notifications.governance_channel` is non-null — warns if null (intentional disable) |
+| 8 | Pipeline channel set | warn | `notifications.pipeline_channel` is non-null — warns if null (falls back to the governance channel) |
+| 9 | hooks.on_notification | warn | `hooks.on_notification` (or legacy `notifications.on_write`) is set and its file exists — warns if unset or missing |
+| 10 | claude-slack-plugin | warn | The shared locator finds claude-slack (`CLAUDE_SLACK_PLUGIN` env → cache → PATH) — skipped if no governance channel |
+| 11 | pipeline-home | warn | The resolved `configDir` exists — warns if absent (fresh install) |
+| 12 | orchestrator not running | warn | `~/.pipeline/orchestrator.state.json` does not show a live PID — warns informationally if already running |
+| 13 | at least one project | warn | `projectList` returns ≥1 row — warns if zero (orchestrator would idle) |
+| 14 | registered project paths | fail | Each registered project's `root_path` exists and contains `.git/` |
+| 15 | path-resolution-consistency | warn | Every config-driven path key resolves; warns on a plansDir that still holds a placeholder or names a missing directory |
+| 16 | worktree-layout-stale | warn | On-disk worktrees match the resolved `worktree_base` template; prints a `git worktree remove` line per stale entry |
+| 17 | web-port-conflict | warn | `web.port` is free or held by our own dashboard — warns if a foreign process owns it |
+| 18 | governor-env-contract | warn | The governor template references only vars in the spawn contract — skipped when the governor is disabled |
+| 19 | concurrency-scope | warn | Informational: prints `Concurrency scope: <value>` |
+| 20 | max-concurrent | warn | Informational: prints `Max concurrent: <n>` |
+| 21 | zombie-rows-check | warn | Zombie `done` rows, orphan branches, and stuck merge-ready rows (from `src/doctor/`) |
 
 Exit codes: **0** — all checks pass or warn; **1** — one or more fail.
 
@@ -184,12 +196,25 @@ Written to `~/.pipeline/config.json` by `pipeline setup`. All keys are optional 
 | `notifications.pipeline_channel` | string \| null | `null` | Separate channel for per-row orchestrator events; falls back to `governance_channel` if null |
 | `hooks.on_notification` | string \| null | `null` | Path to forwarder script — called once per envelope with the JSON file path as its only argv |
 | `hooks.on_merge_ready` | string \| null | `null` | Path to hook script — called when a row reaches `stage=merge`; receives env vars (no argv) |
-| `hooks.on_merge` | string \| null | `null` | Path to hook script — replaces the local squash merge when set; receives same env vars as `on_merge_ready`; hook owns the git operation |
+| `hooks.on_merge` | string \| null | `null` | Path to hook script — delegates the squash merge to the hook when the branch has no open PR; receives four env vars (no argv); hook owns the git operation |
 | `hooks.merge_check` | string \| null | `null` | Path to hook script — invoked per `merge`-stage row each poll; exit 0 = "branch's PR is merged on the remote" → row advances to `done`. Sole mechanism for UI-merge detection (platform-agnostic) |
 | `autoMerge` | boolean | `false` | When `true`, the orchestrator automatically spawns the merge agent for rows at `stage=merge` |
 | `review.skill` | string | `"/code-review"` | Slash-command invoked by review sessions |
 | `review.deep_flag` | string | `""` | Extra flag appended to the review skill invocation (any string; empty disables) |
 | `devRetryBudget` | integer | `2` | Max times a dev session may retry after QA failure; per-feature override via `pipeline retry-budget-set` |
+| `notifications.fallback_dir` | string \| null | `null` | Directory envelope JSON is written to; `null` means `<stateDir>/notifications` |
+| `session_templates_dir` | string \| null | `null` | Directory overriding bundled session templates; per-file fallback to the bundled copy |
+| `recognised_branch_types` | string[] | `["autonomous", "interactive"]` | Branch prefixes `queue-plan` considers recognised; anything else earns a one-line warning |
+| `worktree_base` | string | `"{root_parent}/.worktrees/{project}/{feature}"` | Per-feature worktree template (see "Worktree paths") |
+| `report_publish_branch_template` | string | `"{kind}/{feature}"` | Side-branch reports are published to after the stash-switchback dance |
+| `web.port` | integer | `8765` | Port `pipeline dashboard web` binds; `--port` overrides for one session |
+| `web.host` | string | `"127.0.0.1"` | Interface the web dashboard binds; `--host` overrides for one session |
+| `orch.concurrency_scope` | string | `"feature"` | `"feature"` = serialise per feature only; `"project"` = one session per project |
+| `orch.max_concurrent` | integer | `3` | Global cap on concurrent sessions; `--max-concurrent` overrides for one launch |
+| `tiers` | object | `{"haiku": "claude-haiku-4-5", "sonnet": "claude-sonnet-4-6", "opus": "claude-opus-4-8"}` | Canonical model string per tier, used by auto-escalation |
+| `tier_efforts` | object | `{"haiku": ["low", "medium", "high"], "sonnet": ["low", "medium", "high", "max"], "opus": ["low", "medium", "high", "xhigh", "max"]}` | Effort levels each tier supports; auto-escalation clamps to these |
+| `proxy.url` | string | `"http://localhost:18081"` | Anthropic-format proxy URL for non-`claude-*` model strings |
+| `proxy.auth_token` | string | `"dummy-local-key"` | Bearer token sent to `proxy.url` |
 
 Example `~/.pipeline/config.json`:
 
@@ -234,17 +259,18 @@ npm install
 
 (Subsequent `pipeline` commands work without re-running install.)
 
-### TUI keybindings (Phase 1 — read-only)
+### TUI keybindings
 
 | Key | Action |
 |-----|--------|
 | `q`, `Ctrl-C` | Quit |
 | `r` | Force refresh now |
-| `n` | Cycle to next registered project |
-| `a` | Toggle show-done rows |
+| `tab`, `p` | Cycle to next registered project |
+| `d` | Toggle show-done rows |
 | `↑` / `↓` / `k` / `j` | Move row cursor |
-
-Phase 2 will add the action menu (queue / delete / etc. via shell-out to existing CLI subcommands).
+| `[` / `]` | Move focus between active sessions |
+| `enter` | Open the row action menu (orchestrator start/stop modal when the agents panel is in orch view) |
+| `o` | Toggle the agents panel between agent list and orchestrator summary |
 
 ---
 
@@ -288,41 +314,39 @@ Wire it via `~/.pipeline/config.json`:
 { "hooks": { "on_notification": "/abs/path/to/forwarder.sh" } }
 ```
 
-Hooks ending in `.mjs` / `.js` are auto-prefixed with `node`; everything else is exec'd directly. The hook's stdout/stderr inherit so failures are visible.
+Hooks ending in `.mjs` / `.js` are auto-prefixed with `node`; everything else is exec'd directly. The hook's stdout/stderr are redirected to `hook.log` in the envelope directory so failures are visible.
 
 ### on_merge hook
 
-Fires at the point of merge — invoked by `merge.mjs` (step 5) for each branch being squash-merged. When set, **the hook is the single merge authority**: `merge.mjs` skips its local squash-merge and delegates the entire git operation to the hook. A non-zero exit code aborts the merge with an error.
+Fires at the point of merge — invoked by `merge.mjs` (step 5) for a branch being squash-merged **that has no open PR**. When an open PR exists, `merge.mjs` merges it itself with `gh pr merge <number> --squash --admin` and never consults the hook. With no PR and the hook set, **the hook is the merge authority**: `merge.mjs` skips its local squash-merge and delegates the git operation to the hook. A non-zero exit code aborts the merge with an error.
 
 ```json
 { "hooks": { "on_merge": "/abs/path/to/hook.mjs" } }
 ```
 
-The hook receives the same four environment variables as `on_merge_ready`:
+The hook receives four environment variables:
 
 | Variable | Value |
 |----------|-------|
 | `PIPELINE_PROJECT` | Project name |
 | `PIPELINE_FEATURE` | Feature slug |
-| `PIPELINE_BRANCH` | Full branch name **or bare slug** — the hook normalises to `autonomous/<slug>` |
+| `PIPELINE_BRANCH` | Full branch name (e.g. `autonomous/fix-login-bug`) |
 | `PIPELINE_TARGET_BRANCH` | Merge target |
 
-**Single-authority contract:** `merge.mjs` performs either (a) a local squash-merge *or* (b) delegates to `on_merge` — never both. When the hook is configured:
+**Merge contract:** `merge.mjs` performs exactly one of (a) an open-PR merge, (b) a delegated `on_merge` hook merge, or (c) a local squash-merge — never two. In order:
 
-1. `merge.mjs` checks whether the branch has any commits ahead of the target. If already integrated (0 ahead), it fast-forwards local target to `origin/<target>` and skips the hook.
-2. If there are commits to merge, `merge.mjs` invokes the hook. The hook does `gh pr merge --squash` on origin.
-3. After the hook exits successfully, `merge.mjs` fast-forwards local target to `origin/<target>` so `local == origin` and the next merge starts clean.
+1. If `gh pr list --head <branch> --state open` finds a PR, `merge.mjs` runs `gh pr merge <number> --squash --admin` and fast-forwards local target to `origin/<target>`. The hook is not consulted.
+2. Otherwise, if `on_merge` is set, it checks whether the branch has any commits ahead of the target. If already integrated (0 ahead), it fast-forwards local target to `origin/<target>` and skips the hook.
+3. If there are commits to merge, `merge.mjs` invokes the hook (which does `gh pr merge --squash` on origin), then fast-forwards local target to `origin/<target>` so `local == origin` and the next merge starts clean.
 
 This prevents the double-squash problem where a local commit and an origin GitHub commit diverge after the merge.
 
-**Enriched squash commit message (bundled template):** the bundled `on-merge.mjs` template (see `src/setup/wizard-hooks.mjs`) builds a richer squash commit than GitHub's default:
+**Enriched squash commit message (bundled template):** the `ON_MERGE_TEMPLATE` constant in `src/setup/wizard-hooks.mjs` builds a richer squash commit than GitHub's default:
 
 1. Calls `row-get <project> <feature>` to read `pr_title`, `d_model`, and `target_branch` in a single DB call.
-2. Checks if the PR is already `MERGED` via `gh pr view` — skips the merge and fast-forwards local target if so (already-merged guard).
-3. Runs `git diff <target>...<branch> --stat --no-color` and passes the output to `claude -p` (Haiku, temperature=0) to generate a 2-3 bullet plain-text commit body.
-4. Appends a `Co-Authored-By: <Model Display Name> <noreply@anthropic.com>` trailer using the `d_model` from the DB row.
-5. Calls `gh pr merge --squash --subject <pr_title> --body <bullets+trailer>` using the fully-qualified branch ref (`autonomous/<slug>`).
-6. Fast-forwards local target to `origin/<target>` after a successful GitHub merge.
+2. Runs `git diff <target>...<branch> --stat --no-color` and passes the output to `claude -p` (Haiku, temperature=0) to generate a 2-3 bullet plain-text commit body.
+3. Appends a `Co-Authored-By: <Model Display Name> <noreply@anthropic.com>` trailer using the `d_model` from the DB row (Claude models only — a non-Anthropic `d_model` gets no trailer).
+4. Calls `gh pr merge <branch> --squash --delete-branch --subject <pr_title> --body <bullets+trailer>` with the branch name it was given.
 
 If `pr_title` is empty (old rows), the feature slug is used as the subject — identical to GitHub's default. If `claude -p` fails or times out, the body falls back to the trailer alone.
 
@@ -332,13 +356,13 @@ If `pr_title` is empty (old rows), the feature slug is used as the subject — i
 
 ### on_merge_ready hook
 
-Fires whenever a pipeline row reaches `stage=merge`. **Gated by `autoMerge`:** when `autoMerge: false` (the default), the bundled `on-merge-ready.mjs` template exits immediately without pushing or creating a PR — automatic PR creation is opt-in. Set `"autoMerge": true` in `~/.pipeline/config.json` to enable it. Common uses when enabled: push the branch, open a GitHub PR, post a Slack ping.
+Fires once per row when it reaches `stage=merge` — unconditionally, whether or not `autoMerge` is set (a `[merge-ready-fired]` marker in `notes_extra` stops a second firing). The hook decides what to do: push the branch, open a GitHub PR, post a Slack ping. `autoMerge` gates only the orchestrator's own merge *session*, not this hook.
 
 ```json
 { "hooks": { "on_merge_ready": "/abs/path/to/hook.mjs" } }
 ```
 
-The hook receives four environment variables — no argv:
+The hook receives six environment variables — no argv:
 
 | Variable | Value |
 |----------|-------|
@@ -346,6 +370,8 @@ The hook receives four environment variables — no argv:
 | `PIPELINE_FEATURE` | Feature slug (e.g. `fix-login-bug`) |
 | `PIPELINE_BRANCH` | Full branch name (e.g. `autonomous/fix-login-bug`) |
 | `PIPELINE_TARGET_BRANCH` | Merge target (e.g. `master`) |
+| `PIPELINE_PROJECT_ROOT` | Registered project root (absolute; empty if unknown) |
+| `PLUGIN_DIR` | Absolute path to this plugin's install dir |
 
 The hook has a 15-second hard timeout; its exit code is ignored (fire-and-forget).
 
@@ -360,7 +386,7 @@ try { row = JSON.parse(rowResult.stdout?.trim() || "{}"); } catch {}
 const title = row.pr_title || feature;  // fall back to slug if empty
 ```
 
-`pipeline setup` asks whether to configure `on_merge_ready` and can write a Slack wrapper to `~/.pipeline/hooks/on-merge-ready.mjs` automatically if `hooks.on_notification` is already pointing at the bundled claude-slack forwarder.
+`pipeline setup` asks whether to configure `on_merge_ready`; if a script already exists at `~/.pipeline/hooks/on-merge-ready.mjs` it offers to wire that path in, but it never writes the hook file itself.
 
 ---
 
@@ -394,7 +420,7 @@ Every config-driven path key in the plugin is resolved through one helper:
 
 | Category | `resolveBase` | Keys |
 |---|---|---|
-| Per-project          | `projectRoot` | `plansDir`, `governor.reports_dir`, `governor.session_dir`, `governor.log_dir`, `worktree_base` *(future)* |
+| Per-project          | `projectRoot` | `plansDir`, `governor.reports_dir`, `governor.session_dir`, `governor.log_dir`, `worktree_base` |
 | Global / install-wide | `paths.configDir` | `notifications.fallback_dir`, `session_templates_dir`, `hooks.on_notification`, `hooks.on_merge_ready`, `hooks.on_merge`, `hooks.merge_check`, `governor.template_path` |
 | Within-worktree       | resolved `featureWorktreePath(...)` | `report_subpath` |
 
@@ -439,12 +465,13 @@ Resolution chains for external binaries (e.g. claude-slack) live under `src/loca
 
 ## Worktree paths
 
-The orchestrator creates one worktree per pipeline-row branch. Operator-managed worktrees for QA tests and code-review verdicts live in separate locations and are handled by the `pipeline test-complete` and `pipeline review-complete` subcommands. Both paths are template-driven via config:
+The orchestrator creates one worktree per feature, shared by every pipeline-managed session for that feature (dev, research, review, test, merge). `pipeline review-complete` and `pipeline test-complete` write their reports into that same worktree and publish them to side-branches — there are no separate handler worktrees any more. The path is template-driven via config:
 
 | Config key | Default | What it resolves to |
 |---|---|---|
-| `orchestrator_worktree_base` | `{root_parent}/{project}-wt/{branch_type}-{branch_local}` | The worktree the orchestrator creates for an `autonomous/<plan-stem>` (etc.) branch |
-| `handler_worktree_base` | `{root_parent}/.worktrees/{kind}-{feature}` | The qa-test / code-review worktree the operator manages by hand |
+| `worktree_base` | `{root_parent}/.worktrees/{project}/{feature}` | The worktree every session for a feature runs in |
+| `orchestrator_worktree_base` | `{root_parent}/{project}-wt/{branch_type}-{branch_local}` | Deprecated pre-3b per-branch layout; only `orchestratorWorktreePath` reads it, and that helper warns on use |
+| `handler_worktree_base` | `{root_parent}/.worktrees/{kind}-{feature}` | Deprecated pre-3b per-kind layout; only `handlerWorktreePath` reads it, and that helper warns on use |
 
 Placeholders:
 
@@ -453,16 +480,17 @@ Placeholders:
 | `{root}` | Registered project's `root_path` (absolute) |
 | `{root_parent}` | `dirname(root_path)` |
 | `{project}` | Registered project name (falls back to `basename(root_path)` if unset) |
-| `{branch}` | Full branch name (orchestrator only), e.g. `autonomous/foo` |
-| `{branch_type}` | First slash-segment of branch (orchestrator only), e.g. `autonomous` |
-| `{branch_local}` | Branch name with first slash-segment stripped (orchestrator only), e.g. `foo` |
-| `{kind}` | `qa-test` or `code-review` (handler only) |
-| `{feature}` | Pipeline-row feature slug (handler only) |
+| `{branch}` | Full branch name (branch-context templates only — `worktree_base` substitutes `""`), e.g. `autonomous/foo` |
+| `{branch_type}` | First slash-segment of branch (branch-context templates only), e.g. `autonomous` |
+| `{branch_local}` | Branch name with first slash-segment stripped (branch-context templates only), e.g. `foo` |
+| `{kind}` | `qa-test` or `code-review` (report paths only) |
+| `{feature}` | Pipeline-row feature slug |
+| `{config_dir}` | `paths.configDir` |
 
-Override a template with an absolute path to ignore `{root_parent}`. Example override that pins all handler-style worktrees to a single shared directory regardless of project:
+Override a template with an absolute path to ignore `{root_parent}`. Example override that pins every feature worktree to a single shared directory regardless of project:
 
 ```json
-{ "handler_worktree_base": "/Users/me/work/wt/{kind}-{feature}" }
+{ "worktree_base": "/Users/me/work/wt/{project}/{feature}" }
 ```
 
 ---
@@ -525,19 +553,21 @@ CLI flags override annotations — useful for one-off overrides without editing 
 
 ```bash
 pipeline queue-plan <project> <plan-file-path> \
-  [--branch <name>] [--depends <slug,...>] [--target-branch <name>] \
-  [--type dev|research|review|test] [--r-model …] [--d-model …]
+  [--branch <name>] [--depends <slug,...>] [--waits-on <slug>] [--base-branch <name>] \
+  [--target-branch <name>] [--title <text>] [--type dev|research|review|test] \
+  [--r-model …] [--d-model …] [--q-model …] [--rvw-model …] \
+  [--r-effort …] [--d-effort …] [--q-effort …] [--rvwe …]
 ```
 
 The plan-file path can be:
 
 1. **Absolute** — used as-is.
 2. **Relative with a slash** — resolved against the cwd.
-3. **Bare filename** — resolved under the project's plans directory (see precedence below).
+3. **Bare filename** — resolved under `<projectRoot>/plans`.
 
 Whatever resolution wins, the **absolute path** is stored on the row. Every downstream consumer (session-gen, orchestrator, merge) reads it from there — no re-resolution, no convention drift.
 
-**Plans-directory precedence** (used by `resolvePlansDir()` in `src/plans-resolver.mjs`; every consumer routes through this helper — no second implementation):
+**Plans-directory precedence** (used by `resolvePlansDir()` in `src/plans-resolver.mjs`; every downstream consumer routes through this helper — `queue-plan` itself is the one exception, joining bare filenames under `<projectRoot>/plans`):
 
 1. `cfg.plansDirs[<project>]` from `~/.pipeline/config.json` — a map of project name to template string. Set via `pipeline project-add --plans-dir <path>` or `project-update --plans-dir <path>`. The full placeholder vocabulary is honoured. Wins per-project.
 2. Project row's `plans_dir` column (legacy; pre-`plansDirs` installs). Cleared on every `project-update`; new writes go to the config map. Still read for backward compatibility.
@@ -553,15 +583,15 @@ Whatever resolution wins, the **absolute path** is stored on the row. Every down
 | `dev` (default) | You have a plan, want it implemented + tested | `queued` → `dev` |
 | `research` | You want investigation + a refined plan written before any code | `queued` → `research` |
 | `review` | The work is done elsewhere (e.g. an external PR), you just want a code review | `queued` → `review` |
-| `test` | Reserved — not picked up by the orchestrator today (see "Session types" below) |
+| `test` | Reserved — a `test` row is spawnable, but nothing routes a row there by default (see "Session types") | `queued` → `test` |
 
 A research row can hand off to a dev row via `pipeline research-complete <project> <research-feature> <dev-feature> <dev-plan>`, chaining the lifecycle.
 
 ### What happens after queue
 
 - Row lands in the DB at the stage you queued for (default `queued`).
-- Orchestrator polls (default every 2s) and picks it up if no deps block it.
-- Worktree is created at `{root_parent}/{project}-wt/autonomous-{plan-stem}` (overridable, see "Worktree paths").
+- Orchestrator polls (default every 30s, `--interval`) and picks it up if no deps block it.
+- Worktree is created at `{root_parent}/.worktrees/{project}/{feature}` (overridable via `worktree_base`, see "Worktree paths").
 - `claude -p` is spawned with the session file (generated from the bundled template + your plan content).
 - Stage advances on session exit; reaper auto-requeues on transient failures (capped by `dev_retries`).
 - Watch progress in `pipeline dashboard tui` / `pipeline dashboard web` or via `/pipeline`.
@@ -572,11 +602,10 @@ A research row can hand off to a dev row via `pipeline research-complete <projec
 
 `queue-plan` resolves a row's `target_branch` via this precedence chain — first hit wins:
 
-1. Row's `target_branch` column (set explicitly at queue time / admin override).
-2. Operator's `--target-branch` flag on `queue-plan`.
-3. Plan file's `*Target-Branch: <name>*` annotation.
-4. `detectDefaultBranch(projectRoot)` — `git symbolic-ref refs/remotes/origin/HEAD`, then `git config init.defaultBranch`.
-5. `DEFAULT_TARGET_BRANCH_FALLBACK` (`"main"`, exported from `src/cli/helpers.mjs`).
+1. Operator's `--target-branch` flag on `queue-plan`.
+2. Plan file's `*Target-Branch: <name>*` annotation.
+3. `detectDefaultBranch(projectRoot)` — `git symbolic-ref refs/remotes/origin/HEAD`, then `git config init.defaultBranch`.
+4. `DEFAULT_TARGET_BRANCH_FALLBACK` (`"main"`, exported from `src/cli/helpers.mjs`).
 
 Once a row has `target_branch` stored, the column wins — the chain only runs at queue time. Hardcoded `"master"` is a defect; route through `detectDefaultBranch` instead.
 
@@ -587,7 +616,7 @@ Once a row has `target_branch` stored, the column wins — the chain only runs a
 3. Plan file's `*Target-Branch: <name>*` annotation, read from the row's `plan_file` basename (else `<feature>.md`) in `plansDir`, then `plansDir/complete/` so a resumed merge still finds a plan already moved. A value naming the source branch or starting `autonomous/` is ignored, as at queue time.
 4. `origin/HEAD`, then `git config init.defaultBranch` — both reported as tier `default`.
 
-Both chains share one annotation parser (`planTargetBranch`, exported from `src/cli/queue.mjs`). A resolved target with neither a local ref nor an `origin/<target>` ref is refused before any signal collection, naming the target and the tier that supplied it — without that check an unknown target surfaces as a missing *source* branch, since `merge-base --is-ancestor <target> <branch>` exits 128 on an unknown revision. The resolved block prints the tier as `targetBranch: <name> (tier: <flag|row|plan|default>)`.
+Both chains share one annotation parser (`planTargetBranch`, exported from `src/plans/target-branch.mjs`). A resolved target with neither a local ref nor an `origin/<target>` ref is refused before any signal collection, naming the target and the tier that supplied it — without that check an unknown target surfaces as a missing *source* branch, since `merge-base --is-ancestor <target> <branch>` exits 128 on an unknown revision. The resolved block prints the tier as `targetBranch: <name> (tier: <flag|row|plan|default>)`.
 
 `warnUnrecognisedTargetPrefix` emits a one-line warning (not error) when the resolved target carries a prefix not in `cfg.recognised_branch_types` (default `["autonomous", "interactive"]`). `lintTargetBranchProse` is the separate check that errors when plan prose mentions a target branch without an annotation.
 
@@ -603,27 +632,26 @@ Before a row is inserted, `target_branch` is validated with `git check-ref-forma
 
 ### Prose-without-annotation lint
 
-When queueing a plan with no `*Target-Branch:` annotation, the plan body is scanned for prose patterns suggesting a non-main branch was intended:
-- Substring `feature/` (case-sensitive)
+When queueing a plan with no `*Target-Branch:` annotation, the plan body (everything from the first blank line or `## ` heading onwards) is scanned for prose suggesting a non-main branch was intended:
 - Pattern `target.{0,5}branch` (case-insensitive)
-- Backticked branch references containing `feature/`
 
-If a suspicious match is found, queueing fails with an error pointing at the offending line. Resolve by either adding the annotation or passing `--target-branch main` explicitly to confirm intent.
+If a match is found, queueing fails with an error pointing at the offending line. Resolve by either adding the annotation or passing `--target-branch main` explicitly to confirm intent.
 
 ---
 
 ## Merge layer
 
-`skills/merge/merge.mjs` runs the squash-merge pipeline: rebase → verify DoD → squash merge → move plans → project commit → smoke check. Invoked by the `/merge` skill:
+`skills/merge/scripts/merge.mjs` runs the squash-merge pipeline: rebase → verify DoD → squash merge → move plans → project commit → smoke check. Invoked by the `/merge` skill:
 
 ```bash
-node plugins/pipeline/skills/merge/merge.mjs \
+node plugins/pipeline/skills/merge/scripts/merge.mjs \
   --branches autonomous/feat-a,autonomous/feat-b \
   --project-dir /path/to/project \
   [--plans-dir /path/to/plans] \
   [--target-branch main] \
   [--session-slug merge_20260608-1430] \
-  [--skip-smoke] [--skip-testing] [--dry-run]
+  [--parent <umbrella-plan>] \
+  [--skip-smoke] [--skip-testing] [--dry-run] [--no-rebase]
 ```
 
 Plan file paths are read from the pipeline DB row (stored at queue time). `--plans-dir` is used only as a fallback for rows that predate DB-stored paths. Default: `<project-dir>/plans/`.
@@ -642,11 +670,11 @@ Plan file paths are read from the pipeline DB row (stored at queue time). `--pla
 | Transition | Gate | Enforced by |
 |------------|------|-------------|
 | research → queued(dev) | Plan written + no `[BLOCKER]` + session complete | Research session |
-| dev → queued(test) | Unconditional | Dev session |
+| dev → queued(review) | Unconditional | Dev session |
 | test → merge | All tests pass + no manual steps | Test session |
 | test → manual | All tests pass + manual steps identified | Test session |
 | manual → merge | Human confirms physical steps done | Human via `/pipeline done` |
-| any → main | All plan items `✓` + QA Pass = `true` + stage = `merge` | `/merge` (hard stop on failure) |
+| any → main | All plan items `✓` + row at `stage=merge` with a non-null `qa_pass` | `/merge` (hard stop on failure) |
 
 ### DoD — plan-files check (`verifyPlanFilesInDiff`)
 
@@ -671,14 +699,14 @@ The merge continues; the operator is responsible for confirming those files were
 
 | Failure | Result |
 |---------|--------|
-| Dev session exits non-zero | Stage stays `dev`; no test session spawned; notification sent |
+| Dev session exits non-zero | Reaper advances the row to `review` when within retry budget and the branch has work; otherwise parks at `manual` with `[dev-no-handoff]`; notification sent |
 | Test session exits non-zero | Partial report written; QA Pass set to `false`; notification sent |
 | Orchestrator spawn fails | Stage reverted to `queued`; `[spawn-failed]` in notes; notification sent |
 | Resolved branch equals the target/default branch | Spawn refused before launch; row parked at `manual` with `[branch-equals-target]`; notification sent (never commits to the merge destination) |
 | Research produces no plan | No chain; human notified |
 | Research has `[BLOCKER]` | No chain; notification names the blocking question |
-| `/merge` — QA Pass is not `true` | Hard stop; merge refused |
-| `/merge` — stage is `manual` | Hard stop; run `/pipeline done` first |
+| `/merge` — row at `stage=merge` but `qa_pass` is `NULL` | Hard stop; merge refused |
+| `/merge` — `rebase_required=1` on the row | Hard stop; rebase by hand, then `pipeline rebase-required-set <project> <feature> 0` |
 
 ### Merge recovery — orphaned state
 
@@ -686,7 +714,7 @@ The merge runner rolls back on abort. If state persists after a merge failure, r
 
 ```bash
 # Orphaned progress entry
-pipeline progress-delete <mem-dir> <slug>
+pipeline progress-delete <project> <slug>
 
 # Stale worktree
 git worktree remove --force <path>
@@ -695,7 +723,7 @@ git worktree remove --force <path>
 git branch -D <branch>
 
 # Pipeline row stuck at merge stage
-pipeline stage-set <project-root> <slug> done
+pipeline stage-set <project> <slug> done
 ```
 
 Re-running `/merge <branch>` after cleanup picks up where it left off — progress entries are idempotent and the runner detects already-integrated branches.
@@ -715,7 +743,7 @@ Re-running `/merge <branch>` after cleanup picks up where it left off — progre
 
 ## Session templates
 
-The orchestrator spawns each session against a markdown template bundled with the plugin: `dev-session.md`, `review-session.md`, `test-session.md`, `research-session.md`, `governor-session.md`. Templates live in `plugins/pipeline/templates/` and contain `{{...}}` placeholders that `session-gen.mjs` expands at queue time. The generated session file lands in `<project-root>/sessions/<type>-<date>-<plan-stem>.md`.
+The orchestrator spawns each session against a markdown template bundled with the plugin: `dev-session.md`, `review-session.md`, `test-session.md`, `research-session.md`, `governor-session.md`. Templates live in `plugins/pipeline/templates/` and contain `{{...}}` placeholders that `session-gen.mjs` expands at spawn time. The generated session file lands in `<project-root>/sessions/<type>-<date>-<feature>.md`.
 
 To override with your own templates, point `session_templates_dir` at a directory:
 
@@ -735,11 +763,19 @@ Placeholders the templates may reference:
 | `{{FEATURE}}` | Pipeline-row feature slug |
 | `{{PLAN_PATH}}` | Absolute path to the plan file |
 | `{{PLAN_CONTENT}}` | Full text of the plan file |
-| `{{CORRELATION_ID}}` | Session slug (`<type>-<date>-<plan-stem>`) — stable per session file |
+| `{{CORRELATION_ID}}` | Session slug (`<type>-<date>-<feature>`) — stable per session file |
 | `{{BRANCH}}` | Branch name (e.g. `autonomous/feat-x`) |
 | `{{TARGET_BRANCH}}` | Merge target (default `main`) |
 | `{{CWD}}` | Worktree path the session runs in |
 | `{{REVIEW_SKILL}}` | `review.skill` + `review.deep_flag` joined and trimmed |
+| `{{PROGRESS_TRACKING}}` | Shared progress-tracking block (`templates/_progress-tracking.md`) |
+| `{{PIPELINE_BIN}}` | Quoted node binary + `~/.local/bin/pipeline-resolver.mjs` entry point |
+| `{{WORKTREE}}` | Feature worktree path |
+| `{{CODE_REVIEW_WT}}` / `{{QA_TEST_WT}}` | Legacy aliases of `{{WORKTREE}}` |
+| `{{REVIEW_REPORTS_DIR}}` / `{{TEST_REPORTS_DIR}}` | `<worktree>/reports` / `<worktree>/test-reports` |
+| `{{REVIEW_PUBLISH_BRANCH}}` / `{{TEST_PUBLISH_BRANCH}}` | `code-review/<feature>` / `qa-test/<feature>` |
+| `{{REVIEW_RETRIES}}` / `{{DEV_RETRIES}}` / `{{DEV_RETRY_BUDGET}}` | Retry counters read off the row |
+| `{{PRIOR_TEST_FEEDBACK}}` | Prior-test-report block injected on a QA bounce-back (empty on the first attempt) |
 
 Unknown placeholders are left untouched in output so missed substitutions are visible.
 
@@ -749,7 +785,7 @@ Unknown placeholders are left untouched in output so missed substitutions are vi
 
 ### UserPromptSubmit hook registration
 
-The pipeline plugin wires a `UserPromptSubmit` hook into Claude Code that fires on every user prompt. This hook is registered in `plugins/pipeline/hooks/hooks.json` and dispatches to a Node.js script via the polyglot wrapper.
+The pipeline plugin registers three events in `plugins/pipeline/hooks/hooks.json`: `UserPromptSubmit` (fires on every user prompt), `SessionStart`, and `PreToolUse`. Each dispatches to a Node.js script.
 
 **Registration schema (`hooks.json`):**
 ```json
@@ -763,6 +799,20 @@ The pipeline plugin wires a `UserPromptSubmit` hook into Claude Code that fires 
             "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/run-hook.cmd\" user-prompt-submit",
             "async": false
           }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [
+          { "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/session-start.mjs\"" }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "hooks": [
+          { "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/pre-tool-use.mjs\"" }
         ]
       }
     ]
@@ -805,9 +855,9 @@ Entry to remove:
 
 ### Hook logging
 
-The mjs hook appends one line per invocation to `~/.pipeline/logs/user-prompt-submit.log`:
+The mjs hook appends one JSON line per invocation to `~/.pipeline/logs/user-prompt-submit.log`:
 ```
-<iso-timestamp> <session-id> <cwd> <keepalive> <transcript-size> <prev-any-ts> <injected-templates>
+{"ts":"<iso-timestamp>","sessionId":"<id>","cwd":"<cwd>","isKeepalive":false,"transcriptSize":<bytes>,"prevAnyTs":"<ts>","injected":true}
 ```
 
 On error, appends:
@@ -821,12 +871,10 @@ No rotation — operator truncates manually if needed during the soak phase; pha
 
 The Python hook crashes on missing template files. The mjs hook wraps each template read in try/catch and falls back to empty string if missing. This divergence is intentional for robustness — template files live outside the plugin tree and may not exist on all user machines.
 
-**Affected templates:**
+**Affected template:**
 - `~/.claude/templates/session-context.md`
-- `~/.claude/templates/compact-resume.md`
-- `~/.claude/templates/session-checkpoint.md`
 
-If any template is missing, its section is skipped but the hook still emits valid JSON stdout.
+If the template is missing, that section is skipped but the hook still emits valid JSON stdout.
 
 ### Hooks pattern for future plugins
 
@@ -843,7 +891,7 @@ exec node "${SCRIPT_DIR}/../src/hooks/hook-name.mjs" "$@"
 
 ## Session types
 
-The orchestrator supports four session types: `dev`, `research`, `review`, `test`. They share one worktree per pipeline row (git semantics: one branch → one worktree).
+The orchestrator supports four session types: `dev`, `research`, `review`, `test`. They share one worktree per feature (git semantics: one branch → one worktree).
 
 **`test` is bypassed in practice.** Orchestrator-spawned test sessions have proven low-value to date. The type stays in the schema so it can be re-enabled later — for example, having a test session write scratch tests to pull on threads surfaced by dev. For now, treat the test stage as a manual gate the operator advances.
 
@@ -854,9 +902,9 @@ The orchestrator supports four session types: `dev`, `research`, `review`, `test
 - No `[BLOCKER]` in any produced plan's Open Questions
 - All progress items complete
 
-If gate passes: sets pipeline row to `queued` with `type=dev`, notifies, and exits. Orchestrator spawns the dev session on the next poll cycle. If gate fails: notifies and does not chain.
+If gate passes: when the dev feature differs, marks the research row `done` and adds a new row at `queued` for the dev feature (no `type=` hint, so the orchestrator spawns dev); when it is the same feature, re-queues that row. Then notifies and exits. Orchestrator spawns the dev session on the next poll cycle. If gate fails: notifies and does not chain.
 
-**Dev** — before generating the test session, closes all documentation gaps: flips `(needs testing)` items to `✓` in the plan, removes resolved Open Questions, updates affected docs. Then sets pipeline row to `queued` with `type=test` and exits.
+**Dev** — before generating the review session, closes all documentation gaps: flips `(needs testing)` items to `✓` in the plan, removes resolved Open Questions, updates affected docs. Then sets pipeline row to `queued` with `type=review` and exits.
 
 **Test** — updates the DB based on outcome:
 - All pass, no manual steps → stage `merge`, QA Pass `true`
@@ -894,7 +942,7 @@ Governor config:
 | `governor.project` | `null` | Registered project name to attribute governor sessions to (`pipeline project-add` first) |
 | `governor.template_path` | `null` → bundled | Override path for `governor-session.md`. Bundled template ships in `plugins/pipeline/templates/`. |
 | `governor.reports_dir` | `<projectRoot>/reports/` | Where the session writes `governance-<date>.md` / `status-<date>.md`. Used by the rate-limit check. |
-| `governor.session_dir` | `<projectRoot>/sessions/` | Where the orchestrator writes generated `gov-<ts>.md` session files |
+| `governor.session_dir` | `<projectRoot>/sessions/` | Where the orchestrator writes generated `gov-<ts>.md` / `gov-monthly-<ts>.md` session files |
 | `governor.log_dir` | `<projectRoot>/logs/` | Where the spawned governor process redirects stdout/stderr |
 
 ---
@@ -960,48 +1008,65 @@ cd plugins/pipeline && npm test
 
 | Subcommand | Purpose |
 |------------|---------|
-| `setup` | Interactive wizard — configure models, Slack, autostart, and PATH alias |
-| `doctor` | Pre-flight checks: Node version, claude CLI, claudeBase, repos/, state dir |
+| `setup` | Interactive wizard — configure models, review skill, Slack channels, dashboard, projects, worktree layout, autostart, and PATH alias |
+| `doctor` | Pre-flight checks: Node version, claude CLI, dirs, DB, config, channels, hooks, projects, worktree layout, ports, governor env |
+| `plugin-root` | Print the plugin's absolute root directory |
+| `config-get <key>` | Print a single top-level config value (empty output if unset) |
+| `dashboard tui [--refresh-ms N]` | Launch the TUI dashboard |
+| `dashboard web [--host H] [--port P]` | Launch the web dashboard at `/pipeline` |
 
 ### Pipeline rows
 
 | Subcommand | Purpose |
 |------------|---------|
-| `stage-set <root> <feature> <stage>` | Set a pipeline row's stage |
-| `stage-get <root> <feature>` | Get current stage for a feature |
-| `row-add <root> <feature> <plan-file> <stage>` | Add a new pipeline row |
-| `rows <root> [--format json\|plain\|md]` | List all rows |
-| `row-delete <root> <feature>` | Remove a pipeline row |
-| `retry-budget-set <root> <feature> <budget>` | Set the max dev retry budget for a feature (overrides config default) |
-| `done <root> <feature>` | Mark a feature complete (only valid from `manual` stage — `stage-set … done` works from any stage, but directly advancing a non-manual row to done is unusual and skips all quality gates) |
+| `stage-set <project> <feature> <stage>` | Set a pipeline row's stage (`--qa-pass` required for `merge`/`manual`; also `--notes`, `--branch`, per-role model/effort flags, `--review-verdict`, `--review-retries`, `--depends`, `--rebase-required`, `--target-branch`) |
+| `stage-get <project> <feature>` | Get current stage for a feature |
+| `row-add <project> <feature> <plan-file> <stage>` | Add a new pipeline row |
+| `rows <project> [--format json\|plain\|md]` | List all rows (`--exclude-stage`, `--feature` narrow the list) |
+| `row-delete <project> <feature>` | Remove a pipeline row |
+| `row-audit <project> [--verbose]` | Report rows in `merge`/`manual` with `qa_pass=NULL` |
+| `retry-budget-set <project> <feature> <budget> [--review]` | Set the max dev retry budget (with `--review`, the review budget, resetting `review_retries`) |
+| `done <project> <feature>` | Advance a `manual` row to `merge` once the operator has completed the physical steps |
 | `cycle-log <project> [--feature <slug>] [--limit N] [--format json\|plain]` | Per-session timing + spend + outcome log (one row per finished session) |
-| `next-actions <root>` | Show what the orchestrator would act on next |
-| `dev-complete <project> <plan-file> <feature> --pipeline <path>` | Advance dev → review |
-| `test-complete <project> <feature> --pipeline <path>` | Advance test stage |
-| `review-complete <root> <feature> --report <path> --verdict <v>` | Advance review |
-| `research-complete <root> <rf> <df> <dp>` | Advance research → dev |
+| `next-actions <project>` | Show what the orchestrator would act on next |
+| `active-progress <project> <feature>` | Print the active progress slug matching a feature |
+| `backlog-scan <project> [<plans-dir>]` | Scan a plans directory for plans that are not yet rows |
+| `backlog-sync <project>` | Reconcile backlog rows against the plans directory |
+| `plans-list [<project>] [--status active\|complete]` | List plan files |
+| `plans-search <query>` | Search plan files |
+| `dev-complete <project> <plan-file> <feature> --title <t> --message <m>` | Advance dev → `queued` with `type=review` |
+| `test-complete <project> <feature> --branch-slug <s> --report <path> --qa-pass <bool> --has-manual-tests <bool> --title <t> --message <m>` | Advance the test stage (`--publish-branch` optional) |
+| `review-complete <project> <feature> --report <path> --verdict <v> --title <t> --message <m>` | Advance review — `ready_to_ship` → `merge`, `needs_work` → `dev`, `abort` → `manual` (`--publish-branch`, `--force-approve`, `--correlation-id` optional) |
+| `research-complete <project> <rf> <df> <dp>` | Advance research → dev |
 
 ### Progress
 
 | Subcommand | Purpose |
 |------------|---------|
-| `progress-create <mem-dir> <slug> [--steps ...]` | Create a progress file |
-| `progress-get <mem-dir> <slug> [--format md\|json\|tasks]` | Get progress content |
-| `progress-mark <mem-dir> <slug> <step> <state>` | Mark a step in-progress or done |
-| `progress-delete <mem-dir> <slug>` | Delete a progress file |
-| `progress-list-active <mem-dir>` | List active in-flight progress files |
-| `progress-note <mem-dir> <slug> <text>` | Append a timestamped note |
-| `progress-set-pid <mem-dir> <slug> <pid>` | Record the session PID |
+| `progress-create <project> <slug> [--steps ...]` | Create a progress file |
+| `progress-get <project> <slug> [--format md\|json\|tasks]` | Get progress content |
+| `progress-mark <project> <slug> <step> <state>` | Mark a step in-progress or done |
+| `progress-resume <project> <slug>` | Print the resume point for a progress file |
+| `progress-delete <project> <slug>` | Delete a progress file |
+| `progress-list-active [<project>\|--all]` | List active in-flight progress files |
+| `progress-snippet` | Print the active-progress snippet block |
+| `progress-note <project> <slug> <text>` | Append a timestamped note |
+| `progress-set-pid <project> <slug> <pid>` | Record the session PID |
+
+A slug is globally unique, so the `<project>` positional is accepted but only `progress-create` actually uses it.
 
 ### Queue
 
 | Subcommand | Purpose |
 |------------|---------|
-| `queue-plan <root> <plan-file>` | Queue a plan for orchestration (`--waits-on`, `--base-branch` for chaining) |
-| `queue-cluster <root> <plan-file>...` | Queue a dependency-chained set of plans in one shot; wires `waits_on` + `base_branch` from each plan's `*Prerequisites:*` |
+| `queue-plan <project> <plan-file>` | Queue a plan for orchestration (`--waits-on`, `--base-branch` for chaining) |
+| `queue-cluster <project> <plan-file>...` | Queue a dependency-chained set of plans in one shot; wires `waits_on` + `base_branch` from each plan's `*Prerequisites:*` |
 | `queue-name-derive <brief>` | Derive a slug from a description |
 | `queue-branch-extract <plan-file>` | Extract branch from plan frontmatter |
+| `queue-deps-extract <plan-file>` | Extract the prerequisite declaration from a plan |
+| `queue-target-extract <plan-file>` | Extract the target branch from a plan |
 | `queue-title-extract <plan-file>` | Extract PR title from plan's `*Title:*` annotation |
+| `queue-mode-detect <plans-dir> <arguments>` | Decide single-plan vs cluster mode from the arguments given |
 
 ### Other
 
@@ -1009,9 +1074,14 @@ cd plugins/pipeline && npm test
 |------------|---------|
 | `notify --title <t> --message <m>` | Publish a notification envelope (forwarded if `hooks.on_notification` is set) |
 | `session-generate <project> <plan-file> <type>` | Generate a session file from template |
+| `spawn-merge <project> <feature>` | Spawn a merge session for a row at `stage=merge` |
 | `row-get <project> <feature>` | Read the full row as JSON — includes `pr_title`, `d_model`, `target_branch`, and all other fields. Preferred over the piecemeal column commands in hook scripts. |
-| `target-branch-get <root> <feature>` | Read the target_branch for a row (deprecated — use `row-get`) |
-| `pr-title-get <root> <feature>` | Read the pr_title for a row (deprecated — use `row-get`) |
+| `target-branch-get <project> <feature>` | Read the target_branch for a row (deprecated — use `row-get`) |
+| `pr-title-get <project> <feature>` | Read the pr_title for a row (deprecated — use `row-get`) |
+| `rebase-required-set <project> <feature> <0\|1>` | Set the row's `rebase_required` flag |
+| `plan-family <project> <parent> [--format json\|plain]` | List an umbrella plan and its children with row stages |
+| `plan-family-sweep <project> [--apply]` | Move a completed umbrella plan + children into `complete/` (dry-run by default) |
+| `lint-plan-family <project> [--plans-dir <path>] [--json]` | Lint plans for `*Parent:*` annotation hygiene; exits 1 on violations |
 
 ---
 
@@ -1022,15 +1092,16 @@ plugins/pipeline/
   bin/pipeline.mjs          CLI entry point
   src/
     setup/
-      wizard.mjs            Interactive setup wizard (8 steps)
+      wizard.mjs            Interactive setup wizard (11 steps)
       doctor.mjs            Environment pre-flight checks
       autostart.mjs         Platform autostart install/verify
-    config.mjs              Config loader with env-override layer
-    config-defaults.mjs     PIPELINE_DEFAULTS (models, notifications, review)
+    config-defaults.mjs     PIPELINE_DEFAULTS (models, tiers, notifications, review)
     pipeline-config.mjs     Merged config resolver
     paths.mjs               Platform-appropriate state/log dirs (~/.pipeline/)
-  scripts/
-    pipeline-db/            SQLite access layer
+    hooks/                  UserPromptSubmit hook implementation (session-start / pre-tool-use live in hooks/ at the plugin root)
+    dashboard/              TUI + web dashboards
+    cli/                    Subcommand implementations
+    db/                     SQLite access layer
       connection.mjs        DB open + single folded migration (Node 22 node:sqlite)
       rows.mjs              Pipeline row CRUD + CAS requeue
       progress.mjs          Progress file tracking
@@ -1041,13 +1112,14 @@ plugins/pipeline/
       index.mjs             Main poll loop + startup/shutdown
       spawn.mjs             Worktree creation + claude -p spawn
       reaper.mjs            Process exit handling + auto-requeue
+      deps.mjs              Dependency gate (soft + waits_on)
+      landed.mjs            Four-signal landing check (ancestor → cherry → pr-merged → branch-deleted)
       governor.mjs          Governor scheduler — daily + monthly governance sessions (see "Governor and metrics")
-      discovery.mjs         Project discovery (pipeline_enabled flag)
       state-file.mjs        Orchestrator state file (~/.pipeline/orchestrator.state.json)
     session-gen.mjs         Session file template engine
     publisher.mjs           Envelope writer + on_notification / on_merge_ready hook dispatcher
-    merge/                  Branch merge helpers
     metrics/                Spend analytics + governance reporting (carried-along surface — see "Governor and metrics")
+  skills/merge/scripts/     Merge runner (merge.mjs, run-merge.mjs, rebase, smoke, plan-files)
 ```
 
 ---
@@ -1068,7 +1140,7 @@ Or pass at queue time:
 pipeline queue-plan <project> <plan-file> --depends auth-refactor,theme-context
 ```
 
-Update an existing row's dependencies: `pipeline stage-set <project-root> <feature> <stage> --depends dep1,dep2`
+Update an existing row's dependencies: `pipeline stage-set <project> <feature> <stage> --depends dep1,dep2`
 
 Clear dependencies: `--depends ""`
 
@@ -1119,4 +1191,4 @@ cat ~/.pipeline/orchestrator.state.json
 
 **DB locked errors:** The orchestrator and CLI share WAL-mode SQLite. If you see `SQLITE_BUSY`, a previous process may have crashed mid-transaction — wait a few seconds and retry.
 
-**Notifications not reaching downstream:** Check `<pipeline-state-dir>/notifications/` — the envelope files should be there. If they are, the publisher is doing its job; the issue is your `hooks.on_notification` hook. Run it manually against one of the envelope files to debug: `node <your-hook> <envelope.json>`. Stdout/stderr from the hook is inherited so any errors print to the orchestrator log.
+**Notifications not reaching downstream:** Check `<pipeline-state-dir>/notifications/` — the envelope files should be there. If they are, the publisher is doing its job; the issue is your `hooks.on_notification` hook. Run it manually against one of the envelope files to debug: `node <your-hook> <envelope.json>`. When the publisher spawns the hook, its stdout/stderr go to `<pipeline-state-dir>/notifications/hook.log`.

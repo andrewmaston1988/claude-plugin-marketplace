@@ -2,13 +2,13 @@
 
 ## Env var ↔ config key mapping
 
-The bridge resolves each token in two steps: env var first, then `config.json` fallback. Neither value is ever written to disk by the bridge itself.
+The listed settings resolve in two steps: env var first, then `config.json` fallback. Env var values are not written to disk by the bridge.
 
 | Env var | Config key | Required | Notes |
 |---|---|---|---|
 | `SLACK_BOT_TOKEN` | `tokens.bot` | Yes | Bot token (`xoxb-…`). Used for all API calls. |
 | `SLACK_APP_TOKEN` | `tokens.app` | Yes (Socket Mode) | App-level token (`xapp-…`). Required when running in Socket Mode. |
-| `CLAUDE_CWD` | `claude.cwd` | No | Sets the working directory for the `claude` subprocess. Defaults to the directory where the bridge process was started. |
+| `CLAUDE_CWD` | `claude.cwd` | Yes (config or env) | Sets the working directory for the `claude` subprocess; `claude.cwd` is required unless this env var is set. |
 
 **Priority**: env var wins over config value. Setting `SLACK_BOT_TOKEN` in the shell overrides whatever is in `config.json`, so secrets can be injected at runtime without modifying any file on disk.
 

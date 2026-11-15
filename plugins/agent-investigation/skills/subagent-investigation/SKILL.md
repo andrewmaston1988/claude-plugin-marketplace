@@ -73,7 +73,7 @@ These are surgical reads — each returns just the relevant slice, not the whole
 claude-investigate report <agent-id>
 ```
 
-~39× compression vs raw JSONL (1 MB → ~30 KB). Bundles summary + tools + ngrams + agents + skills + errors + retries + pivots + phases + patterns.
+~30× compression vs raw JSONL (1 MB → ~30 KB). Bundles summary + tools + ngrams + agents + skills + errors + retries + pivots + phases + patterns.
 
 ### Fallback: Grep (plugin absent)
 

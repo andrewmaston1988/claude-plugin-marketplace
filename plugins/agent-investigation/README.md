@@ -5,16 +5,20 @@ Investigate agent transcripts — locate, summarize, find errors, retries, pivot
 ## Installation
 
 ```bash
-claude plugins install agent-investigation
+claude plugin install agent-investigation@andrewmaston1988-claude-plugins
 ```
 
 ## Usage
 
 ### CLI Entry Point
 
+Nothing puts `claude-investigate` on `PATH` — the plugin declares no `bin` field — so invoke the script directly:
+
 ```bash
-claude-investigate <subcommand> [args...]
+node <plugin-dir>/bin/claude-investigate.mjs <subcommand> [args...]
 ```
+
+`/investigate <agent-id>` runs the same entry point.
 
 #### Agent-id subcommands (auto-locates transcript)
 
@@ -39,6 +43,7 @@ claude-investigate <subcommand> [args...]
 - `compare <a.jsonl> <b.jsonl>` — Tool trajectory diff
 - `patterns <jsonl> [--out FILE]` — Candidate skill patterns (JSON)
 - `slice <jsonl> --turn N [--ctx N]` — Extract turn ± context
+- `doctor` — Check dependencies
 
 ### Slash Command
 
