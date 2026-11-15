@@ -54,15 +54,15 @@ with its session; a scenario does not.
 
 ## The read-only default
 
-Both guards are on unless you pass `--allow-writes`:
+Browser runs use both guards unless you pass `--allow-writes`; TV runs use the network guard:
 
 1. Every non-GET, non-HEAD, non-OPTIONS request is failed at the network layer and recorded in `network.json`.
 2. A `click` or `tap` whose target submits a non-GET form is refused before any input is dispatched — the step
    records the failure type `write_blocked`.
 
 Neither layer stops a **GET that has a side effect**. So point the probe at a fixture or a local dev server,
-never at a live service. `--allow-writes` turns both layers off for one run: use it only on a page you own and
-can reset.
+never at a live service. For browser runs, `--allow-writes` turns both layers off. On TV it allows
+intercepted writes to `tv.testOrigin` only. Use it only on a page you own and can reset.
 
 ## Tizen TV
 
@@ -322,7 +322,7 @@ steps:
 | "The viewport was set, so touch is on." | Read `hover` and `pointer` in `env.json`. One real tool reported `hover:hover` at 390×844 — the viewport took, the pointer did not. |
 | "The step failed, so the app is broken." | `inconclusive` and the typed failures mean the probe could not judge. Check the target before blaming the app. |
 | "It's only a GET, the guard can't stop it anyway." | Correct — which is why the URL must be a fixture or a local dev server, never a live service. |
-| "`--allow-writes` will get past the refusal." | It turns off both layers for the whole run. Only on a page you own and can reset. |
+| "`--allow-writes` will get past the refusal." | Browser runs turn off both layers; TV writes remain limited to `tv.testOrigin`. Only on a page you own and can reset. |
 | "The tree has no button, so the button is missing." | With an `aria-modal` dialog open the tree holds only the dialog. Re-capture with `--include-background`. |
 | "The scenario validates, so it tests something." | `validate` checks shape, not intent. A run returns `needs_review` when no step asserts. |
 
