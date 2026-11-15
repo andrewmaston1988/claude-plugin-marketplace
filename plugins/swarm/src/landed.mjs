@@ -179,17 +179,38 @@ export function absorbed(base, branch, repo, gitRunner) {
 
 // 0 when the branch's work is held elsewhere; otherwise a count (at least 1) of
 // what destroying it would lose; Infinity when git cannot answer.
-export function unlandedCount(branch, repo, { prefix, gitRunner } = {}) {
+// `extraBases` are caller-supplied commits to try as absorption bases first — the
+// porting checkout's HEAD, which no ref on this repo's default branch holds after a
+// cherry-pick. The caller picks them; the guard on what may be a base lives there.
+export function unlandedCount(branch, repo, { prefix, gitRunner, extraBases } = {}) {
   if (typeof prefix !== "string" || !prefix) throw new TypeError("unlandedCount requires the branch prefix");
   if (typeof gitRunner !== "function") throw new TypeError("unlandedCount requires a gitRunner");
+  if (!Array.isArray(extraBases)) throw new TypeError("unlandedCount requires an extraBases array");
   try {
     if (reachable(branch, repo, prefix, gitRunner)) return 0;
-    const bases = candidateBases(repo, prefix, gitRunner);
-    for (const base of bases) {
+    const tip = gitOf(gitRunner, ["rev-parse", "--verify", `${branch}^{commit}`], repo);
+    const own = tip.status === 0 ? tip.stdout : null;
+    const extras = [];
+    const seen = new Set();
+    for (const sha of extraBases) {
+      const r = gitOf(gitRunner, ["rev-parse", "--verify", `${sha}^{commit}`], repo);
+      // A base at the branch's own tip absorbs trivially; a fast-forward port leaves a
+      // ref on that tip, which `reachable` already counts.
+      if (r.status !== 0 || !r.stdout || r.stdout === own || seen.has(r.stdout)) continue;
+      seen.add(r.stdout);
+      extras.push(r.stdout);
+    }
+    for (const base of extras) {
       if (absorbed(base, branch, repo, gitRunner)) return 0;
     }
-    if (!bases.length) return Infinity;
-    const cherry = gitOf(gitRunner, ["cherry", bases[0], branch], repo);
+    const defaults = candidateBases(repo, prefix, gitRunner);
+    for (const base of defaults) {
+      if (seen.has(base)) continue;
+      if (absorbed(base, branch, repo, gitRunner)) return 0;
+    }
+    // The cherry count is defined against the default branch, never a caller's base.
+    if (!defaults.length) return Infinity;
+    const cherry = gitOf(gitRunner, ["cherry", defaults[0], branch], repo);
     if (cherry.status !== 0) return Infinity;
     return Math.max(1, lines(cherry.stdout).filter((l) => l.startsWith("+")).length);
   } catch {

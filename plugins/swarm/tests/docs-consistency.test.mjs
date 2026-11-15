@@ -159,6 +159,15 @@ test("setup's projects row describes the optional hooks and mcp keys", () => {
   ok(setup.includes("Stage 7e"), "the projects row must point at the MCP stage");
 });
 
+test("row 13: README names the port nudge and that pruneNudge silences both", () => {
+  const readme = readFileSync(new URL("../README.md", import.meta.url), "utf8");
+  const paragraph = readme.split(/\r?\n\r?\n/).find((p) => p.includes("port nudge")) || "";
+  ok(paragraph, "README must name the port nudge");
+  ok(paragraph.includes("PostToolUseFailure"), "the port nudge's events must be named");
+  ok(paragraph.includes("pruneNudge"), "the silencing switch must be named");
+  ok(/silences both/.test(paragraph), "the switch must be said to silence both nudges");
+});
+
 for (const [level, description] of [
   ["low", "quick mechanical work"],
   ["medium", "balanced reasoning"],

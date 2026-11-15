@@ -16,7 +16,11 @@
       { "matcher": "Bash", "hooks": [ { "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/dispatch-gate.mjs\"" }, { "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/foreground-guard.mjs\"" } ] }
     ],
     "PostToolUse": [
-      { "matcher": "Skill|Bash", "hooks": [ { "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/skill-ack.mjs\"" } ] }
+      { "matcher": "Skill|Bash", "hooks": [ { "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/skill-ack.mjs\"" } ] },
+      { "matcher": "Bash|PowerShell", "hooks": [ { "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/port-nudge.mjs\"", "timeout": 30 } ] }
+    ],
+    "PostToolUseFailure": [
+      { "matcher": "Bash|PowerShell", "hooks": [ { "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/port-nudge.mjs\"", "timeout": 30 } ] }
     ],
     "Stop": [
       { "hooks": [ { "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/grade-nudge.mjs\"" } ] },

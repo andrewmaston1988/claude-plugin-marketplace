@@ -236,7 +236,7 @@ export function prepareIsolation(task, cfg, resultsDir, { reset = false, addTime
     // "Unlanded" is measured against the landing places a run can see — the
     // default branch and the live checkout — never this run's pinned base, which
     // predates work already merged on.
-    const unlanded = unlandedCount(branch, repo, { prefix: cfg.worktreeBranchPrefix || "swarm/", gitRunner: git });
+    const unlanded = unlandedCount(branch, repo, { prefix: cfg.worktreeBranchPrefix || "swarm/", gitRunner: git, extraBases: [] });
     if (unlanded > 0 && !reset) {
       throw new Error(
         `worktree branch '${branch}' carries ${unlanded === Infinity ? "an unknown number of" : unlanded} unlanded commit(s) — refusing to reset it ` +
@@ -306,7 +306,7 @@ export function collect(task, cfg, wt, { isChainFollower = false, isIntegrateSou
   // plan's group, so ask git as well — and only when a sweep is still possible.
   const sweepable = !changed && !(wt.reused && isChainFollower);
   if (sweepable
-    && unlandedCount(wt.branch, wt.repo, { prefix: cfg.worktreeBranchPrefix || "swarm/", gitRunner: _git }) === 0) {
+    && unlandedCount(wt.branch, wt.repo, { prefix: cfg.worktreeBranchPrefix || "swarm/", gitRunner: _git, extraBases: [] }) === 0) {
     _git(["worktree", "remove", "--force", wt.path], wt.repo, { timeout: 60000 });
     if (!isIntegrateSource) _git(["branch", "-D", wt.branch], wt.repo, { timeout: 60000 });
     // The record goes with the tree: a record still saying "ready" would name a path
