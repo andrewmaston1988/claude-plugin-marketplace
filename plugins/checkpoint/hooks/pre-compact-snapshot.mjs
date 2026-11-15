@@ -6,7 +6,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 
-import { resolveOwnStatePath, isMeaningfulState, SKELETON_MARKER } from './lib/paths.mjs';
+import { resolveOwnStatePath, isMeaningfulState, SKELETON_MARKER, docsDirPath, nowStamp } from './lib/paths.mjs';
 import { SKILL_ID, SKILL_DISAMBIGUATION } from './lib/skill-ref.mjs';
 
 // Read this much from the end of the JSONL — enough to find the last user/assistant
@@ -115,6 +115,29 @@ export function buildSkeleton(entries, trigger, sid, cwd, size) {
   return lines.join('\n');
 }
 
+// Stdout is instructions to the summariser. Budgeted: the read-first sentence
+// and the STATE path always survive; the quoted resume: line absorbs the cuts.
+const SUMMARY_INSTRUCTIONS_LIMIT = 10_000;
+
+export function buildSummaryInstructions(statePath, snapshotPath, stateBody) {
+  const readFirst = `After compaction, the first action is to Read \`${statePath}\` in full. It is the checkpoint for this session; do not rewrite it from the summary.`;
+  let out = readFirst;
+  if (snapshotPath) {
+    out += `\nA pre-compact snapshot with the last messages and tool uses is at \`${snapshotPath}\`.`;
+  }
+  const m = typeof stateBody === 'string' ? stateBody.match(/^resume:\s*(.+)$/m) : null;
+  if (m) {
+    const prefix = '\nresume: "';
+    // -1 for the closing quote, -1 for the trailing newline added at return.
+    const remaining = SUMMARY_INSTRUCTIONS_LIMIT - out.length - prefix.length - 2;
+    if (remaining > 0) {
+      const line = m[1].trim();
+      out += prefix + (line.length <= remaining ? line : line.slice(0, remaining)) + '"';
+    }
+  }
+  return out + '\n';
+}
+
 // ---- main ----
 function main() {
   let stdin = '';
@@ -136,27 +159,40 @@ function main() {
     catch { process.exit(0); }
     if (!statePath) process.exit(0); // no session_id → nothing per-session to write
 
-    // Content guard: never overwrite a non-empty per-session STATE with a
-    // skeletal backstop, regardless of age. (Replaces the old mtime-window
-    // guard, which let stale-but-rich STATE.md get clobbered by an empty
-    // snapshot — the bug that prompted this rewrite.) Per-session filenames
-    // prevent *cross-session* clobber; this guard prevents self-clobber.
-    try {
-      if (fs.existsSync(statePath) && isMeaningfulState(fs.readFileSync(statePath, 'utf8'))) {
-        process.exit(0);
-      }
-    } catch { /* fall through to write */ }
+    let stateBody = null;
+    try { if (fs.existsSync(statePath)) stateBody = fs.readFileSync(statePath, 'utf8'); } catch { /* unreadable → skeleton path */ }
+
+    // A full checkpoint is never overwritten. Instead the snapshot lands as a
+    // sibling precompact-<stamp>.md in the docs dir; '' (e.g. a CLAUDE_STATE_PATH
+    // override) skips it entirely.
+    const hasFullCheckpoint = stateBody !== null && isMeaningfulState(stateBody);
 
     let size = 0;
     try { if (transcriptPath) size = fs.statSync(transcriptPath).size; } catch {}
 
     const entries = transcriptPath ? readTranscriptTail(transcriptPath) : [];
-    try {
-      const body = buildSkeleton(entries, trigger, sid, cwd, size);
-      fs.mkdirSync(path.dirname(statePath), { recursive: true });
-      fs.writeFileSync(statePath, body, 'utf8');
-    } catch { /* never block compaction */ }
+    let snapshotPath = '';
+    if (hasFullCheckpoint) {
+      const dir = docsDirPath(statePath);
+      if (dir) {
+        const candidate = path.join(dir, `precompact-${nowStamp()}.md`);
+        try {
+          fs.mkdirSync(dir, { recursive: true });
+          const body = `# Pre-compact snapshot at ${new Date().toISOString().slice(0, 19).replace('T', ' ')}\n\n`
+            + buildSkeleton(entries, trigger, sid, cwd, size);
+          fs.writeFileSync(candidate, body, 'utf8');
+          snapshotPath = candidate;
+        } catch { /* snapshot is best-effort; never block compaction */ }
+      }
+    } else {
+      try {
+        const body = buildSkeleton(entries, trigger, sid, cwd, size);
+        fs.mkdirSync(path.dirname(statePath), { recursive: true });
+        fs.writeFileSync(statePath, body, 'utf8');
+      } catch { /* never block compaction */ }
+    }
 
+    process.stdout.write(buildSummaryInstructions(statePath, snapshotPath, stateBody || ''));
     process.exit(0);
   });
 }

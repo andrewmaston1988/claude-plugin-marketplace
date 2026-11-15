@@ -5,9 +5,10 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import os from 'node:os';
 import { shouldPickUp, buildPickupNote, classifyState } from '../session-start-compact.mjs';
-import { SKELETON_MARKER } from '../lib/paths.mjs';
+import { SKELETON_MARKER, readStateHead, latestPrecompactSnapshot, docsDirPath } from '../lib/paths.mjs';
 
 const HOOKS = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const TEMPLATE = path.resolve(HOOKS, '..', 'skills', 'checkpoint', 'templates', 'state-template.md');
 
 test('shouldPickUp: only the compact source fires', () => {
   const base = { source: 'compact', enabled: true, correlation: false };
@@ -19,13 +20,12 @@ test('shouldPickUp: only the compact source fires', () => {
   assert.equal(shouldPickUp({ ...base, correlation: true }), false);
 });
 
-test('every note names the qualified skill id and disambiguates it', () => {
-  for (const kind of ['skeleton', 'rich', 'none', 'unresolved']) {
+test('every non-rich note names the qualified skill id and disambiguates it', () => {
+  for (const kind of ['skeleton', 'none', 'unresolved']) {
     const note = buildPickupNote(kind, 'C:/x/STATE_a_1.md');
     // Bare "checkpoint" collides with the CLI's built-in checkpoint/rewind.
     assert.match(note, /skill="checkpoint:checkpoint"/);
     assert.match(note, /not the built-in checkpoint\/rewind/i);
-    assert.match(note, /compact/i);
   }
 });
 
@@ -48,14 +48,8 @@ test('classifyState reads the file rather than assuming a write happened', () =>
 
 // The note used to claim a skeleton was written on every compaction. PreCompact
 // skips the write whenever a real checkpoint exists, so that was usually false.
-test('the note states what actually happened and names the path', () => {
+test('the non-rich notes state what actually happened and name the path', () => {
   const p = 'C:/proj/STATE_slug_abc_20260822T140000Z.md';
-
-  const rich = buildPickupNote('rich', p);
-  assert.ok(rich.includes(p), 'rich note must name the STATE path');
-  assert.doesNotMatch(rich, /wrote a skeletal|was written by/i,
-    'rich note must not claim PreCompact wrote anything');
-  assert.match(rich, /left it alone/i);
 
   const skel = buildPickupNote('skeleton', p);
   assert.ok(skel.includes(p), 'skeleton note must name the STATE path');
@@ -107,4 +101,122 @@ test('hooks.json routes compact to this hook and keeps it off fresh starts', () 
   assert.ok(resume, 'session-start-resume.mjs must stay wired');
   assert.doesNotMatch(resume.matcher || '', /compact/,
     'the resume offer must not fire after a compaction');
+});
+
+// ---- row 7: rich note with a STATE written from the template ----
+
+function stateFromTemplate(overrides = {}) {
+  let body = fs.readFileSync(TEMPLATE, 'utf8');
+  // Drop the instruction preamble; keep the fenced STATE body.
+  const fence = body.match(/```\n([\s\S]*?)\n```/);
+  assert.ok(fence, 'template carries a fenced STATE body');
+  body = fence[1];
+  const values = {
+    '<one-line continuation description>': 'row 7 test session',
+    '<date/time>': '2026-11-15 12:00',
+    '<absolute path>   branch: <name> (clean|dirty)': '/tmp/proj   branch: main (clean)',
+    '<the single first action the next session should take>': 'run the failing test',
+    '<sibling docs dir path for substantial write-ups; omit if unused>': 'docs/',
+    ...overrides,
+  };
+  for (const [k, v] of Object.entries(values)) body = body.split(k).join(v);
+  return body;
+}
+
+function withTempDir(fn) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ckpt-note-'));
+  try { return fn(dir); } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+}
+
+function writeState(dir, body, sid = 'sid7', stamp = '20261115T120000Z') {
+  const p = path.join(dir, `STATE_${sid}_${stamp}.md`);
+  fs.writeFileSync(p, body, 'utf8');
+  return p;
+}
+
+test('row 7a: rich note leads with the read-first sentence, then the snapshot, then the head verbatim', () => {
+  withTempDir((dir) => {
+    const body = stateFromTemplate();
+    const statePath = writeState(dir, body);
+    const docsDir = docsDirPath(statePath);
+    fs.mkdirSync(docsDir, { recursive: true });
+    const snap = path.join(docsDir, 'precompact-20261115T130000Z.md');
+    fs.writeFileSync(snap, 'snapshot body', 'utf8');
+
+    const note = buildPickupNote('rich', statePath);
+    assert.ok(note.startsWith(`Read \`${statePath}\` in full before your next action`),
+      `note must lead with the read-first sentence, got: ${note.slice(0, 120)}`);
+    assert.ok(note.indexOf('precompact-20261115T130000Z.md') > note.indexOf('before your next action'),
+      'snapshot path comes after the read-first sentence');
+    // Header block verbatim (frontmatter, fences and all) and NEXT ACTIONS verbatim.
+    const head = body.split('## OBJECTIVE')[0];
+    assert.ok(note.includes(head.trimEnd()), 'header block appears verbatim');
+    assert.ok(note.includes('## NEXT ACTIONS'), 'NEXT ACTIONS section appears');
+    const nextActions = body.split('## NEXT ACTIONS')[1].split('\n## ')[0];
+    assert.ok(note.includes(`## NEXT ACTIONS${nextActions}`.trimEnd()), 'NEXT ACTIONS verbatim');
+  });
+});
+
+test('row 7a: readStateHead returns the header block and NEXT ACTIONS verbatim', () => {
+  withTempDir((dir) => {
+    const body = stateFromTemplate();
+    const statePath = writeState(dir, body);
+    const head = readStateHead(statePath, 10_000);
+    assert.ok(head.startsWith('---'), 'head starts with the frontmatter fence');
+    assert.ok(head.includes('session: row 7 test session'));
+    assert.ok(head.includes('resume:  run the failing test'));
+    assert.ok(head.includes('## NEXT ACTIONS'));
+    assert.ok(!head.includes('## OBJECTIVE'), 'head stops before later sections');
+  });
+});
+
+test('row 7b: a head over budget is truncated with a pointer', () => {
+  withTempDir((dir) => {
+    const body = stateFromTemplate().replace(
+      '1. … (ordered; #1 == the `resume:` header line)',
+      '1. ' + 'x'.repeat(5_000));
+    const statePath = writeState(dir, body);
+    const head = readStateHead(statePath, 500);
+    assert.ok(head.length <= 500, `head must fit the budget, got ${head.length}`);
+    assert.match(head, /…read the file for the rest$/);
+  });
+});
+
+test('row 7c: a STATE with no NEXT ACTIONS yields the header alone', () => {
+  withTempDir((dir) => {
+    const body = stateFromTemplate().replace(/## NEXT ACTIONS[\s\S]*?(?=\n## )/, '');
+    assert.ok(!body.includes('## NEXT ACTIONS'));
+    const statePath = writeState(dir, body);
+    const head = readStateHead(statePath, 10_000);
+    assert.ok(head.includes('session: row 7 test session'), 'header survives');
+    assert.ok(!head.includes('## NEXT ACTIONS'), 'no phantom NEXT ACTIONS');
+    const note = buildPickupNote('rich', statePath);
+    assert.ok(note.includes('session: row 7 test session'));
+  });
+});
+
+test('row 7d: the note stays within 10,000 chars even with a huge NEXT ACTIONS', () => {
+  withTempDir((dir) => {
+    const body = stateFromTemplate().replace(
+      '1. … (ordered; #1 == the `resume:` header line)',
+      '1. ' + 'y'.repeat(50_000));
+    const statePath = writeState(dir, body);
+    const note = buildPickupNote('rich', statePath);
+    assert.ok(note.length <= 10_000, `note must stay within 10,000 chars, got ${note.length}`);
+    assert.ok(note.startsWith(`Read \`${statePath}\` in full before your next action`));
+  });
+});
+
+test('latestPrecompactSnapshot picks the newest snapshot, or empty', () => {
+  withTempDir((dir) => {
+    assert.equal(latestPrecompactSnapshot(path.join(dir, 'missing')), '');
+    const docs = path.join(dir, 'docs');
+    fs.mkdirSync(docs);
+    assert.equal(latestPrecompactSnapshot(docs), '');
+    fs.writeFileSync(path.join(docs, 'precompact-20261115T010000Z.md'), 'a');
+    fs.writeFileSync(path.join(docs, 'precompact-20261115T030000Z.md'), 'b');
+    fs.writeFileSync(path.join(docs, 'precompact-20261115T020000Z.md'), 'c');
+    fs.writeFileSync(path.join(docs, 'unrelated.md'), 'd');
+    assert.equal(latestPrecompactSnapshot(docs), path.join(docs, 'precompact-20261115T030000Z.md'));
+  });
 });
