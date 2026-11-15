@@ -408,9 +408,16 @@ test("row 10: prune from the porting worktree frees a cherry-picked run; from th
     // A feature branch in its own worktree receives the leaf's patch as a new SHA:
     // nothing git can see from the main checkout holds the leaf's tip.
     spawnSync("git", ["worktree", "add", "-q", "-b", "feat", portTree, "master"], { cwd: f.repo, windowsHide: true });
+    // Diverge first: a pick onto the leaf's own parent replays the identical commit
+    // and lands the leaf's own SHA, proving nothing about the porting tree's base.
+    writeFileSync(join(portTree, "port-base.txt"), "port base\n");
+    commitAll(portTree, "port base");
+    const leafTip = gitOut(["rev-parse", "HEAD"], wt.path);
     const picked = spawnSync("git", ["-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false",
-      "cherry-pick", gitOut(["rev-parse", "HEAD"], wt.path)], { cwd: portTree, windowsHide: true });
+      "cherry-pick", leafTip], { cwd: portTree, windowsHide: true });
     equal(picked.status, 0, String(picked.stderr));
+    ok(gitOut(["rev-parse", "HEAD"], portTree) !== leafTip,
+      "precondition: the cherry-pick is a new commit, not the leaf's own SHA");
     writeFinishedRun(f.resultsDir, [{ branch: wt.branch, path: wt.path }]);
     const env = { SWARM_HOME: join(f.dir, "home") };
 

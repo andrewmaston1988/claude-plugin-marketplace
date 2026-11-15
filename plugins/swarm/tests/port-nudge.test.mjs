@@ -78,13 +78,17 @@ test("row 1: PORT_RE matches the verbs that move HEAD and nothing else", () => {
 });
 
 test("row 2: portingTree takes the one distinct -C path, resolved against cwd, else cwd", () => {
-  equal(portingTree('git -C "C:/x/my repo" commit', "C:/work"), resolve("C:/x/my repo"));
-  equal(portingTree("git -C sub merge topic", "C:/work"), resolve("C:/work/sub"));
+  // Roots built from a platform-absolute path: a literal "C:/work" is relative on Linux,
+  // so the same rows would assert different things on each platform.
+  const WORK = resolve("/work");
+  const REPO = resolve("/x/my repo");
+  equal(portingTree(`git -C "${REPO}" commit`, WORK), REPO);
+  equal(portingTree("git -C sub merge topic", WORK), resolve("/work/sub"));
   // Two different checkouts: no single porting tree, so the payload's cwd stands.
-  equal(portingTree("git -C a commit && git -C b merge x", "C:/work"), "C:/work");
+  equal(portingTree("git -C a commit && git -C b merge x", WORK), WORK);
   // The same path twice is still one.
-  equal(portingTree("git -C a status && git -C a commit", "C:/work"), resolve("C:/work/a"));
-  equal(portingTree("git commit -m x", "C:/work"), "C:/work");
+  equal(portingTree("git -C a status && git -C a commit", WORK), resolve("/work/a"));
+  equal(portingTree("git commit -m x", WORK), WORK);
 });
 
 test("row 3: a cherry-pick is ported only when the porting checkout's HEAD is a base", () => {

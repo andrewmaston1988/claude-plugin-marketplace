@@ -88,7 +88,19 @@ export function portFixture() {
     leaf,
     run,
     porting,
-    cherryPick: (path, sha) => must(["cherry-pick", sha], path),
+    // A pick onto the leaf's own parent replays the identical commit — same parent,
+    // tree, message, author and (same-second) timestamp — so git lands the leaf's own
+    // SHA and reachability answers before any extra base is tried. Give the target
+    // branch a commit of its own first, and prove the pick is a distinct commit.
+    cherryPick: (path, sha) => {
+      if (must(["rev-parse", "HEAD"], path) === must(["rev-parse", `${sha}^`], path)) {
+        writeCommit(path, "port-base.txt", "port base\n", "port base");
+      }
+      must(["cherry-pick", sha], path);
+      const picked = must(["rev-parse", "HEAD"], path);
+      if (picked === sha) throw new Error(`cherry-pick of ${sha} reproduced the leaf's own commit`);
+      return picked;
+    },
     replay: (path, from, branch) => {
       const patch = git(["diff", from, branch], repo);
       if (patch.status !== 0) throw new Error(`git diff ${from} ${branch} failed: ${patch.stderr}`);

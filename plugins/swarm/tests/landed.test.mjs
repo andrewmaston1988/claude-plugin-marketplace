@@ -299,8 +299,11 @@ test("row 12: extraBases is required, absorbs a cherry-pick, dedupes, and drops 
   // The whole point: a cherry-pick onto a feature branch lands nothing git can see
   // until that branch's HEAD is offered as a base.
   newBranch(repo, "feat", "main");
-  must(["cherry-pick", must(["rev-parse", "swarm/leaf"], repo)], repo);
+  writeCommit(repo, "port-base.txt", "port base\n", "port base");
+  const leafTip = must(["rev-parse", "swarm/leaf"], repo);
+  must(["cherry-pick", leafTip], repo);
   const feat = must(["rev-parse", "HEAD"], repo);
+  ok(feat !== leafTip, "precondition: the cherry-pick is a new commit, not the leaf's own SHA");
   checkout(repo, "main");
   ok(landed(repo, "swarm/leaf") >= 1, "without the extra base the cherry-picked copy is invisible");
   equal(unlandedCount("swarm/leaf", repo, { prefix: PREFIX, gitRunner: git, extraBases: [feat] }), 0,
@@ -370,8 +373,13 @@ test("row 21: extra bases absorb first, and the cherry count keeps the first def
   newBranch(repo, "swarm/leaf", "main");
   writeCommit(repo, "leaf.txt", "leaf work\n", "leaf work");
   newBranch(repo, "feat", "main");
-  must(["cherry-pick", must(["rev-parse", "swarm/leaf"], repo)], repo);
+  // The target branch must diverge first, or the pick replays the leaf's own commit
+  // and reachability answers before the extra base is ever consulted.
+  writeCommit(repo, "port-base.txt", "port base\n", "port base");
+  const leafTip = must(["rev-parse", "swarm/leaf"], repo);
+  must(["cherry-pick", leafTip], repo);
   const feat = must(["rev-parse", "HEAD"], repo);
+  ok(feat !== leafTip, "precondition: the cherry-pick is a new commit, not the leaf's own SHA");
   checkout(repo, "main");
 
   const rec = recording();
