@@ -70,8 +70,7 @@ export async function detectForeground({ config, callSdb, _fetch = fetch, _now =
     return { error: `could not list the TV's apps: ${error.message}` };
   }
 
-  // A `.service` id is a background service, and REST never answers one: on the household set
-  // `kIciSQlYEM.service` held its GET past the timeout and ended the scan before Disney+.
+  // A `.service` id is a background service; REST holds its GET without answering.
   const candidates = appIds(stdout)
     .filter((id) => id !== widget && !id.endsWith(".service") && !tried.has(id));
   for (let index = 0; index < candidates.length; index += SCAN_WIDTH) {
