@@ -40,11 +40,15 @@ Swarm's own leaf worktrees live under `treeRoot` (`~/.swarm/worktrees` by defaul
 root — a task there is judged by the repo its tree was cut from, so each provider's roots still
 bind.
 
-Every other key (`providers.<name>.*`, `concurrency`, `timeoutMs`,
-`worktreeBranchPrefix`, `modelDenylist`, `providers.ollama.cloud.ollama.*`, `notifyCmd`,
-`grading.enabled`, `dashboard.*`, `swarm.always`) is documented inline in
-`config.default.json` with its default — `setup` walks the ones worth touching. Swarm
-never manages credentials; auth is your provider app's ambient sign-in.
+The shipped keys (`providers.<name>.*`, `concurrency`, `timeoutMs`, `minFreeMemMb`,
+`valveFreeMemMb`, `disable1mContext`, `mcp`, `projects`, `heartbeatSecs`, `quietWarnSecs`,
+`retry.*`, `quotaPreflight`, `quotaWarnPct`, `quotaCacheSecs`, `quotaPatterns`,
+`modelDenylist`, `resultInlineCap`, `treeRoot`, `worktreeBranchPrefix`, `notifyCmd`,
+`grading.enabled`, `dashboard.*`, `swarm.*`) are documented in `config.default.json` with
+their defaults — `setup` walks the ones worth touching. `allowedRoots`,
+`providers.<name>.allowedRoots`, and `display.money` are optional keys with no shipped
+default; without roots configured, dispatch is denied, and money is off unless enabled.
+Swarm never manages credentials; auth is your provider app's ambient sign-in.
 
 **Provenance:** every fetched figure (`validate`, `run`, `models`, `ollama-usage`) says
 where it came from. A failed live fetch (expired cookie, network, timeout) still shows the
@@ -151,18 +155,33 @@ foreground.
 ## Usage
 
 ```bash
-swarm models              # discover launchable rows from enabled providers — run first
-swarm list                # saved manifests (<cwd>/.swarm/manifests + ~/.swarm/manifests)
+swarm models [--all]       # discover launchable rows from enabled providers — run first
+swarm list                 # saved manifests (<cwd>/.swarm/manifests + ~/.swarm/manifests)
 swarm validate <plan.json | name> [--args '<json>'] [--resolved]  # lint ids, deps, template refs, governance roots, effort pairs, context fit, forEach/when/compute shapes + expressions
-swarm run <plan.json | name> [--args '<json>']    # execute; designed for Bash run_in_background. Refuses unless `validate` passed on the same bytes + args (markers in ~/.swarm/validated/)
-swarm ask <resultsDir> <leaf-id> "follow-up?"   # interrogate a finished leaf
+swarm run <plan.json | name> [--args '<json>'] [--force]  # execute; designed for Bash run_in_background. Refuses unless `validate` passed on the same bytes + args (markers in ~/.swarm/validated/)
+swarm status <resultsDir> [--watch [--interval <secs>]]  # progress view; --mine lists this session's kept runs
+swarm status --mine       # list this session's finished runs still holding kept worktrees
+swarm wait <resultsDir> [--timeout <secs>]  # wait for settlement (exit 0 clean, 1 leaf not ok, 2 engine died, 3 timed out)
+swarm stop <resultsDir>    # cooperatively stop a live engine
+swarm prune <resultsDir> [--dry-run] [--discard-unlanded]  # destroy kept trees and branches
+swarm mcp list [--json]    # list leaf MCP servers and off/on state
+swarm mcp set --off <a,b> [--repo <repo>=<servers>]…  # set leaf MCP configuration
+swarm ask <resultsDir> <leaf-id> "follow-up?" [--model <m>]  # interrogate a finished leaf
 swarm report <resultsDir>   # render the run's digest.md/report.md → digest.html/report.html (backfill for old runs)
 swarm quota                # Anthropic plus cached cloud-provider utilization
 swarm usage [--provider X] # live usage from enabled provider capabilities
-swarm ollama-usage [--cookie '<value>']  # ollama.com session/weekly usage — see below
+swarm ollama-usage [--cookie '<value>']  # ollama.com session/weekly usage
 swarm grade --init <resultsDir>   # write grades.json — one skeleton row per model leaf, no model names on it
 swarm grade --file <grades.json>  # validate the filled batch and append it to the score store
-swarm perf [--aspect X] [--model Y] [--domain D]   # aspect x model table with sample counts
+swarm grade --waive <resultsDir> --reason "<text>"  # excuse a run from grading
+swarm perf [--aspect X] [--model Y] [--domain D] [--overall]   # aspect x model table with sample counts
+swarm scores backfill-realmodel [--dry-run]  # rewrite alias-named score rows from transcripts
+swarm cost                 # list costs per provider
+swarm refresh-prices [--dry-run]  # refresh published provider price tables
+swarm serve [--daemon]     # start the phone dashboard
+swarm config init          # write shipped config keys, preserving existing values
+swarm statusline install   # install the self-resolving statusline shim
+swarm install              # install the swarm command on PATH
 ```
 
 A bare name resolves through the manifest registry (`<cwd>/.swarm/manifests/<name>.json`,
@@ -683,9 +702,10 @@ a run is live.
 
 ```bash
 swarm serve --daemon            # start in the background; prints the URL to open
-swarm serve status | stop | restart
+swarm serve status | stop | restart | enable | disable
 swarm serve doctor              # checks port, pid, autostart, version, firewall, tls
 swarm serve install-autostart   # start it with Windows
+swarm serve uninstall-autostart # remove the Windows startup task
 ```
 
 Settings live under `dashboard` in `~/.swarm/config.json` (port, bind address, access
