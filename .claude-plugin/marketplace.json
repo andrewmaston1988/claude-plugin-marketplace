@@ -35,7 +35,7 @@
     },
     {
       "name": "claude-peers",
-      "description": "Deprecated — Peer discovery and real-time messaging between local Claude Code sessions — stdio MCP server + self-healing localhost broker",
+      "description": "Deprecated: use Claude Code's built-in SendMessage instead — Peer discovery and real-time messaging between local Claude Code sessions — stdio MCP server + self-healing localhost broker",
       "source": "./plugins/claude-peers",
       "author": {
         "name": "Andrew Maston",

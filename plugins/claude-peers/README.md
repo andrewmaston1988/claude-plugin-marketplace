@@ -1,6 +1,6 @@
 # claude-peers
 
-> **Deprecated.** claude-peers is no longer developed. It stays installable for existing setups but gets no fixes, and new setups should not depend on it.
+> **Deprecated.** Claude Code's built-in `SendMessage` (with `ListAgents` to find other local sessions) now does what claude-peers did, with no MCP server or broker to run — use that instead. claude-peers is no longer developed; it stays installable for existing setups but gets no fixes.
 
 Peer discovery and real-time messaging between Claude Code sessions on one machine. Each session runs a stdio MCP server; a singleton localhost broker routes messages between them. A message sent to a peer is delivered as a `<channel source="claude-peers">` notification at its next turn boundary.
 
