@@ -440,13 +440,13 @@ into the default branch or the live checkout changes no file at the base's tip o
 first-parent commits that touched the branch's files — which covers squash, rebase and traditional
 merges alike; telling a squash apart needs git 2.38 or later, and below that only reachability and
 patch matching answer. When the engine reuses or resets one of its own worktrees, a branch that
-has not landed is never force-reset — it refuses rather than lose the work. `swarm prune <resultsDir>` is
-not that path: it removes each kept tree with its branch, plus every branch of the run
+has not landed is never force-reset — it refuses rather than lose the work. `swarm prune <resultsDir>` deletes at once — run `--dry-run` to preview. It is
+not the reset path: it removes each kept tree with its branch, plus every branch of the run
 that no tree holds, all with `git branch -D` — a branch a task named explicitly goes only
 with its tree. Push under a name outside `swarm/`, or merge, before pruning. It never destroys results. There is no
 detach option; push a branch under a name outside `swarm/` to preserve its remote copy, because
-`origin/swarm/…` is never a landing place. It refuses a live run. It removes what has landed
-and keeps the rest: every row with unlanded commits or uncommitted changes stays, named on
+`origin/swarm/…` is never a landing place. It refuses a live run. Work that has not landed is
+kept and named, not refused: every row with unlanded commits or uncommitted changes stays, named on
 stderr with its counts, and the command exits 1; a later prune takes the rest once its work
 lands. `--dry-run` previews which rows would go and which would stay and removes nothing;
 `--discard-unlanded` destroys the blocked work too, whether or not the branch landed. `swarm status --mine`

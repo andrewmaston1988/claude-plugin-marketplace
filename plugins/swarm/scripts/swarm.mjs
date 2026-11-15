@@ -40,7 +40,7 @@ const USAGE = `usage: swarm.mjs <command>
   status --mine              this session's finished runs still holding kept worktrees, each with its prune command
   wait <resultsDir> [--timeout <secs>]  block until the run settles, then print the final roster (exit 0 clean · 1 leaf not ok · 2 engine died · 3 timed out)
   stop <resultsDir>          cooperative stop: signal a live engine and wait, or record a dead one — never kills a process
-  prune <resultsDir> [--dry-run] [--discard-unlanded]   destroy kept worktrees + branches; refuses live, unlanded, or dirty trees
+  prune <resultsDir> [--dry-run] [--discard-unlanded]   deletes at once — --dry-run previews; refuses a live run, keeps unlanded or dirty work and names it
   mcp list [--json]          MCP servers a leaf starts, with today's off/on state and the repos that turn one on
   mcp set --off <a,b> [--repo <repo>=<servers>]…   write the leaf MCP config: the off list plus the repos that turn one back on
   report <resultsDir>        render the run's digest.md/report.md → digest.html/report.html (self-contained, theme-aware; backfill for old runs)
