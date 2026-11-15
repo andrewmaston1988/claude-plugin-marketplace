@@ -3,7 +3,10 @@ import { test } from "node:test";
 import { equal, ok } from "node:assert/strict";
 import { EventEmitter } from "node:events";
 import { rmSync } from "node:fs";
-import { runPlan, runTask, loopStallMs, nextStallCredit } from "../src/scheduler.mjs";
+import { runPlan, runTask } from "../src/scheduler.mjs";
+// The stall seams are internal to the scheduler, not part of its public surface
+// (tests/module-surface.test.mjs pins that to the pre-split names).
+import { loopStallMs, nextStallCredit } from "../src/scheduler/loop-stall.mjs";
 import { CFG, tmp, task, plan, fakeSpawnFactory, makeIo, promptOf, streamOut } from "./helpers/scheduler-fixtures.mjs";
 
 // A synchronous spin long enough for the monitor to notice the loop was blocked.

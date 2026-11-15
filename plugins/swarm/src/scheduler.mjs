@@ -36,7 +36,6 @@ export function launcherSession(env = process.env) {
 
 export { makeDefaultIo };
 export { classifyFailure, pickNewestRunning, runTask, substituteItems, substituteTemplates } from "./scheduler/run-task.mjs";
-export { loopStallMs, nextStallCredit } from "./scheduler/loop-stall.mjs";
 
 // Execute the plan's dependency graph under the concurrency cap.
 // Returns { summary, summaryPath, digestPath, digestFailed, worktreesKept }.
