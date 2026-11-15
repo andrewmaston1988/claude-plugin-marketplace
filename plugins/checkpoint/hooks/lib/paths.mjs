@@ -236,8 +236,6 @@ export function latestPrecompactSnapshot(docsDir) {
   return snaps.length ? path.join(docsDir, snaps[snaps.length - 1]) : '';
 }
 
-// True if `body` has user-meaningful content (not empty, not just whitespace).
-// Used by the snapshot hook to refuse self-clobber of a non-empty STATE.
 // Rename a STATE file to embed the *current* UTC stamp. The sessionId portion
 // of the filename is preserved; only the trailing `YYYYMMDDTHHMMSSZ` advances.
 // If the target name already exists in the same directory (e.g. another
@@ -274,6 +272,8 @@ export function isSkeletonState(body) {
   return typeof body === 'string' && body.includes(SKELETON_MARKER);
 }
 
+// True if `body` has user-meaningful content (not empty, not just whitespace).
+// Used by the snapshot hook to refuse self-clobber of a non-empty STATE.
 export function isMeaningfulState(body) {
   if (typeof body !== 'string') return false;
   const stripped = body.replace(/[\s ]+/g, '');
