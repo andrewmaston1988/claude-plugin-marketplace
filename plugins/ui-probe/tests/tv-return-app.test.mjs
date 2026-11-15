@@ -34,6 +34,14 @@ const HIDDEN_APPLE_TV = [
   `'Torrent Test'\t                         '1.0'\t    '${WIDGET}'`,
 ].join("\n");
 
+// The household set's zero-config list: a background service that never answers leads it.
+const SERVICE_FIRST = [
+  "PkgId                                    Ver       Name",
+  "------------------------------------------------------------------------",
+  "'KICI Service'\t                          '1.0'\t    'kIciSQlYEM.service'",
+  `'ITVX'\t                                  '1.0'\t    '${ITVX}'`,
+].join("\n");
+
 /** One response in the shape the plugin's own `fetch` returns. */
 const answer = (body, status = 200) => ({
   ok: status >= 200 && status < 300,
@@ -185,6 +193,40 @@ test("a candidate answering 404 is skipped, and a later visible app is still fou
   );
 });
 
+test("the applist scan never reads a background .service id", async () => {
+  const stub = fetchStub({
+    "kIciSQlYEM.service": () => showing("kIciSQlYEM.service", "KICI Service"),
+    [ITVX]: () => showing(ITVX, "ITVX"),
+  });
+
+  const found = await detectForeground({ config: CONFIG, callSdb: async () => ({ stdout: SERVICE_FIRST }), _fetch: stub });
+
+  assert.deepEqual(found, { id: ITVX, name: "ITVX" }, "the app in front is found behind the service");
+  assert.equal(stub.ids().includes("kIciSQlYEM.service"), false, "a .service id is never fetched");
+});
+
+test("a candidate that times out is skipped, and the next batch still finds the app in front", async () => {
+  const stub = fetchStub({
+    "com.samsung.tv.aria-dummy": () => answer({ code: 404, message: "Not Found" }, 404),
+    "abc.netflix": () => hidden("abc.netflix", "Netflix"),
+    "3KA0pm7a7V.TubiTV": () => hidden("3KA0pm7a7V.TubiTV", "Tubi"),
+    "abc.primevideo": () => {
+      throw new Error("GET http://192.0.2.10:8001/api/v2/applications/abc.primevideo did not answer within 2000 ms");
+    },
+    [YOUTUBE]: () => showing(YOUTUBE, "YouTube"),
+    [WIDGET]: () => showing(WIDGET, "Torrent Test"),
+  });
+
+  const found = await detectForeground({
+    config: CONFIG,
+    callSdb: async () => ({ stdout: HIDDEN_APPLE_TV }),
+    _fetch: stub,
+  });
+
+  assert.deepEqual(found, { id: YOUTUBE, name: "YouTube" }, "one dead candidate does not end the walk");
+  assert.equal(stub.ids().includes("abc.primevideo"), true, "the dead one was tried before the walk went on");
+});
+
 // ── Row 6: detection never fails the run ──────────────────────────────────────────────
 
 test("nothing visible is null, not a failure", async () => {
@@ -208,6 +250,19 @@ test("a transport failure ends detection as not read, without throwing", async (
 
   assert.match(found.error, /ECONNREFUSED/);
   assert.equal(found.id, undefined);
+});
+
+test("nothing visible plus a skipped candidate is not read, not a quiet null", async () => {
+  const stub = fetchStub({
+    [ITVX]: () => hidden(ITVX, "ITVX"),
+    "abc123.tom": () => {
+      throw new Error("connect ECONNREFUSED 192.0.2.10:8001");
+    },
+  });
+
+  const found = await detectForeground({ config: CONFIG, callSdb: async () => ({ stdout: APPLIST }), _fetch: stub });
+
+  assert.deepEqual(found, { error: "connect ECONNREFUSED 192.0.2.10:8001" }, "a skipped candidate leaves the answer unproven");
 });
 
 test("detection gives up at its 8 s budget", async () => {
@@ -269,9 +324,9 @@ test("a relaunch that comes up visible is returned", async () => {
   assert.equal(stub.polls(), 2);
 });
 
-test("a relaunch that never shows within 5 s is reported, not retried forever", async () => {
+test("a relaunch that never shows within 15 s is reported, not retried forever", async () => {
   let clock = 0;
-  const neverVisible = Array.from({ length: 10 }, () => () => hidden(APPLE_TV, "Apple TV"));
+  const neverVisible = Array.from({ length: 30 }, () => () => hidden(APPLE_TV, "Apple TV"));
   const stub = fetchScript({ reread: hidden(APPLE_TV, "Apple TV"), polls: neverVisible });
 
   const record = await returnTo(APPLE, {
@@ -281,9 +336,9 @@ test("a relaunch that never shows within 5 s is reported, not retried forever", 
     _now: () => clock,
   });
 
-  assert.equal(record.outcome, "launched, not visible after 5 s");
-  assert.equal(stub.polls(), 10, "one poll every 500 ms across the 5 s window");
-  assert.equal(clock, 5000);
+  assert.equal(record.outcome, "launched, not visible after 15 s");
+  assert.equal(stub.polls(), 30, "one poll every 500 ms across the 15 s window");
+  assert.equal(clock, 15000);
 });
 
 test("a poll that throws is reported as not confirmed", async () => {
@@ -314,7 +369,7 @@ test("an unreadable re-read still tries the launch", async () => {
   assert.equal(stub.posts().length, 1);
 });
 
-test("a poll's read is capped at what is left of the 5 s window", async () => {
+test("a last poll cut short by the window's cap is the window ending, not a wire failure", async () => {
   let clock = 0;
   let launched = false;
   let polls = 0;
@@ -327,17 +382,40 @@ test("a poll's read is capped at what is left of the 5 s window", async () => {
     if (!launched) return hidden(APPLE_TV, "Apple TV");
     polls += 1;
     if (polls === 1) {
-      clock = 4900; // the launch ate the window; 100 ms is all that is left
+      clock = 14600; // the launch and one poll ate the window; 400 ms is all that is left
       return hidden(APPLE_TV, "Apple TV");
     }
-    return new Promise((resolve, reject) => {
-      options.signal.addEventListener("abort", () => reject(new Error("The operation was aborted")));
-    });
+    throw new Error(`GET http://192.0.2.10:8001/api/v2/applications/${APPLE_TV} did not answer within 400 ms`);
   };
 
   const record = await returnTo(APPLE, { config: CONFIG, _fetch: stub, _sleep: instant, _now: () => clock });
 
-  assert.match(record.outcome, /launched, not confirmed: GET .* did not answer within 100 ms$/);
+  assert.equal(record.outcome, "launched, not visible after 15 s", "the last 400 ms of the window is the window ending");
+  assert.equal(polls, 2, "the capped poll was the last one");
+});
+
+test("a poll that fails with time still left is not confirmed, even when capped", async () => {
+  let clock = 0;
+  let launched = false;
+  let polls = 0;
+
+  const stub = async (url, options = {}) => {
+    if (options.method === "POST") {
+      launched = true;
+      return answer({ running: true, visible: true });
+    }
+    if (!launched) return hidden(APPLE_TV, "Apple TV");
+    polls += 1;
+    if (polls === 1) {
+      clock = 14600;
+      return hidden(APPLE_TV, "Apple TV");
+    }
+    throw new Error("socket hang up");
+  };
+
+  const record = await returnTo(APPLE, { config: CONFIG, _fetch: stub, _sleep: instant, _now: () => clock });
+
+  assert.equal(record.outcome, "launched, not confirmed: socket hang up", "a wire failure is still a wire failure");
 });
 
 test("the record follows the id that was detected, not the one the TV echoes back", async () => {
