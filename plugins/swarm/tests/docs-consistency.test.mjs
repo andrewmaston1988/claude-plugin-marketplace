@@ -128,7 +128,8 @@ test("setup routes an empty graded record to model descriptions", () => {
   ok(!setup.includes("the tier guide routes models"), "setup must retire the tier-guide fallback");
 });
 
-test("swarm procedure preserves the Claude capability exception", () => {  const step = skill().split("\n").find((line) => line.startsWith("1. **Discover models**")) || "";
+test("swarm procedure preserves the Claude capability exception", () => {
+  const step = skill().split("\n").find((line) => line.startsWith("1. **Discover models**")) || "";
   ok(step.includes("Claude tier") && step.includes("capability"), `step 1 lacks the Claude-tier capability exception: ${step}`);
 });
 
