@@ -3,7 +3,6 @@
 import fs from 'node:fs';
 
 const DEFAULT_CONTEXT_WINDOW = 200_000;
-export const CONTEXT_NUDGE_BANDS = [85, 95]; // ascending; fire once per band per window cycle
 export const WARM_RATIO          = 0.5;  // cache_read share that counts as "warm"
 
 // [substring, window]. First match wins; unknown -> default.
@@ -18,6 +17,7 @@ const MODEL_WINDOWS = [
 
 export function contextWindowFor(model) {
   if (typeof model === 'string') {
+    if (model.endsWith('[1m]')) return 1_000_000;
     for (const [sub, win] of MODEL_WINDOWS) if (model.includes(sub)) return win;
   }
   return DEFAULT_CONTEXT_WINDOW;
@@ -36,13 +36,32 @@ export function contextUtilization(usage, windowTokens) {
   return Math.round((100 * total) / windowTokens);
 }
 
-export function decideCheckpointNudge(pct, lastFiredPct) {
-  // Utilisation falling below the last fired point means compaction reset the window — new cycle.
-  if (lastFiredPct != null && pct < lastFiredPct) lastFiredPct = null;
-  let band = null;
-  for (const b of CONTEXT_NUDGE_BANDS) if (pct >= b) band = b;
-  if (band == null) return false;
-  return lastFiredPct == null || band > lastFiredPct;
+// Token bands, not percentages: `soon` at trigger - 2r and `now` at trigger - r,
+// with r = min(reserve, trigger / 4) so the two lines can never collapse.
+// `state` is { trigger, cycle, fired }; the caller persists the returned one.
+export function decideCheckpointNudge({ used, trigger, reserve, state } = {}) {
+  const prev = state && typeof state === 'object' ? state : {};
+  const triggerChanged = prev.trigger != null && prev.trigger !== trigger;
+  let cycle = Number.isInteger(prev.cycle) ? prev.cycle : 0;
+  let fired = Array.isArray(prev.fired) ? prev.fired.slice() : [];
+  if (triggerChanged) { cycle += 1; fired = []; }
+
+  const nextState = () => ({ ...prev, trigger, cycle, fired });
+  if (!Number.isFinite(trigger) || trigger <= 0) return { band: null, state: nextState() };
+
+  const want = Number(reserve);
+  const r = Number.isFinite(want) && want > 0 ? Math.min(want, trigger / 4) : trigger / 4;
+  const soonLine = trigger - 2 * r;
+  const nowLine = trigger - r;
+
+  // Usage below `soon` after a band fired means compaction happened — new cycle.
+  if (!triggerChanged && fired.length > 0 && used < soonLine) { cycle += 1; fired = []; }
+
+  const reached = used >= nowLine ? 'now' : used >= soonLine ? 'soon' : null;
+  const band = reached && !fired.includes(reached) ? reached : null;
+  if (band) fired.push(band);
+
+  return { band, state: nextState() };
 }
 
 // 'warm' | 'busted' | 'cold' (cold = no usage tokens at all).
