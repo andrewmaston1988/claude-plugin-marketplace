@@ -19,8 +19,8 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 const TEMPLATES_DIR = path.resolve(HERE, 'templates');
 const SETTINGS = path.join(os.homedir(), '.claude', 'settings.json');
 
-// Byte fallback (no usage row yet). A transcript byte is ~4 bytes of context.
-const BYTES_PER_TOKEN = 4;
+// Byte fallback (no usage row yet). A token is ~4 transcript bytes.
+export const BYTES_PER_TOKEN = 4;
 
 // Honest provenance for the {ttlNote} template slot, keyed by resolveTtlSource().source.
 export const TTL_NOTES = {

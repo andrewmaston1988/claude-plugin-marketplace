@@ -81,7 +81,15 @@ export function checkpointNudge({
   if (!statePath) return null;
 
   const point = usagePoint(recentTurns, fallbackUsed);
-  if (!point) return null;
+  if (!point) {
+    // No token count to decide on, but the PostToolUse throttle still needs the
+    // recorded size or every later tool call re-reads the same tail.
+    if (Number.isFinite(transcriptBytes)) {
+      const prev = readNudgeState(statePath);
+      if (prev.lastSize !== transcriptBytes) writeJSON(statePath, { ...prev, lastSize: transcriptBytes });
+    }
+    return null;
+  }
 
   const { tokens: trigger } = compactTrigger({
     model: point.model,

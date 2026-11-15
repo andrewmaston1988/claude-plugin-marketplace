@@ -55,6 +55,14 @@ function usageTranscript(file, used, fillerBytes = 0) {
   return fs.statSync(file).size;
 }
 
+// A transcript whose tail carries no usage-bearing assistant turn at all.
+function noUsageTranscript(file, fillerBytes) {
+  write(file, JSON.stringify({
+    type: 'user', message: { role: 'user', content: 'x'.repeat(fillerBytes) },
+  }) + '\n');
+  return fs.statSync(file).size;
+}
+
 function runHook(home, payload, extraEnv) {
   return spawnSync(process.execPath, [HOOK_PATH], {
     input: JSON.stringify(payload), encoding: 'utf8', env: cleanEnv(home, extraEnv),
@@ -193,6 +201,30 @@ test('PostToolUse is silent without a transcript or session id', (t) => {
   const noSid = runHook(f.home, { cwd: f.cwd, session_id: '', transcript_path: path.join(f.root, 'nope.jsonl') });
   assert.equal(noSid.status, 0);
   assert.equal(noSid.stdout.trim(), '');
+});
+
+// ---- (h) no usage row still advances the growth throttle ----
+
+test('PostToolUse advances lastSize past a transcript with no usage row', (t) => {
+  const f = fixture(t);
+  const transcript = path.join(f.root, 'session.jsonl');
+  const size = noUsageTranscript(transcript, 100_000);
+
+  const r = runHook(f.home, { cwd: f.cwd, session_id: 'pt-h', transcript_path: transcript });
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.stdout.trim(), '');
+  assert.equal(readNudgeState(nudgeStatePath('pt-h', f.nudgeDir)).lastSize, size,
+    'a tail with no usage row must not be re-read on every later tool call');
+});
+
+test('checkpointNudge records the transcript size when it has no token count', (t) => {
+  const f = fixture(t);
+  const text = checkpointNudge({
+    recentTurns: [], cwd: f.cwd, env: {}, sessionId: 'pt-i', settings: {},
+    home: f.home, nudgeDir: f.nudgeDir, transcriptBytes: 200_000,
+  });
+  assert.equal(text, null);
+  assert.equal(readNudgeState(nudgeStatePath('pt-i', f.nudgeDir)).lastSize, 200_000);
 });
 
 // ---- (g) eight concurrent writeJSON writers leave valid JSON ----

@@ -10,6 +10,7 @@ import { pathToFileURL } from 'node:url';
 import { readJSON } from './lib/paths.mjs';
 import { readRecentAssistantTurns } from './lib/context.mjs';
 import { checkpointNudge, nudgeStatePath, readNudgeState } from './lib/nudge.mjs';
+import { BYTES_PER_TOKEN } from './prompt-submit-checkpoint.mjs';
 
 // Below this much transcript growth the decision is skipped entirely: no tail
 // read, no settings read, no write.
@@ -45,6 +46,7 @@ function handle(payload) {
     env: process.env,
     sessionId,
     settings,
+    fallbackUsed: Math.floor(size / BYTES_PER_TOKEN),
     transcriptBytes: size,
   });
   emit(text);
