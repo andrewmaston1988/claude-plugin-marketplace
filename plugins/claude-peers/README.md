@@ -1,6 +1,6 @@
 # claude-peers
 
-Peer discovery and real-time messaging between Claude Code sessions on one machine. Each session runs a stdio MCP server; a singleton localhost broker routes messages between them. A message sent to a peer appears in its console within a second as a `<channel source="claude-peers">` block.
+Peer discovery and real-time messaging between Claude Code sessions on one machine. Each session runs a stdio MCP server; a singleton localhost broker routes messages between them. A message sent to a peer is delivered as a `<channel source="claude-peers">` notification at its next turn boundary.
 
 ## Pieces
 
@@ -11,18 +11,18 @@ Peer discovery and real-time messaging between Claude Code sessions on one machi
 
 ## Delivery: push or poll
 
-Rendering a `<channel>` block requires this plugin in the session's `--dangerously-load-development-channels` allowlist. A session launched without it — commonly one routed through a third-party provider — silently drops every push aimed at it.
+Rendering a `<channel>` block requires this plugin in the session's `--dangerously-load-development-channels` or `--channels` allowlist. A session launched without it — commonly one routed through a third-party provider — silently drops every push aimed at it.
 
-At handshake the server walks its process ancestry to the owning `claude` command and reads that flag off its argv. Allowlisted → the push instructions ship unchanged. Not allowlisted → the handshake additionally instructs the session to `CronCreate` a `*/3 * * * *` job calling `check_messages`, which drains the broker's held queue. Detection that fails for any reason resolves to *not allowlisted*: a needless poll costs a turn every three minutes, a missed push costs the message.
+At handshake the server walks its process ancestry to the owning `claude` command and reads the channel flag and its allowlist value off its argv. Allowlisted → the push instructions ship unchanged. Not allowlisted → the handshake additionally instructs the session to `CronCreate` a `*/3 * * * *` job calling `check_messages`, which drains the broker's held queue. Detection that fails for any reason resolves to *not allowlisted*: a needless poll costs a turn every three minutes, a missed push costs the message.
 
-The flag is the only signal read. If a session that cannot render channels is nonetheless launched with the flag, it is indistinguishable from one that can, and it gets the push instructions.
+The channel flag and allowlist are the only signals read. If a session that cannot render channels is nonetheless launched with the flag, it is indistinguishable from one that can, and it gets the push instructions.
 
 ## MCP tools
 
 | Tool | Purpose |
 |---|---|
 | `list_peers` | Discover other sessions plus your own row, marked (`scope`: `machine` / `directory` / `repo`) |
-| `send_message` | Message a peer by id — lands in their console immediately |
+| `send_message` | Message a peer by id — delivered at their next turn boundary |
 | `set_summary` | Publish a 1–2 sentence "what I'm working on", plus the directory you're working in (both required) |
 | `check_messages` | Recover messages the broker is holding — including ones already pushed as a notification, so a push missed while idle is not lost |
 
