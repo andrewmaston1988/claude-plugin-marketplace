@@ -9,9 +9,7 @@ import * as nodeFs from "node:fs";
 import { join, posix } from "node:path";
 
 import { REPO_SUITE } from "../test-suites.mjs";
-import { closureOf, makeIndex } from "./graph.mjs";
-
-const SKIP_DIRS = new Set(["node_modules", ".git", "sessions"]);
+import { SKIP_DIRS, closureOf, makeIndex } from "./graph.mjs";
 
 /** Whole-suite fallbacks: the graph cannot see these files, so any change to
  *  one runs its plugin's suite rather than guessing. */

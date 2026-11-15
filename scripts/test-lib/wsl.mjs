@@ -5,10 +5,10 @@
 // so a linked worktree works) plus an rsync of the tree that is running now.
 // /mnt/c reports every file as mode 777, so the rsync copies no permissions
 // (-rlt, never -a) and the clone keeps git's own modes; with `-a` every file
-// reads as mode-dirty in the mirror, which is the 2026-11-15 review's finding.
+// reads as mode-dirty in the mirror.
 //
-// Every wsl.exe call is an argument array with no shell. wsl.exe re-quotes a
-// single command string, which broke a probe on 2026-11-15.
+// Every wsl.exe call is an argument array with no shell: wsl.exe re-quotes a
+// single command string, which mangles it.
 //
 // Exit codes: the suite's own code, or 2 when WSL mode could not run at all.
 

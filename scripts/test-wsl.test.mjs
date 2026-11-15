@@ -1,4 +1,4 @@
-// Tests for WSL mode (`scripts/test-lib/wsl.mjs`) — test plan rows 11 and 12.
+// Tests for WSL mode (`scripts/test-lib/wsl.mjs`) and the `--wsl` flag.
 //
 // A fake spawnSync records every call, so the mirror's step ORDER and the
 // ARGUMENT-ARRAY shape of each wsl.exe call are both asserted without a distro.
@@ -8,6 +8,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 
 import { DISTRO, SETUP_POINTER, distroList, runWsl, toWslPath } from "./test-lib/wsl.mjs";
+import { main } from "./test.mjs";
 
 const HEAD = "8aac8ba6e100a08c1aa33c9286aeecd45a21bf36";
 const REPO_ROOT = "C:\\code\\claude-plugin-marketplace";
@@ -110,7 +111,27 @@ async function run(fake, options = {}) {
   return { code, logs };
 }
 
-// --- Row 11: the distro has to exist ---------------------------------------
+test("--wsl rejects a selection flag instead of silently running everything", async () => {
+  const flags = [
+    [["--wsl", "--list"], "--list"],
+    [["--wsl", "--suite", "repo"], "--suite"],
+    [["--wsl", "--all"], "--all"],
+    [["--wsl", "--against", "master"], "--against"],
+  ];
+  for (const [argv, flag] of flags) {
+    const errors = [];
+    const code = await main(argv, {
+      _spawn: () => {
+        throw new Error(`a rejected combination spawned a process: ${argv.join(" ")}`);
+      },
+      _suites: [{ name: "repo", runs: [] }],
+      _log: () => {},
+      _err: (line) => errors.push(line),
+    });
+    assert.equal(code, 2, argv.join(" "));
+    assert.ok(errors.join("\n").includes(`--wsl cannot be combined with ${flag}`), argv.join(" "));
+  }
+});
 
 test("no plugin-dev in the distro list exits 2 and prints the setup pointer", async () => {
   const fake = makeFake({ distros: ["docker-desktop"] });
@@ -137,8 +158,6 @@ test("the distro list decodes from UTF-16LE and from plain UTF-8", () => {
   assert.deepEqual(distroList(Buffer.from("")), []);
   assert.deepEqual(distroList(Buffer.from("\uFEFFplugin-dev\r\n", "utf16le")), ["plugin-dev"]);
 });
-
-// --- Row 11: the mirror steps, in order ------------------------------------
 
 test("a first sync clones, pins the checkout, rsyncs and then runs the command", async () => {
   const fake = makeFake();
@@ -222,8 +241,6 @@ test("the rsync copies no permissions and keeps .git and node_modules", async ()
   assert.ok(args.includes("node_modules"));
 });
 
-// --- Row 11: every wsl.exe call is an argument array -----------------------
-
 test("wsl.exe is never given a shell string", async () => {
   for (const options of [{}, { mirrorOrigin: SOURCE, mirrorExists: true }]) {
     const fake = makeFake(options);
@@ -255,8 +272,6 @@ test("the mirror is named after the repository and lives under the WSL home", as
   assert.equal(clone[clone.length - 1], MIRROR);
   assert.ok(MIRROR.startsWith(`${HOME}/mirror/`), MIRROR);
 });
-
-// --- Row 11: the exit code and streaming ----------------------------------
 
 test("the command's exit code is the runner's exit code", async () => {
   assert.equal((await run(makeFake({ runStatus: 0 }))).code, 0);
@@ -291,8 +306,6 @@ test("a repository root that does not exist exits 2", async () => {
     "no work is attempted beyond the distro list",
   );
 });
-
-// --- Row 12: path conversion ---------------------------------------------
 
 test("a Windows path converts to its /mnt form", () => {
   assert.equal(toWslPath("C:\\a\\b"), "/mnt/c/a/b");

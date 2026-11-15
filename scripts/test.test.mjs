@@ -1,7 +1,6 @@
-// Tests for the plugin test runner, its registry and its selection. Every
-// interesting failure is in DERIVATION -- glob expansion, the changed set, the
-// import closure -- so selection runs the real graph over fixture trees. Spawn
-// and the clock are injected: a timeout costs milliseconds, a failed run nothing.
+// Tests for the plugin test runner, its registry and its selection. Failures are
+// in DERIVATION -- glob expansion, the changed set, the import closure -- so
+// selection runs the real graph over fixtures, with spawn and clock injected.
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -21,7 +20,6 @@ const ROOT = join(HERE, "..");
 const RUNNER = join(HERE, "test.mjs");
 const WORKFLOW = join(ROOT, ".github", "workflows", "test.yml");
 const FIX_GLOB = "plugins/fix/tests/*.test.mjs";
-// --- Fixture plumbing ------------------------------------------------------
 
 function git(cwd, ...args) {
   const r = spawnSync("git", args, { cwd, encoding: "utf8" });
@@ -74,9 +72,8 @@ function capture() {
   const errors = [];
   return { lines, errors, log: (line) => lines.push(line), err: (line) => errors.push(line) };
 }
-// --- Row 1: the registry and CI cannot drift -------------------------------
 
-test("row 1: every registry suite is run by CI through the runner", () => {
+test("every registry suite is run by CI through the runner", () => {
   const yml = readFileSync(WORKFLOW, "utf8");
   for (const suite of SUITES) {
     assert.match(
@@ -87,7 +84,7 @@ test("row 1: every registry suite is run by CI through the runner", () => {
   }
 });
 
-test("row 1: every --suite CI names is a registry suite", () => {
+test("every --suite CI names is a registry suite", () => {
   const yml = readFileSync(WORKFLOW, "utf8");
   // Comments talk about the runner too; only a real invocation counts.
   const body = yml.split("\n").filter((line) => !/^\s*#/.test(line)).join("\n");
@@ -98,28 +95,22 @@ test("row 1: every --suite CI names is a registry suite", () => {
   }
 });
 
-test("row 1: every CI-only step the runner does not own is still there by name", () => {
+test("every CI-only step the runner does not own is still there by name", () => {
   const yml = readFileSync(WORKFLOW, "utf8");
-  const kept = [
-    "500-line growth ratchet",
-    "Configure git identity",
-    "Plant read-only home sentinels",
-    "Verify home sentinels untouched",
-    "Check plugin file types",
-  ];
+  const kept = ["500-line growth ratchet", "Configure git identity", "Plant read-only home sentinels",
+    "Verify home sentinels untouched", "Check plugin file types"];
   for (const name of kept) assert.match(yml, new RegExp(`name:\\s*${name}`), `CI lost "${name}"`);
 });
 
-test("row 1: pipeline's npm ci step is gone, because its suite's install runs it", () => {
+test("pipeline's npm ci step is gone, because its suite's install runs it", () => {
   const yml = readFileSync(WORKFLOW, "utf8");
   assert.doesNotMatch(yml, /name:\s*Install dependencies/);
   for (const run of findSuite("pipeline").runs) {
     assert.deepEqual(run.install, ["npm", "ci"], "the install moved into the registry");
   }
 });
-// --- Row 3: the changed set ------------------------------------------------
 
-test("row 3: committed, unstaged and untracked changes all enter the changed set", (t) => {
+test("committed, unstaged and untracked changes all enter the changed set", (t) => {
   const repo = makeRepo(t);
   write(repo, "seed.mjs");
   write(repo, ".gitignore", "ignored.txt\n");
@@ -130,7 +121,6 @@ test("row 3: committed, unstaged and untracked changes all enter the changed set
   write(repo, "unstaged.mjs");
   write(repo, "untracked.mjs");
   write(repo, "ignored.txt");
-
   const changed = changedSet({ repoRoot: repo, base: resolveBase({ repoRoot: repo }) });
   for (const path of ["committed.mjs", "unstaged.mjs", "untracked.mjs"]) {
     assert.ok(changed.includes(path), `${path} missing from ${changed.join(",")}`);
@@ -138,7 +128,7 @@ test("row 3: committed, unstaged and untracked changes all enter the changed set
   assert.ok(!changed.includes("ignored.txt"), "an ignored file is not a change");
 });
 
-test("row 3: master is the base when there is no origin, and the merge-base is used", (t) => {
+test("master is the base when there is no origin, and the merge-base is used", (t) => {
   const repo = makeRepo(t);
   write(repo, "seed.mjs");
   commitAll(repo, "seed");
@@ -150,13 +140,12 @@ test("row 3: master is the base when there is no origin, and the merge-base is u
   write(repo, "elsewhere.mjs");
   commitAll(repo, "master moves");
   git(repo, "checkout", "-q", "feature");
-
   const changed = changedSet({ repoRoot: repo, base: resolveBase({ repoRoot: repo }) });
   assert.ok(changed.includes("work.mjs"), changed.join(","));
   assert.ok(!changed.includes("elsewhere.mjs"), "master's own commit is not this branch's diff");
 });
 
-test("row 3: no master and no --against exits 2 naming --against", (t) => {
+test("no master and no --against exits 2 naming --against", (t) => {
   const repo = makeRepo(t, "trunk");
   write(repo, "seed.mjs");
   commitAll(repo, "seed");
@@ -166,7 +155,7 @@ test("row 3: no master and no --against exits 2 naming --against", (t) => {
   assert.match(r.stderr, /--against/);
 });
 
-test("row 3: --against overrides the branch base and an unknown ref fails closed", (t) => {
+test("--against overrides the branch base and an unknown ref fails closed", (t) => {
   const repo = makeRepo(t);
   write(repo, "seed.mjs");
   commitAll(repo, "seed");
@@ -175,10 +164,10 @@ test("row 3: --against overrides the branch base and an unknown ref fails closed
   assert.equal(resolveBase({ repoRoot: repo, against: base }), base);
   assert.throws(() => resolveBase({ repoRoot: repo, against: "no-such-ref" }), /not a ref/);
 });
-// --- Rows 4, 5, 6: the import graph and its fallbacks ----------------------
 
 /** The fixture plugin: one module chain, one dynamic import, one URL file, one
- *  URL directory, two computed `join()` paths -- and a `.win.test.mjs`. */
+ *  URL directory, a computed plugin-root locator, two computed `join()` paths
+ *  -- and a `.win.test.mjs`. */
 function graphFixture(t) {
   const repo = makeRepo(t);
   const files = {
@@ -193,6 +182,8 @@ function graphFixture(t) {
       'const p = new URL("../bin/urlonly.mjs", import.meta.url).pathname;\n',
     "plugins/fix/templates/a.md": "template\n",
     "plugins/fix/tests/url-dir.test.mjs": 'const d = new URL("../templates", import.meta.url);\n',
+    "plugins/fix/src/root.mjs": 'export const root = new URL("..", import.meta.url);\nexport const here = new URL(".", import.meta.url);\n',
+    "plugins/fix/tests/root.test.mjs": 'import { root } from "../src/root.mjs";\n',
     "plugins/fix/bin/joined.mjs": "export const joined = 1;\n",
     "plugins/fix/tests/join-cli.test.mjs": 'join(here, "..", "bin", "joined.mjs");\n',
     "plugins/fix/skills/x/SKILL.md": "skill\n",
@@ -221,7 +212,7 @@ const fixEntries = (repo, changed) =>
 
 const selectedFile = (entries, suffix) => entries.filter((entry) => entry.file.endsWith(suffix));
 
-test("row 4: a change reaches a test through a transitive import and no further", (t) => {
+test("a change reaches a test through a transitive import and no further", (t) => {
   const entries = fixEntries(graphFixture(t), ["plugins/fix/src/a.mjs"]);
   const reached = selectedFile(entries, "transitive.test.mjs");
   assert.equal(reached.length, 1, JSON.stringify(entries));
@@ -229,22 +220,28 @@ test("row 4: a change reaches a test through a transitive import and no further"
   assert.deepEqual(selectedFile(entries, "unrelated.test.mjs"), [], "a test importing neither was selected");
 });
 
-test("row 5: a string-literal import() enters the closure", (t) => {
+test("a string-literal import() enters the closure", (t) => {
   const entries = fixEntries(graphFixture(t), ["plugins/fix/src/dyn.mjs"]);
   assert.equal(selectedFile(entries, "dynamic.test.mjs").length, 1, JSON.stringify(entries));
 });
 
-test("row 5: a new URL literal naming a file enters the closure", (t) => {
+test("a new URL literal naming a file enters the closure", (t) => {
   const entries = fixEntries(graphFixture(t), ["plugins/fix/bin/urlonly.mjs"]);
   assert.equal(selectedFile(entries, "url-file.test.mjs").length, 1, JSON.stringify(entries));
 });
 
-test("row 5: a new URL literal naming a directory adds every file under it", (t) => {
+test("a new URL literal naming a directory adds every file under it", (t) => {
   const entries = fixEntries(graphFixture(t), ["plugins/fix/templates/a.md"]);
   assert.equal(selectedFile(entries, "url-dir.test.mjs").length, 1, JSON.stringify(entries));
 });
 
-test("row 5: a computed join() path is caught by its basename literal", (t) => {
+test("a URL locator ending in . or .. enumerates no directory contents", (t) => {
+  const result = select({ suites: [suiteOf("fix", [FIX_GLOB])], changed: ["plugins/fix/notes.md"], repoRoot: graphFixture(t) });
+  assert.deepEqual(result.entries.filter((entry) => entry.why !== "windows"), [], "a plugin-root locator walked the plugin");
+  assert.equal(result.docsOnly, true);
+});
+
+test("a computed join() path is caught by its basename literal", (t) => {
   const repo = graphFixture(t);
   const cli = fixEntries(repo, ["plugins/fix/bin/joined.mjs"]);
   assert.equal(selectedFile(cli, "join-cli.test.mjs").length, 1, JSON.stringify(cli));
@@ -252,20 +249,20 @@ test("row 5: a computed join() path is caught by its basename literal", (t) => {
   assert.equal(selectedFile(skill, "join-skill.test.mjs").length, 1, JSON.stringify(skill));
 });
 
-test("row 6: a changed .md in no closure selects nothing and reports docs-only", (t) => {
+test("a changed .md in no closure selects nothing and reports docs-only", (t) => {
   const result = select({ suites: [suiteOf("fix", [FIX_GLOB])], changed: ["plugins/fix/notes.md"], repoRoot: graphFixture(t) });
-  assert.deepEqual(result.entries.filter((entry) => entry.why !== "windows"), []);
+  assert.deepEqual(result.entries.filter((entry) => entry.why !== "windows"), [], "a .md in no closure selected a test");
   assert.equal(result.docsOnly, true);
 });
 
-test("row 6: a changed non-.md file in no closure runs the whole suite", (t) => {
+test("a changed non-.md file in no closure runs the whole suite", (t) => {
   const path = "plugins/fix/src/tray/windows.ps1";
   const entries = fixEntries(graphFixture(t), [path]);
   assert.ok(entries.length >= 6, JSON.stringify(entries));
   assert.ok(entries.every((entry) => entry.why === `fallback: ${path}`));
 });
 
-test("row 6: --list reports the change docs-only through the real CLI", async (t) => {
+test("--list reports the change docs-only through the real CLI", async (t) => {
   const repo = graphFixture(t);
   commitAll(repo, "fixture");
   write(repo, "plugins/fix/extra.md", "more notes\n");
@@ -281,20 +278,14 @@ test("row 6: --list reports the change docs-only through the real CLI", async (t
   const rows = out.lines.map((line) => line.split(" ").slice(0, 2).join(" "));
   assert.deepEqual(rows, ["fix plugins/fix/tests/thing.win.test.mjs"], ".md selects nothing");
 });
-// --- Row 7: whole-suite fallbacks -----------------------------------------
 
-test("row 7: lockfiles and plugin manifests run the whole suite", (t) => {
+test("lockfiles and plugin manifests run the whole suite", (t) => {
   const repo = graphFixture(t);
   const suite = [suiteOf("fix", [FIX_GLOB])];
   const all = expandRun(suite[0].runs[0], { repoRoot: repo }).length;
-  const fallbacks = [
-    "plugins/fix/package.json",
-    "plugins/fix/package-lock.json",
-    "plugins/fix/.claude-plugin/plugin.json",
-    "plugins/fix/.codex-plugin/plugin.json",
-    "plugins/fix/hooks/hooks.json",
-    "plugins/fix/.env.test",
-  ];
+  const fallbacks = ["plugins/fix/package.json", "plugins/fix/package-lock.json",
+    "plugins/fix/.claude-plugin/plugin.json", "plugins/fix/.codex-plugin/plugin.json",
+    "plugins/fix/hooks/hooks.json", "plugins/fix/.env.test"];
   for (const path of fallbacks) {
     const { entries } = select({ suites: suite, changed: [path], repoRoot: repo });
     assert.equal(entries.length, all, `${path} should run the whole suite`);
@@ -302,7 +293,7 @@ test("row 7: lockfiles and plugin manifests run the whole suite", (t) => {
   }
 });
 
-test("row 7: a change under scripts/ or .github/ runs the repo suite", (t) => {
+test("a change under scripts/ or .github/ runs the repo suite", (t) => {
   const repo = graphFixture(t);
   const suites = [suiteOf("fix", [FIX_GLOB]), suiteOf("repo", ["scripts/*.test.mjs"])];
   for (const path of ["scripts/x.mjs", ".github/workflows/test.yml"]) {
@@ -314,17 +305,15 @@ test("row 7: a change under scripts/ or .github/ runs the repo suite", (t) => {
     assert.deepEqual(attributed, [], "a repo-level change must not select a plugin test");
   }
 });
-// --- Row 8: every .win.test.mjs always runs -------------------------------
 
-test("row 8: a .win.test.mjs is selected by a diff that touches none of it", (t) => {
+test("a .win.test.mjs is selected by a diff that touches none of it", (t) => {
   const entries = fixEntries(graphFixture(t), ["plugins/fix/notes.md"]);
   const win = selectedFile(entries, ".win.test.mjs");
   assert.equal(win.length, 1, JSON.stringify(entries));
   assert.equal(win[0].why, "windows");
 });
-// --- Row 9: --list runs nothing -------------------------------------------
 
-test("row 9: --list prints <suite> <file> <why> and spawns no node --test", async (t) => {
+test("--list prints <suite> <file> <why> and spawns no node --test", async (t) => {
   const repo = graphFixture(t);
   commitAll(repo, "fixture");
   write(repo, "plugins/fix/src/a.mjs", "export const a = 2;\n");
@@ -347,9 +336,8 @@ test("row 9: --list prints <suite> <file> <why> and spawns no node --test", asyn
     assert.match(why, /^(changed: |windows$|fallback: )/, line);
   }
 });
-// --- Row 16: globs ---------------------------------------------------------
 
-test("row 16: ** matches zero or more directories, * matches one level", (t) => {
+test("** matches zero or more directories, * matches one level", (t) => {
   const repo = makeRepo(t);
   write(repo, "tests/a.test.mjs");
   write(repo, "tests/deep/b.test.mjs");
@@ -361,23 +349,40 @@ test("row 16: ** matches zero or more directories, * matches one level", (t) => 
   assert.deepEqual(flat, ["tests/a.test.mjs"]);
 });
 
-test("row 16: a run whose globs match nothing fails, names the glob, and spawns nothing", async (t) => {
+test("a whole-suite run whose globs match nothing exits 1 and names the glob", async (t) => {
   const repo = makeRepo(t);
   write(repo, "tests/a.test.mjs");
   const spawn = stubSpawn();
-  const results = await runSuites([suiteOf("empty", ["nowhere/*.test.mjs"])], {
-    repoRoot: repo,
+  const out = capture();
+  const code = await main(["--suite", "empty"], {
+    cwd: repo,
+    _suites: [suiteOf("empty", ["nowhere/*.test.mjs"])],
     _spawn: spawn.spawn,
+    _log: out.log,
+    _err: out.err,
   });
-  assert.equal(results.length, 1);
-  assert.equal(results[0].status, "no-files");
-  assert.match(results[0].reason, /nowhere\/\*\.test\.mjs/);
+  assert.equal(code, 1, "an empty whole-suite run reported success");
+  assert.match(out.lines.join("\n"), /no file matched nowhere\/\*\.test\.mjs/);
   assert.equal(spawn.calls.length, 0, "an empty expansion spawned node --test bare");
 });
-// --- Row 10: failure exit codes -------------------------------------------
 
-test("row 10: a failing run exits 1 and the summary names it; all green exits 0", async (t) => {
+test("--suite resolves only against the injected suite list", async (t) => {
   const repo = graphFixture(t);
+  const out = capture();
+  const code = await main(["--suite", "repo", "--list"], {
+    cwd: repo,
+    _suites: [suiteOf("repo", [FIX_GLOB])],
+    _log: out.log,
+    _err: out.err,
+  });
+  assert.equal(code, 0);
+  assert.ok(out.lines.length > 0, "the injected suite selected nothing");
+  for (const line of out.lines) assert.match(line, /^repo plugins\/fix\/tests\//, line);
+});
+
+test("a failing run exits 1 and the summary names it; all green exits 0", async (t) => {
+  const repo = graphFixture(t);
+  const lines = [];
   const run = (spawn) =>
     main(["--suite", "fix"], {
       cwd: repo,
@@ -386,7 +391,6 @@ test("row 10: a failing run exits 1 and the summary names it; all green exits 0"
       _log: (line) => lines.push(line),
       _err: () => {},
     });
-  const lines = [];
 
   const failing = stubSpawn({ code: 1 });
   assert.equal(await run(failing), 1);
@@ -411,9 +415,8 @@ test("a run spawns node with the tests in the run's cwd and its env", async (t) 
   assert.equal(call.opts.cwd, repo);
   assert.equal(call.opts.env.A, "1");
 });
-// --- Row 17: timeout kills the tree ---------------------------------------
 
-test("row 17: killTree uses taskkill /T on win32 and the process group elsewhere", () => {
+test("killTree uses taskkill /T on win32 and the process group elsewhere", () => {
   const spawned = [];
   killTree(99, { platform: "win32", _spawnSync: (...args) => spawned.push(args) });
   assert.deepEqual(spawned[0], ["taskkill", ["/T", "/F", "/PID", "99"], { stdio: "ignore" }]);
@@ -423,7 +426,7 @@ test("row 17: killTree uses taskkill /T on win32 and the process group elsewhere
   assert.deepEqual(killed, [[-99, "SIGKILL"]]);
 });
 
-test("row 17: a run past its timeout is killed and reported failed", async (t) => {
+test("a run past its timeout is killed and reported failed", async (t) => {
   const repo = graphFixture(t);
   const suite = suiteOf("slow", [FIX_GLOB]);
   suite.runs[0].timeoutMs = 30;
@@ -441,21 +444,18 @@ test("row 17: a run past its timeout is killed and reported failed", async (t) =
   assert.deepEqual(killed, [777], "the run's tree was not killed");
   assert.match(lines.join("\n"), /TIMEOUT/);
 });
-// --- Row 18: hash-gated install -------------------------------------------
 
-function memoryFs(files) {
-  return {
-    existsSync: (path) => files.has(path),
-    readFileSync: (path) => {
-      if (!files.has(path)) throw new Error(`ENOENT ${path}`);
-      return files.get(path);
-    },
-    writeFileSync: (path, value) => files.set(path, value),
-    mkdirSync: () => {},
-  };
-}
+const memoryFs = (files) => ({
+  existsSync: (path) => files.has(path),
+  readFileSync: (path) => {
+    if (!files.has(path)) throw new Error(`ENOENT ${path}`);
+    return files.get(path);
+  },
+  writeFileSync: (path, value) => files.set(path, value),
+  mkdirSync: () => {},
+});
 
-test("row 18: install runs when the hash is missing or differs, and is skipped when it matches", () => {
+test("install runs when the hash is missing or differs, and is skipped when it matches", () => {
   const cwd = join(tmpdir(), "install-fixture");
   const lockfile = join(cwd, "package-lock.json");
   const record = join(cwd, "node_modules", ".test-install-hash");

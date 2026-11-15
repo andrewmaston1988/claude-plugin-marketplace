@@ -26,7 +26,7 @@ node scripts/test.mjs --wsl
 - `--suite <name>`: select one whole suite. Also accepts `--suite=<name>`; cannot combine with `--all`.
 - `--against <ref>`: override the diff base. Also accepts `--against=<ref>`.
 - `--list`: print `<suite> <file> <why>` without installing or running tests. Reasons are `changed: <path>`, `fallback: <path>`, `windows`, or `suite` for whole-suite selection.
-- `--wsl`: sync the mirror and run `node scripts/test.mjs --all` there. Other selection flags, including `--list`, do not narrow or preview this run.
+- `--wsl`: sync the mirror and run `node scripts/test.mjs --all` there. Combining it with `--list`, `--suite`, `--all` or `--against` exits 2 naming the conflicting flag, because that run is always the whole regression.
 - `--help` or `-h`: print usage.
 
 Exit 0 means success, including an empty diff selection. Exit 1 means a test run failed or timed out, or a whole-suite run matched no file. Exit 2 means a request or prerequisite failed, such as an unknown suite, unresolved diff base, or unavailable WSL distro. WSL returns the remote runner's exit code once it starts.

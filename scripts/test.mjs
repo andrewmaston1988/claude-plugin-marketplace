@@ -1,20 +1,5 @@
-// The plugin test runner: one owner for "how a plugin's tests are run".
-//
-//     node scripts/test.mjs                       # diff-aware: touched tests + every .win.test.mjs
-//     node scripts/test.mjs --all                 # every suite
-//     node scripts/test.mjs --suite <name>        # one suite, whole
-//     node scripts/test.mjs --list [--suite <n>]  # what would run, and nothing else
-//     node scripts/test.mjs --against <ref>       # name the base commit of the diff
-//     node scripts/test.mjs --wsl                 # full regression in the plugin-dev distro
-//
-// The suites live in `scripts/test-suites.mjs`; CI calls this runner with
-// `--suite <name>`, so a local run and CI execute the same command by
-// construction rather than by two files agreeing by hand.
-//
-// Exit codes:
-//     0: every run passed (or nothing was selected)
-//     1: at least one run failed, was killed at its timeout, or matched no file
-//     2: the request could not be carried out (no base ref, unknown suite, no distro)
+// The plugin test runner: one owner for how a plugin's tests are run. Flags are
+// in USAGE below; tiers, exit codes and test-writing rules are in TESTING.md.
 
 import { spawn, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
@@ -22,7 +7,7 @@ import * as nodeFs from "node:fs";
 import { join, posix } from "node:path";
 import { pathToFileURL } from "node:url";
 
-import { SUITES, findSuite } from "./test-suites.mjs";
+import { SUITES } from "./test-suites.mjs";
 import { ChangedSetError, changedSet, resolveBase } from "./test-lib/changed.mjs";
 import { expandRun, select, wholeEntries } from "./test-lib/select.mjs";
 
@@ -235,6 +220,18 @@ export async function main(argv = process.argv.slice(2), options = {}) {
     }
   }
   if (all && suiteName) return usage("--suite and --all are exclusive", _err);
+  if (wsl) {
+    // WSL mode runs the whole regression by design; a selection flag alongside
+    // it would be read as narrowing that run, so refuse rather than ignore it.
+    const flags = [
+      ["--list", listOnly],
+      ["--suite", Boolean(suiteName)],
+      ["--against", Boolean(against)],
+      ["--all", all],
+    ];
+    const conflict = flags.find(([, given]) => given);
+    if (conflict) return usage(`--wsl cannot be combined with ${conflict[0]}`, _err);
+  }
 
   let repoRoot;
   try {
@@ -263,16 +260,18 @@ export async function main(argv = process.argv.slice(2), options = {}) {
 
   let chosen;
   if (suiteName) {
-    const suite = findSuite(suiteName) || _suites.find((s) => s.name === suiteName);
+    // Against the injected list only: a suite passed in by a test must win over
+    // a built-in of the same name, or the test cannot exercise its own registry.
+    const suite = _suites.find((s) => s.name === suiteName);
     if (!suite) return usage(`unknown suite ${suiteName} (known: ${_suites.map((s) => s.name).join(", ")})`, _err);
     chosen = [suite];
   } else chosen = _suites;
 
   let entries;
   let selected = null;
-  if (all || suiteName) {
+  const whole = Boolean(all || suiteName);
+  if (whole) {
     entries = wholeEntries(chosen, { repoRoot });
-    if (!listOnly) selected = new Set(entries.map((entry) => `${entry.suite}\0${entry.file}`));
   } else {
     let base;
     let changed;
@@ -295,7 +294,10 @@ export async function main(argv = process.argv.slice(2), options = {}) {
     for (const entry of entries) _log(`${entry.suite} ${entry.file} ${entry.why}`);
     return 0;
   }
-  if (entries.length === 0) {
+  // An empty diff selection is a pass. An empty whole-suite expansion is not:
+  // it would report success having run nothing, so it falls through to
+  // `runSuites` and the no-files failure that names the glob.
+  if (!whole && entries.length === 0) {
     _log("[test] nothing selected");
     return 0;
   }

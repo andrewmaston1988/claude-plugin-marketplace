@@ -1,20 +1,6 @@
-// The registry of plugin test suites: one entry per suite, one run per
-// command CI used to carry. `scripts/test.mjs` is the only reader, so CI and a
-// local run execute the same commands by construction -- a second copy of
-// "how to test plugin X" is the thing this file exists to delete.
-//
-// Fields per run:
-//   cwd        repo-relative working directory the globs are relative to
-//   globs      `**` matches zero or more directories; `*` never crosses `/`
-//   exclude    substrings; a run-relative path containing one is dropped
-//   envFile    passed to node as --env-file, resolved in cwd
-//   env        extra environment for the child
-//   install    argv run before the tests, once per lockfile hash
-//   timeoutMs  wall clock; expiry kills the run's process tree
-//   label      names the run in the summary (pipeline carries three)
-//
-// Every command below is copied from `.github/workflows/test.yml` as it stood
-// before the runner existed. When the two disagree, CI is the ground truth.
+// The registry of plugin test suites: the one place "how to test plugin X" is
+// written. `scripts/test.mjs` is its only reader, so CI and a local run execute
+// the same commands by construction.
 
 const TEN_MIN = 10 * 60 * 1000;
 const TWENTY_MIN = 20 * 60 * 1000;
@@ -58,7 +44,7 @@ export const SUITES = [
   },
   {
     name: "swarm",
-    // 234 test files, all at depth 1; `**` keeps a deeper one covered.
+    // `**` matches every test file at any depth below `tests/`.
     runs: [
       {
         cwd: "plugins/swarm",

@@ -1,24 +1,12 @@
 // The import graph a diff-aware run selects on: a test is selected when a
-// changed file is reachable from it. Reachability is four kinds of edge,
-// followed from every file in the closure and not only from the test, because
-// the file that names a path is as often a module as a test.
-//
-//   * relative static imports and `export ... from`;
-//   * string-literal `import()`;
-//   * `new URL("<rel>", import.meta.url)` literals, with a directory literal
-//     adding every file under it;
-//   * basename literals -- a string equal to a file name in the same plugin, or
-//     ending in `/<name>` -- which is what catches computed paths such as
-//     `join(here, "..", "bin", "cli.mjs")`.
-//
-// Over-selection is the accepted cost: a selected test costs seconds, a missed
-// one costs a red PR. Anything the graph cannot see at all falls back to the
-// whole suite in the runner.
+// changed file is reachable from it. Over-selection costs seconds; a missed
+// test costs a red PR, so anything the graph cannot see falls back to the suite.
 
 import { readdirSync, readFileSync } from "node:fs";
 import { join, posix } from "node:path";
 
-const SKIP_DIRS = new Set(["node_modules", ".git", "sessions"]);
+/** Never walked: a dependency tree, git's own storage, and session transcripts. */
+export const SKIP_DIRS = new Set(["node_modules", ".git", "sessions"]);
 
 // `import x from "…"`, `import { a } from "…"`, `import "…"`. The optional
 // middle group excludes parens so a dynamic `import("…")` is left to its own
@@ -104,11 +92,15 @@ function resolveModule(spec, fromFile, index) {
   return [];
 }
 
-/** A `new URL("<rel>", import.meta.url)` literal: a file, or a directory whose
- *  every file is named (`new URL("../templates", …)`). */
+/** A `new URL("<rel>", import.meta.url)` literal: a file, or a named directory
+ *  whose every file it names (`new URL("../templates", …)`). A literal ending
+ *  in `.` or `..` is a locator for a computed root, not a named directory, so
+ *  it adds no contents of its own. */
 function resolveUrlLiteral(literal, fromFile, index) {
   const clean = literal.split("?")[0].split("#")[0];
   const out = resolveModule(clean, fromFile, index);
+  const last = posix.basename(clean.replace(/\/+$/, ""));
+  if (last === "" || last === "." || last === "..") return out;
   const base = posix.normalize(posix.join(posix.dirname(fromFile), clean));
   const prefix = base === "." || base === "" ? null : `${base}/`;
   if (prefix === null) return out;
@@ -131,8 +123,8 @@ function basenameEdges(text, index) {
     if (base === "" || base === "." || base === "..") continue;
     const hits = index.byBasename.get(base);
     if (!hits) continue;
-    // Either the literal IS the file name, or it ends in `/<that name>`.
-    if (normalised !== base && !normalised.includes("/")) continue;
+    // Any literal whose basename names a file in the plugin is an edge, whatever
+    // path prefix it carries. That is what catches `join(here, "..", "bin", "x.mjs")`.
     for (const file of hits) out.push(file);
   }
   return out;
