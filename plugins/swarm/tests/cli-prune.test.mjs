@@ -85,7 +85,7 @@ test("prune --dry-run: a kept worktree whose path is already gone from disk is n
 
     const r = runCli(["prune", resultsDir, "--dry-run"], { cwd: dir, env: { SWARM_HOME: join(dir, "home") } });
     equal(r.status, 0, r.stdout + r.stderr);
-    ok(/has no kept worktrees — nothing to prune/.test(r.stdout), r.stdout);
+    ok(/has no kept worktrees or branches — nothing to prune/.test(r.stdout), r.stdout);
   } finally {
     rmSync(dir, { recursive: true, force: true });
     rmSync(repo, { recursive: true, force: true });
@@ -114,7 +114,7 @@ test("prune: a real prune rewrites worktreesKept to drop the pruned entry; a sec
 
     const r2 = runCli(["prune", resultsDir, "--dry-run"], { cwd: dir, env: { SWARM_HOME: join(dir, "home") } });
     equal(r2.status, 0, r2.stdout + r2.stderr);
-    ok(/has no kept worktrees — nothing to prune/.test(r2.stdout), r2.stdout);
+    ok(/has no kept worktrees or branches — nothing to prune/.test(r2.stdout), r2.stdout);
   } finally {
     rmSync(dir, { recursive: true, force: true });
     rmSync(repo, { recursive: true, force: true });

@@ -1,7 +1,8 @@
-// `swarm prune` — destroy a finished run's kept worktrees and branches, refusing
-// anything live, unlanded or dirty. Split out of swarm.mjs, which now just
-// dispatches to it. The CLI-wide usage text stays in swarm.mjs and is passed in,
-// so a bare `prune` still prints the same block as every other bad invocation.
+// `swarm prune` — delete a finished run's kept worktrees and branches at once, keeping
+// and naming every row that still holds unlanded or uncommitted work. A live run is
+// refused. Split out of swarm.mjs, which now just dispatches to it. The CLI-wide usage
+// text stays in swarm.mjs and is passed in, so a bare `prune` still prints the same
+// block as every other bad invocation.
 import { join, resolve } from "node:path";
 import { getConfig } from "../src/config.mjs";
 import { runLiveness } from "../src/runlog.mjs";
@@ -43,25 +44,60 @@ export async function cmdPrune(rest, { usage }) {
   // The report describes every row, so it never stops at a blocker or a clock.
   const { rows } = planPrune(run, git, fs, { cfg, extraBases, measureBytes: true, stopAtBlocker: false, deadline: Infinity });
   if (!rows.length) {
-    out(`swarm: ${dir} has no kept worktrees — nothing to prune.`);
+    out(`swarm: ${dir} has no kept worktrees or branches — nothing to prune.`);
     return 0;
   }
-  // The guard decides the run BEFORE the report describes it: a refused call must
-  // never print "freed", or the loudest line on screen would claim a destruction
-  // that did not happen.
+  // Partial prune: a blocked row is kept and never touched, and never stops the clean ones.
+  const discard = rest.includes("--discard-unlanded");
   const blocked = pruneBlockers(rows);
-  if (!dryRun && blocked.length && !rest.includes("--discard-unlanded")) {
-    for (const row of blocked) {
-      err(`  ${row.path} ${row.branch ?? "(detached)"}: ${workCounts(row).join(", ")}`);
+  const go = discard ? rows : rows.filter((row) => !blocked.includes(row));
+  const stay = discard ? [] : blocked;
+
+  if (dryRun) {
+    if (go.length) out(formatPrune(go, { dryRun: true }));
+    if (stay.length) {
+      out(`swarm: would keep ${rowCount(stay.length)} that still ${stay.length === 1 ? "holds" : "hold"} work:`);
+      for (const row of stay) out(`  ${rowLabel(row)}: ${workCounts(row).join(", ")}`);
     }
-    err("swarm: refusing — land or take this work first, or pass --discard-unlanded to destroy it");
-    return 1;
+    return 0;
   }
-  out(formatPrune(rows, { dryRun }));
-  if (!dryRun) {
-    executePrune(rows, git, fs, { resultsDir: dir, cfg });
-    // survivors: whatever wasn't just removed and wasn't already gone before we started
-    if (hadSummary) writeSummary(dir, { ...summary, worktreesKept: kept.filter((wt) => fs.existsSync(wt.path)) });
+
+  const { failed } = executePrune(go, git, fs, { resultsDir: dir, cfg });
+  const failure = new Map(failed.map(({ row, reason }) => [row, reason]));
+  const removed = [];
+  const refused = [];
+  for (const row of go) {
+    if (!failure.has(row) && gone(row, git, fs)) removed.push(row);
+    else refused.push({ row, reason: failure.get(row) ?? null });
   }
-  return 0;
+  // survivors: whatever wasn't just removed and wasn't already gone before we started
+  if (hadSummary) writeSummary(dir, { ...summary, worktreesKept: kept.filter((wt) => fs.existsSync(wt.path)) });
+  // The report follows execute: a removal git refused is kept, never printed as freed.
+  if (removed.length) out(formatPrune(removed));
+  for (const row of stay) err(`  ${rowLabel(row)}: ${workCounts(row).join(", ")}`);
+  for (const { row, reason } of refused) {
+    err(`  ${rowLabel(row)}: ${workCounts(row).join(", ") || firstLine(reason) || "still present"}`);
+  }
+  // Two unrelated causes, two remedies: `stay` rows hold work the operator must land or
+  // take, and `--discard-unlanded` is the word that overrides that. A `refused` row is one
+  // git itself would not remove (a locked worktree, say) — retrying with the flag re-runs
+  // the same removal, so it is never offered there.
+  if (stay.length) {
+    err(`swarm: kept ${rowCount(stay.length)} that still ${stay.length === 1 ? "holds" : "hold"} work — land or take it and prune again, or pass --discard-unlanded to destroy it`);
+  }
+  if (refused.length) {
+    err(`swarm: kept ${rowCount(refused.length)} that git refused to remove — clear what git names above and prune again`);
+  }
+  return stay.length || refused.length ? 1 : 0;
+}
+
+const rowLabel = (row) => `${row.path ?? "(no tree)"} ${row.branch ?? "(detached)"}`;
+const rowCount = (n) => `${n} row${n === 1 ? "" : "s"}`;
+const firstLine = (text) => (text || "").split(/\r?\n/).map((s) => s.trim()).find(Boolean) || "";
+
+// A row is gone when its tree left the disk, or a branch-only row's ref no longer resolves.
+function gone(row, git, fs) {
+  if (row.path != null) return !fs.existsSync(row.path);
+  if (!fs.existsSync(row.repo)) return false;
+  return git(["rev-parse", "--verify", `refs/heads/${row.branch}`], row.repo).status !== 0;
 }
