@@ -54,7 +54,7 @@ Notes:
 
 ## Replying
 
-Reply normally — just write your answer, as you would in any other turn. The plugin's `PreToolUse`, `PostToolUse` and `Stop` hooks mirror the turn to the claimed channel: your narration posts as messages before each tool starts, and the running tool shows as **a status line in one live block**, under the last message, until the turn stops. A claimed session asks in plain text rather than through `AskUserQuestion`: a `PreToolUse` hook mirrors the question and its options to the channel and then denies the tool, because the terminal dialog cannot be answered from Slack. Write the question with its options as normal text and end the turn.
+Reply normally — just write your answer, as you would in any other turn. The plugin's `UserPromptSubmit`, `PreToolUse`, `PostToolUse` and `Stop` hooks mirror the turn to the claimed channel: your narration posts as messages before each tool starts, and the running tool shows as **a status line in one live block**, under the last message, until the turn stops. A claimed session asks in plain text rather than through `AskUserQuestion`: a `PreToolUse` hook mirrors the question and its options to the channel and then denies the tool, because the terminal dialog cannot be answered from Slack. Write the question with its options as normal text and end the turn.
 
 Do **not** answer with a tool call. There is nothing to send by hand — the hooks already post your text, so a tool call per message wastes context and can post the same reply twice.
 
