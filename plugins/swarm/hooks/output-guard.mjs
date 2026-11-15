@@ -8,10 +8,9 @@
 // the run they authorised seated four cost-dominated models.
 //
 // A redirect is allowed: the file holds everything and Read-ing it whole is the
-// intended use. `||` is not a pipe. Quoted spans are blanked before the pipe scan, so
-// a commit message or an `--args` JSON blob that mentions the command is not a filter —
-// while the subcommand match itself runs on the raw text, so a quoted engine path
-// still counts.
+// intended use. `||` is not a pipe. Quoted spans are blanked first, on the raw text
+// before anything else, so a commit message or an `--args` JSON blob that mentions
+// the command is not a filter.
 //
 // Silent inside a swarm leaf, on the same signal foreground-guard.mjs uses: a leaf's
 // own tooling may legitimately parse the record, and a broken guard must never wedge
@@ -96,7 +95,7 @@ export function decide({ env = process.env, payload } = {}) {
   const blanked = blankQuoted(command);
   for (const sub of GUARDED) {
     const re = new RegExp(swarmSubcommandRe(sub).source, "g");
-    for (const m of command.matchAll(re)) {
+    for (const m of blanked.matchAll(re)) {
       if (piped(blanked, m.index + m[0].length)) return deny();
     }
   }

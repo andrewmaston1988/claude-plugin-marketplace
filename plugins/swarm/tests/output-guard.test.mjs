@@ -59,11 +59,11 @@ test("row 13: allows the bare read, a redirect, quoted mentions, `||`, and other
   }
 });
 
-// A quoted engine path must still count: the subcommand match runs on the raw text,
-// only the pipe scan runs on the blanked copy.
-test("row 13: a quoted engine path before a real pipe is still denied", () => {
-  const out = decide({ env: {}, payload: call("Bash", 'node "C:/x/swarm.mjs" perf | grep kimi') });
-  equal(out?.hookSpecificOutput?.permissionDecision, "deny");
+// A quoted mention is blanked, so the command inside it never matches — the same
+// reason `git commit -m "swarm perf | grep"` passes. The cost is a quoted engine
+// path: `node "C:/x/swarm.mjs" perf | grep` is not caught, recorded as a limitation.
+test("row 13: a quoted mention with a pipe outside it is not a match", () => {
+  equal(decide({ env: {}, payload: call("Bash", 'grep "swarm validate" docs.md | head -5') }), null);
 });
 
 // A leaf's own tooling may legitimately parse the record, and a broken guard must
