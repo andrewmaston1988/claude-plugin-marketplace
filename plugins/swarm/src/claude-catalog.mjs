@@ -50,7 +50,7 @@ export function catalogModels(env = process.env) {
   return Array.isArray(models) ? models : [];
 }
 
-const stripModelSuffix = (model) => model.replace(/\[1m\]$/, "").replace(/-\d{8}$/, "");
+export const stripModelSuffix = (model) => model.replace(/\[1m\]$/, "").replace(/-\d{8}$/, "");
 
 // The row's declared input window, or null when the catalog cannot answer:
 // exact id, then the id without `[1m]`/date, then the longest id the model

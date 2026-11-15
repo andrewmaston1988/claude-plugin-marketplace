@@ -4,7 +4,7 @@ import path from 'node:path';
 import os from 'node:os';
 
 import { contextWindowFor } from './context.mjs';
-import { maxInputTokens } from './claude-catalog.mjs';
+import { maxInputTokens, stripModelSuffix } from './claude-catalog.mjs';
 import { readJSON } from './paths.mjs';
 
 // Claude Code compacted ~33k below the configured window in every measured run.
@@ -28,7 +28,7 @@ export function modelSettingsEntry(modelSettings, model) {
   if (!modelSettings || typeof modelSettings !== 'object' || typeof model !== 'string') return undefined;
   const has = (k) => Object.prototype.hasOwnProperty.call(modelSettings, k);
   if (has(model)) return modelSettings[model];
-  const stripped = model.replace(/\[1m\]$/, '').replace(/-\d{8}$/, '');
+  const stripped = stripModelSuffix(model);
   if (has(stripped)) return modelSettings[stripped];
   let bestKey = '';
   for (const key of Object.keys(modelSettings)) {
