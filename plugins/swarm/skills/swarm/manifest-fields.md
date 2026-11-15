@@ -82,6 +82,14 @@ block requires `provider` too. The resolved primary/fallback/digest identities a
 in the run's effective manifest snapshot; `runner` is derived internally and is not
 manifest grammar.
 
+`seatReason` is the escape for a seat the graded record refuses. `swarm validate` fails a
+task whose model has an overall record of `n` ≥ 40 that a launchable, over-canon model beats
+on both quality and cost, unless the task says why the seat is used anyway: `"seatReason":
+"cross-family verifier: every non-deepseek ollama model is dominated"`. It covers the task's
+own seat and its `fallbackModel`, and `digest.seatReason` does the same for the digest block.
+A number, an empty string or a null is refused by name. Compute, integrate and manifest nodes
+take none. A refusal is per task, so a model seated by two tasks needs the reason on both.
+
 Provider-specific roots and enabled state are checked during validation and again at
 dispatch. Codex tasks accept `settings` with only an `env` key: per-leaf env vars reach
 the Codex process, and any other settings key is refused by name. Codex writer leaves
