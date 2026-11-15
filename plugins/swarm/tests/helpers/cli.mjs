@@ -11,6 +11,13 @@ export const SHIMS = fileURLToPath(new URL("../shims", import.meta.url));
 try { chmodSync(join(SHIMS, "claude"), 0o755); } catch { /* windows */ }
 try { chmodSync(join(SHIMS, "codex"), 0o755); } catch { /* windows */ }
 
+// The engine's memory gates read the HOST's free memory, so on a small VM (a 4 GB
+// WSL distro) leaves park and a fixture's run.log grows rows the row never asked for.
+// 0 is the documented "disabled" sentinel for both floors. Pinned here — the one
+// place a CLI child's config is built — so every engine test inherits it; a row that
+// exercises the gate overrides it through `config`.
+export const ENGINE_FLOORS_OFF = { minFreeMemMb: 0, valveFreeMemMb: 0 };
+
 // Writes a throwaway config carrying `quotaPreflight` and any row-specific `config`
 // unless the caller pinned SWARM_CONFIG itself. Returns the dir so the caller can
 // remove it when the child exits.
@@ -21,7 +28,7 @@ function configOverlay(env, quotaPreflight, config) {
   const configPath = join(configDir, "config.json");
   const sourcePath = childEnv.SWARM_HOME && join(childEnv.SWARM_HOME, "config.json");
   const source = sourcePath && existsSync(sourcePath) ? JSON.parse(readFileSync(sourcePath, "utf8")) : {};
-  writeFileSync(configPath, JSON.stringify({ ...source, ...config, quotaPreflight }), "utf8");
+  writeFileSync(configPath, JSON.stringify({ ...ENGINE_FLOORS_OFF, ...source, ...config, quotaPreflight }), "utf8");
   childEnv.SWARM_CONFIG = configPath;
   return { configDir, childEnv };
 }

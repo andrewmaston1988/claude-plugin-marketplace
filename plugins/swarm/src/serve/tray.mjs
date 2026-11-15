@@ -28,7 +28,7 @@ export async function launchTray({ home, port, shimPath = join(home, "serve.mjs"
     // must outlive the parent that spawned it: `cmd /c start` gives it a fresh hidden
     // console AND breaks it out of our job.
     // `-Disabled` is a bare switch, absent rather than "false" when the dashboard is on;
-    // daemon.test.mjs reads this literal to check each flag against the tray's params.
+    // daemon.win.test.mjs reads this literal to check each flag against the tray's params.
     const trayArgs = ["/c", "start", "", "/min", "powershell.exe", "-WindowStyle", "Hidden", "-NonInteractive",
       "-File", trayScript, "-PidFile", pidPath(home), "-NodeExe", nodeExe, "-ShimPath", shimPath,
       "-Port", String(port), "-IconPath", iconPath, "-SwarmHome", home,
