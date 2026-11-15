@@ -21,7 +21,6 @@ const ROOT = join(HERE, "..");
 const RUNNER = join(HERE, "test.mjs");
 const WORKFLOW = join(ROOT, ".github", "workflows", "test.yml");
 const FIX_GLOB = "plugins/fix/tests/*.test.mjs";
-
 // --- Fixture plumbing ------------------------------------------------------
 
 function git(cwd, ...args) {
@@ -75,7 +74,6 @@ function capture() {
   const errors = [];
   return { lines, errors, log: (line) => lines.push(line), err: (line) => errors.push(line) };
 }
-
 // --- Row 1: the registry and CI cannot drift -------------------------------
 
 test("row 1: every registry suite is run by CI through the runner", () => {
@@ -119,7 +117,6 @@ test("row 1: pipeline's npm ci step is gone, because its suite's install runs it
     assert.deepEqual(run.install, ["npm", "ci"], "the install moved into the registry");
   }
 });
-
 // --- Row 3: the changed set ------------------------------------------------
 
 test("row 3: committed, unstaged and untracked changes all enter the changed set", (t) => {
@@ -178,7 +175,6 @@ test("row 3: --against overrides the branch base and an unknown ref fails closed
   assert.equal(resolveBase({ repoRoot: repo, against: base }), base);
   assert.throws(() => resolveBase({ repoRoot: repo, against: "no-such-ref" }), /not a ref/);
 });
-
 // --- Rows 4, 5, 6: the import graph and its fallbacks ----------------------
 
 /** The fixture plugin: one module chain, one dynamic import, one URL file, one
@@ -201,7 +197,17 @@ function graphFixture(t) {
     "plugins/fix/tests/join-cli.test.mjs": 'join(here, "..", "bin", "joined.mjs");\n',
     "plugins/fix/skills/x/SKILL.md": "skill\n",
     "plugins/fix/tests/join-skill.test.mjs": 'join(SKILLS, "skills/x/SKILL.md");\n',
+    "plugins/fix/package.json": "{}\n",
+    "plugins/fix/package-lock.json": "{}\n",
+    "plugins/fix/hooks/hooks.json": "{}\n",
+    "plugins/fix/.claude-plugin/plugin.json": "{}\n",
+    "plugins/fix/.codex-plugin/plugin.json": "{}\n",
+    "plugins/fix/.env.test": "A=1\n",
     "plugins/fix/notes.md": "notes\n",
+    // Names the fallback files from inside a closure: without the fallback
+    // rule only this one test would be selected, not the whole suite.
+    "plugins/fix/tests/manifest.test.mjs":
+      'for (const p of ["../package.json", "../package-lock.json", "../hooks/hooks.json",\n  "../.claude-plugin/plugin.json", "../.codex-plugin/plugin.json", "../.env.test"]) new URL(p, import.meta.url);\n',
     "plugins/fix/src/tray/windows.ps1": "# tray\n",
     "plugins/fix/tests/thing.win.test.mjs": "export const w = 1;\n",
     "scripts/keep.test.mjs": "export const k = 1;\n",
@@ -275,7 +281,6 @@ test("row 6: --list reports the change docs-only through the real CLI", async (t
   const rows = out.lines.map((line) => line.split(" ").slice(0, 2).join(" "));
   assert.deepEqual(rows, ["fix plugins/fix/tests/thing.win.test.mjs"], ".md selects nothing");
 });
-
 // --- Row 7: whole-suite fallbacks -----------------------------------------
 
 test("row 7: lockfiles and plugin manifests run the whole suite", (t) => {
@@ -309,7 +314,6 @@ test("row 7: a change under scripts/ or .github/ runs the repo suite", (t) => {
     assert.deepEqual(attributed, [], "a repo-level change must not select a plugin test");
   }
 });
-
 // --- Row 8: every .win.test.mjs always runs -------------------------------
 
 test("row 8: a .win.test.mjs is selected by a diff that touches none of it", (t) => {
@@ -318,7 +322,6 @@ test("row 8: a .win.test.mjs is selected by a diff that touches none of it", (t)
   assert.equal(win.length, 1, JSON.stringify(entries));
   assert.equal(win[0].why, "windows");
 });
-
 // --- Row 9: --list runs nothing -------------------------------------------
 
 test("row 9: --list prints <suite> <file> <why> and spawns no node --test", async (t) => {
@@ -344,7 +347,6 @@ test("row 9: --list prints <suite> <file> <why> and spawns no node --test", asyn
     assert.match(why, /^(changed: |windows$|fallback: )/, line);
   }
 });
-
 // --- Row 16: globs ---------------------------------------------------------
 
 test("row 16: ** matches zero or more directories, * matches one level", (t) => {
@@ -372,7 +374,6 @@ test("row 16: a run whose globs match nothing fails, names the glob, and spawns 
   assert.match(results[0].reason, /nowhere\/\*\.test\.mjs/);
   assert.equal(spawn.calls.length, 0, "an empty expansion spawned node --test bare");
 });
-
 // --- Row 10: failure exit codes -------------------------------------------
 
 test("row 10: a failing run exits 1 and the summary names it; all green exits 0", async (t) => {
@@ -410,7 +411,6 @@ test("a run spawns node with the tests in the run's cwd and its env", async (t) 
   assert.equal(call.opts.cwd, repo);
   assert.equal(call.opts.env.A, "1");
 });
-
 // --- Row 17: timeout kills the tree ---------------------------------------
 
 test("row 17: killTree uses taskkill /T on win32 and the process group elsewhere", () => {
@@ -441,7 +441,6 @@ test("row 17: a run past its timeout is killed and reported failed", async (t) =
   assert.deepEqual(killed, [777], "the run's tree was not killed");
   assert.match(lines.join("\n"), /TIMEOUT/);
 });
-
 // --- Row 18: hash-gated install -------------------------------------------
 
 function memoryFs(files) {
