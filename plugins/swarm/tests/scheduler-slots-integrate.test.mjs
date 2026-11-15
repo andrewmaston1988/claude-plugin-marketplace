@@ -116,7 +116,11 @@ test("S6: concurrency width recovers to the ceiling across waves", async () => {
   const dir = tmp();
   try {
     const ids = ["a", "b", "c", "d", "e", "f", "g", "h"];
-    const spawn = fakeSpawnFactory(() => ({ delayMs: 15 }));
+    // A leaf must outlive the spread between its wave's first and last launch, or
+    // the 2 ms sampler sees 3 alive and reads a healthy wave as a ratchet. The ready
+    // loop yields between launches, and a macrotask turn costs up to ~30 ms under the
+    // full suite's load, so the lifetime carries that margin.
+    const spawn = fakeSpawnFactory(() => ({ delayMs: 150 }));
     const io = makeIo(spawn);
     const p = plan(dir, ids.map((id) => task(id)), { concurrency: 4 });
     // Split samples by the 5th spawn call (the first admission of the second
