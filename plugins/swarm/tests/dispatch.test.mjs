@@ -3,7 +3,7 @@ import { equal, deepEqual, ok, throws, match } from "node:assert/strict";
 import { mkdtempSync, writeFileSync, rmSync, mkdirSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
-import { buildDispatch, toSpawnable, resolveExecutable, windowsCommandLineLength } from "../src/dispatch.mjs";
+import { buildDispatch, toSpawnable, windowsCommandLineLength } from "../src/dispatch.mjs";
 import { loadManifest } from "./helpers/repo-io.mjs";
 import * as leafGuard from "../src/manifest-leaf-guard.mjs";
 import { treeDirFor } from "../src/worktree.mjs";
@@ -414,19 +414,7 @@ test("dispatch: a Claude task from outside allowedRoots is refused, like every o
 
 // ── windows spawn resolution ──────────────────────────────────────────────────
 
-test("toSpawnable peels a node .cmd shim, expanding %~dp0", { skip: process.platform !== "win32" }, () => {
-  const dir = mkdtempSync(join(tmpdir(), "swarm-shim-"));
-  try {
-    const cmdPath = join(dir, "claude.cmd");
-    writeFileSync(cmdPath, `@echo off\r\nnode "%~dp0claude-shim.mjs" %*\r\n`);
-    const { cmd, args } = toSpawnable([cmdPath, "-p", "hi"]);
-    equal(cmd, process.execPath);
-    equal(args[0], join(dir, "claude-shim.mjs"));
-    deepEqual(args.slice(1), ["-p", "hi"]);
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-  }
-});
+// The real-shim and `where` cases live in dispatch.win.test.mjs.
 
 // An opaque .cmd cannot be peeled to a node script, and cmd.exe re-parses the argv it is
 // handed — a prompt containing quotes comes out mangled. Refusing names what to fix instead.
@@ -442,12 +430,6 @@ test("toSpawnable refuses an opaque .cmd instead of routing it through cmd.exe",
     () => toSpawnable([cmdPath, "-p", "hi"], { _platform: "win32", _readFileSync: () => { throw new Error("EACCES"); } }),
     (e) => e.message.includes(cmdPath) && /not a node shim/.test(e.message)
   );
-});
-
-test("toSpawnable passes .exe and pathless resolution through untouched", { skip: process.platform !== "win32" }, () => {
-  const r = toSpawnable(["C:\\bin\\claude.exe", "-p", "x"]);
-  equal(r.cmd, "C:\\bin\\claude.exe");
-  deepEqual(r.args, ["-p", "x"]);
 });
 
 // ── windowsCommandLineLength (CreateProcess quoting) ───────────────────────────
@@ -472,13 +454,6 @@ test("windowsCommandLineLength: a trailing backslash before the closing quote is
   const len = windowsCommandLineLength(["claude", "-p", "a b\\"]);
   // quoted form: "a b\\" -> " a b \\ \\ " = 1 + 3 + 2 + 1 = 7, plus "claude -p " (10)
   equal(len, 10 + 7);
-});
-
-test("resolveExecutable resolves a bare name via where on win32", { skip: process.platform !== "win32" }, () => {
-  const fakeWhere = (cmd, args) => ({ status: 0, stdout: "C:\\somewhere\\claude.cmd\r\nC:\\other\\claude.exe\r\n" });
-  equal(resolveExecutable("claude", { _spawnSync: fakeWhere }), "C:\\somewhere\\claude.cmd");
-  const missing = () => ({ status: 1, stdout: "" });
-  equal(resolveExecutable("claude", { _spawnSync: missing }), "claude");
 });
 
 // A task whose cwd is a swarm-made worktree must pass dispatch exactly when it passes the
