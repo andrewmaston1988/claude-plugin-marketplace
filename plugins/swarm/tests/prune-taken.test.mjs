@@ -7,6 +7,7 @@ import { equal, ok } from "node:assert/strict";
 import * as fs from "node:fs";
 import { join } from "node:path";
 import { appendTaken } from "../src/taken.mjs";
+import { defaultBranchName } from "../src/landed.mjs";
 import { runPortNudge } from "../src/port-nudge.mjs";
 import { git, must, takenFixture, publishDefault } from "./helpers/port-fixture.mjs";
 import { runCli } from "./helpers/cli.mjs";
@@ -60,8 +61,11 @@ test("row 10: with the taken log deleted the same lane is kept as today", () => 
 
 test("row 11: an unproved port keeps the lane, naming why", () => withFixture((f) => {
   recordPort(f);
-  // The branch was never merged: main still sits where the squash landed on.
+  // The branch was never merged: main still sits where the squash landed on. Published
+  // after the reset, so this row exercises "not merged", not "no default branch".
   must(["reset", "--hard", `${f.squash}^`], f.repo);
+  publishDefault(f.repo);
+  equal(defaultBranchName(f.git, f.repo), "main", "precondition: the repo names a default branch");
   const abandoned = prune(f, ["--dry-run"]);
   ok(abandoned.stdout.includes(`taken into \`${f.branch}\`; \`${f.branch}\` not landed yet`), abandoned.stdout);
   ok(fs.existsSync(f.lane.path), "the unproved lane is kept");

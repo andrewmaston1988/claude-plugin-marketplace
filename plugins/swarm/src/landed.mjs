@@ -65,7 +65,7 @@ export const defaultBranchName = (gitRunner, repo) => defaultBranch(gitRunner, r
 // The default branch as this repo sees it: the local branch of that name where it
 // exists, then the remote-tracking copy. Never the checkout — during a port that is
 // the branch the caller is asking about.
-function defaultCommits(repo, gitRunner) {
+export function defaultCommits(repo, gitRunner) {
   const found = defaultBranch(gitRunner, repo);
   if (!found) return [];
   const commits = [];
@@ -77,13 +77,15 @@ function defaultCommits(repo, gitRunner) {
 }
 
 // The default branch and the checked-out branch: where work lands. Remote refs
-// are not scanned — merge-tree across every ref costs seconds per branch.
+// are not scanned — merge-tree across every ref costs seconds per branch. The default
+// branch comes from the same any-remote HEAD rule the taken check uses, so the two
+// cannot disagree on a clone whose remote is not `origin`.
 export function candidateBases(repo, prefix, gitRunner) {
   const refs = [];
-  const origin = gitOf(gitRunner, ["symbolic-ref", "refs/remotes/origin/HEAD"], repo);
-  if (origin.status === 0 && origin.stdout) {
-    refs.push(origin.stdout);
-    refs.push(`refs/heads/${origin.stdout.replace(/^refs\/remotes\/origin\//, "")}`);
+  const found = defaultBranch(gitRunner, repo);
+  if (found) {
+    refs.push(`refs/remotes/${found.remote}/${found.name}`);
+    refs.push(`refs/heads/${found.name}`);
   }
   const head = gitOf(gitRunner, ["symbolic-ref", "-q", "HEAD"], repo);
   let detached = null;
@@ -207,17 +209,17 @@ export function absorbed(base, branch, repo, gitRunner) {
 }
 
 // True only when the default branch holds `sha` or absorbs it — never any other ref,
-// so a pushed-but-unmerged feature branch reads unlanded. Fail-closed: an unreadable
+// so a pushed-but-unmerged feature branch reads unlanded. `bases` are the default
+// branch's commits, resolved once per repo by the caller. Fail-closed: an unreadable
 // sha, a repo whose remotes name no default branch, or a git error is false, the safe
 // answer for a caller deciding what may be lost.
-export function landedOnDefault(sha, repo, { prefix, gitRunner } = {}) {
-  if (typeof prefix !== "string" || !prefix) throw new TypeError("landedOnDefault requires the branch prefix");
+export function landedOnDefault(sha, repo, { gitRunner, bases } = {}) {
   if (typeof gitRunner !== "function") throw new TypeError("landedOnDefault requires a gitRunner");
+  if (!Array.isArray(bases)) throw new TypeError("landedOnDefault requires the default-branch bases");
   try {
+    if (!bases.length) return false;
     const commit = gitOf(gitRunner, ["rev-parse", "--verify", `${sha}^{commit}`], repo);
     if (commit.status !== 0 || !commit.stdout) return false;
-    const bases = defaultCommits(repo, gitRunner);
-    if (!bases.length) return false;
     for (const base of bases) {
       const contains = gitOf(gitRunner, ["merge-base", "--is-ancestor", commit.stdout, base], repo);
       if (contains.status === 0) return true;

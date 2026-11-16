@@ -270,7 +270,10 @@ test("row 11: cost is bounded and the cap reports unlanded, never 0", () => with
   const rec = recording();
   const n = unlandedCount("swarm/leaf", repo, { prefix: PREFIX, gitRunner: rec.run, extraBases: [] });
   ok(n >= 1, `the absorbing squash sits past the 20-commit scan cap, so this is unlanded: ${n}`);
-  equal(rec.calls.filter((args) => args[0] === "for-each-ref").length, 1);
+  equal(rec.calls.filter((args) => args[0] === "for-each-ref" && args.includes("--contains")).length, 1,
+    "one reachability scan");
+  equal(rec.calls.filter((args) => args.some((a) => String(a).includes("%(symref)"))).length, 1,
+    "one remote-HEAD read names the default branch its bases come from");
   ok(rec.calls.filter((args) => args[0] === "merge-base").length <= 3, "at most three candidate bases");
   equal(rec.calls.filter((args) => args[0] === "merge-tree").length, 21, "the tip plus at most 20 touching commits");
 }));
@@ -405,6 +408,23 @@ test("row 22: an extra base equal to the branch's own tip is skipped", () => wit
 
   ok(unlandedCount("swarm/leaf", repo, { prefix: PREFIX, gitRunner: git, extraBases: [tip] }) >= 1,
     "a branch absorbs its own tip — that proves nothing");
+}));
+
+test("row 23: the default base comes from any remote's HEAD, not only origin's", () => withRepo((repo) => {
+  newBranch(repo, "other");
+  newBranch(repo, "swarm/leaf", "main");
+  writeCommit(repo, "a.txt", "leaf one\n", "leaf one");
+  writeCommit(repo, "b.txt", "leaf two\n", "leaf two");
+  checkout(repo, "main");
+  must(["merge", "-q", "--squash", "swarm/leaf"], repo);
+  must(["commit", "-qm", "squash leaf"], repo);
+  // `upstream` alone names the default branch, and the checkout is on a branch that never
+  // held the squash, so only the remote-HEAD read can reach the base that absorbed the lane.
+  must(["update-ref", "refs/remotes/upstream/main", must(["rev-parse", "main"], repo)], repo);
+  must(["symbolic-ref", "refs/remotes/upstream/HEAD", "refs/remotes/upstream/main"], repo);
+  checkout(repo, "other");
+
+  equal(unlandedCount("swarm/leaf", repo, { prefix: PREFIX, gitRunner: git, extraBases: [] }), 0);
 }));
 
 test("row 12: collect destroys a tree whose branch the squash absorbed, and keeps one it did not", () => {

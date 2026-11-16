@@ -1,7 +1,7 @@
 // The proof that a lane was ported into another branch, recorded while it exists.
 // One append-only log per repo: parallel hooks append concurrently, so a line is
 // never rewritten. Landing is decided later, against the default branch alone.
-import { dirname, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { runsKeyFor } from "./config.mjs";
 import { gitOf, landedOnDefault } from "./landed.mjs";
 import { normalizeForCompare } from "./roots.mjs";
@@ -16,17 +16,16 @@ export function takenLogPath(home, toplevel) {
 export const takenKey = ({ run, repo, branch }) =>
   `${run}\n${repo ? normalizeForCompare(repo) : ""}\n${branch}`;
 
-// Past 1 MB the log becomes `.1` and readers take both. Windows will not rename
-// onto an existing file, so the older rotation goes first; a race here loses the
-// rotation, never a line.
+// Past 1 MB the live log is renamed aside to a unique generation and readers take every
+// generation. Nothing is ever unlinked, so a second hook's rename fails — the live log is
+// already gone — instead of deleting the rotation the first hook just made.
+let generation = 0;
 function rotateIfFull(logPath, fs) {
   let size;
   try { size = fs.statSync(logPath).size; } catch { return; }
   if (size <= MAX_LOG_BYTES) return;
-  try {
-    fs.rmSync(`${logPath}.1`, { force: true });
-    fs.renameSync(logPath, `${logPath}.1`);
-  } catch { /* another hook rotated first, or the file is held open */ }
+  try { fs.renameSync(logPath, `${logPath}.${Date.now()}-${process.pid}-${generation++}`); }
+  catch { /* another hook rotated this log first; this append lands in the live log */ }
 }
 
 export function appendTaken({ home, toplevel, records, fs }) {
@@ -40,13 +39,35 @@ export function appendTaken({ home, toplevel, records, fs }) {
   fs.appendFileSync(logPath, text);
 }
 
-// Newest line per lane wins; `.1` is the older rotation, so it is read first.
-// A run whose dir is gone is history no prune can act on.
+// Every rotation, oldest first, then the live log last so its line is the newest read.
+function logFiles(logPath, fs) {
+  const dir = dirname(logPath);
+  const stem = `${basename(logPath)}.`;
+  let names;
+  try { names = fs.readdirSync(dir); } catch { return [logPath]; }
+  const rotated = [];
+  for (const name of names) {
+    if (!name.startsWith(stem)) continue;
+    const file = join(dir, name);
+    try { rotated.push({ file, mtime: fs.statSync(file).mtimeMs }); } catch { /* raced away */ }
+  }
+  rotated.sort((a, b) => a.mtime - b.mtime);
+  return [...rotated.map((entry) => entry.file), logPath];
+}
+
+// Newest line per lane wins, across every generation. A run whose dir is gone is history
+// no prune can act on — asked once per run, never once per line, so a full log costs a
+// handful of stats rather than thousands.
 export function readTaken({ home, toplevel, fs }) {
   const logPath = takenLogPath(home, toplevel);
   const runsRoot = join(home, "runs", runsKeyFor(toplevel));
+  const alive = new Map();
+  const runAlive = (run) => {
+    if (!alive.has(run)) alive.set(run, fs.existsSync(join(runsRoot, run)));
+    return alive.get(run);
+  };
   const out = new Map();
-  for (const file of [`${logPath}.1`, logPath]) {
+  for (const file of logFiles(logPath, fs)) {
     let text;
     try { text = fs.readFileSync(file, "utf8"); } catch { continue; }
     for (const line of text.split(/\r?\n/)) {
@@ -54,7 +75,7 @@ export function readTaken({ home, toplevel, fs }) {
       let rec;
       try { rec = JSON.parse(line); } catch { continue; }
       if (typeof rec?.run !== "string" || typeof rec?.branch !== "string") continue;
-      if (!fs.existsSync(join(runsRoot, rec.run))) continue;
+      if (!runAlive(rec.run)) continue;
       out.set(takenKey(rec), rec);
     }
   }
@@ -114,8 +135,9 @@ function candidateTip(record, repo, gitRunner) {
 }
 
 // Landed only when the target's tip is on the default branch. Everything unprovable
-// stays unlanded, and a lane that moved after the record makes it stale.
-export function takenVerdict({ record, laneTip, repo, prefix, gitRunner }) {
+// stays unlanded, and a lane that moved after the record makes it stale. `bases` are the
+// caller's resolved default-branch commits, so a multi-lane plan asks git once per repo.
+export function takenVerdict({ record, laneTip, repo, gitRunner, bases }) {
   if (!record?.into) return { landed: false, reason: "no taken record" };
   const into = record.into;
   try {
@@ -124,7 +146,7 @@ export function takenVerdict({ record, laneTip, repo, prefix, gitRunner }) {
     }
     const tip = candidateTip(record, repo, gitRunner);
     if (!tip) return { landed: false, reason: `taken into \`${into}\`; the recorded tip is gone` };
-    if (!landedOnDefault(tip, repo, { prefix, gitRunner })) {
+    if (!landedOnDefault(tip, repo, { gitRunner, bases })) {
       return { landed: false, reason: `taken into \`${into}\`; \`${into}\` not landed yet` };
     }
     return { landed: true, reason: `taken into \`${into}\`` };

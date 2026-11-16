@@ -14,7 +14,7 @@ test("plan: a live run short-circuits before any git call", () => {
   let gitCalled = false;
   const git = () => { gitCalled = true; return { status: 0, stdout: "", stderr: "" }; };
   const fs = { existsSync: () => true, readdirSync: () => [], statSync: () => ({ size: 0 }) };
-  const result = plan({ live: true }, git, fs, { extraBases: [], measureBytes: true, stopAtBlocker: false, deadline: Infinity });
+  const result = plan({ live: true }, git, fs, { extraBases: [], measureBytes: true, stopAtBlocker: false, deadline: Infinity, taken: null });
   deepEqual(result, { live: true });
   equal(gitCalled, false, "git must never be consulted when the run is live");
 });
@@ -27,7 +27,7 @@ test("plan: a kept tree becomes a row with path, branch, measured bytes and repo
     statSync: () => ({ size: 1024 }),
   };
   const run = { repos: ["/repo"], resultsDir: "/results", worktreesKept: [{ branch: "swarm/impl", path: "/results/wt-impl", repo: "/repo" }] };
-  const { rows } = plan(run, git, fs, { extraBases: [], measureBytes: true, stopAtBlocker: false, deadline: Infinity });
+  const { rows } = plan(run, git, fs, { extraBases: [], measureBytes: true, stopAtBlocker: false, deadline: Infinity, taken: null });
   deepEqual(rows, [{ path: "/results/wt-impl", branch: "swarm/impl", bytes: 1024, repo: "/repo", unlanded: Infinity, dirty: Infinity }]);
 });
 
@@ -57,7 +57,7 @@ test("plan: a tree registered in git under resultsDir but absent from worktreesK
     statSync: () => ({ size: 7 }),
   };
   const run = { repos: ["/repo"], resultsDir: "/results", worktreesKept: [] };
-  const { rows } = plan(run, git, fs, { extraBases: [], measureBytes: true, stopAtBlocker: false, deadline: Infinity });
+  const { rows } = plan(run, git, fs, { extraBases: [], measureBytes: true, stopAtBlocker: false, deadline: Infinity, taken: null });
   equal(rows.length, 1);
   equal(rows[0].path, orphanPath);
   equal(rows[0].branch, "swarm/orphan");
@@ -74,7 +74,7 @@ test("plan: a repo that no longer exists is never asked for its orphaned worktre
     statSync: () => ({ size: 512 }),
   };
   const run = { repos: ["/gone-repo"], resultsDir: "/results", worktreesKept: [{ branch: "swarm/gone", path: "/results/wt-gone", repo: "/gone-repo" }] };
-  const { rows } = plan(run, git, fs, { extraBases: [], measureBytes: true, stopAtBlocker: false, deadline: Infinity });
+  const { rows } = plan(run, git, fs, { extraBases: [], measureBytes: true, stopAtBlocker: false, deadline: Infinity, taken: null });
   deepEqual(rows, [{ path: "/results/wt-gone", branch: "swarm/gone", bytes: 512, repo: "/gone-repo", unlanded: Infinity, dirty: Infinity }]);
   equal(calls.length, 0, "must not run git against a repo that doesn't exist");
 });
@@ -174,7 +174,7 @@ test("plan measures unlanded commits and dirty porcelain; blockers include unkno
     readdirSync: () => [], statSync: () => ({ size: 0 }),
   };
   const { rows } = plan({ worktreesKept: [{ path: "/tree", branch: "topic", repo: "/repo" }] }, git, fs,
-    { extraBases: [], measureBytes: true, stopAtBlocker: false, deadline: Infinity });
+    { extraBases: [], measureBytes: true, stopAtBlocker: false, deadline: Infinity, taken: null });
   equal(rows[0].unlanded, 1);
   equal(rows[0].dirty, 2);
   ok(calls.some(({ args }) => args[0] === "cherry"));
@@ -194,11 +194,11 @@ test("row 11: measureBytes: false skips the tree walk and rows carry bytes: null
     : { status: 1, stdout: "", stderr: "" });
   const run = { repos: [], resultsDir: null, worktreesKept: [{ branch: null, path: "/tree", repo: "/repo" }] };
 
-  const unmeasured = plan(run, git, fs, { extraBases: [], measureBytes: false, stopAtBlocker: false, deadline: Infinity });
+  const unmeasured = plan(run, git, fs, { extraBases: [], measureBytes: false, stopAtBlocker: false, deadline: Infinity, taken: null });
   equal(unmeasured.rows[0].bytes, null, "an unmeasured row must say so, not claim zero bytes");
   ok(!reads.includes("/tree"), `measureBytes: false must never walk the tree: ${reads.join(", ")}`);
 
-  const measured = plan(run, git, fs, { extraBases: [], measureBytes: true, stopAtBlocker: false, deadline: Infinity });
+  const measured = plan(run, git, fs, { extraBases: [], measureBytes: true, stopAtBlocker: false, deadline: Infinity, taken: null });
   equal(measured.rows[0].bytes, 4096, "a measured row still carries its byte count for the CLI report");
   ok(reads.includes("/tree"), "the report's sizes come from the walk");
 });
@@ -213,7 +213,7 @@ test("plan: failed cherry and status measurements fail closed as blockers", () =
   const git = () => ({ status: 1, stdout: "", stderr: "git unavailable" });
   const fs = { existsSync: () => true, readdirSync: () => [], statSync: () => ({ size: 0 }) };
   const { rows } = plan({ worktreesKept: [{ path: "/tree", branch: "topic", repo: "/repo" }] }, git, fs,
-    { extraBases: [], measureBytes: true, stopAtBlocker: false, deadline: Infinity });
+    { extraBases: [], measureBytes: true, stopAtBlocker: false, deadline: Infinity, taken: null });
   equal(rows[0].unlanded, Infinity);
   equal(rows[0].dirty, Infinity);
   deepEqual(blockers(rows), [rows[0]]);
@@ -231,13 +231,13 @@ test("row 19: stopAtBlocker ends the plan at the first blocking row; without it 
     ],
   };
 
-  const stopped = plan(run, git, fs, { extraBases: [], measureBytes: true, stopAtBlocker: true, deadline: Infinity });
+  const stopped = plan(run, git, fs, { extraBases: [], measureBytes: true, stopAtBlocker: true, deadline: Infinity, taken: null });
   equal(calls.filter((name) => name === "status").length, 1, "the first blocking row ends the plan");
   equal(stopped.stopped, true);
   equal(stopped.rows.length, 1);
 
   calls.length = 0;
-  const all = plan(run, git, fs, { extraBases: [], measureBytes: true, stopAtBlocker: false, deadline: Infinity });
+  const all = plan(run, git, fs, { extraBases: [], measureBytes: true, stopAtBlocker: false, deadline: Infinity, taken: null });
   equal(calls.filter((name) => name === "status").length, 3, "the report measures every row");
   equal(all.stopped, undefined);
   equal(all.rows.length, 3);
@@ -249,7 +249,7 @@ test("row 20: a deadline already passed measures no row and stops the plan", () 
   const fs = { existsSync: () => true, readdirSync: () => [], statSync: () => ({ size: 0 }) };
   const run = { repos: [], resultsDir: null, worktreesKept: [{ branch: "swarm/a", path: "/tree-a", repo: "/repo" }] };
 
-  const result = plan(run, git, fs, { extraBases: [], measureBytes: true, stopAtBlocker: false, deadline: Date.now() - 1 });
+  const result = plan(run, git, fs, { extraBases: [], measureBytes: true, stopAtBlocker: false, deadline: Date.now() - 1, taken: null });
   deepEqual(result, { rows: [], stopped: true });
   equal(calls.filter((name) => name === "for-each-ref").length, 0, "a passed deadline measures no row");
 });
@@ -295,7 +295,7 @@ function missingTreePlan(porcelain, gitFallback) {
   };
   const fs = { existsSync: (p) => p === "/repo", readdirSync: () => [], statSync: () => ({ size: 0 }) };
   const run = { repos: ["/repo"], resultsDir: "/results", worktreesKept: [] };
-  const result = plan(run, git, fs, { extraBases: [], measureBytes: true, stopAtBlocker: false, deadline: Infinity });
+  const result = plan(run, git, fs, { extraBases: [], measureBytes: true, stopAtBlocker: false, deadline: Infinity, taken: null });
   return { ...result, calls };
 }
 
@@ -379,7 +379,7 @@ test("row 7: a branch-only row is measured from its ref alone — no git status,
   const reads = [];
   const fs = { existsSync: (p) => p === "/repo", readdirSync: (p) => { reads.push(p); return []; }, statSync: () => ({ size: 0 }) };
   const { rows } = plan({ repos: ["/repo"], resultsDir: "/results", worktreesKept: [] }, git, fs,
-    { extraBases: [], measureBytes: true, stopAtBlocker: false, deadline: Infinity });
+    { extraBases: [], measureBytes: true, stopAtBlocker: false, deadline: Infinity, taken: null });
 
   deepEqual(rows, [{ path: null, branch, repo: "/repo", bytes: 0, dirty: 0, unlanded: 0 }]);
   ok(!calls.some(({ args }) => args[0] === "status"), "there is no tree to ask for a working state");
@@ -421,7 +421,7 @@ test("row 21: a branch row is keyed by repo, so the same branch name in another 
     statSync: () => ({ size: 0 }),
   };
   const run = { repos: ["/repo-a", "/repo-b"], resultsDir: "/results", worktreesKept: [{ path: "/wt-a", branch, repo: "/repo-a" }] };
-  const { rows } = plan(run, git, fs, { extraBases: [], measureBytes: true, stopAtBlocker: false, deadline: Infinity });
+  const { rows } = plan(run, git, fs, { extraBases: [], measureBytes: true, stopAtBlocker: false, deadline: Infinity, taken: null });
   equal(rows.length, 2, JSON.stringify(rows));
   equal(rows.find((row) => row.path != null)?.repo, "/repo-a");
   const orphan = rows.find((row) => row.path == null);
@@ -443,13 +443,13 @@ test("row 8: a blocking branch-only row stops the plan, and a passed deadline me
   const run = { repos: ["/repo"], resultsDir: "/results", worktreesKept: [] };
   const measured = () => calls.filter((args) => args.includes("--contains")).length;
 
-  const stopped = plan(run, git, fs, { extraBases: [], measureBytes: true, stopAtBlocker: true, deadline: Infinity });
+  const stopped = plan(run, git, fs, { extraBases: [], measureBytes: true, stopAtBlocker: true, deadline: Infinity, taken: null });
   equal(stopped.stopped, true);
   equal(stopped.rows.length, 1);
   equal(measured(), 1, "the first blocking branch row ends the plan");
 
   calls.length = 0;
-  const expired = plan(run, git, fs, { extraBases: [], measureBytes: true, stopAtBlocker: false, deadline: Date.now() - 1 });
+  const expired = plan(run, git, fs, { extraBases: [], measureBytes: true, stopAtBlocker: false, deadline: Date.now() - 1, taken: null });
   deepEqual(expired, { rows: [], stopped: true });
   equal(measured(), 0, "a passed deadline measures no branch-only row");
 });

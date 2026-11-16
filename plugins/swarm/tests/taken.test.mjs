@@ -5,18 +5,17 @@ import "./helpers/isolate-home.mjs";
 import { test } from "node:test";
 import { equal, ok, throws } from "node:assert/strict";
 import * as fs from "node:fs";
-import { mkdirSync, statSync, existsSync, readFileSync, writeFileSync, renameSync, rmSync } from "node:fs";
-import { join, resolve, sep } from "node:path";
+import { mkdirSync, statSync, existsSync, readFileSync, readdirSync, writeFileSync, renameSync, rmSync } from "node:fs";
+import { basename, join, resolve, sep } from "node:path";
 import { spawn } from "node:child_process";
 import { takenLogPath, appendTaken, readTaken, refreshTaken, takenKey, takenVerdict } from "../src/taken.mjs";
 import { portInProgress } from "../src/port-complete.mjs";
-import { landedOnDefault } from "../src/landed.mjs";
+import { landedOnDefault, defaultCommits } from "../src/landed.mjs";
 import { portFixture, must, writeCommit, git, publishDefault } from "./helpers/port-fixture.mjs";
 import { initRepo } from "./helpers/worktree-fixtures.mjs";
 
-const PREFIX = "swarm/";
 const MAX = 1024 * 1024;
-const OPTS = { prefix: PREFIX, gitRunner: git };
+const OPTS = (repo) => ({ gitRunner: git, bases: defaultCommits(repo, git) });
 
 const rec = (over = {}) => ({
   run: "run-a",
@@ -259,7 +258,7 @@ test("row 7: takenVerdict reads the target's tip, then the recorded tip, against
   must(["commit", "-qm", "squash feature"], f.repo);
   publishDefault(f.repo);
   const verdict = (record, laneTip = lane.sha, gitRunner = f.git) =>
-    takenVerdict({ record, laneTip, repo: f.toplevel, prefix: PREFIX, gitRunner });
+    takenVerdict({ record, laneTip, repo: f.toplevel, gitRunner, bases: defaultCommits(f.toplevel, gitRunner) });
 
   // intoTip is the bare pick, which main never absorbs: landing here proves the
   // target's own tip was the candidate.
@@ -289,7 +288,7 @@ test("row 8: landedOnDefault is true for a commit the default branch contains", 
   const tip = must(["rev-parse", "HEAD"], repo);
   publishDefault(repo);
 
-  equal(landedOnDefault(tip, repo, OPTS), true);
+  equal(landedOnDefault(tip, repo, OPTS(repo)), true);
 }));
 
 // The default branch is named by a remote HEAD alone. The checkout during a port IS the
@@ -301,8 +300,8 @@ test("row 8: with no remote there is no default branch, and a taken lane stays u
   const tip = must(["rev-parse", "HEAD"], repo);
   const record = rec({ repo, into: "feat", portCommit: must(["rev-parse", "HEAD~1"], repo), intoTip: tip });
 
-  equal(landedOnDefault(tip, repo, OPTS), false, "the checkout is not a default branch");
-  const v = takenVerdict({ record, laneTip: record.laneTip, repo, prefix: PREFIX, gitRunner: git });
+  equal(landedOnDefault(tip, repo, OPTS(repo)), false, "the checkout is not a default branch");
+  const v = takenVerdict({ record, laneTip: record.laneTip, repo, gitRunner: git, bases: defaultCommits(repo, git) });
   equal(v.landed, false, "a lane taken into the checkout's own branch is not landed");
 }));
 
@@ -316,7 +315,7 @@ test("row 8: the remote naming the default branch need not be origin", () => wit
   must(["checkout", "-q", "feat"], repo);
   equal(git(["merge-base", "--is-ancestor", landed, "HEAD"], repo).status, 1, "HEAD is on the port branch");
 
-  equal(landedOnDefault(landed, repo, OPTS), true, "upstream's HEAD names the default branch");
+  equal(landedOnDefault(landed, repo, OPTS(repo)), true, "upstream's HEAD names the default branch");
 }));
 
 test("row 8: landedOnDefault is true for a commit the default branch absorbs", () => withRepo((repo) => {
@@ -330,7 +329,7 @@ test("row 8: landedOnDefault is true for a commit the default branch absorbs", (
   publishDefault(repo);
   ok(must(["rev-parse", "HEAD"], repo) !== laneTip, "precondition: the squash is a new commit");
 
-  equal(landedOnDefault(laneTip, repo, OPTS), true);
+  equal(landedOnDefault(laneTip, repo, OPTS(repo)), true);
 }));
 
 test("row 8: a commit only a non-default local ref holds is not landed", () => withRepo((repo) => {
@@ -339,7 +338,7 @@ test("row 8: a commit only a non-default local ref holds is not landed", () => w
   const featTip = must(["rev-parse", "HEAD"], repo);
   must(["checkout", "-q", "main"], repo);
 
-  equal(landedOnDefault(featTip, repo, OPTS), false);
+  equal(landedOnDefault(featTip, repo, OPTS(repo)), false);
 }));
 
 test("row 13(a): a branch pushed but never merged is not landed", () => withRepo((repo) => {
@@ -354,7 +353,7 @@ test("row 13(a): a branch pushed but never merged is not landed", () => withRepo
   ok(must(["for-each-ref", "--contains", featTip, "--format=%(refname)"], repo).includes("refs/remotes/origin/feat"),
     "precondition: a remote-tracking ref is the only thing holding the commit");
 
-  equal(landedOnDefault(featTip, repo, OPTS), false);
+  equal(landedOnDefault(featTip, repo, OPTS(repo)), false);
 }));
 
 test("row 13b: a recreated target does not inherit the record", () => withFixture((f) => {
@@ -372,7 +371,7 @@ test("row 13b: a recreated target does not inherit the record", () => withFixtur
   must(["merge", "-q", "--squash", "feature"], f.repo);
   must(["commit", "-qm", "land the recreated branch"], f.repo);
 
-  const v = takenVerdict({ record, laneTip: lane.sha, repo: f.toplevel, prefix: PREFIX, gitRunner: f.git });
+  const v = takenVerdict({ record, laneTip: lane.sha, repo: f.toplevel, gitRunner: f.git, bases: defaultCommits(f.toplevel, f.git) });
   equal(v.landed, false, "the new tip does not descend from portCommit, and the recorded tip never landed");
 }));
 
@@ -406,7 +405,7 @@ test("row 13d: a lane that moved after the record is ignored", () => withFixture
   const movedTip = must(["rev-parse", "HEAD"], lane.path);
 
   const record = rec({ run: "run13d", branch: lane.branch, laneTip: lane.sha, into: "feature", portCommit: pick, intoTip: pick });
-  const v = takenVerdict({ record, laneTip: movedTip, repo: f.toplevel, prefix: PREFIX, gitRunner: f.git });
+  const v = takenVerdict({ record, laneTip: movedTip, repo: f.toplevel, gitRunner: f.git, bases: defaultCommits(f.toplevel, f.git) });
   equal(v.landed, false, "a record only speaks for the tip it was written against");
 }));
 
@@ -451,19 +450,51 @@ test("row 14: eight processes appending at once lose no line", async () => {
   }
 });
 
-test("row 14: past 1 MB the log rotates to .1 and readers see both", () => withFixture((f) => {
+test("row 14: past 1 MB the log rotates aside and readers see every generation", () => withFixture((f) => {
   for (const name of ["old-run", "new-run"]) runDir(f, name);
   const log = takenLogPath(f.home, f.toplevel);
   mkdirSync(join(f.home, "taken"), { recursive: true });
   const line = JSON.stringify(rec({ run: "old-run", branch: "swarm/old-run/leaf", intoTip: "old" })) + "\n";
   writeFileSync(log, line.repeat(Math.ceil((MAX + 2) / line.length)));
   ok(statSync(log).size > MAX, "precondition: the log is over 1 MB");
+  const generations = () => readdirSync(join(f.home, "taken")).filter((n) => n.startsWith(`${basename(log)}.`));
 
   appendTaken({ home: f.home, toplevel: f.toplevel, fs, records: [rec({ run: "new-run", branch: "swarm/new-run/leaf" })] });
 
-  ok(existsSync(`${log}.1`), "the full log is rotated aside");
+  equal(generations().length, 1, "the full log is rotated aside");
   ok(statSync(log).size < 1024, "the live log restarts with the new line");
   const map = readTaken({ home: f.home, toplevel: f.toplevel, fs });
   equal(map.get(key("old-run", "swarm/old-run/leaf")).intoTip, "old", "rotation keeps the older lines readable");
   equal(map.get(key("new-run", "swarm/new-run/leaf")).intoTip, "c".repeat(40));
+}));
+
+// Two hooks crossing the 1 MB line at once: the second rotates between the first's stat
+// and its rename. Nothing is unlinked, so the first hook's rotation still holds its lines.
+test("row 14: two interleaved rotations lose no stored line", () => withFixture((f) => {
+  for (const name of ["old-run", "raced-run", "new-run"]) runDir(f, name);
+  const log = takenLogPath(f.home, f.toplevel);
+  mkdirSync(join(f.home, "taken"), { recursive: true });
+  const line = JSON.stringify(rec({ run: "old-run", branch: "swarm/old-run/leaf", intoTip: "old" })) + "\n";
+  writeFileSync(log, line.repeat(Math.ceil((MAX + 2) / line.length)));
+  ok(statSync(log).size > MAX, "precondition: the log is over 1 MB");
+
+  let raced = false;
+  const racing = {
+    ...fs,
+    statSync: (path, opts) => {
+      const stat = fs.statSync(path, opts);
+      if (!raced && path === log) {
+        raced = true;
+        appendTaken({ home: f.home, toplevel: f.toplevel, fs, records: [rec({ run: "raced-run", branch: "swarm/raced-run/leaf" })] });
+      }
+      return stat;
+    },
+  };
+  appendTaken({ home: f.home, toplevel: f.toplevel, fs: racing, records: [rec({ run: "new-run", branch: "swarm/new-run/leaf" })] });
+  equal(raced, true, "precondition: a second hook rotated mid-rotation");
+
+  const map = readTaken({ home: f.home, toplevel: f.toplevel, fs });
+  equal(map.get(key("old-run", "swarm/old-run/leaf")).intoTip, "old", "the earlier rotation is not unlinked");
+  equal(map.get(key("raced-run", "swarm/raced-run/leaf")).intoTip, "c".repeat(40), "the racing hook's line is kept");
+  equal(map.get(key("new-run", "swarm/new-run/leaf")).intoTip, "c".repeat(40), "the appending hook's line is kept");
 }));

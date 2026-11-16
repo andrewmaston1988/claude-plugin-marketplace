@@ -1,6 +1,6 @@
 import { join, resolve, dirname, basename } from "node:path";
 import { existsSync, readdirSync } from "node:fs";
-import { unlandedCount, isSwarmRef } from "./landed.mjs";
+import { unlandedCount, isSwarmRef, defaultCommits } from "./landed.mjs";
 import { takenKey, takenVerdict } from "./taken.mjs";
 import { treeDirFor, runOfTree, listTreeRecords, legacyTreeDirs, treeRecordPath, treeRootFor, runScopeKey } from "./worktree.mjs";
 import { isUnderRoot, normalizeForCompare } from "./roots.mjs";
@@ -216,6 +216,75 @@ function treeFacts(git, path) {
   return { repo: dirname(resolve(path, common.stdout)), branch };
 }
 
+// Every lane a run still holds: its summary's own list, its per-tree records and scratch
+// dir, git's registrations, and the run's own branches no tree holds. Lazy, so a caller
+// with a spent deadline stops without paying for the rest. `orphan` marks a lane the
+// summary named whose tree is gone — a record can still name it, prune has no row to
+// destroy. prune and the port nudge ask this one generator, so the two can never disagree
+// about which lanes a run holds.
+export function* discoveredLanes(run, git, fs, { cfg } = {}) {
+  const prefix = cfg?.worktreeBranchPrefix || "swarm/";
+  const trees = new Set();
+  const lanes = new Set();
+  const laneKey = (repo, branch) => `${normalizeForCompare(repo)}\n${branch}`;
+  const freshTree = (path) => {
+    const key = normalizeForCompare(path);
+    if (trees.has(key)) return false;
+    trees.add(key);
+    return true;
+  };
+  // An orphan names no tree, so it does not claim its branch: the run-scope scan still
+  // has to find that branch and yield it as a row of its own.
+  const lane = (over) => {
+    if (!over.orphan && over.repo && over.branch) lanes.add(laneKey(over.repo, over.branch));
+    return { path: null, branch: null, repo: null, missing: false, head: null, orphan: false, ...over };
+  };
+  // summary.json's own list: how the run reported what it left, and the only source that
+  // carries a shared chain's taskIds. It is not authoritative for what EXISTS — a killed
+  // run wrote no summary, a summary entry can name a path already moved — so the two
+  // scans below add to it rather than replacing it.
+  for (const wt of run.worktreesKept || []) {
+    const onDisk = fs.existsSync(wt.path);
+    if (onDisk && !freshTree(wt.path)) continue;
+    yield lane({ path: onDisk ? wt.path : null, branch: wt.branch ?? null, repo: wt.repo ?? null, orphan: !onDisk });
+  }
+  // Everything else on disk that belongs to the run, wherever the resolver put it.
+  if (run.resultsDir) {
+    for (const t of heldTrees(run.resultsDir, { cfg })) {
+      if (!fs.existsSync(t.path) || !freshTree(t.path)) continue;
+      const facts = t.repo && t.branch ? t : treeFacts(git, t.path);
+      if (!facts?.repo) continue; // not a worktree git can speak for — never a row to destroy
+      yield lane({ path: t.path, branch: t.branch ?? facts.branch ?? null, repo: facts.repo });
+    }
+  }
+  for (const repo of run.repos || []) {
+    if (!fs.existsSync(repo)) continue;
+    for (const reg of registeredForRun(git, repo, run.resultsDir, { cfg })) {
+      if (!freshTree(reg.path)) continue;
+      // Registered but gone from disk: a missing directory holds no uncommitted work,
+      // and its registration must go before `branch -D` can take the branch.
+      yield lane({ path: reg.path, branch: reg.branch, repo, missing: !fs.existsSync(reg.path), head: reg.head });
+    }
+  }
+  // The run's OWN branches, whether or not a tree still holds one. An explicitly named
+  // `branch` has no scope key and is never found here: its name can be any branch at all.
+  if (run.resultsDir) {
+    const scope = `refs/heads/${prefix}${runScopeKey(run.resultsDir)}/`;
+    for (const repo of run.repos || []) {
+      if (!fs.existsSync(repo)) continue;
+      const listed = git(["for-each-ref", "--format=%(refname:short)", scope], repo);
+      if (listed.status !== 0) continue;
+      // A branch a tree holds is either already a tree lane or checked out somewhere
+      // prune does not own; `branch -D` would refuse it either way.
+      const held = new Set((worktreeList(git, repo) || []).map((t) => t.branch).filter(Boolean));
+      for (const branch of listed.stdout.split(/\r?\n/).map((s) => s.trim()).filter(Boolean)) {
+        if (held.has(branch) || lanes.has(laneKey(repo, branch))) continue;
+        yield lane({ branch, repo });
+      }
+    }
+  }
+}
+
 // `run`: { live, repos: [string], resultsDir, worktreesKept: [{ branch, path, repo }] }.
 // A run may span several repos, so every kept tree carries its OWN repo and `repos`
 // is the set to sweep for orphans the summary never recorded — never one scalar,
@@ -229,11 +298,12 @@ function treeFacts(git, path) {
 // feature branch that has since landed: content checks cannot see that, the recorded proof
 // can. Consulted only where the content checks already said unlanded, so a clean row costs
 // no extra git call.
-export function plan(run, git, fs, { cfg, extraBases, measureBytes, stopAtBlocker, deadline, taken = null } = {}) {
+export function plan(run, git, fs, { cfg, extraBases, measureBytes, stopAtBlocker, deadline, taken } = {}) {
   if (!Array.isArray(extraBases)) throw new TypeError("plan requires an extraBases array");
   if (typeof measureBytes !== "boolean") throw new TypeError("plan requires measureBytes");
   if (typeof stopAtBlocker !== "boolean") throw new TypeError("plan requires stopAtBlocker");
   if (typeof deadline !== "number") throw new TypeError("plan requires a deadline");
+  if (!(taken instanceof Map) && taken !== null) throw new TypeError("plan requires a taken map or null");
   if (run.live) return { live: true };
 
   const prefix = cfg?.worktreeBranchPrefix || "swarm/";
@@ -249,13 +319,20 @@ export function plan(run, git, fs, { cfg, extraBases, measureBytes, stopAtBlocke
     return true;
   };
   const runName = taken && run.resultsDir ? basename(resolve(run.resultsDir)) : null;
+  // The default branch is invariant per repo and a multi-lane run asks once per taken row.
+  const defaultBases = new Map();
+  const basesFor = (repo) => {
+    const key = normalizeForCompare(repo);
+    if (!defaultBases.has(key)) defaultBases.set(key, defaultCommits(repo, git));
+    return defaultBases.get(key);
+  };
   const applyTaken = (row) => {
     if (!runName || !row.branch || !(row.unlanded > 0)) return row;
     const record = taken.get(takenKey({ run: runName, repo: row.repo, branch: row.branch }));
     if (!record) return row;
     const tip = git(["rev-parse", "--verify", `${row.branch}^{commit}`], row.repo);
     const laneTip = tip.status === 0 && tip.stdout ? tip.stdout : null;
-    const verdict = takenVerdict({ record, laneTip, repo: row.repo, prefix, gitRunner: git });
+    const verdict = takenVerdict({ record, laneTip, repo: row.repo, gitRunner: git, bases: basesFor(row.repo) });
     // `taken` rides on a kept row too: the CLI prints why it could not be proved.
     return { ...row, ...(verdict.landed && { unlanded: 0 }), taken: verdict.reason };
   };
@@ -290,59 +367,13 @@ export function plan(run, git, fs, { cfg, extraBases, measureBytes, stopAtBlocke
     });
   };
 
-  // summary.json's own list: how the run reported what it left, and the only source that
-  // carries a shared chain's taskIds. It is not authoritative for what EXISTS — a killed
-  // run wrote no summary, a summary entry can name a path already moved — so the two
-  // scans below add to it rather than replacing it.
-  for (const wt of run.worktreesKept || []) {
+  // Every lane the run still holds, wherever the resolver put it.
+  for (const found of discoveredLanes(run, git, fs, { cfg })) {
     if (stopped) break;
-    if (!fs.existsSync(wt.path)) continue; // already gone from disk — not a row to plan or report
-    addRow(wt.path, wt.branch, wt.repo);
-  }
-
-  // Everything else on disk that belongs to the run, wherever the resolver put it.
-  if (run.resultsDir) {
-    for (const t of heldTrees(run.resultsDir, { cfg })) {
-      if (stopped) break;
-      if (seen.has(t.path) || !fs.existsSync(t.path)) continue;
-      const facts = t.repo && t.branch ? t : treeFacts(git, t.path);
-      if (!facts?.repo) continue; // not a worktree git can speak for — never a row to destroy
-      addRow(t.path, t.branch ?? facts.branch ?? null, facts.repo);
-    }
-  }
-
-  for (const repo of run.repos || []) {
-    if (stopped) break;
-    if (!fs.existsSync(repo)) continue;
-    for (const reg of registeredForRun(git, repo, run.resultsDir, { cfg })) {
-      if (stopped) break;
-      if (seen.has(reg.path)) continue;
-      // Registered but gone from disk: a missing directory holds no uncommitted work,
-      // and its registration must go before `branch -D` can take the branch.
-      addRow(reg.path, reg.branch, repo, { missing: !fs.existsSync(reg.path), head: reg.head });
-    }
-  }
-
-  // The run's OWN branches, whether or not a tree still holds one. An explicitly named
-  // `branch` has no scope key and is never found here: its name can be any branch at all.
-  if (run.resultsDir) {
-    const scope = `refs/heads/${prefix}${runScopeKey(run.resultsDir)}/`;
-    for (const repo of run.repos || []) {
-      if (stopped) break;
-      if (!fs.existsSync(repo)) continue;
-      const listed = git(["for-each-ref", "--format=%(refname:short)", scope], repo);
-      if (listed.status !== 0) continue;
-      // A branch a tree holds is either already a tree row or checked out somewhere
-      // prune does not own; `branch -D` would refuse it either way.
-      const held = new Set((worktreeList(git, repo) || []).map((t) => t.branch).filter(Boolean));
-      // Rows are keyed repo + branch: another repo's same-named branch is a different
-      // row, and suppressing it by name alone leaks that ref on every prune.
-      const onRow = (branch) => rows.some((row) => row.branch === branch && row.repo && normalizeForCompare(row.repo) === normalizeForCompare(repo));
-      for (const branch of listed.stdout.split(/\r?\n/).map((s) => s.trim()).filter(Boolean)) {
-        if (stopped) break;
-        if (held.has(branch) || onRow(branch)) continue;
-        addBranchRow(branch, repo);
-      }
+    if (found.path) {
+      addRow(found.path, found.branch, found.repo, { ...(found.missing && { missing: true, ...(found.head && { head: found.head }) }) });
+    } else if (!found.orphan && found.branch && found.repo) {
+      addBranchRow(found.branch, found.repo);
     }
   }
 

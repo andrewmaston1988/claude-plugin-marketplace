@@ -117,12 +117,8 @@ export function portFixture() {
   };
 }
 
-// The shape a superseded port leaves: the lane's two commits were
-// cherry-picked into feature branch `branch` (the second resolved through
-// `--continue`), a review commit rewrote the same lines, the branch was
-// squash-landed on main and deleted. Nothing on main holds a lane commit or its
-// patch, so every content check reads unlanded — the state the taken log exists
-// to settle. Lines sit far apart so only the pick we mean conflicts.
+// The shape a superseded port leaves: nothing on the default branch holds the lane's
+// commits or their patch, so every content check reads unlanded.
 export function takenFixture({ run = "run-1", id = "implement-rating", branch = "feat", launcher = null } = {}) {
   const f = portFixture();
   const { repo, home } = f;

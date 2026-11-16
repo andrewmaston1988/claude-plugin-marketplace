@@ -88,6 +88,26 @@ test("row 2: a completed port records each lane its HEAD proves", () => withFixt
   }
 }));
 
+test("row 2: a run whose summary names no kept trees still records the lane it ported", () => withFixture((f) => {
+  const port = f.porting("porting", "feat");
+  const leaf = f.leaf("run-2n", "leaf");
+  const dir = f.run("run-2n", { launcher: SESSION, leaves: [leaf] });
+  // A killed run, or one a partial prune rewrote: the tree is on disk and its own record
+  // names the lane, but the summary names none of it.
+  fs.writeFileSync(join(dir, "summary.json"), JSON.stringify({
+    started: new Date().toISOString(), finished: new Date().toISOString(),
+    tasks: [], blocked: [], worktreesKept: [], totalTokens: null,
+  }));
+  f.cherryPick(port, leaf.sha);
+
+  fire(f, port, `git cherry-pick ${leaf.sha}`);
+
+  const recs = logRecords(f);
+  equal(recs.length, 1, "the lane comes from discovery, never from the summary alone");
+  equal(recs[0].branch, leaf.branch);
+  equal(recs[0].repo, f.repo);
+}));
+
 test("row 3(a): a conflicted pick records nothing until it is finished", () => withFixture((f) => {
   // One lane already absorbed, one whose pick is left open: the absorbed lane is
   // provable at this HEAD, and only git's own marker can keep it out of the log.
