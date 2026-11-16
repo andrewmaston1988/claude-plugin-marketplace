@@ -13,6 +13,7 @@ import { fileURLToPath } from "node:url";
 import { SUITES, findSuite } from "./test-suites.mjs";
 import { installIfNeeded, killTree, main, runSuites } from "./test.mjs";
 import { changedSet, resolveBase } from "./test-lib/changed.mjs";
+import { recordTimings } from "./test-lib/fast.mjs";
 import { expandRun, select } from "./test-lib/select.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -454,6 +455,257 @@ test("a run past its timeout is killed and reported failed", async (t) => {
   assert.equal(code, 1, "a timed-out run must fail the runner");
   assert.deepEqual(killed, [777], "the run's tree was not killed");
   assert.match(lines.join("\n"), /TIMEOUT/);
+});
+
+/** A reporter's in-flight record, as the killed run would have left it. */
+function inFlightRecord(repo, name, files) {
+  const dir = join(repo, "test-results");
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, name), JSON.stringify({ pid: 1, label: "slow", files }), "utf8");
+}
+
+test("A4: a timeout names this run's own unfinished files, and only those", async (t) => {
+  const repo = graphFixture(t);
+  const suite = suiteOf("slow", [FIX_GLOB]);
+  suite.runs[0].timeoutMs = 30;
+  inFlightRecord(repo, "slow.777.inflight.json", [
+    { file: "plugins/fix/tests/transitive.test.mjs", startedAt: 0 },
+    { file: "plugins/fix/tests/unrelated.test.mjs", startedAt: 0 },
+  ]);
+  inFlightRecord(repo, "slow.778.inflight.json", [
+    { file: "plugins/fix/tests/join-cli.test.mjs", startedAt: 0 },
+  ]);
+
+  const lines = [];
+  const code = await main(["--suite", "slow"], {
+    cwd: repo,
+    _suites: [suite],
+    _spawn: stubSpawn({ never: true, pid: 777 }).spawn,
+    _killTree: () => {},
+    _now: () => 125000,
+    _log: (line) => lines.push(line),
+    _err: () => {},
+  });
+
+  const out = lines.join("\n");
+  assert.equal(code, 1);
+  assert.match(
+    out,
+    /still running: plugins\/fix\/tests\/transitive\.test\.mjs \(2m05s\), plugins\/fix\/tests\/unrelated\.test\.mjs \(2m05s\)/,
+    out,
+  );
+  assert.ok(!out.includes("join-cli.test.mjs"), `another pid's record reached the reason:\n${out}`);
+});
+
+test("A4: a missing or corrupt in-flight record leaves the plain timeout reason", async (t) => {
+  const repo = graphFixture(t);
+  const suite = suiteOf("slow", [FIX_GLOB]);
+  suite.runs[0].timeoutMs = 20;
+  inFlightRecord(repo, "slow.777.inflight.json", []);
+  writeFileSync(join(repo, "test-results", "slow.777.inflight.json"), "{not json", "utf8");
+
+  const lines = [];
+  const run = () => main(["--suite", "slow"], {
+    cwd: repo,
+    _suites: [suite],
+    _spawn: stubSpawn({ never: true, pid: 777 }).spawn,
+    _killTree: () => {},
+    _log: (line) => lines.push(line),
+    _err: () => {},
+  });
+
+  assert.equal(await run(), 1);
+  assert.match(lines.join("\n"), /: TIMEOUT -- no exit within 20ms in /);
+  assert.ok(!lines.join("\n").includes("still running"), lines.join("\n"));
+
+  // The runner unlinked the corrupt record after the run; now it is absent too.
+  lines.length = 0;
+  assert.equal(await run(), 1);
+  assert.match(lines.join("\n"), /: TIMEOUT -- no exit within 20ms in /);
+});
+
+// --- --fast ----------------------------------------------------------------
+
+test("A7: --fast runs everything with no timings, then skips a measured-slow file", async (t) => {
+  const repo = graphFixture(t);
+  const suites = [suiteOf("fix", [FIX_GLOB])];
+
+  const cold = stubSpawn();
+  const coldOut = capture();
+  assert.equal(await main(["--suite", "fix", "--fast"], {
+    cwd: repo, _suites: suites, _spawn: cold.spawn, _log: coldOut.log, _err: coldOut.err,
+  }), 0);
+  assert.match(coldOut.lines.join("\n"), /--fast: no timings recorded yet; running everything/);
+  assert.ok(cold.calls[0].args.includes("plugins/fix/tests/transitive.test.mjs"), "an unmeasured file was skipped");
+
+  recordTimings({
+    resultsDir: join(repo, "test-results"),
+    repoRoot: repo,
+    entries: [{ file: "plugins/fix/tests/transitive.test.mjs", ms: 45000 }],
+  });
+
+  const warm = stubSpawn();
+  const warmOut = capture();
+  assert.equal(await main(["--suite", "fix", "--fast"], {
+    cwd: repo, _suites: suites, _spawn: warm.spawn, _log: warmOut.log, _err: warmOut.err,
+  }), 0);
+  assert.match(
+    warmOut.lines.join("\n"),
+    /--fast skipped 1 measured-slow file\(s\): plugins\/fix\/tests\/transitive\.test\.mjs/,
+  );
+  assert.ok(!warm.calls[0].args.includes("plugins/fix/tests/transitive.test.mjs"), "the measured-slow file still ran");
+  assert.ok(warm.calls[0].args.includes("plugins/fix/tests/unrelated.test.mjs"), "a fast file was skipped too");
+});
+
+test("A7: a run --fast empties reports skipped and exits 0", async (t) => {
+  const repo = graphFixture(t);
+  const suites = [suiteOf("one", ["plugins/fix/tests/transitive.test.mjs"])];
+  recordTimings({
+    resultsDir: join(repo, "test-results"),
+    repoRoot: repo,
+    entries: [{ file: "plugins/fix/tests/transitive.test.mjs", ms: 45000 }],
+  });
+
+  const spawn = stubSpawn();
+  const out = capture();
+  const code = await main(["--suite", "one", "--fast"], {
+    cwd: repo, _suites: suites, _spawn: spawn.spawn, _log: out.log, _err: out.err,
+  });
+
+  assert.equal(code, 0, out.lines.join("\n"));
+  assert.equal(spawn.calls.length, 0, "an emptied run spawned node --test");
+  assert.match(out.lines.join("\n"), /\[test\] one: SKIPPED -- --fast skipped 1 measured-slow file\(s\)/);
+});
+
+test("A7: --fast is refused with --wsl", async () => {
+  const errors = [];
+  const refuse = () => {
+    throw new Error("a refused combination spawned a process");
+  };
+  const code = await main(["--wsl", "--fast"], {
+    _spawn: refuse, _spawnSync: refuse, _log: () => {}, _err: (line) => errors.push(line),
+  });
+  assert.equal(code, 2);
+  assert.match(errors.join("\n"), /--wsl cannot be combined with --fast/);
+});
+
+// --- --orphans -------------------------------------------------------------
+
+test("A8: --orphans exits 1 on a stray test and 0 once notRun lists it", async (t) => {
+  const repo = makeRepo(t);
+  write(repo, "plugins/x/tests/covered.test.mjs");
+  write(repo, "other/y.test.mjs");
+  const suites = [suiteOf("x", ["plugins/x/tests/*.test.mjs"])];
+
+  const bad = capture();
+  assert.equal(await main(["--orphans"], {
+    cwd: repo, _suites: suites, _log: bad.log, _err: bad.err,
+  }), 1);
+  assert.deepEqual(bad.lines, ["other/y.test.mjs"]);
+
+  const exempt = capture();
+  assert.equal(await main(["--orphans"], {
+    cwd: repo,
+    _suites: suites,
+    _notRun: [{ path: "other/y.test.mjs", reason: "fixture read by a suite" }],
+    _log: exempt.log,
+    _err: exempt.err,
+  }), 0);
+  assert.deepEqual(exempt.lines, []);
+});
+
+test("A8: an ordinary run warns about orphan test files on stderr", async (t) => {
+  const repo = makeRepo(t);
+  write(repo, "plugins/x/tests/covered.test.mjs");
+  write(repo, "other/y.test.mjs");
+  const out = capture();
+  await main(["--suite", "x", "--list"], {
+    cwd: repo, _suites: [suiteOf("x", ["plugins/x/tests/*.test.mjs"])], _log: out.log, _err: out.err,
+  });
+  assert.match(out.errors.join("\n"), /orphan test file\(s\) no suite runs: other\/y\.test\.mjs/);
+});
+
+// --- --if-selected ---------------------------------------------------------
+
+/** A committed fixture with a second plugin whose only test is Windows-only,
+ *  so a diff in `plugins/fix` leaves that suite with a `windows` entry alone. */
+function ifSelectedRepo(t) {
+  const repo = graphFixture(t);
+  write(repo, "plugins/elsewhere/tests/x.win.test.mjs");
+  commitAll(repo, "fixture");
+  return repo;
+}
+
+async function ifSelectedRun(repo, suites, suiteName) {
+  const spawn = stubSpawn();
+  const out = capture();
+  const code = await main(["--suite", suiteName, "--if-selected", "--against", "HEAD"], {
+    cwd: repo, _suites: suites, _spawn: spawn.spawn, _log: out.log, _err: out.err,
+  });
+  return { code, out, spawn };
+}
+
+test("A9: --if-selected runs a selected suite whole and skips an unselected one", async (t) => {
+  const repo = ifSelectedRepo(t);
+  const suites = [
+    suiteOf("fix", [FIX_GLOB]),
+    suiteOf("elsewhere", ["plugins/elsewhere/tests/*.test.mjs"]),
+  ];
+  write(repo, "plugins/fix/src/a.mjs", "export const a = 2;\n");
+
+  const selectedRun = await ifSelectedRun(repo, suites, "fix");
+  assert.equal(selectedRun.code, 0);
+  assert.ok(selectedRun.spawn.calls.length > 0, "a selected suite did not run");
+  assert.ok(
+    selectedRun.spawn.calls[0].args.includes("plugins/fix/tests/unrelated.test.mjs"),
+    "the suite did not run whole",
+  );
+
+  const skipped = await ifSelectedRun(repo, suites, "elsewhere");
+  assert.equal(skipped.code, 0);
+  assert.equal(skipped.spawn.calls.length, 0, "an unselected suite spawned node --test");
+  assert.match(skipped.out.lines.join("\n"), /^\[test\] elsewhere: not selected by this diff$/m);
+});
+
+test("A9: a runner, registry or workflow change runs every suite", async (t) => {
+  const repo = ifSelectedRepo(t);
+  const suites = [
+    suiteOf("fix", [FIX_GLOB]),
+    suiteOf("elsewhere", ["plugins/elsewhere/tests/*.test.mjs"]),
+  ];
+  for (const path of ["scripts/test-lib/select.mjs", "scripts/test-suites.mjs", ".github/workflows/test.yml"]) {
+    write(repo, path);
+    const { code, spawn } = await ifSelectedRun(repo, suites, "elsewhere");
+    assert.equal(code, 0, path);
+    assert.ok(spawn.calls.length > 0, `${path} did not run the suite`);
+    rmSync(join(repo, path), { force: true });
+  }
+});
+
+test("A9: a changed *.win.test.mjs selects its suite", async (t) => {
+  const repo = ifSelectedRepo(t);
+  const suites = [suiteOf("fix", [FIX_GLOB]), suiteOf("elsewhere", ["plugins/elsewhere/tests/*.test.mjs"])];
+  write(repo, "plugins/fix/tests/extra.win.test.mjs");
+  const { code, spawn } = await ifSelectedRun(repo, suites, "fix");
+  assert.equal(code, 0);
+  assert.ok(spawn.calls.length > 0, "a changed win test did not select its suite");
+});
+
+test("A9: --if-selected with an unresolvable base exits 2 and runs nothing", async (t) => {
+  const repo = graphFixture(t);
+  commitAll(repo, "fixture");
+  const spawn = stubSpawn();
+  const errors = [];
+  const code = await main(["--suite", "fix", "--if-selected", "--against", "nosuchref"], {
+    cwd: repo,
+    _suites: [suiteOf("fix", [FIX_GLOB])],
+    _spawn: spawn.spawn,
+    _log: () => {},
+    _err: (line) => errors.push(line),
+  });
+  assert.equal(code, 2);
+  assert.match(errors.join("\n"), /not a ref/);
+  assert.equal(spawn.calls.length, 0, "a selection error still spawned a run");
 });
 
 const memoryFs = (files) => ({
