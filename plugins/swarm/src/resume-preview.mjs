@@ -62,9 +62,9 @@ export function resumePreview(plan, { readResult: read = readPreviewResult, live
   // Clones and child leaves exist only after expansion, so their own keys are
   // unknowable here — name the parent and say when they get checked.
   const expanded = rerun.flatMap((t) => [
-    ...(t.forEach ? [`clones of ${t.id}`] : []),
-    ...(t.childPlan ? [`child leaves of ${t.id}`] : []),
+    ...(t.forEach ? [`clones of ${t.id} are checked when they expand`] : []),
+    ...(t.childPlan ? [`child leaves of ${t.id} are checked when they expand`] : []),
   ]);
-  const tail = expanded.length ? ` — ${expanded.join(" and ")} are checked when they expand` : "";
+  const tail = expanded.length ? ` — ${expanded.join("; ")}` : "";
   return [`results dir ${dir} holds an earlier run (${live ? "live engine" : "finished"}); on resume these re-execute: ${listed}${tail}`];
 }
