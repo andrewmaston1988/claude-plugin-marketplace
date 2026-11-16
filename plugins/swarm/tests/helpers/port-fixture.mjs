@@ -109,3 +109,52 @@ export function portFixture() {
     cleanup: () => rmSync(home, { recursive: true, force: true }),
   };
 }
+
+// The shape reported in tv11-build-1 (2026-11-15): the lane's two commits were
+// cherry-picked into feature branch `branch` (the second resolved through
+// `--continue`), a review commit rewrote the same lines, the branch was
+// squash-landed on main and deleted. Nothing on main holds a lane commit or its
+// patch, so every content check reads unlanded — the state the taken log exists
+// to settle. Lines sit far apart so only the pick we mean conflicts.
+export function takenFixture({ run = "run-1", id = "implement-rating", branch = "feat" } = {}) {
+  const f = portFixture();
+  const { repo, home } = f;
+  const body = (over = {}) => Array.from({ length: 15 }, (_, i) => over[i + 1] ?? `line${String(i + 1).padStart(2, "0")}`).join("\n") + "\n";
+
+  writeCommit(repo, "app.txt", body(), "app base");
+  const laneBranch = `swarm/${run}/${id}`;
+  const lanePath = join(home, `leaf-${run}-${id}`);
+  must(["worktree", "add", "-q", "-b", laneBranch, lanePath, "main"], repo);
+  writeCommit(lanePath, "app.txt", body({ 1: "line01 alpha lane" }), "lane work 1");
+  const one = must(["rev-parse", "HEAD"], lanePath);
+  writeCommit(lanePath, "app.txt", body({ 1: "line01 alpha lane", 13: "line13 gamma lane" }), "lane work 2");
+  const two = must(["rev-parse", "HEAD"], lanePath);
+
+  const port = f.porting("porting", branch);
+  // The port base rewrites the line the second pick also rewrites: that pick conflicts.
+  writeCommit(port, "app.txt", body({ 8: "line08 beta port", 13: "line13 gamma port" }), "port base");
+  must(["cherry-pick", one], port);
+  const pickOne = must(["rev-parse", "HEAD"], port);
+  const conflicted = git(["cherry-pick", two], port);
+  if (conflicted.status === 0) throw new Error("the fixture's second pick did not conflict");
+  writeFileSync(join(port, "app.txt"), body({ 1: "line01 alpha lane", 8: "line08 beta port", 13: "line13 gamma lane" }));
+  must(["add", "app.txt"], port);
+  must(["cherry-pick", "--continue", "--no-edit"], port);
+  const pickTwo = must(["rev-parse", "HEAD"], port);
+
+  writeCommit(port, "app.txt", body({ 1: "line01 alpha reviewed", 8: "line08 beta port", 13: "line13 gamma reviewed" }), "review: rewrite the lane's lines");
+  const review = must(["rev-parse", "HEAD"], port);
+  // The review commit is the branch's tip: the last proof a taken record can hold
+  // once the branch itself is deleted.
+  const portTip = review;
+
+  must(["merge", "--squash", branch], repo);
+  must(["commit", "-qm", `land ${branch}`], repo);
+  const squash = must(["rev-parse", "HEAD"], repo);
+  must(["worktree", "remove", "--force", port], repo);
+  must(["branch", "-D", branch], repo);
+
+  const lane = { id, branch: laneBranch, path: lanePath, commits: [one, two], tip: two };
+  const runDir = f.run(run, { leaves: [lane] });
+  return { ...f, runName: run, runDir, lane, branch, port, picks: [pickOne, pickTwo], review, portTip, squash };
+}
