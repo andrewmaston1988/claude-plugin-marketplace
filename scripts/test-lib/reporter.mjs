@@ -13,7 +13,7 @@
 
 import { createHash } from "node:crypto";
 import * as nodeFs from "node:fs";
-import { basename, dirname, isAbsolute, join, relative, sep } from "node:path";
+import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 export const HEARTBEAT_MS = 60_000;
@@ -50,15 +50,19 @@ export function resolveMode(env) {
 }
 
 /** Resolves on the timer OR on abort, so a closed generator never leaves the
- *  loop waiting on a heartbeat that will not fire. */
+ *  loop waiting on a heartbeat that will not fire. The listener is dropped on
+ *  either path: one that accumulates would trip Node's listener warning. */
 export function abortableSleep(ms, signal) {
   return new Promise((resolve) => {
     if (signal && signal.aborted) return resolve();
-    const timer = setTimeout(resolve, ms);
-    if (signal) signal.addEventListener("abort", () => {
-      clearTimeout(timer);
+    let timer = null;
+    const done = () => {
+      if (timer) clearTimeout(timer);
+      if (signal) signal.removeEventListener("abort", done);
       resolve();
-    }, { once: true });
+    };
+    timer = setTimeout(done, ms);
+    if (signal) signal.addEventListener("abort", done, { once: true });
   });
 }
 
@@ -178,9 +182,14 @@ function totalsLines(totals) {
   return [`totals: ${counts.tests} tests, ${counts.passed} passed, ${counts.failed} failed, ${counts.skipped ?? 0} skipped, ${counts.todo ?? 0} todo${duration}`];
 }
 
-function isFileLevel(data) {
-  return Boolean(data) && data.nesting === 0 && typeof data.name === "string"
-    && typeof data.file === "string" && data.name === basename(toPosix(data.file));
+/** Node names a file-level row with the path exactly as it was passed on the
+ *  command line -- `tests/a.test.mjs`, or the whole path when absolute -- so the
+ *  row is identified by resolving that name back onto the file. */
+function isFileLevel(data, cwd) {
+  if (!Boolean(data) || data.nesting !== 0) return false;
+  if (typeof data.name !== "string" || typeof data.file !== "string") return false;
+  const abs = absPath(data.file, cwd);
+  return resolve(cwd, data.name) === resolve(abs);
 }
 
 // --- Reporter --------------------------------------------------------------
@@ -327,14 +336,14 @@ export function createReporter({ now = Date.now, sleep = abortableSleep, env = p
       const file = typeof data.file === "string" ? data.file : "";
       switch (event.type) {
         case "test:dequeue": {
-          if (!isFileLevel(data)) return null;
+          if (!isFileLevel(data, cwd)) return null;
           const key = display(file, paths);
           running.set(key, now());
           writeInFlight();
           return null;
         }
         case "test:complete": {
-          if (!isFileLevel(data)) return null; // nested completes duplicate test:pass/fail
+          if (!isFileLevel(data, cwd)) return null; // nested completes duplicate test:pass/fail
           const key = display(file, paths);
           const details = data.details || {};
           const passed = details.passed !== false;
@@ -363,7 +372,7 @@ export function createReporter({ now = Date.now, sleep = abortableSleep, env = p
         }
         case "test:pass":
         case "test:fail": {
-          if (isFileLevel(data)) return null;
+          if (isFileLevel(data, cwd)) return null;
           const details = data.details || {};
           if (details.type !== "test") return null; // a suite row only restates its children
           const key = display(file, paths);
@@ -447,8 +456,12 @@ export function createReporter({ now = Date.now, sleep = abortableSleep, env = p
 
   /** The abort has to fire before the pending sleep settles, and only the
    *  consumer knows when that is -- so the iterator is wrapped rather than
-   *  handed out raw. */
-  return function reporter(source) {
+   *  handed out raw.
+   *
+   *  An arrow function on purpose: Node's reporter loader runs `new reporter()`
+   *  on any default export whose prototype owns a `constructor`, and calls the
+   *  result with no source. */
+  return (source) => {
     const abort = new AbortController();
     const inner = run(source, abort);
     return {

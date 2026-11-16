@@ -8,12 +8,13 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
+import { getEventListeners } from "node:events";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { basename, dirname, join } from "node:path";
+import { dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
 
-import { HEARTBEAT_MS, createReporter } from "./test-lib/reporter.mjs";
+import { HEARTBEAT_MS, abortableSleep, createReporter } from "./test-lib/reporter.mjs";
 
 // --- Harness ---------------------------------------------------------------
 
@@ -36,14 +37,16 @@ function envFor(root, extra = {}) {
 
 const neverSleep = () => new Promise(() => {});
 
+/** A file row is named with the path as it was passed on the command line; the
+ *  fixtures pass absolute paths, so that is what Node reports. */
 function dequeue(file) {
-  return { type: "test:dequeue", data: { file, name: basename(file), nesting: 0, type: "test" } };
+  return { type: "test:dequeue", data: { file, name: file, nesting: 0, type: "test" } };
 }
 
 function complete(file, { passed = true, ms = 100 } = {}) {
   return {
     type: "test:complete",
-    data: { file, name: basename(file), nesting: 0, details: { duration_ms: ms, passed, type: "test" } },
+    data: { file, name: file, nesting: 0, details: { duration_ms: ms, passed, type: "test" } },
   };
 }
 
@@ -52,7 +55,7 @@ function complete(file, { passed = true, ms = 100 } = {}) {
 function fileResult(file, { passed = true, ms = 100 } = {}) {
   return {
     type: passed ? "test:pass" : "test:fail",
-    data: { file, name: basename(file), nesting: 0, details: { duration_ms: ms, type: "test" } },
+    data: { file, name: file, nesting: 0, details: { duration_ms: ms, type: "test" } },
   };
 }
 
@@ -191,6 +194,12 @@ test("A2: a failed file streams ✗ and the failure block names the test, the er
 });
 
 // --- A3 --------------------------------------------------------------------
+
+test("the heartbeat sleep drops its abort listener once it fires", async () => {
+  const controller = new AbortController();
+  await abortableSleep(1, controller.signal);
+  assert.equal(getEventListeners(controller.signal, "abort").length, 0);
+});
 
 test("A3: an idle source gets a heartbeat naming the running file, and close settles the sleep", async (t) => {
   const root = makeRoot(t);
@@ -376,6 +385,16 @@ test("a file that crashes at load still prints, with its stderr as the failure e
   assert.match(out, /^✗ tests\/crash\.test\.mjs {2}0\.4s$/m);
   assert.match(out, /^FAIL tests\/crash\.test\.mjs$/m);
   assert.match(out, /Error: load crash/);
+});
+
+test("a file row named by a cwd-relative path is recognised as the file", async (t) => {
+  const root = process.cwd();
+  const file = join(root, "scripts", "relative-name.test.mjs");
+  const out = await drain(
+    createReporter({ env: { ...envFor(root), TEST_RESULTS_DIR: makeRoot(t) }, sleep: neverSleep }),
+    events([dequeue(file), complete(file, { ms: 900 })]),
+  );
+  assert.match(out, /^✓ scripts\/relative-name\.test\.mjs {2}0\.9s$/m);
 });
 
 test("the in-flight record is written per pid on file start and cleared at the end", async (t) => {
