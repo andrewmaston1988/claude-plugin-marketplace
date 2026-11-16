@@ -220,8 +220,8 @@ test("Codex integration: the report carries the leaf's title and the engine's ru
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
-// No report block means a read-only digest: it keeps the repo-root gate it does
-// not need to leave, so it gets no writable directory and no launch allowance.
+// No report block means a read-only digest: a reader, so it keeps reading in place
+// and gets the launch allowance every read-only leaf now gets.
 test("Codex integration: a read-only digest configuration stays read-only end to end", async () => {
   const dir = tmp();
   try {
@@ -234,7 +234,7 @@ test("Codex integration: a read-only digest configuration stays read-only end to
     equal(call.opts.cwd, dir, "a read-only digest reads the dispatching repo in place");
     equal(call.args[call.args.indexOf("--sandbox") + 1], "read-only");
     deepEqual(shimRuns[0].granted, [], "a read-only digest has nothing to make writable");
-    ok(!call.args.includes("--skip-git-repo-check"), call.args.join(" "));
+    equal(call.args.filter((arg) => arg === "--skip-git-repo-check").length, 1, call.args.join(" "));
     ok(!call.args.includes("--settings"), call.args.join(" "));
 
     equal(readFileSync(join(p.resultsDir, "digest.md"), "utf8").trim(), CODEX_DIGEST_TEXT);

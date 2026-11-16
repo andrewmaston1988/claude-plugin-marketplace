@@ -3,6 +3,7 @@ import { runResult } from "./contracts.mjs";
 import { createCodexStreamParser } from "./stream.mjs";
 import { codexModelProblem, providerConfig, readNow } from "./providers.mjs";
 import { normalizeForCompare } from "./roots.mjs";
+import { hasWriteTools } from "./manifest-task-policy.mjs";
 import { staleNotes } from "./usage.mjs";
 import { discoverCodexModels } from "./codex-app-server.mjs";
 
@@ -18,7 +19,7 @@ function writeEffortArg(args, effort) {
 export function codexSandbox(task, context) {
   const cfg = providerConfig(context?.config || context?.cfg || {}, "codex");
   const writeCapable = task.write === true || task.writeCapable === true || task.worktreeName ||
-    /(?:^|,)(?:Write|Edit|Bash)(?:,|$)/.test(String(task.allowedTools || ""));
+    hasWriteTools(task.allowedTools);
   const sandbox = task.sandbox || (writeCapable ? (cfg.sandbox || "workspace-write") : "read-only");
   if (!["read-only", "workspace-write"].includes(sandbox)) {
     throw new Error(`Codex sandbox must be read-only or workspace-write, got '${sandbox}'`);
@@ -27,7 +28,9 @@ export function codexSandbox(task, context) {
 }
 
 function writeSandboxArg(args, task, context) {
-  args.push("--sandbox", codexSandbox(task, context));
+  const sandbox = codexSandbox(task, context);
+  args.push("--sandbox", sandbox);
+  return sandbox;
 }
 
 // The engine's typed write targets, as directories. `--add-dir` grants a whole
@@ -64,7 +67,7 @@ export function buildCodexInvocation(task, prompt, context = {}) {
   const args = ["exec", "--json"];
   if (task.model) args.push("--model", task.model);
   writeEffortArg(args, task.effort ?? task.reasoningEffort ?? "medium");
-  writeSandboxArg(args, task, context);
+  const sandbox = writeSandboxArg(args, task, context);
   // The scheduler writes this file — codex takes only strict form, and the builder stays pure.
   if (task.returns && context.schemaPath) args.push("--output-schema", context.schemaPath);
   const addDirs = task.additionalDirs || context.additionalDirs || cfg.additionalDirs || [];
@@ -85,11 +88,15 @@ export function buildCodexInvocation(task, prompt, context = {}) {
     writable.add(key);
     args.push("--add-dir", dir);
   }
-  // The generated digest launches from engine scratch — a cwd outside every Git
-  // repository, where `codex exec` refuses to start. Scoped to the digest by the
-  // cwd/originalCwd comparison (a pure comparison, not a filesystem probe): an
-  // ordinary Codex leaf keeps the repo-root gate that stops it wandering.
-  if (task.isDigest === true && task.cwd !== task.originalCwd) args.push("--skip-git-repo-check");
+  // `codex exec` refuses to start outside a Git repository or a directory it trusts.
+  // A read-only leaf is a reader: swarm's allowedRoots check at validate already
+  // bounds where it may read, so the repo-root gate would only stop it reading logs
+  // or a data dump. A writer keeps the gate — it runs in its own worktree, which is
+  // a repository — except the generated digest, which launches from engine scratch.
+  // Keyed on the sandbox actually passed, so flag and sandbox cannot disagree.
+  if (sandbox === "read-only" || (task.isDigest === true && task.cwd !== task.originalCwd)) {
+    args.push("--skip-git-repo-check");
+  }
   if (sessionId) args.push("resume", sessionId);
   args.push(prompt);
   // settings.env is the one settings key with a Codex route: the spawn env. The guard
