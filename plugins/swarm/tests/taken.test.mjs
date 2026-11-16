@@ -156,6 +156,10 @@ test("row 4: a git that cannot answer reads in progress", () => {
       : { status: 0, stdout: ".git/CHERRY_PICK_HEAD", stderr: "" });
     equal(portInProgress(f.repo, mixed), true, "a failed unmerged probe is no proof");
 
+    // A short answer names some markers and not the rest.
+    const short = (args) => ({ status: 0, stdout: args.includes("--diff-filter=U") ? "" : ".git/CHERRY_PICK_HEAD", stderr: "" });
+    equal(portInProgress(f.repo, short), true, "an answer naming one marker of six is no proof");
+
     throws(() => portInProgress(f.repo), TypeError, "the git runner is required");
   } finally { f.cleanup(); }
 });
@@ -180,6 +184,18 @@ test("row 5: readTaken keeps the newest line per (run, lane) across .1 and the l
   const before = readFileSync(log, "utf8");
   appendTaken({ home: f.home, toplevel: f.toplevel, fs, records: [rec({ run: "run-b", branch: "swarm/run-b/other" })] });
   ok(readFileSync(log, "utf8").startsWith(before), "an append never rewrites an earlier line");
+}));
+
+test("row 5: the same lane name in two repos is two records", () => withFixture((f) => {
+  runDir(f, "run-a");
+  appendTaken({ home: f.home, toplevel: f.toplevel, fs, records: [
+    rec({ repo: join(f.home, "one") }),
+    rec({ repo: join(f.home, "two") }),
+  ] });
+
+  const map = readTaken({ home: f.home, toplevel: f.toplevel, fs });
+  equal(map.size, 2, "a multi-repo run's lanes never overwrite each other");
+  equal(map.get(key("run-a", "swarm/run-a/leaf", join(f.home, "two"))).repo, join(f.home, "two"));
 }));
 
 test("row 6: refreshTaken moves only records on the branch, along descent", () => withFixture((f) => {
@@ -212,6 +228,23 @@ test("row 6: refreshTaken moves only records on the branch, along descent", () =
 
   refreshTaken({ home: f.home, toplevel: f.toplevel, into: "feature", head: c2, git: f.git, fs });
   equal(logLines(log).length, lines + 1, "an unchanged tip appends nothing");
+}));
+
+test("row 6: a spent budget refreshes nothing", () => withFixture((f) => {
+  const b = f.porting("b6d", "feature");
+  writeCommit(b, "f1.txt", "1\n", "c1");
+  const c1 = must(["rev-parse", "HEAD"], b);
+  writeCommit(b, "f2.txt", "2\n", "c2");
+  const c2 = must(["rev-parse", "HEAD"], b);
+  runDir(f, "run-a");
+  appendTaken({ home: f.home, toplevel: f.toplevel, fs, records: [rec({ intoTip: c1 })] });
+  const log = takenLogPath(f.home, f.toplevel);
+  const before = readFileSync(log, "utf8");
+
+  const moved = refreshTaken({ home: f.home, toplevel: f.toplevel, into: "feature", head: c2, git: f.git, fs, deadline: 0 });
+
+  equal(moved.length, 0, "the hook's budget is spent before the first git call");
+  equal(readFileSync(log, "utf8"), before, "no refresh line is appended");
 }));
 
 test("row 7: takenVerdict reads the target's tip, then the recorded tip, against the default branch", () => withFixture((f) => {
