@@ -4,11 +4,14 @@
 //   SWARM_SHIM_OUTPUT    stdout to emit (default "shim-ok")
 //   SWARM_SHIM_EXIT      exit code (default 0)
 //   SWARM_SHIM_SLEEP_MS  delay before exiting (for timeout/concurrency tests)
+//   SWARM_SHIM_WAIT_FILE hold until this file exists (polled ~25 ms), capped at
+//                        SWARM_SHIM_WAIT_MS (default 30000) — a release handshake
+//   SWARM_SHIM_WAIT_MS   cap for SWARM_SHIM_WAIT_FILE
 //   SWARM_SHIM_STREAM    emit stream-json events (assistant usage + result
 //                        wrapping SWARM_SHIM_OUTPUT) like the real CLI
 //   SWARM_SHIM_CACHE_READ  with STREAM: cache_read_input_tokens to report
 //   SWARM_SHIM_NO_WORK     with STREAM: report zero input and output tokens
-import { appendFileSync } from "node:fs";
+import { appendFileSync, existsSync } from "node:fs";
 
 const envSubset = {};
 for (const k of Object.keys(process.env)) {
@@ -24,6 +27,15 @@ if (process.env.SWARM_SHIM_LOG) {
 
 const sleepMs = parseInt(process.env.SWARM_SHIM_SLEEP_MS || "0", 10);
 if (sleepMs > 0) await new Promise((r) => setTimeout(r, sleepMs));
+
+const waitFile = process.env.SWARM_SHIM_WAIT_FILE;
+if (waitFile) {
+  const waitMs = parseInt(process.env.SWARM_SHIM_WAIT_MS || "30000", 10);
+  const deadline = Date.now() + waitMs;
+  while (!existsSync(waitFile) && Date.now() < deadline) {
+    await new Promise((r) => setTimeout(r, 25));
+  }
+}
 
 const text = process.env.SWARM_SHIM_OUTPUT ?? "shim-ok";
 if (process.env.SWARM_SHIM_STREAM) {

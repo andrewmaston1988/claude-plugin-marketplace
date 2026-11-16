@@ -116,24 +116,27 @@ test("S6: concurrency width recovers to the ceiling across waves", async () => {
   const dir = tmp();
   try {
     const ids = ["a", "b", "c", "d", "e", "f", "g", "h"];
-    const spawn = fakeSpawnFactory(() => ({ delayMs: 15 }));
+    const base = fakeSpawnFactory(() => ({ delayMs: 300 }));
+    // Peak width per wave, counted off spawn and close rather than sampled: a wave
+    // that ratcheted down never holds its whole width alive at once, and the count
+    // cannot miss the peak between two ticks of a timer.
+    const peak = [0, 0];
+    let live = 0;
+    const spawn = (...args) => {
+      const wave = base.calls.length >= 4 ? 1 : 0;
+      live++;
+      peak[wave] = Math.max(peak[wave], live);
+      const child = base(...args);
+      child.on("close", () => { live--; });
+      return child;
+    };
     const io = makeIo(spawn);
     const p = plan(dir, ids.map((id) => task(id)), { concurrency: 4 });
-    // Split samples by the 5th spawn call (the first admission of the second
-    // wave) rather than a wall-clock threshold — process/test-harness
-    // start-up jitter makes an absolute time cutoff unreliable.
-    const samples1 = [];
-    const samples2 = [];
-    let wave2 = false;
-    const sampler = setInterval(() => {
-      if (!wave2 && spawn.calls.length >= 5) wave2 = true;
-      (wave2 ? samples2 : samples1).push(spawn.gauge.active);
-    }, 2);
     await runPlan(p, CFG, io);
-    clearInterval(sampler);
-    equal(spawn.calls.length, 8);
-    equal(Math.max(0, ...samples1), 4, "first wave never reached the ceiling");
-    equal(Math.max(0, ...samples2), 4, "second wave never reached the ceiling — width ratcheted down");
+
+    equal(base.calls.length, 8);
+    equal(peak[0], 4, `first wave peaked at ${peak[0]}, want 4`);
+    equal(peak[1], 4, `second wave peaked at ${peak[1]}, want 4 — width did not recover`);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

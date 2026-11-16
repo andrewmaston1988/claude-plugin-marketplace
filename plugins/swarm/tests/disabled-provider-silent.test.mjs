@@ -15,6 +15,8 @@ import { refreshRateCards } from "../src/rate-card.mjs";
 import { refreshPrices, refreshStaleRateCards } from "../src/rate-card-cli.mjs";
 import { costSections } from "../src/cost.mjs";
 import { createServer } from "../src/serve/server.mjs";
+import { refreshRoster } from "../src/roster.mjs";
+import { refreshStubs } from "./helpers/serve-fixture.mjs";
 import { runCli } from "./helpers/cli.mjs";
 import { loadPerfViews, H } from "./helpers/perf-views-harness.mjs";
 import { hub, COST } from "./helpers/overview-hub.mjs";
@@ -158,8 +160,18 @@ async function getCost(cfg, refreshLog) {
   const server = createServer({ tls: null,
     home, cfg: { dashboard: { port: 0, bind: "127.0.0.1", token: null }, ...cfg }, _estate: estate,
     _watch: () => ({ close() {} }), _heartbeatMs: 60_000, _pollMs: 60_000,
-    // The dashboard's own refresh, its network swapped for the recorder.
+    ...refreshStubs,
+    // Both of the dashboard's own refreshes, their networks swapped for the recorder.
     _refreshPrices: (opts) => refreshStaleRateCards({ ...opts, _fetch: refreshLog._fetch }),
+    // One catalogue row, so discovery banks a roster rather than falling through to
+    // spawning the picker command.
+    _refreshRoster: (opts) => refreshRoster({
+      ...opts,
+      fetchImpl: async (url) => {
+        refreshLog._fetch(url);
+        return { ok: true, json: async () => ({ models: [{ name: "glm-5.2:cloud" }] }) };
+      },
+    }),
   });
   await new Promise((r) => server.listen(0, "127.0.0.1", r));
   try {
@@ -184,7 +196,7 @@ test("/api/cost with codex disabled carries no codex section and the dashboard f
   ok(body.sections.some((s) => s.provider === "claude"), "an enabled provider keeps its section");
   ok(!body.sections.some((s) => s.provider === "codex"), "no codex section");
   ok(!/codex|gpt-/i.test(JSON.stringify(body)), "nothing in the payload names codex or a gpt model");
-  ok(!rec.urls.some((u) => u.includes(OPENAI)), `the dashboard's price refresh reached codex's vendor: ${rec.urls}`);
+  ok(!rec.urls.some((u) => u.includes(OPENAI)), `a dashboard refresh reached codex's vendor: ${rec.urls}`);
   ok(rec.urls.some((u) => CLAUDE_HOSTS.test(u)), `an enabled vendor is still refreshed by the dashboard: ${rec.urls}`);
 });
 

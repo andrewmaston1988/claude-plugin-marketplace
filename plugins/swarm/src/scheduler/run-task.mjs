@@ -14,6 +14,7 @@ import { TEMPLATE_RE } from "../coverage.mjs";
 import { matchQuota, DEFAULT_QUOTA_PATTERNS } from "../quota.mjs";
 import { normalizeForCompare } from "../roots.mjs";
 import { hasWriteTools, resolveWorktreeName, leafWriteGuardRoots } from "../manifest-task-policy.mjs";
+import { loopStallMs, nextStallCredit } from "./loop-stall.mjs";
 
 const RATE_LIMIT_RE = /rate.?limit|429|too many requests/i;
 const EXIT_DRAIN_MS = 2000;
@@ -253,15 +254,32 @@ export function runTask(task, prompt, cfg, io, leafLog, { onTokens, onActivity, 
       if (drain.unref) drain.unref();
     };
     child.on("exit", (code) => { exitCode = code; exited = true; armDrain(); });
-    const timer = setTimeout(() => {
-      // Already exited: the drain armed at exit will settle with the real code.
-      // Marking a timeout here would report completed work as a false failure.
-      if (exited) return;
-      timedOut = true;
-      armDrain();
-      try { (io.killTree ?? ((c) => c.kill()))(child); } catch { /* best effort */ }
-    }, task.timeoutMs);
-    if (timer.unref) timer.unref();
+    // The budget is charged for live loop time only: a blocked loop also blocks the
+    // leaf's own callbacks, so a stall must not read as the leaf having hung.
+    let chargedStallMs = loopStallMs();
+    let creditMs = 0;
+    let timer = null;
+    const armTimeout = (ms) => {
+      timer = setTimeout(() => {
+        // Already exited: the drain armed at exit will settle with the real code.
+        // Marking a timeout here would report completed work as a false failure.
+        if (exited) return;
+        const next = nextStallCredit({
+          stallMs: loopStallMs(), chargedMs: chargedStallMs, creditMs, timeoutMs: task.timeoutMs,
+        });
+        if (next.extra > 0) {
+          chargedStallMs = next.chargedMs;
+          creditMs = next.creditMs;
+          armTimeout(next.extra);
+          return;
+        }
+        timedOut = true;
+        armDrain();
+        try { (io.killTree ?? ((c) => c.kill()))(child); } catch { /* best effort */ }
+      }, ms);
+      if (timer.unref) timer.unref();
+    };
+    armTimeout(task.timeoutMs);
     // The leaf log must be FLUSHED before the task resolves. end() is
     // fire-and-forget, so resolving straight after it let runPlan finish with
     // writes still in flight: the run reported done while results/<id>.log was

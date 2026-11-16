@@ -4,6 +4,7 @@
 import { copyFileSync, existsSync, linkSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { delimiter, join } from "node:path";
 import { homedir, tmpdir } from "node:os";
+import { after } from "node:test";
 
 // An inherited SWARM_HOME is only trustworthy when WE set it — the marker says so.
 // Without it, an operator who exports SWARM_HOME in their shell gets their real
@@ -38,3 +39,32 @@ if (!process.env.SWARM_HOME || process.env.SWARM_TEST_HOME !== "1") {
     try { rmSync(dir, { recursive: true, force: true }); } catch { /* best effort on exit */ }
   });
 }
+
+// No fetch in this process reaches a vendor. A CLI child a test spawns is not covered:
+// it inherits the env, not this patch. An outbound TLS connect here has killed node
+// outright with no output, so the run reports a bare `test failed` with nothing
+// pointing at the request that caused it.
+//
+// Loopback stays open: several tests fetch the server they just started.
+const realFetch = globalThis.fetch;
+const LOOPBACK = new Set(["localhost", "127.0.0.1", "[::1]"]);
+const blocked = [];
+globalThis.fetch = (input, init) => {
+  let url;
+  try {
+    // `new URL` is the resolution: a non-absolute input throws here and is handed
+    // on, so the caller still sees fetch's own "Failed to parse URL" rejection.
+    url = new URL(typeof input === "string" || input instanceof URL ? String(input) : input?.url);
+  } catch {
+    return realFetch(input, init);
+  }
+  if (LOOPBACK.has(url.hostname)) return realFetch(input, init);
+  blocked.push(url.href);
+  return Promise.reject(new Error(`network access in a swarm test: ${url.href}`));
+};
+
+// A hook, not an exit code: the thrown error lands in the test report naming the
+// URLs it refused, where a non-zero exit is reported as a bare `test failed`.
+after(() => {
+  if (blocked.length) throw new Error(`network access in a swarm test: ${blocked.join(", ")}`);
+});

@@ -9,6 +9,14 @@ import { buildSnapshot } from "../../src/serve/estate.mjs";
 
 export const cfg = (over = {}) => ({ quietWarnSecs: 60, dashboard: { port: 0, bind: "127.0.0.1", token: null, ...over } });
 
+// The cost view fires both vendor refreshes off the request path. A test must
+// never let one leave the machine, so the fixture answers them itself; a caller
+// that injects its own seam still overrides these.
+export const refreshStubs = {
+  _refreshPrices: () => Promise.resolve({ refreshed: [], failed: [], skipped: true }),
+  _refreshRoster: () => Promise.resolve({ models: [], errors: {} }),
+};
+
 export function seedHome() {
   const home = mkdtempSync(join(tmpdir(), "swarm-serve-"));
   const live = join(home, "runs", "C--code-a", "live-1");
@@ -71,7 +79,7 @@ export async function withServer(opts, fn) {
   const estateSeam = !seams._estate && !seams._Worker
     ? { _estate: makeInThreadEstate({ home, now, heartbeatMs: Math.max(50, (dashCfg.heartbeatSecs ?? 15) * 1000), quietWarnMs: (dashCfg.quietWarnSecs ?? 60) * 1000, pollMs }) }
     : {};
-  const server = createServer({ tls: null, home, cfg: dashCfg, now, _watch, _heartbeatMs: opts.heartbeatMs ?? 60_000, _debounceMs: 30, _pollMs: pollMs, ...estateSeam, ...seams });
+  const server = createServer({ tls: null, home, cfg: dashCfg, now, _watch, _heartbeatMs: opts.heartbeatMs ?? 60_000, _debounceMs: 30, _pollMs: pollMs, ...refreshStubs, ...estateSeam, ...seams });
   await new Promise((r) => server.listen(0, "127.0.0.1", r));
   const port = server.address().port;
   const get = (path, { raw = false } = {}) => new Promise((resolve, reject) => {

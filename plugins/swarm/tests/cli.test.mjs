@@ -1,7 +1,7 @@
 import "./helpers/isolate-home.mjs"; import { spawnSync, spawn } from "node:child_process";
 import { test } from "node:test";
 import { equal, ok, deepEqual, match } from "node:assert/strict";
-import { mkdtempSync, rmSync, writeFileSync, readFileSync, existsSync, readdirSync, mkdirSync, utimesSync, statSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync, readFileSync, existsSync, readdirSync, mkdirSync, utimesSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { createServer } from "node:http";
@@ -479,48 +479,6 @@ test("C1: ask refuses a results dir whose engine is alive — exit 1, claude nev
     ok(!existsSync(shimLog), "claude shim must never be invoked against a live engine");
     equal(readFileSync(join(resultsDir, "run.log"), "utf8"), runLog, "run.log must not gain a second run-start");
   } finally {
-    rmSync(dir, { recursive: true, force: true });
-  }
-});
-
-test("C2: run refuses to start while an ask is live", async () => {
-  const dir = tmp();
-  let askPromise;
-  try {
-    const home = gateHome(join(dir, "home"), { heartbeatSecs: 0.5 });
-    const manifest = join(dir, "plan.json");
-    writeFileSync(manifest, JSON.stringify({
-      resultsDir: "out",
-      tasks: [{ id: "t1", prompt: "x", provider: "claude", model: "claude-haiku-4-5-20251001" }],
-    }));
-    const resultsDir = join(dir, "out");
-
-    const r0 = runValidated(["run", manifest], {
-      cwd: dir,
-      env: { SWARM_HOME: home, SWARM_SHIM_STREAM: "1", SWARM_SHIM_OUTPUT: "first answer" },
-    });
-    equal(r0.status, 0, r0.stdout + r0.stderr);
-    const hbPath = join(resultsDir, "heartbeat");
-    const baseline = statSync(hbPath).mtimeMs;
-
-    askPromise = runCliAsync(["ask", resultsDir, "t1", "why?"], {
-      cwd: dir,
-      env: { SWARM_HOME: home, SWARM_SHIM_SLEEP_MS: "2000", SWARM_SHIM_STREAM: "1", SWARM_SHIM_OUTPUT: "slow answer" },
-    });
-
-    const deadline = Date.now() + 10000;
-    while (statSync(hbPath).mtimeMs === baseline && Date.now() < deadline) await sleep(20);
-    ok(statSync(hbPath).mtimeMs > baseline, "the ask must touch the heartbeat before a concurrent run can be refused");
-
-    const shimLog2 = join(dir, "shim2.log");
-    const r1 = runValidated(["run", manifest], { cwd: dir, env: { SWARM_HOME: home, SWARM_SHIM_LOG: shimLog2 } });
-    equal(r1.status, 1, r1.stdout + r1.stderr);
-    ok(!existsSync(shimLog2), "run must refuse before dispatching anything while the ask is live");
-
-    const a = await askPromise;
-    equal(a.status, 0, a.stdout + a.stderr);
-  } finally {
-    await askPromise?.catch(() => {});
     rmSync(dir, { recursive: true, force: true });
   }
 });

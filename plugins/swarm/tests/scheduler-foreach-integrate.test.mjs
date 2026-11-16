@@ -9,6 +9,12 @@ import { runPlan, runTask, substituteTemplates, substituteItems, classifyFailure
 import { treeDirFor } from "../src/worktree.mjs";
 import { DIGEST_ID } from "../src/digest.mjs";
 import { CFG, tmp, fakeSpawnFactory, makeIo, promptOf, initGitRepo, commitAllInRepo, integrateLeaf, forEachFixLeaf, fixCloneTasks } from "./helpers/scheduler-fixtures.mjs";
+// A join that never ran must name the node that stopped it: reading join.json
+// regardless reports ENOENT and hides the blocked state behind it.
+function assertJoinRan(r) {
+  const states = Object.fromEntries(r.summary.tasks.map((t) => [t.id, t.state]));
+  equal(states.join, "ok", `join did not run: ${JSON.stringify(states)}`);
+}
 // ── F3-F7: integrate.from over a forEach parent ──────────────────────────────
 // The parent has no branch of its own — its clones do. These hand-build the POST-expansion
 // shape, pinning the seam where `expandForEach` mints the tree as `${parentId}-${i}` (a
@@ -137,8 +143,9 @@ test("F5: two clones editing the same line — conflict markers, conflicts list,
           integrate: { into: "feat", from: ["fix"] } },
       ],
     };
-    await runPlan(p, CFG, io);
+    const r = await runPlan(p, CFG, io);
 
+    assertJoinRan(r);
     const res = JSON.parse(readFileSync(join(p.resultsDir, "results", "join.json"), "utf8"));
     equal(res.ok, true, "a content conflict is not a node failure — same as an ordinary integrate");
     deepEqual(res.outputJson.conflicts, ["shared.txt"]);
@@ -270,8 +277,9 @@ test("F9: a real forEach template with a worktree name actually expands and fold
           integrate: { into: "feat", from: ["fix"] } },
       ],
     };
-    await runPlan(p, CFG, io);
+    const r = await runPlan(p, CFG, io);
 
+    assertJoinRan(r);
     const res = JSON.parse(readFileSync(join(p.resultsDir, "results", "join.json"), "utf8"));
     equal(res.ok, true, res.output);
     equal(res.outputJson.merged.length, 3, "a real 3-item forEach must expand to 3 clones and fold every one back");
