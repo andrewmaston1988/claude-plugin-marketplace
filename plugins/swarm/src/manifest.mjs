@@ -16,6 +16,10 @@ import { detectCycle, validateTaskRelations, validateWorktreeGroups } from "./ma
 import { validateMustRead, validateMustReadRunners } from "./manifest-must-read.mjs";
 import { validateContextFit } from "./manifest-context-fit.mjs";
 import { PROVIDERS, checkDenylist, checkHeadroom, resolveProvider } from "./manifest-model-gates.mjs";
+import { checkModelIdentity } from "./model-identity.mjs";
+import { roleErrors, roleWarnings } from "./manifest-role.mjs";
+import { resumePreview } from "./resume-preview.mjs";
+import { selectClaudeCatalog } from "./claude-catalog.mjs";
 import { ValidationError } from "./validation-error.mjs";
 
 // The loader is the public surface: every name this module exported before it was
@@ -115,7 +119,7 @@ export function readManifestJson(path) {
 // into the run by the scheduler. The child inherits the parent run's cwd and
 // resultsDir; it may not steer the run itself.
 
-function loadChild(node, parentPath, cwd, cfg, resultsDir, errors, warnings, { args, usedArgs, fromRegistry, cache = [], io, probedGuards, providerRegistry = PROVIDERS } = {}) {
+function loadChild(node, parentPath, cwd, cfg, resultsDir, errors, warnings, { args, usedArgs, fromRegistry, cache = [], catalogFetchedAt, io, probedGuards, providerRegistry = PROVIDERS } = {}) {
   const nodeLabel = `task '${node.id}'`;
   // A registry-resolved parent references its children relative to itself — a
   // saved manifest must work from any cwd. Plain-path parents keep cwd
@@ -149,10 +153,14 @@ function loadChild(node, parentPath, cwd, cfg, resultsDir, errors, warnings, { a
   validateTaskRelations(raw.tasks, errors, label, { itemAllowed: node.forEach !== undefined });
   validateMustRead(raw.tasks, errors, label);
   validateWorktreeGroups(raw.tasks, errors, label);
+  // Judged on the authored task: normalisation fills in default tools, and a
+  // defaulted list must never be what refuses a verifier.
+  errors.push(...roleErrors(raw.tasks, label));
+  warnings.push(...roleWarnings(raw.tasks, label));
   const cycle = detectCycle(raw.tasks.filter((t) => t.id));
   if (cycle) errors.push(`${nodeLabel}: dependency cycle in child manifest: ${cycle.join(" -> ")}`);
   const tasks = normalizeTasks(raw.tasks, {
-    cwd, resultsDir, cfg, errors, warnings, label, cache, io, probedGuards,
+    cwd, resultsDir, cfg, errors, warnings, label, cache, catalogFetchedAt, io, probedGuards,
     providerRegistry,
     defaultTimeoutMs: node.timeoutMs ?? raw.timeoutMs ?? cfg.timeoutMs ?? DEFAULT_TIMEOUT_MS,
   });
@@ -175,10 +183,13 @@ function loadChild(node, parentPath, cwd, cfg, resultsDir, errors, warnings, { a
 // `await getUsage(cfg)` — so callers that can fetch inject it and tests can
 // inject a fake; the default is the cache-only usageFromCache, which never
 // touches the network, so validation stays offline unless the caller fetches).
-export function loadManifest(path, cfg, cwd = process.cwd(), { args, fromRegistry = false, ref, cache = [], io, headroom = usageFromCache(cfg), providerRegistry = PROVIDERS, runnerRegistry } = {}) {
+export function loadManifest(path, cfg, cwd = process.cwd(), { args, fromRegistry = false, ref, cache = [], io, headroom = usageFromCache(cfg), providerRegistry = PROVIDERS, runnerRegistry, previewResume = false } = {}) {
   const errors = [];
   const warnings = [];
   const resolvedIo = { ...defaultManifestIo(cfg), ...io };
+  // One read per load: every Claude seat's catalog age is the same answer. Absent
+  // (no catalog on this machine) leaves the age unknown, which only warns.
+  const catalogFetchedAt = selectClaudeCatalog()?.fetchedAt;
   const probedGuards = new Set();
   if (args !== undefined && (args === null || typeof args !== "object" || Array.isArray(args))) {
     throw new ValidationError([`args must be a JSON object — e.g. {"base":"master"} (got ${JSON.stringify(args)})`]);
@@ -243,6 +254,10 @@ export function loadManifest(path, cfg, cwd = process.cwd(), { args, fromRegistr
   validateTaskRelations(raw.tasks, errors, label);
   validateMustRead(raw.tasks, errors, label);
   validateWorktreeGroups(raw.tasks, errors, label);
+  // Judged on the authored task: normalisation fills in default tools, and a
+  // defaulted list must never be what refuses a verifier.
+  errors.push(...roleErrors(raw.tasks, label));
+  warnings.push(...roleWarnings(raw.tasks, label));
 
   const cycle = detectCycle(raw.tasks.filter((t) => t.id));
   if (cycle) errors.push(`dependency cycle detected: ${cycle.join(" -> ")}`);
@@ -266,7 +281,7 @@ export function loadManifest(path, cfg, cwd = process.cwd(), { args, fromRegistr
   const manifestFiles = [manifestPath];
   for (const t of raw.tasks) {
     if (t && typeof t === "object" && typeof t.manifest === "string" && t.manifest) {
-      const child = loadChild(t, manifestPath, cwd, cfg, resultsDir, errors, warnings, { args, usedArgs, fromRegistry, cache, io: resolvedIo, probedGuards, providerRegistry });
+      const child = loadChild(t, manifestPath, cwd, cfg, resultsDir, errors, warnings, { args, usedArgs, fromRegistry, cache, catalogFetchedAt, io: resolvedIo, probedGuards, providerRegistry });
       if (child) {
         childPlans.set(t.id, { tasks: child.tasks });
         manifestFiles.push(child.path);
@@ -283,7 +298,7 @@ export function loadManifest(path, cfg, cwd = process.cwd(), { args, fromRegistr
   }
 
   const tasks = normalizeTasks(raw.tasks, {
-    cwd, resultsDir, cfg, errors, label, childPlans, cache, headroom, warnings, io: resolvedIo, probedGuards, providerRegistry,
+    cwd, resultsDir, cfg, errors, label, childPlans, cache, headroom, warnings, catalogFetchedAt, io: resolvedIo, probedGuards, providerRegistry,
     defaultTimeoutMs: raw.timeoutMs ?? cfg.timeoutMs ?? DEFAULT_TIMEOUT_MS,
   });
   checkCommandLineLengths(tasks, cfg, resolvedIo, errors, label);
@@ -308,6 +323,10 @@ export function loadManifest(path, cfg, cwd = process.cwd(), { args, fromRegistr
         checkGovernance(digestIdentity.provider, raw.digest.model, cwd, "digest", cfg, errors, resolvedIo);
         digestGovernanceDenied = errors.length > before;
         checkHeadroom(digestIdentity.provider, raw.digest.model, "digest", headroom, errors, warnings);
+        checkModelIdentity({
+          model: digestIdentity.model, provider: digestIdentity.provider, cache, catalogFetchedAt,
+          label: "digest", errors, warnings,
+        });
       }
       checkDenylist(raw.digest.model, "digest", cfg, errors);
       const report = raw.digest.report;
@@ -354,6 +373,10 @@ export function loadManifest(path, cfg, cwd = process.cwd(), { args, fromRegistr
     }
   }
 
+  // Opted into by validate alone: `run` is about to write into this dir, so what a
+  // resume would re-run is news only before the run that does it.
+  if (previewResume) warnings.push(...resumePreview({ resultsDir, tasks }));
+
   if (errors.length) throw new ValidationError(errors);
 
   return {
@@ -385,7 +408,7 @@ export function effectivePlanDoc(plan) {
     // `workspace` and `branch` are recorded as authored — a derived tree is not authored,
     // and there is no longer any normalised form to project back.
     if (t.branchName !== undefined) o.branch = t.branchName;
-    for (const k of ["provider", "fallbackModel", "fallbackProvider", "effort", "allowedTools", "after", "when", "forEach", "compute", "returns", "verifyCitations", "workspace", "outputDir", "mustRead", "contextWindow"]) {
+    for (const k of ["provider", "fallbackModel", "fallbackProvider", "effort", "allowedTools", "after", "when", "forEach", "compute", "returns", "verifyCitations", "workspace", "outputDir", "mustRead", "contextWindow", "role"]) {
       if (t[k] !== undefined && t[k] !== "" && !(Array.isArray(t[k]) && t[k].length === 0)) o[k] = t[k];
     }
     if (t.childPlan) o.child = t.childPlan.tasks.map(strip);

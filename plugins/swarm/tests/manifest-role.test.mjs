@@ -3,9 +3,17 @@
 import "./helpers/isolate-home.mjs";
 import { test } from "node:test";
 import { deepEqual, equal, ok } from "node:assert/strict";
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { roleErrors, roleWarnings } from "../src/manifest-role.mjs";
 import { validateTaskShapes } from "../src/manifest-task-shape.mjs";
 import { validateTaskRelations } from "../src/manifest-relations.mjs";
+import { effectivePlanDoc } from "../src/manifest.mjs";
+import { writeManifestSnapshot } from "../src/results.mjs";
+import { loadManifest } from "./helpers/repo-io.mjs";
+import { CFG, claudeTask, tmp, writeManifest } from "./helpers/manifest-fixtures.mjs";
+import { runCli } from "./helpers/cli.mjs";
+import { tmp as repoDir } from "./helpers/cli-fixture.mjs";
 
 const label = (t) => `task '${t.id}'`;
 const task = (over = {}) => ({ id: "verify-x", prompt: "report", model: "claude-haiku-4-5-20251001", ...over });
@@ -46,6 +54,43 @@ test("row 2: a Bash-holding verifier naming any workspace is refused, but an int
   const relationErrors = [];
   validateTaskRelations(tasks, relationErrors, label);
   deepEqual(relationErrors, []);
+});
+
+test("row 2b: the authored role reaches the resolved preview and the run's own snapshot", () => {
+  const dir = tmp();
+  try {
+    writeFileSync(join(dir, "out.keep"), "");
+    mkdirSync(join(dir, "out"), { recursive: true });
+    const path = writeManifest(dir, { resultsDir: "out", tasks: [
+      claudeTask({ id: "verify-x", role: "verifier", allowedTools: "Read,Grep,Glob,Bash" }),
+      claudeTask({ id: "plain" }),
+    ] });
+    const doc = effectivePlanDoc(loadManifest(path, CFG, dir));
+    const by = Object.fromEntries(doc.tasks.map((t) => [t.id, t]));
+    equal(by["verify-x"].role, "verifier", "the field the refusals were judged on is recorded");
+    equal("role" in by.plain, false, "a task with no role records none");
+
+    // scheduler.mjs writes the run's manifest.json from this exact pair.
+    const snapshot = JSON.parse(readFileSync(writeManifestSnapshot(join(dir, "out"), doc), "utf8"));
+    equal(snapshot.tasks.find((t) => t.id === "verify-x").role, "verifier");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+
+  // The same document is what `validate --resolved` prints for approval.
+  const repo = repoDir();
+  try {
+    const path = join(repo, "m.json");
+    writeFileSync(path, JSON.stringify({ tasks: [
+      { id: "verify-x", prompt: "report", provider: "claude", model: "claude-haiku-4-5-20251001", allowedTools: "Read,Grep,Glob,Bash", role: "verifier" },
+    ] }));
+    const r = runCli(["validate", path, "--resolved"], { cwd: repo, env: { SWARM_HOME: join(repo, "home") } });
+    equal(r.status, 0, r.stdout + r.stderr);
+    const resolved = JSON.parse(r.stdout.slice(r.stdout.indexOf("resolved manifest:") + "resolved manifest:".length));
+    equal(resolved.tasks[0].role, "verifier", r.stdout);
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+  }
 });
 
 test("row 3: role accepts only the string \"verifier\", and an unknown key is still refused", () => {

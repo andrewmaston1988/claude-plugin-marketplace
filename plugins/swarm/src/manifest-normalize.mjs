@@ -13,8 +13,9 @@ import { defaultToolsFor, hasWriteTools, resolveWorktreeName } from "./manifest-
 import { guardOf, probeGuard, defaultManifestIo, projectFor } from "./manifest-leaf-guard.mjs";
 import { leafMcpOff, toolUsesServer } from "./leaf-mcp.mjs";
 import { PROVIDERS, checkDenylist, checkHeadroom, resolveProvider, validateEffort } from "./manifest-model-gates.mjs";
+import { checkModelIdentity } from "./model-identity.mjs";
 
-export function normalizeTasks(rawTasks, { cwd, resultsDir, cfg, defaultTimeoutMs, errors, label, childPlans, headroom, warnings = [], cache = [], io = defaultManifestIo(), probedGuards = new Set(), providerRegistry = PROVIDERS }) {
+export function normalizeTasks(rawTasks, { cwd, resultsDir, cfg, defaultTimeoutMs, errors, label, childPlans, headroom, warnings = [], cache = [], catalogFetchedAt, io = defaultManifestIo(), probedGuards = new Set(), providerRegistry = PROVIDERS }) {
   // Many tasks share a cwd; ask git once per directory.
   const tops = new Map();
   const repoTop = (dir) => {
@@ -72,6 +73,9 @@ export function normalizeTasks(rawTasks, { cwd, resultsDir, cfg, defaultTimeoutM
     if (!isCompute && !isManifest && !isIntegrate) {
       const primary = resolveProvider({ ...t }, cfg, cache, l, errors, providerRegistry);
       provider = primary?.provider;
+      // After the shape and provider rules have spoken: a name that is not a model
+      // at all is theirs to refuse, and this only judges roster membership.
+      if (primary) checkModelIdentity({ model: primary.model, provider, cache, catalogFetchedAt, label: l, errors, warnings });
       if (provider) {
         primaryDeclared = declaredEfforts(t.model, provider, cache);
         resolvedEffort = effortFor(t, primaryDeclared);
@@ -100,6 +104,7 @@ export function normalizeTasks(rawTasks, { cwd, resultsDir, cfg, defaultTimeoutM
           } else {
             const fallback = resolveProvider({ model: t.fallbackModel, provider: t.fallbackProvider }, cfg, cache, `${l} fallback`, errors, providerRegistry);
             fallbackProvider = fallback?.provider;
+            if (fallback) checkModelIdentity({ model: fallback.model, provider: fallbackProvider, cache, catalogFetchedAt, label: `${l} fallback`, errors, warnings });
             if (fallbackProvider) {
               // The effort pinned for the primary is sent to the fallback too, so it
               // must satisfy whatever the fallback's own provider declares.
@@ -185,6 +190,9 @@ export function normalizeTasks(rawTasks, { cwd, resultsDir, cfg, defaultTimeoutM
       fallbackModel: !isCompute && !isManifest && typeof t.fallbackModel === "string" ? t.fallbackModel : undefined,
       ...(!isCompute && !isManifest && !isIntegrate && fallbackProvider && { fallbackProvider }),
       ...(!isCompute && !isManifest && !isIntegrate && typeof t.seatReason === "string" && { seatReason: t.seatReason }),
+      // Carried so `--resolved` and the run's own snapshot record the role the
+      // refusals were judged on — the plan you approve is the one that ran.
+      ...(t.role !== undefined && { role: t.role }),
       effort: isCompute || isManifest || isIntegrate ? undefined : resolvedEffort,
       // An authored list wins whole. The default is filled in HERE — not appended at
       // dispatch — so the snapshot and the leaf's own result record the list it got.
