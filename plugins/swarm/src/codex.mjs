@@ -1,7 +1,7 @@
 import { dirname } from "node:path";
 import { runResult } from "./contracts.mjs";
 import { createCodexStreamParser } from "./stream.mjs";
-import { providerConfig, readNow } from "./providers.mjs";
+import { codexModelProblem, providerConfig, readNow } from "./providers.mjs";
 import { normalizeForCompare } from "./roots.mjs";
 import { staleNotes } from "./usage.mjs";
 import { discoverCodexModels } from "./codex-app-server.mjs";
@@ -159,6 +159,10 @@ export function createCodexProviderAdapter(options = {}) {
     validateTask(task, context = {}) {
       const problems = [];
       if (typeof task?.model !== "string" || !task.model.trim()) problems.push("Codex tasks require a non-empty model");
+      if (typeof task?.model === "string") {
+        const modelProblem = codexModelProblem(task.model);
+        if (modelProblem) problems.push(modelProblem);
+      }
       if (task?.sandbox === "danger-full-access") problems.push("Codex tasks cannot use danger-full-access");
       // Codex has no `--settings`: `env` is reachable (the spawn env), and every other
       // key is Claude-only. Named individually — the blanket refusal left an author with

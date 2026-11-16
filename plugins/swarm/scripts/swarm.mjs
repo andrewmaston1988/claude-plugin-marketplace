@@ -213,7 +213,7 @@ async function cmdValidate(rest) {
   const fromRegistry = ref.source !== "path";
   const roster = modelRoster({ config: cfg, env: process.env, registry: defaultProviderRegistry() });
   writeRosterErrors(roster.errors, err);
-  const plan = loadManifest(ref.path, cfg, process.cwd(), { args, fromRegistry, headroom: await usageHeadroom(cfg), cache: roster.models, ...(fromRegistry && { ref: rest[0] }) });
+  const plan = loadManifest(ref.path, cfg, process.cwd(), { args, fromRegistry, headroom: await usageHeadroom(cfg), cache: roster.models, previewResume: true, ...(fromRegistry && { ref: rest[0] }) });
   // The seats are read before the first line: `manifest OK` is the approval, and
   // a refused seat is not approved — so it is never printed above the refusal.
   const seats = await seatCheck(plan, cfg);

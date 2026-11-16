@@ -7,7 +7,7 @@ import { equal, ok, deepEqual } from "node:assert/strict";
 import { writeFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { loadManifest } from "./helpers/repo-io.mjs";
-import { CFG, writeManifest, tmp, claudeTask } from "./helpers/manifest-fixtures.mjs";
+import { CFG, writeManifest, tmp, claudeTask, errorsOf } from "./helpers/manifest-fixtures.mjs";
 
 const CACHE = [
   { provider: "ollama", model: "small:cloud", contextLength: 131072 },
@@ -176,10 +176,15 @@ test("context-fit: a worktree leaf's estimate is a floor — it reads the tree c
   ok(errs[0].includes("mustRead is ≥"), errs[0]);
 });
 
-test("context-fit: a model name with surrounding whitespace still finds its roster row", () => {
+test("context-fit: a model with surrounding whitespace is refused before any roster lookup", () => {
+  // This row used to pin the trimmed name finding its row. A model carrying
+  // whitespace is not a model id, so there is no lookup left to reach.
   const dir = tmp();
   writeFileSync(join(dir, "big.txt"), "a".repeat(KB300));
-  equal(fit(dir, { tasks: [seat(" mid:cloud ", { mustRead: ["big.txt"] })] }).length, 1);
+  const errs = errorsOf(() => loadManifest(
+    writeManifest(dir, { tasks: [seat(" mid:cloud ", { mustRead: ["big.txt"] })] }), cfgFor(dir), dir, { cache: CACHE, headroom: HEADROOM }));
+  ok(errs.some((e) => e.includes("not a model id")), errs.join("\n"));
+  ok(!errs.some(isFit), `no fit reading is attempted for a name that is not a model: ${errs.join("\n")}`);
 });
 
 test("context-fit: a sub-2000-token budget still prints a number", () => {
