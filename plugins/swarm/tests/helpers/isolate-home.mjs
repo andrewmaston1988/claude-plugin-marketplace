@@ -40,9 +40,10 @@ if (!process.env.SWARM_HOME || process.env.SWARM_TEST_HOME !== "1") {
   });
 }
 
-// No test reaches a vendor over the wire. An outbound TLS connect here has
-// killed node outright with no output, so the run reports a bare `test failed`
-// with nothing pointing at the request that caused it.
+// No fetch in this process reaches a vendor. A CLI child a test spawns is not covered:
+// it inherits the env, not this patch. An outbound TLS connect here has killed node
+// outright with no output, so the run reports a bare `test failed` with nothing
+// pointing at the request that caused it.
 //
 // Loopback stays open: several tests fetch the server they just started.
 const realFetch = globalThis.fetch;
