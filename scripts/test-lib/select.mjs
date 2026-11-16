@@ -11,9 +11,20 @@ import { join, posix } from "node:path";
 import { REPO_SUITE } from "../test-suites.mjs";
 import { SKIP_DIRS, closureOf, makeIndex } from "./graph.mjs";
 
+export { SKIP_DIRS };
+
 /** Whole-suite fallbacks: the graph cannot see these files, so any change to
  *  one runs its plugin's suite rather than guessing. */
 const FALLBACK_BASENAMES = new Set(["package.json", "package-lock.json", ".env.test"]);
+
+/** The runner decides what every other test does, so a change to it cannot be
+ *  scoped: every suite runs. */
+const RUNNER_PATHS = new Set(["scripts/test.mjs", "scripts/test-suites.mjs", ".github/workflows/test.yml"]);
+const RUNNER_DIR = "scripts/test-lib/";
+
+function isRunnerPath(path) {
+  return RUNNER_PATHS.has(path) || path.startsWith(RUNNER_DIR);
+}
 
 // --- Glob expansion --------------------------------------------------------
 
@@ -55,7 +66,10 @@ function staticPrefix(pattern) {
   return kept.join("/");
 }
 
-function walkFrom(absDir, relBase, out, _readdirSync) {
+/** Every file under `absDir`, repo-relative posix, refusing the directories
+ *  `skipDirs` names. The orphan check walks the whole repository with it, so
+ *  one walker decides what "a file in this repo" means for both. */
+export function walkFrom(absDir, relBase, out, _readdirSync = nodeFs.readdirSync, skipDirs = SKIP_DIRS) {
   let entries;
   try {
     entries = _readdirSync(absDir, { withFileTypes: true });
@@ -65,7 +79,7 @@ function walkFrom(absDir, relBase, out, _readdirSync) {
   for (const entry of entries) {
     const rel = relBase === "" ? entry.name : `${relBase}/${entry.name}`;
     if (entry.isDirectory()) {
-      if (!SKIP_DIRS.has(entry.name)) walkFrom(join(absDir, entry.name), rel, out, _readdirSync);
+      if (!skipDirs.has(entry.name)) walkFrom(join(absDir, entry.name), rel, out, _readdirSync, skipDirs);
     } else if (entry.isFile()) {
       out.push(rel);
     }
@@ -190,7 +204,10 @@ export function select({
     const plugin = /^plugins\/([^/]+)\//.exec(path)?.[1] || null;
     const covering = plugin ? byPlugin.get(plugin) || [] : [];
 
-    if (path.startsWith("scripts/") || path.startsWith(".github/")) {
+    if (isRunnerPath(path)) {
+      for (const suite of suites) addWhole(suite, `fallback: ${path}`);
+      selected = true;
+    } else if (path.startsWith("scripts/") || path.startsWith(".github/")) {
       if (repoSuite) {
         addWhole(repoSuite, `fallback: ${path}`);
         selected = true;
