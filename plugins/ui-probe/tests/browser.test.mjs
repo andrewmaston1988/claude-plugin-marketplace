@@ -5,6 +5,8 @@ import { fileURLToPath } from "node:url";
 import { findBrowser, launch } from "../src/browser.mjs";
 
 const PROFILE = "C:/tmp/ui-probe-profile-abc";
+const BROWSER_WS = "ws://127.0.0.1:9333/devtools/browser/abc";
+const PAGE_WS = "ws://127.0.0.1:9333/devtools/page/xyz";
 
 function fakeFs({ profileRemovable = true } = {}) {
   const removed = [];
@@ -51,47 +53,104 @@ function fakeChild() {
 
 const instant = async () => {};
 
-function launchWith({ answers = 2, child = fakeChild(), fs = fakeFs() } = {}) {
+function launchWith({ answers = 2, child = fakeChild(), fs = fakeFs(), reap, kill, writeOwner } = {}) {
   let fetched = 0;
   const fetchUrls = [];
   const { sockets, _WebSocket } = fakeSocket();
+  const events = [];
+  const calls = { reaps: 0, kills: [], owners: [], spawns: [] };
   const deps = {
     browser: "C:/Program Files/Microsoft/Edge/Application/msedge.exe",
-    _spawn: () => child,
+    _spawn: () => {
+      events.push("spawn");
+      calls.spawns.push(true);
+      return child;
+    },
     _fetch: async (url) => {
       fetchUrls.push(url);
+      if (url.endsWith("/json/list")) {
+        return { json: async () => [{ type: "page", webSocketDebuggerUrl: PAGE_WS }] };
+      }
       fetched += 1;
       if (fetched > answers) throw new Error("connection refused");
-      return { json: async () => ({ webSocketDebuggerUrl: "ws://127.0.0.1:9333/devtools/browser/abc" }) };
+      return { json: async () => ({ webSocketDebuggerUrl: BROWSER_WS }) };
     },
     _fs: fs,
     _WebSocket,
     _sleep: instant,
+    _reap: async (options) => {
+      events.push("reap");
+      calls.reaps += 1;
+      if (reap) await reap(options);
+    },
+    _kill: async (profile) => {
+      calls.kills.push(profile);
+      if (kill) await kill(profile);
+    },
+    _writeOwner: (profile, ...rest) => {
+      events.push("owner");
+      calls.owners.push([profile, ...rest]);
+      if (writeOwner) writeOwner(profile, ...rest);
+    },
   };
-  return { deps, fs, child, sockets, fetches: () => fetchUrls };
+  return { deps, fs, child, sockets, events, calls, fetches: () => fetchUrls };
 }
 
-test("launch returns the port, the browser socket and a close", async () => {
+test("launch returns the port, the browser socket, the profile and a close", async () => {
   const { deps } = launchWith();
   const session = await launch(deps);
   assert.equal(session.port, 9333);
+  assert.equal(session.profile, PROFILE);
   assert.equal(typeof session.browserWs.send, "function");
+  assert.equal(typeof session.attachPage, "function");
   assert.equal(typeof session.close, "function");
 });
 
+test("attachPage attaches a page-level client over the port, once", async () => {
+  const { deps, sockets } = launchWith();
+  const session = await launch(deps);
+  const page = await session.attachPage();
+  assert.equal(typeof page.send, "function");
+  assert.equal(sockets.at(-1).url, PAGE_WS, "the attached client is a page target, not the browser socket");
+  assert.equal(await session.attachPage(), page, "a second attach reuses the client");
+});
+
+test("the reaper runs before the owner file is written and the browser is spawned", async () => {
+  const { deps, events, calls } = launchWith();
+  const session = await launch(deps);
+  assert.deepEqual(events, ["reap", "owner", "spawn"]);
+  assert.deepEqual(calls.owners, [[PROFILE]]);
+  await session.close();
+});
+
+test("a rejecting reaper does not fail the launch", async () => {
+  const { deps } = launchWith({ reap: async () => { throw new Error("lister blew up"); } });
+  const session = await launch(deps);
+  assert.equal(session.port, 9333);
+  await session.close();
+});
+
+test("a reaper that overruns its budget does not hold up the launch", { timeout: 15000 }, async () => {
+  const { deps } = launchWith({ reap: () => new Promise(() => {}) });
+  const session = await launch(deps);
+  assert.equal(session.port, 9333);
+  await session.close();
+});
+
 test("close sends Browser.close, waits for the port to stop answering, then removes the profile", async () => {
-  const { deps, fs, child, sockets, fetches } = launchWith({ answers: 2 });
+  const { deps, fs, child, sockets, fetches, calls } = launchWith({ answers: 2 });
   const session = await launch(deps);
   await session.close();
 
   assert.deepEqual(sockets.at(-1).sent.map((frame) => frame.method), ["Browser.close"]);
   assert.equal(fetches().filter((url) => url.endsWith("/json/version")).length, 3);
   assert.deepEqual(fs.removed, [PROFILE]);
+  assert.deepEqual(calls.kills, [], "a browser that went quiet is not killed");
   assert.equal(child.kills, 0);
 });
 
-test("a port still answering after the poll window warns and still removes the profile", async () => {
-  const { deps, fs } = launchWith({ answers: Number.POSITIVE_INFINITY });
+test("a port still answering after the poll window warns, kills by profile, then removes the profile", async () => {
+  const { deps, fs, calls } = launchWith({ answers: Number.POSITIVE_INFINITY });
   const session = await launch(deps);
   const warnings = [];
   const original = console.warn;
@@ -103,6 +162,7 @@ test("a port still answering after the poll window warns and still removes the p
   }
   assert.equal(warnings.length, 1);
   assert.match(warnings[0], /9333 still answering/);
+  assert.deepEqual(calls.kills, [PROFILE]);
   assert.deepEqual(fs.removed, [PROFILE]);
 });
 
@@ -168,20 +228,31 @@ test("no browser found is an actionable error", () => {
   );
 });
 
-test("launch removes the profile when no DevToolsActivePort appears", async () => {
+test("a launch that fails after the spawn kills the browser and retries the profile removal", async () => {
   const fs = fakeFs();
   // The port file never appears: existsSync answers only for the browser binary.
   fs.existsSync = (path) => path.endsWith("msedge.exe");
+  let attempts = 0;
+  const rmSync = fs.rmSync;
+  fs.rmSync = (path) => {
+    attempts += 1;
+    if (attempts < 3) throw new Error("EBUSY");
+    rmSync(path);
+  };
   const child = fakeChild();
-  const { deps } = launchWith({ child, fs });
+  const { deps, calls } = launchWith({ child, fs });
   await assert.rejects(launch(deps), /DevToolsActivePort/);
+  assert.deepEqual(calls.kills, [PROFILE]);
+  assert.equal(attempts, 3, "the profile removal retries before giving up");
   assert.deepEqual(fs.removed, [PROFILE]);
-  assert.equal(child.kills, 0);
+  assert.equal(child.kills, 0, "the launcher stub's PID is never killed");
 });
 
-test("the module never kills a process", () => {
+test("the module never kills a process itself", () => {
   const source = readFileSync(fileURLToPath(new URL("../src/browser.mjs", import.meta.url)), "utf8");
-  assert.doesNotMatch(source, /\.kill\(|process\.kill/);
+  for (const banned of ["process.kill(", "child.kill(", "Stop-Process"]) {
+    assert.ok(!source.includes(banned), `every kill goes through the injected killer; found ${banned}`);
+  }
 });
 
 test("a profile that cannot be removed is named rather than silently left behind", async () => {

@@ -3,6 +3,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { connect, sleep } from "./cdp.mjs";
+import { REAP_BUDGET_MS, killBrowserForProfile, reapOrphans, writeOwnerFile } from "./reaper.mjs";
 
 const CANDIDATES = {
   win32: [
@@ -78,6 +79,32 @@ async function devtoolsPort(profile, child, { _fs, _sleep }) {
   throw new Error("browser never wrote DevToolsActivePort");
 }
 
+/** Best-effort reap. A lister that throws or overruns is the next launch's problem, not this one's. */
+async function reapWithinBudget(_reap, budgetMs) {
+  let timer;
+  try {
+    await Promise.race([
+      Promise.resolve().then(() => _reap()),
+      new Promise((resolve) => { timer = setTimeout(resolve, budgetMs); }),
+    ]);
+  } catch { /* orphan cleanup is never a launch failure */ } finally {
+    clearTimeout(timer);
+  }
+}
+
+/** Windows holds the profile open for a moment after the browser goes, so one rmdir is not enough. */
+async function removeProfile(profile, { _fs, _sleep }) {
+  for (let i = 0; i < PROFILE_REMOVE_TRIES; i++) {
+    try {
+      _fs.rmSync(profile, { recursive: true, force: true });
+      return true;
+    } catch {
+      await _sleep(PROFILE_REMOVE_RETRY_MS);
+    }
+  }
+  return false;
+}
+
 export async function launch({
   browser,
   viewport,
@@ -87,11 +114,23 @@ export async function launch({
   _spawnSync = spawnSync,
   _WebSocket = WebSocket,
   _sleep = sleep,
+  _reap = reapOrphans,
+  _kill = killBrowserForProfile,
+  _writeOwner = writeOwnerFile,
 } = {}) {
   const exe = findBrowser({ browser, _exists: _fs.existsSync, _spawnSync });
+
+  // Whatever an earlier run left behind goes before this one adds to it.
+  await reapWithinBudget(_reap, REAP_BUDGET_MS);
+
   const profile = _fs.mkdtempSync(join(tmpdir(), "ui-probe-profile-"));
+  let browserWs = null;
 
   try {
+    // The launcher stub leaves the real browser with no parent link, so the owner file is the
+    // only thing that says this profile still has a live probe behind it.
+    _writeOwner(profile);
+
     const args = [
       "--headless=new", "--remote-debugging-port=0", `--user-data-dir=${profile}`,
       "--no-first-run", "--no-default-browser-check", "--disable-extensions", "--disable-gpu",
@@ -107,11 +146,21 @@ export async function launch({
     const port = await devtoolsPort(profile, child, { _fs, _sleep });
     const versionUrl = `http://127.0.0.1:${port}/json/version`;
     const version = await (await _fetch(versionUrl)).json();
-    const browserWs = await connect(version.webSocketDebuggerUrl, { _WebSocket, timeoutMs: CLOSE_CALL_TIMEOUT_MS });
+    browserWs = await connect(version.webSocketDebuggerUrl, { _WebSocket, timeoutMs: CLOSE_CALL_TIMEOUT_MS });
+
+    // The page hop belongs to the launch, not to each caller: a caller that has to know the
+    // transport would break the moment the transport changes.
+    let page = null;
+    const attachPage = () => {
+      page ??= connect(port, { _WebSocket, _fetch, _sleep });
+      return page;
+    };
 
     return {
       port,
       browserWs,
+      profile,
+      attachPage,
       // The spawned PID is the launcher stub, already exited, so the only handle on the real browser
       // is its socket: ask it to close, confirm the debugging port went quiet, then drop the profile.
       async close() {
@@ -127,25 +176,23 @@ export async function launch({
           }
           await _sleep(CLOSE_POLL_MS);
         }
-        if (!dead) console.warn(`ui-probe: browser on port ${port} still answering after Browser.close`);
-        let removed = false;
-        for (let i = 0; i < PROFILE_REMOVE_TRIES; i++) {
-          try {
-            _fs.rmSync(profile, { recursive: true, force: true });
-            removed = true;
-            break;
-          } catch {
-            await _sleep(PROFILE_REMOVE_RETRY_MS);
-          }
+        if (!dead) {
+          console.warn(`ui-probe: browser on port ${port} still answering after Browser.close`);
+          // It ignored the polite ask; the profile is the only handle left on it.
+          try { await _kill(profile); } catch { /* best effort — the warning above already names the failure */ }
         }
-        if (!removed) console.warn(`ui-probe: could not remove the browser profile at ${profile}`);
+        if (!(await removeProfile(profile, { _fs, _sleep }))) {
+          console.warn(`ui-probe: could not remove the browser profile at ${profile}`);
+        }
       },
     };
   } catch (error) {
-    // The browser may never have started; the profile is still ours to clean up.
+    // Whatever failed, the browser we spawned must not outlive this call.
     try {
-      _fs.rmSync(profile, { recursive: true, force: true });
-    } catch {
+      if (browserWs) browserWs.close();
+      await _kill(profile);
+    } catch { /* the rethrow below is the failure that matters */ }
+    if (!(await removeProfile(profile, { _fs, _sleep }))) {
       console.warn(`ui-probe: could not remove the browser profile at ${profile}`);
     }
     throw error;
