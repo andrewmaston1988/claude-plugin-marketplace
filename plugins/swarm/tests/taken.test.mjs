@@ -1,17 +1,22 @@
-// The taken log: append-only proof, recorded while the port exists, read later while
-// landing is decided against the default branch alone.
+// The taken log and the checks it composes (test-plan rows 4-8, 13 and 14): a port is
+// recorded only once git finished it, the proof is append-only, and landing is decided
+// against the default branch alone.
 import "./helpers/isolate-home.mjs";
 import { test } from "node:test";
-import { equal, ok } from "node:assert/strict";
+import { equal, ok, throws } from "node:assert/strict";
 import * as fs from "node:fs";
-import { mkdirSync, statSync, existsSync, readFileSync, writeFileSync, renameSync } from "node:fs";
-import { join } from "node:path";
+import { mkdirSync, statSync, existsSync, readFileSync, writeFileSync, renameSync, rmSync } from "node:fs";
+import { join, resolve, sep } from "node:path";
 import { spawn } from "node:child_process";
 import { takenLogPath, appendTaken, readTaken, refreshTaken, takenVerdict } from "../src/taken.mjs";
-import { portFixture, must, writeCommit } from "./helpers/port-fixture.mjs";
+import { portInProgress } from "../src/port-complete.mjs";
+import { landedOnDefault } from "../src/landed.mjs";
+import { portFixture, must, writeCommit, git } from "./helpers/port-fixture.mjs";
+import { initRepo } from "./helpers/worktree-fixtures.mjs";
 
 const PREFIX = "swarm/";
 const MAX = 1024 * 1024;
+const OPTS = { prefix: PREFIX, gitRunner: git };
 
 const rec = (over = {}) => ({
   run: "run-a",
@@ -30,8 +35,128 @@ function withFixture(fn) {
   try { return fn(f); } finally { f.cleanup(); }
 }
 
+function withRepo(fn) {
+  const repo = initRepo();
+  try { return fn(repo); } finally { rmSync(repo, { recursive: true, force: true }); }
+}
+
 const runDir = (f, name) => mkdirSync(join(f.runsRoot, name), { recursive: true });
 const logLines = (path) => readFileSync(path, "utf8").split(/\r?\n/).filter(Boolean);
+
+// feat and main rewrote the same line, so a pick, a merge, a revert and a rebase all
+// stop mid-flight in the porting worktree.
+function diverged() {
+  const f = portFixture();
+  const port = f.porting();
+  writeCommit(port, "a.txt", "feat\n", "feat");
+  writeCommit(f.repo, "a.txt", "main\n", "mainchange");
+  writeCommit(f.repo, "b.txt", "x\n", "second");
+  return {
+    f,
+    port,
+    mainChange: must(["rev-parse", "main~1"], f.repo),
+    second: must(["rev-parse", "main"], f.repo),
+  };
+}
+
+const marker = (tree, name) => resolve(tree, must(["rev-parse", "--git-path", name], tree));
+
+// The command must stop, and the state it leaves must read in progress. Resolving the
+// index proves git's own marker still speaks, not the unmerged entry every conflict
+// leaves behind — so each marker name is pinned on its own.
+function stopped(f, tree, args, markerName) {
+  equal(git(args, tree).status, 1, `${args.join(" ")} must stop on a conflict`);
+  ok(existsSync(marker(tree, markerName)), `${markerName} after ${args.join(" ")}`);
+  equal(portInProgress(tree, f.git), true, `${args.join(" ")}: unmerged`);
+  must(["checkout", "--ours", "--", "a.txt"], tree);
+  must(["add", "--", "a.txt"], tree);
+  equal(must(["diff", "--name-only", "--diff-filter=U"], tree), "", `${args.join(" ")}: index resolved`);
+  equal(portInProgress(tree, f.git), true, `${args.join(" ")}: the marker alone`);
+}
+
+test("row 4: every in-progress state reads in progress, and each abort clears it", () => {
+  const { f, port, mainChange, second } = diverged();
+  try {
+    equal(portInProgress(port, f.git), false, "a clean porting checkout");
+
+    stopped(f, port, ["merge", "main"], "MERGE_HEAD");
+    must(["merge", "--abort"], port);
+    equal(portInProgress(port, f.git), false, "a merge abort clears it");
+
+    stopped(f, port, ["cherry-pick", mainChange], "CHERRY_PICK_HEAD");
+    must(["cherry-pick", "--abort"], port);
+    equal(portInProgress(port, f.git), false, "a pick abort clears it");
+
+    stopped(f, port, ["revert", "--no-edit", mainChange], "REVERT_HEAD");
+    must(["revert", "--abort"], port);
+
+    stopped(f, port, ["rebase", "main"], "rebase-merge");
+    must(["rebase", "--abort"], port);
+
+    stopped(f, port, ["rebase", "--apply", "main"], "rebase-apply");
+    must(["rebase", "--abort"], port);
+    equal(portInProgress(port, f.git), false, "a rebase abort clears it");
+
+    // A multi-commit pick queues a sequencer. `--quit` then drops the markers, so the
+    // last check must catch an index left unmerged with nothing else to name it.
+    stopped(f, port, ["cherry-pick", mainChange, second], "sequencer");
+    must(["cherry-pick", "--quit"], port);
+    equal(portInProgress(port, f.git), false, "a quit over a resolved index leaves nothing");
+    must(["reset", "--hard", "-q"], port);
+
+    equal(git(["cherry-pick", mainChange], port).status, 1, "a single pick stops on the conflict");
+    must(["cherry-pick", "--quit"], port);
+    ok(!existsSync(marker(port, "CHERRY_PICK_HEAD")), "--quit drops CHERRY_PICK_HEAD");
+    ok(!existsSync(marker(port, "sequencer")), "--quit drops the sequencer");
+    ok(must(["diff", "--name-only", "--diff-filter=U"], port) !== "", "the index is still unmerged");
+    equal(portInProgress(port, f.git), true, "an unmerged index alone is in progress");
+  } finally { f.cleanup(); }
+});
+
+test("row 4: markers resolve through git's own path, not `<tree>/.git`", () => {
+  const f = portFixture();
+  const port = f.porting();
+  try {
+    // A linked worktree's `.git` is a file, so only `--git-path` finds its markers.
+    const resolved = marker(port, "CHERRY_PICK_HEAD");
+    ok(!resolved.startsWith(join(port, ".git") + sep), `a linked worktree keeps markers outside its tree: ${resolved}`);
+    ok(resolved.startsWith(resolve(f.repo, ".git") + sep), resolved);
+
+    equal(portInProgress(port, f.git), false, "clean before the marker");
+    writeFileSync(resolved, `${must(["rev-parse", "HEAD"], port)}\n`);
+    equal(portInProgress(port, f.git), true, "the admin-dir marker is seen");
+    rmSync(resolved);
+    equal(portInProgress(port, f.git), false, "and only that marker counts");
+
+    // The main worktree reports `.git/<name>` relative to the tree.
+    const relative = must(["rev-parse", "--git-path", "MERGE_HEAD"], f.repo);
+    ok(!/^([A-Za-z]:[\\/]|[\\/])/.test(relative), `the main worktree's path is relative: ${relative}`);
+    const abs = resolve(f.repo, relative);
+    writeFileSync(abs, `${must(["rev-parse", "HEAD"], f.repo)}\n`);
+    equal(portInProgress(f.repo, f.git), true, "a relative marker resolves against the tree");
+    rmSync(abs);
+    equal(portInProgress(f.repo, f.git), false);
+  } finally { f.cleanup(); }
+});
+
+test("row 4: a git that cannot answer reads in progress", () => {
+  const f = portFixture();
+  try {
+    const failing = () => ({ status: 128, stdout: "", stderr: "fatal: not a git repository" });
+    equal(portInProgress(f.repo, failing), true, "a git failure records nothing");
+
+    const throwing = () => { throw new Error("spawn failed"); };
+    equal(portInProgress(f.repo, throwing), true, "a thrown git call records nothing");
+
+    // Marker probes answer; the unmerged probe fails. Still no proof of a finished port.
+    const mixed = (args) => (args.includes("--diff-filter=U")
+      ? { status: 128, stdout: "", stderr: "fatal" }
+      : { status: 0, stdout: ".git/CHERRY_PICK_HEAD", stderr: "" });
+    equal(portInProgress(f.repo, mixed), true, "a failed unmerged probe is no proof");
+
+    throws(() => portInProgress(f.repo), TypeError, "the git runner is required");
+  } finally { f.cleanup(); }
+});
 
 test("row 5: readTaken keeps the newest line per (run, lane) across .1 and the log", () => withFixture((f) => {
   for (const name of ["run-a", "run-b"]) runDir(f, name);
@@ -121,6 +246,49 @@ test("row 7: takenVerdict reads the target's tip, then the recorded tip, against
   const broken = (args, cwd, opts) => (args[0] === "diff" ? { status: 0, stdout: "", stderr: "" } : { status: 128, stdout: "", stderr: "boom" });
   const errored = verdict({ ...record, intoTip: review }, lane.sha, broken);
   equal(errored.landed, false, "any git error reads not landed");
+}));
+
+test("row 8: landedOnDefault is true for a commit the default branch contains", () => withRepo((repo) => {
+  writeCommit(repo, "a.txt", "main work\n", "main work");
+  const tip = must(["rev-parse", "HEAD"], repo);
+
+  equal(landedOnDefault(tip, repo, OPTS), true);
+}));
+
+test("row 8: landedOnDefault is true for a commit the default branch absorbs", () => withRepo((repo) => {
+  must(["checkout", "-q", "-b", "swarm/leaf", "main"], repo);
+  writeCommit(repo, "a.txt", "leaf a\n", "leaf a");
+  writeCommit(repo, "b.txt", "leaf b\n", "leaf b");
+  const laneTip = must(["rev-parse", "HEAD"], repo);
+  must(["checkout", "-q", "main"], repo);
+  must(["merge", "-q", "--squash", "swarm/leaf"], repo);
+  must(["commit", "-qm", "squash leaf"], repo);
+  ok(must(["rev-parse", "HEAD"], repo) !== laneTip, "precondition: the squash is a new commit");
+
+  equal(landedOnDefault(laneTip, repo, OPTS), true);
+}));
+
+test("row 8: a commit only a non-default local ref holds is not landed", () => withRepo((repo) => {
+  must(["checkout", "-q", "-b", "feat", "main"], repo);
+  writeCommit(repo, "feat.txt", "feat work\n", "feat work");
+  const featTip = must(["rev-parse", "HEAD"], repo);
+  must(["checkout", "-q", "main"], repo);
+
+  equal(landedOnDefault(featTip, repo, OPTS), false);
+}));
+
+test("row 13(a): a branch pushed but never merged is not landed", () => withRepo((repo) => {
+  must(["checkout", "-q", "-b", "feat", "main"], repo);
+  writeCommit(repo, "feat.txt", "feat work\n", "feat work");
+  const featTip = must(["rev-parse", "HEAD"], repo);
+  // The ref a push leaves once the branch is deleted locally.
+  must(["update-ref", "refs/remotes/origin/feat", featTip], repo);
+  must(["checkout", "-q", "main"], repo);
+  must(["branch", "-q", "-D", "feat"], repo);
+  ok(must(["for-each-ref", "--contains", featTip, "--format=%(refname)"], repo).includes("refs/remotes/origin/feat"),
+    "precondition: a remote-tracking ref is the only thing holding the commit");
+
+  equal(landedOnDefault(featTip, repo, OPTS), false);
 }));
 
 test("row 13b: a recreated target does not inherit the record", () => withFixture((f) => {

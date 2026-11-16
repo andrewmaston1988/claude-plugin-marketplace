@@ -1,16 +1,20 @@
-// Rows 10 and 11: a lane ported into a feature branch that later landed is pruned by the
-// taken record, and every unprovable case stays kept with its reason named.
+// Rows 10-12: a lane ported into a feature branch that later landed is pruned by the
+// taken record, every unprovable case stays kept with its reason named, and the port
+// nudge counts the same lane once the squash lands.
 import "./helpers/isolate-home.mjs";
 import { test } from "node:test";
 import { equal, ok } from "node:assert/strict";
 import * as fs from "node:fs";
 import { join } from "node:path";
 import { appendTaken } from "../src/taken.mjs";
+import { runPortNudge } from "../src/port-nudge.mjs";
 import { git, must, takenFixture } from "./helpers/port-fixture.mjs";
 import { runCli } from "./helpers/cli.mjs";
 
-const withFixture = (fn) => {
-  const f = takenFixture();
+const SESSION = "sess-taken";
+
+const withFixture = (fn, opts) => {
+  const f = takenFixture(opts);
   try { return fn(f); } finally { f.cleanup(); }
 };
 
@@ -76,3 +80,23 @@ test("row 11: a lane with no record keeps today's message", () => withFixture((f
   ok(r.stdout.includes("2 unlanded"), r.stdout);
   equal(r.stdout.includes("taken into"), false, "no taken reason without a record");
 }));
+
+// The nudge measures through plan() with the same taken map, so the squash that landed
+// the port is also what lets a HEAD-moving command name the run from the main checkout.
+test("row 12: the port nudge counts a taken lane once the squash lands", () => withFixture((f) => {
+  recordPort(f);
+  const out = runPortNudge({
+    payload: {
+      session_id: SESSION,
+      cwd: f.repo,
+      hook_event_name: "PostToolUse",
+      tool_name: "Bash",
+      tool_input: { command: "git commit -m landed" },
+    },
+    env: {}, config: f.cfg, home: f.home, git: f.git, spawn: f.spawn, fs, budgetMs: 120_000,
+  });
+  ok(out !== "", "the run is reported, not held back as unlanded");
+  const line = JSON.parse(out).hookSpecificOutput.additionalContext;
+  ok(line.includes(`\`${f.runName}\` is ported`), line);
+  ok(line.includes(`landed in \`main\`@\`${f.squash.slice(0, 7)}\``), line);
+}, { launcher: SESSION }));

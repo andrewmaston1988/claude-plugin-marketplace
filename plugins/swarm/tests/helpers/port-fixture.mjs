@@ -116,7 +116,7 @@ export function portFixture() {
 // squash-landed on main and deleted. Nothing on main holds a lane commit or its
 // patch, so every content check reads unlanded — the state the taken log exists
 // to settle. Lines sit far apart so only the pick we mean conflicts.
-export function takenFixture({ run = "run-1", id = "implement-rating", branch = "feat" } = {}) {
+export function takenFixture({ run = "run-1", id = "implement-rating", branch = "feat", launcher = null } = {}) {
   const f = portFixture();
   const { repo, home } = f;
   const body = (over = {}) => Array.from({ length: 15 }, (_, i) => over[i + 1] ?? `line${String(i + 1).padStart(2, "0")}`).join("\n") + "\n";
@@ -155,6 +155,6 @@ export function takenFixture({ run = "run-1", id = "implement-rating", branch = 
   must(["branch", "-D", branch], repo);
 
   const lane = { id, branch: laneBranch, path: lanePath, commits: [one, two], tip: two };
-  const runDir = f.run(run, { leaves: [lane] });
+  const runDir = f.run(run, { launcher, leaves: [lane] });
   return { ...f, runName: run, runDir, lane, branch, port, picks: [pickOne, pickTwo], review, portTip, squash };
 }
