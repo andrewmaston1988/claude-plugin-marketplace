@@ -1,63 +1,16 @@
-import { readdirSync, readFileSync } from "node:fs";
-import { homedir } from "node:os";
-import { join } from "node:path";
+import { catalogModels, selectClaudeCatalog } from "./claude-catalog.mjs";
 import { modelDescriptor } from "./contracts.mjs";
-
-function catalogHome(input) {
-  const env = input?.env && typeof input.env === "object" ? input.env : input;
-  return env?.HOME || env?.USERPROFILE || homedir();
-}
-
-function catalogRows(catalog) {
-  const models = catalog?.catalog?.config?.models;
-  if (!Array.isArray(models)) return null;
-  return models;
-}
-
-function readCatalogFile(path) {
-  try {
-    const catalog = JSON.parse(readFileSync(path, "utf8"));
-    const rows = catalogRows(catalog);
-    const fetchedAt = Number(catalog?.fetchedAt);
-    if (!rows || !Number.isFinite(fetchedAt)) return null;
-    return { catalog, fetchedAt };
-  } catch {
-    return null;
-  }
-}
-
-// The catalog the reader serves: the highest embedded `fetchedAt` on disk. Never
-// the newest mtime — catalog files accumulate and the two disagree, so mtime would
-// pick a file whose contents are older than the one it replaced.
-function selectedClaudeCatalog(env = process.env) {
-  const directory = join(catalogHome(env), ".claude", "cache", "model-catalog");
-  let files;
-  try {
-    files = readdirSync(directory, { withFileTypes: true })
-      .filter((entry) => entry.isFile() && entry.name.endsWith("-cc.json"));
-  } catch {
-    return null;
-  }
-  if (!files.length) return null;
-  return files
-    .map((entry) => {
-      const parsed = readCatalogFile(join(directory, entry.name));
-      return parsed && { ...parsed, file: entry.name };
-    })
-    .filter(Boolean)
-    .sort((a, b) => b.fetchedAt - a.fetchedAt)[0] ?? null;
-}
 
 // That selection's identity, for a reader that must tell one catalog from the
 // next without re-reading the rows it already banked.
 export function claudeCatalogIdentity(env = process.env) {
-  const selected = selectedClaudeCatalog(env);
+  const selected = selectClaudeCatalog(env);
   return selected ? `${selected.file}@${selected.fetchedAt}` : null;
 }
 
 export function readClaudeCatalog(env = process.env) {
-  const models = catalogRows(selectedClaudeCatalog(env)?.catalog);
-  if (!models) return [];
+  const models = catalogModels(env);
+  if (!models.length) return [];
 
   try {
     return models.flatMap((model) => {

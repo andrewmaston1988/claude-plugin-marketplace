@@ -39,8 +39,9 @@ Writes (or reconciles) a structured `STATE.md` so a *fresh session* can resume t
 
 | Hook | What it does |
 |---|---|
-| **PreCompact** | Writes a skeletal STATE.md backstop before auto-compaction; leaves a marker. Never blocks. |
-| **UserPromptSubmit** | Nudges you to invoke this skill when context utilisation crosses the 85%/95% bands; runs the opt-in keepalive. |
+| **PreCompact** | Before auto-compaction: with a full checkpoint, writes a `precompact-<stamp>.md` snapshot into its docs dir and never touches the checkpoint; with none, writes the skeletal STATE.md. Either way it prints summary instructions on stdout, and it never blocks. |
+| **UserPromptSubmit** | Nudges you to invoke this skill when context reaches the `soon`/`now` bands, measured against this session's real compaction point rather than a percentage of the model window; runs the opt-in keepalive. |
+| **PostToolUse** | The same nudge mid-turn, so a band also lands between prompts. |
 | **SessionStart** | On a fresh start, hands over the newest STATE files (if any) and has you offer to resume. |
 | **Stop** | After a turn that lands substantial uncaptured work (commit, or many file edits), blocks the stop once and asks you to judge: significant feature completed → invoke this skill and write up what was completed; otherwise just stop. |
 
