@@ -336,12 +336,7 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), {
     if (progressed) continue;
 
     // Stop wins: whatever is parked or waiting gets swept to failed:stopped below.
-    if (ctx.running.size === 0 && (ctx.stopRequested || (ctx.memoryParked.size === 0 && ctx.retryWaiting === 0))) {
-      // A leaf can fail and give up its slot without the loop ever coming back
-      // round (a synchronous worktree prepare throw), so the top sweep misses it.
-      sweepBlocked();
-      break;
-    }
+    if (ctx.running.size === 0 && (ctx.stopRequested || (ctx.memoryParked.size === 0 && ctx.retryWaiting === 0))) break;
     if (ctx.running.size > 0) {
       await Promise.race(ctx.running.values());
       // running is keyed by id and released on settlement; state is the truth about
@@ -362,6 +357,9 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), {
       ctx.wake = () => {};
     }
   }
+  // A leaf can fail and give up its slot without the loop coming back round (a
+  // synchronous worktree prepare throw), so the top sweep misses its dependents.
+  sweepBlocked();
   // A leaf that never got a slot (still pending) or was mid-backoff never runs
   // classifyFailure's stopped branch — say so here, or a stopped run leaves it
   // reading "pending" forever, indistinguishable from a run that just hasn't

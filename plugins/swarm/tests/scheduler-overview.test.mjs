@@ -161,9 +161,8 @@ test("failure blocks dependents transitively; independent branch completes", asy
   }
 });
 
-// A launch can fail and release its slot inside one yield (a synchronous worktree
-// prepare throw), so the loop reaches the exit without another pass over the
-// dependents. The exit sweep must still mark them blocked.
+// A launch can fail synchronously, before the seat yield opens (a worktree prepare
+// throw), so the loop reaches the exit without another pass over the dependents. The exit sweep must still mark them blocked.
 test("a launch-time failure blocks its dependents before the run exits", async () => {
   const dir = tmp();
   try {
