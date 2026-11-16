@@ -50,14 +50,22 @@ export function writeTaskResult(resultsDir, task, result) {
 
 // Reusable only when the recorded key matches. A result carrying NO key predates
 // keying — keep it, so an upgrade never re-spends an in-flight run; only a
-// recorded MISMATCH is evidence the work changed. The log line is what `status`
-// reads to say why a task re-ran.
-export function cacheHit(resultsDir, task, prior) {
+// recorded MISMATCH is evidence the work changed. Pure, so a reader that must not
+// write to the run log (`resume-preview.mjs`) applies the same rule.
+export function reusable(prior, task) {
   if (!prior || prior.ok !== true) return false;
-  if (prior.key === undefined || prior.key === taskKey(task)) return true;
-  appendRunLog(resultsDir, {
-    ts: new Date().toISOString(), id: task.id, event: "cache-miss",
-    priorKey: prior.key, reason: "task-definition-changed",
-  });
+  return prior.key === undefined || prior.key === taskKey(task);
+}
+
+// The cache-miss line is what `status` reads to say why a task re-ran, so it fires
+// only on the one state reusable() refuses for a recorded definition: a key mismatch.
+export function cacheHit(resultsDir, task, prior) {
+  if (reusable(prior, task)) return true;
+  if (prior?.ok === true && prior.key !== undefined) {
+    appendRunLog(resultsDir, {
+      ts: new Date().toISOString(), id: task.id, event: "cache-miss",
+      priorKey: prior.key, reason: "task-definition-changed",
+    });
+  }
   return false;
 }

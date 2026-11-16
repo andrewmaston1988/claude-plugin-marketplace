@@ -11,7 +11,7 @@ const CLONE_ID_RE = /\[\d+\]$/;
 // so the generic unknown-key error never fires for one and say nothing useful.
 const RETIRED_TASK_KEYS = new Set(["isolation"]);
 const KNOWN_TASK_KEYS = new Set([
-  "id", "prompt", "model", "provider", "seatReason", "fallbackModel", "fallbackProvider", "effort", "allowedTools", "cwd",
+  "id", "prompt", "model", "provider", "seatReason", "role", "fallbackModel", "fallbackProvider", "effort", "allowedTools", "cwd",
   "workspace", "branch", "outputDir", "timeoutMs", "after", "compute", "when", "forEach",
   "returns", "verifyCitations", "manifest", "integrate", "settings", "leafGuard",
   "mustRead", "contextWindow",
@@ -21,7 +21,7 @@ const KNOWN_TASK_KEYS = new Set([
 // leaf-shaped key on the node itself is an authoring mistake.
 const MANIFEST_BANNED_KEYS = [
   "prompt", "model", "compute", "returns", "workspace", "branch", "allowedTools",
-  "outputDir", "effort", "fallbackModel", "mustRead", "contextWindow",
+  "outputDir", "effort", "fallbackModel", "mustRead", "contextWindow", "role",
 ];
 
 // The scheduler spreads these last so a task's own `env` can't override them;
@@ -74,7 +74,7 @@ export function validateTaskShapes(rawTasks, errors, label) {
     } else if (t.compute !== undefined) {
       // Agentless: a compute step never spawns a leaf, so leaf-only keys are
       // authoring mistakes worth naming individually.
-      const agentKeys = ["model", "prompt", "fallbackModel", "effort", "allowedTools", "workspace", "branch", "outputDir", "contextWindow"]
+      const agentKeys = ["model", "prompt", "fallbackModel", "effort", "allowedTools", "workspace", "branch", "outputDir", "contextWindow", "role"]
         .filter((k) => t[k] !== undefined);
       if (agentKeys.length) {
         errors.push(`${l}: compute tasks are agentless — remove ${agentKeys.join("/")}; the expression runs in the engine, no leaf is spawned`);
@@ -86,7 +86,7 @@ export function validateTaskShapes(rawTasks, errors, label) {
       // Agentless like compute: the engine merges, no leaf is spawned.
       // `workspace`/`branch` too: an integrate node's tree is `integrate.into`, so naming
       // one here would validate and be silently ignored.
-      const agentKeys = ["model", "prompt", "fallbackModel", "effort", "allowedTools", "returns", "workspace", "branch", "outputDir", "contextWindow"]
+      const agentKeys = ["model", "prompt", "fallbackModel", "effort", "allowedTools", "returns", "workspace", "branch", "outputDir", "contextWindow", "role"]
         .filter((k) => t[k] !== undefined);
       if (agentKeys.length) {
         errors.push(`${l}: integrate tasks are agentless — remove ${agentKeys.join("/")}; the merge runs in the engine, no leaf is spawned`);
@@ -119,6 +119,10 @@ export function validateTaskShapes(rawTasks, errors, label) {
     }
     if (t.effort !== undefined && (typeof t.effort !== "string" || !t.effort.trim())) {
       errors.push(`${l}: effort must be a non-empty string — e.g. \"effort\": \"medium\"`);
+    }
+    // One value today: a role with no check of its own would only be a word.
+    if (t.role !== undefined && t.role !== "verifier") {
+      errors.push(`${l}: role must be "verifier" — the one role validate enforces, e.g. "role": "verifier"`);
     }
     // `isolation` is gone. Named explicitly rather than left to the unknown-key error,
     // because every manifest written before this change carries it and the generic
