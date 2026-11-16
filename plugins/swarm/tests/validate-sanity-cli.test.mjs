@@ -9,6 +9,8 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { runCli } from "./helpers/cli.mjs";
 import { tmp } from "./helpers/cli-fixture.mjs";
+import { loadManifest } from "./helpers/repo-io.mjs";
+import { CFG } from "./helpers/manifest-fixtures.mjs";
 import { writeRosterEntry } from "../src/roster.mjs";
 
 const CLAUDE = "claude-haiku-4-5-20251001";
@@ -110,6 +112,27 @@ test("row 13: `swarm run` loads the same manifest and says nothing about a resum
     equal(r.status, 1, r.stdout + r.stderr);
     ok(r.stderr.includes("has not been validated as written"), `the load happened: ${r.stderr}`);
     ok(!`${r.stdout}${r.stderr}`.includes("holds an earlier run"), "the preview is validate's alone");
+    // `run` never prints plan.warnings, so the wiring it must not do is invisible
+    // from outside: pin the boundary it relies on — the preview is opt-in.
+    const loaded = loadManifest(w.path, CFG, w.dir);
+    ok(!(loaded.warnings || []).some((x) => x.includes("holds an earlier run")), "a plain load computes no preview");
+  } finally {
+    cleanup(w);
+  }
+});
+
+test("row 4: a `verify-` leaf with Edit and no role is warned through validate, not refused", () => {
+  // The incident's author never sets the field: the warning must reach validate's
+  // own channel, not just the helper's return value.
+  const w = world([leaf({ id: "verify-x", allowedTools: "Read,Edit,Bash" })]);
+  try {
+    const r = cli(w, ["validate", w.path]);
+    equal(r.status, 0, r.stdout + r.stderr);
+    ok(r.stdout.includes("manifest OK"), r.stdout);
+    const line = r.stdout.split("\n").find((l) => l.startsWith("warning:") && l.includes("looks like a verifier"));
+    ok(line, r.stdout);
+    ok(line.includes("can edit"), line);
+    ok(line.includes('"role": "verifier"'), line);
   } finally {
     cleanup(w);
   }

@@ -9,8 +9,9 @@ import { roleErrors, roleWarnings } from "../src/manifest-role.mjs";
 import { validateTaskShapes } from "../src/manifest-task-shape.mjs";
 import { validateTaskRelations } from "../src/manifest-relations.mjs";
 import { effectivePlanDoc } from "../src/manifest.mjs";
-import { writeManifestSnapshot } from "../src/results.mjs";
+import { runPlan } from "../src/scheduler.mjs";
 import { loadManifest } from "./helpers/repo-io.mjs";
+import { fakeSpawnFactory, makeIo } from "./helpers/fake-io.mjs";
 import { CFG, claudeTask, tmp, writeManifest } from "./helpers/manifest-fixtures.mjs";
 import { runCli } from "./helpers/cli.mjs";
 import { tmp as repoDir } from "./helpers/cli-fixture.mjs";
@@ -56,22 +57,24 @@ test("row 2: a Bash-holding verifier naming any workspace is refused, but an int
   deepEqual(relationErrors, []);
 });
 
-test("row 2b: the authored role reaches the resolved preview and the run's own snapshot", () => {
+test("row 2b: the authored role reaches the resolved preview and the run's own snapshot", async () => {
   const dir = tmp();
   try {
     writeFileSync(join(dir, "out.keep"), "");
     mkdirSync(join(dir, "out"), { recursive: true });
     const path = writeManifest(dir, { resultsDir: "out", tasks: [
-      claudeTask({ id: "verify-x", role: "verifier", allowedTools: "Read,Grep,Glob,Bash" }),
+      claudeTask({ id: "verify-x", role: "verifier", allowedTools: "Read,Grep,Glob" }),
       claudeTask({ id: "plain" }),
     ] });
-    const doc = effectivePlanDoc(loadManifest(path, CFG, dir));
-    const by = Object.fromEntries(doc.tasks.map((t) => [t.id, t]));
+    const plan = loadManifest(path, CFG, dir);
+    const by = Object.fromEntries(effectivePlanDoc(plan).tasks.map((t) => [t.id, t]));
     equal(by["verify-x"].role, "verifier", "the field the refusals were judged on is recorded");
     equal("role" in by.plain, false, "a task with no role records none");
 
-    // scheduler.mjs writes the run's manifest.json from this exact pair.
-    const snapshot = JSON.parse(readFileSync(writeManifestSnapshot(join(dir, "out"), doc), "utf8"));
+    // Read back off a real run: the scheduler writes manifest.json, so this pins its
+    // call site, not a copy of it.
+    await runPlan(plan, CFG, makeIo(fakeSpawnFactory()));
+    const snapshot = JSON.parse(readFileSync(join(dir, "out", "manifest.json"), "utf8"));
     equal(snapshot.tasks.find((t) => t.id === "verify-x").role, "verifier");
   } finally {
     rmSync(dir, { recursive: true, force: true });
