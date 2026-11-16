@@ -208,13 +208,21 @@ test("row 9: a later commit on the recorded branch moves intoTip; another branch
   equal(logRecords(f).at(-1).intoTip, moved, "the record still points at its own branch");
 }));
 
-test("row 15: one firing records at most 12 lanes and none with under 10 s left", () => withFixture((f) => {
+test("row 15: one firing records at most 12 lanes", () => withFixture((f) => {
   const port = f.porting("porting", "feat");
   const leaves = Array.from({ length: 20 }, (_, i) => f.leaf("run-15", `leaf${i}`));
-  for (const lane of leaves) f.cherryPick(port, lane.sha);
+  // Merging proves each lane by ancestry, the cheap gate: absorption is the expensive
+  // one, and the cap must bind whichever proof the lane needs.
+  for (const lane of leaves) must(["merge", "--no-edit", lane.branch], port);
   f.run("run-15", { launcher: SESSION, leaves });
 
-  fire(f, port, "git commit -m x", 120_000);
+  // A 1 ms tick keeps the budget out of the way: the real fixture is slow enough that a
+  // wall clock would trip the 10 s floor before the cap ever bound.
+  const realNow = Date.now;
+  const start = 1_000_000;
+  let ticks = 0;
+  Date.now = () => start + (ticks++);
+  try { fire(f, port, "git commit -m x"); } finally { Date.now = realNow; }
   equal(logRecords(f).length, 12, "the cap bounds one firing");
 }));
 
