@@ -323,6 +323,9 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), {
         // A launch blocks the loop in prepareIsolation (git worktree add is sync), so
         // without a turn between seats a running leaf's armed callbacks starve.
         await new Promise((resume) => setImmediate(resume));
+        // A stop landing in that turn kills only the children that exist, so a seat
+        // launched after it would outlive the sweep that ends the run.
+        if (ctx.stopRequested) break;
       }
     }
     if (progressed) continue;

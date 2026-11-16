@@ -40,12 +40,40 @@ test("row 5: the ready loop yields a macrotask between leaf launches", async () 
   }
 });
 
-test("row 6a: a 600 ms synchronous busy-wait raises the stall reading", () => {
+test("row 5(b): a stop landing inside the yield never launches the remaining seats", async () => {
+  const dir = tmp();
+  try {
+    const spawn = fakeSpawnFactory((call) => {
+      const id = promptOf(call).slice(3);
+      // requestStop kills only the children that exist at that instant, so a seat
+      // launched after the stop would escape it.
+      if (id === "a") process.emit("SIGINT");
+      return { output: streamOut(`done-${id}`, `s-${id}`), delayMs: 1 };
+    });
+    const r = await runPlan(plan(dir, [task("a"), task("b")]), CFG, makeIo(spawn));
+
+    equal(spawn.calls.length, 1, `a seat launched after the stop: ${spawn.calls.map(promptOf).join(",")}`);
+    equal(r.summary.tasks.find((t) => t.id === "b").state, "failed:stopped");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("row 6a: a 600 ms synchronous busy-wait raises the stall reading", async () => {
   const before = loopStallMs();
   busyWait(600);
-  const after = loopStallMs();
-  ok(after - before >= 350,
-    `a 600 ms stall moved the reading by ${after - before} ms (want >= 350 ms)`);
+  // A timer turn lets the monitor's tick bank the stall, so the read below comes off
+  // the accumulated total rather than the stall still in progress.
+  await new Promise((resolve) => setTimeout(resolve, 60));
+  const banked = loopStallMs();
+  ok(banked - before >= 350,
+    `a 600 ms stall moved the reading by ${banked - before} ms (want >= 350 ms)`);
+  // Banked, not still in progress: a quiet stretch must not move it again. A reading
+  // that only ever counted the stall in progress would climb with the wall clock.
+  await new Promise((resolve) => setTimeout(resolve, 1000));
+  const quiet = loopStallMs();
+  ok(quiet - banked < 500,
+    `the reading grew ${quiet - banked} ms across a quiet loop — the stall was never banked`);
 });
 
 test("row 6b: a stall still in progress is counted before the monitor's next tick", () => {
