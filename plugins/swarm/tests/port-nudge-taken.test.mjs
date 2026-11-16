@@ -156,6 +156,19 @@ test("row 3(c): a port onto the default branch records nothing", () => withFixtu
   equal(logRecords(f).length, 0, "the default branch needs no record");
 }));
 
+test("row 3(c): the default branch is found whatever the remote is called", () => withFixture((f) => {
+  const main = must(["rev-parse", "HEAD"], f.repo);
+  must(["update-ref", "refs/remotes/upstream/main", main], f.repo);
+  must(["symbolic-ref", "refs/remotes/upstream/HEAD", "refs/remotes/upstream/main"], f.repo);
+
+  const leaf = f.leaf("run-3cu", "leaf");
+  f.run("run-3cu", { launcher: SESSION, leaves: [leaf] });
+  f.cherryPick(f.repo, leaf.sha);
+
+  fire(f, f.repo, `git cherry-pick ${leaf.sha}`);
+  equal(logRecords(f).length, 0, "a remote not named origin still names the landing branch");
+}));
+
 test("row 3(d): a swarm branch or a detached HEAD records nothing", () => withFixture((f) => {
   const leaf = f.leaf("run-3d", "leaf");
   f.run("run-3d", { launcher: SESSION, leaves: [leaf] });

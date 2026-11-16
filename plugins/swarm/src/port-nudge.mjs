@@ -192,12 +192,19 @@ export function isPortPayload(payload, env = {}) {
 const RECORD_LANE_CAP = 12;
 const RECORD_MIN_BUDGET_MS = 10_000;
 
-// origin/HEAD is the one name git records for a repo's default branch. With no remote the
-// answer is null and a port onto the landing branch records anyway: a stray line costs a
-// read, while a wrong skip would lose the proof this hook exists to keep.
+// A remote's HEAD is the name git records for a repo's default branch, and a clone's remote
+// need not be called `origin`. With no remote at all the answer is null and a port onto the
+// landing branch records anyway: a stray line costs a read, while a wrong skip would lose
+// the proof this hook exists to keep.
 function defaultBranchName(git, tree) {
-  const origin = git(["symbolic-ref", "-q", "refs/remotes/origin/HEAD"], tree);
-  return origin.status === 0 && origin.stdout ? origin.stdout.replace(/^refs\/remotes\/origin\//, "") : null;
+  const heads = git(["for-each-ref", "--format=%(refname) %(symref)", "refs/remotes"], tree);
+  if (heads.status !== 0 || !heads.stdout) return null;
+  for (const line of heads.stdout.split(/\r?\n/)) {
+    const [ref, target] = line.trim().split(/\s+/);
+    const m = /^refs\/remotes\/[^/]+\/(.+)$/.exec(target || "");
+    if (ref?.endsWith("/HEAD") && m) return m[1];
+  }
+  return null;
 }
 
 // The proof decays: a lane absorbed by this checkout's HEAD is unprovable once the branch
