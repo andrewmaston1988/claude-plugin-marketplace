@@ -107,20 +107,25 @@ commits HEAD does not have, so a previous run's phases cannot be silently discar
 
 ## How a verifier link works
 
-A reviewer with no write tools still does its whole job, because its findings do not travel
+Set `"role": "verifier"` on a reporting leaf so `swarm validate` enforces the verifier
+contract: it cannot hold `Edit`, `Write` or `NotebookEdit`, and it cannot name a writers'
+`workspace`. `Bash` is allowed for inspecting commits; the verifier gets its own private tree.
+
+A verifier needs no `Write` tool to report, because its findings do not travel
 through files:
 
 - **Its output is its return value.** The engine writes every leaf's result to
   `results/<id>.json`; the next link reads it via `{{result:<reviewer-id>}}`. A reviewer never
   needs `Write` to report — it needs `Write` only to *change* things, which is the one thing it
   must not do.
-- **It sees more than a fresh checkout.** Same working directory as the link before it, so it
-  reads that link's commits *and* anything left uncommitted. `git log`, `git diff`, and the files
-  themselves all work.
+- **It can inspect the chain's commits.** The verifier's private tree is cut from the run's
+  pinned dispatch commit, while the repository refs are shared, so `git log` and `git diff`
+  can reach the chain's branch. Its own worktree is swept at collect if it remains unchanged.
 - **It never ends the chain's tree.** Collection is deferred to the group's last link, so a
   reviewer changing nothing cannot trigger the empty-tree cleanup that would delete the work its
   successor needs.
-- **Giving a reviewer write tools breaks the contract silently.** It will fix things instead of
-  reporting them, and `{{result:}}` then describes work the next link cannot see the reasoning
-  for. Nothing in the engine prevents this — `allowedTools` is tool-name-only and a leaf holding
-  `Write` can write anywhere — so the tool list is the whole mechanism.
+- **Giving a verifier edit tools breaks the contract.** `swarm validate` refuses `Edit`,
+  `Write` and `NotebookEdit` on a task marked `"role": "verifier"`; `Bash` remains allowed
+  for reading commits, though it can write outside the worktree. A verifier without the role
+  whose id starts `verify-`, `review-` or `judge-` warns when it holds edit tools or shares a
+  workspace with a writer.

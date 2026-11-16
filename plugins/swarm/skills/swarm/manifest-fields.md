@@ -34,6 +34,16 @@ Two optional keys, both writer-only, both omitted by the common case:
   That is the point of naming it; `prepareIsolation` still refuses to reset a tree holding
   unlanded commits.
 
+### Verifier role — `role`
+
+`"role": "verifier"` marks a leaf whose job is to report on another leaf's work. `swarm validate`
+refuses a verifier that holds `Edit`, `Write` or `NotebookEdit`, or names any `workspace`;
+a verifier with `Bash` can inspect commits, but it runs in its own private tree. The only
+accepted role value is the string `"verifier"`; any other value is refused. A task without
+`role` whose id starts with `verify-`, `review-` or `judge-` warns when it holds edit tools
+or names a workspace also named by a writer. Add the role and remove edit tools, or rename
+the task if it is meant to write.
+
 A writer whose `cwd` is not inside a git repository is refused — there is no repo to branch
 from. A reader has no such constraint: it reads wherever it was pointed, which is how a leaf
 reads logs or a data dump outside any repo. `compute`, `integrate` and `manifest` nodes spawn
@@ -44,15 +54,15 @@ no leaf, so none of this applies, and naming either key on one is refused.
   "tasks": [
     { "id": "survey", "provider": "claude", "model": "claude-haiku-4-5-20251001", "prompt": "…" },
     { "id": "implementation", "provider": "claude", "model": "claude-sonnet-5", "allowedTools": "Read,Edit,Bash", "prompt": "…" },
-    { "id": "review", "provider": "claude", "model": "claude-sonnet-5", "after": ["implementation"], "allowedTools": "Read,Edit,Bash",
+    { "id": "implementation-followup", "provider": "claude", "model": "claude-sonnet-5", "after": ["implementation"], "allowedTools": "Read,Edit,Bash",
       "workspace": "feat", "prompt": "…" },
     { "id": "read-logs", "provider": "claude", "model": "claude-haiku-4-5-20251001", "cwd": "C:/logs", "prompt": "…" }
   ]
 }
 ```
 
-`survey` reads the live repo; `implementation` gets a private tree without asking; `review` shares the
-`feat` tree with anything else naming it; `read-logs` reads a directory that is not a repo.
+`survey` reads the live repo; `implementation` gets a private tree without asking;
+`implementation-followup` shares the `feat` tree with anything else naming it; `read-logs` reads a directory that is not a repo.
 
 **To start a tree from another task's commits, use an `integrate` node** — it creates the
 target tree and merges the named branches into it. There is no key for basing one tree on
