@@ -7,7 +7,7 @@ import "./helpers/isolate-home.mjs";
 import { test } from "node:test";
 import { equal, ok } from "node:assert/strict";
 import * as fs from "node:fs";
-import { resolve } from "node:path";
+import { join, resolve } from "node:path";
 import { portingTree, runPortNudge } from "../src/port-nudge.mjs";
 import { takenLogPath } from "../src/taken.mjs";
 import { portFixture, must, writeCommit } from "./helpers/port-fixture.mjs";
@@ -210,10 +210,16 @@ test("row 9: a later commit on the recorded branch moves intoTip; another branch
 
 test("row 15: one firing records at most 12 lanes", () => withFixture((f) => {
   const port = f.porting("porting", "feat");
-  const leaves = Array.from({ length: 20 }, (_, i) => f.leaf("run-15", `leaf${i}`));
-  // Merging proves each lane by ancestry, the cheap gate: absorption is the expensive
-  // one, and the cap must bind whichever proof the lane needs.
-  for (const lane of leaves) must(["merge", "--no-edit", lane.branch], port);
+  // One real tree keeps the run in this session's list; the cap counts lanes, so the
+  // other 19 are branches and the port proves them all by ancestry in one merge.
+  const kept = f.leaf("run-15", "leaf0");
+  must(["merge", "--no-edit", kept.branch], port);
+  const leaves = [kept, ...Array.from({ length: 19 }, (_, i) => {
+    const id = `leaf${i + 1}`;
+    const branch = `swarm/run-15/${id}`;
+    must(["branch", branch, kept.sha], f.repo);
+    return { id, branch, path: join(f.home, `leaf-run-15-${id}`), sha: kept.sha };
+  })];
   f.run("run-15", { launcher: SESSION, leaves });
 
   // A 1 ms tick keeps the budget out of the way: the real fixture is slow enough that a
@@ -230,7 +236,9 @@ test("row 15: with under 10 s of budget left nothing is recorded and the turn is
   const port = f.porting("porting", "feat");
   const leaf = f.leaf("run-15b", "leaf");
   f.run("run-15b", { launcher: SESSION, leaves: [leaf] });
-  f.cherryPick(port, leaf.sha);
+  // A merge proves the run by ancestry, so the measure costs no absorption: the budget
+  // floor is this test's subject, not the proof.
+  must(["merge", "--no-edit", leaf.branch], port);
 
   // The clock is real until the measure's own budget checks are done, then it jumps to
   // the last seconds of the budget: the run is still reported, recording is skipped.
