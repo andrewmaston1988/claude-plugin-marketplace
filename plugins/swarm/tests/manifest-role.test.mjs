@@ -6,6 +6,7 @@ import { deepEqual, equal, ok } from "node:assert/strict";
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { roleErrors, roleWarnings } from "../src/manifest-role.mjs";
+import { normalizeTasks } from "../src/manifest-normalize.mjs";
 import { validateTaskShapes } from "../src/manifest-task-shape.mjs";
 import { validateTaskRelations } from "../src/manifest-relations.mjs";
 import { effectivePlanDoc } from "../src/manifest.mjs";
@@ -111,6 +112,32 @@ test("row 3: role accepts only the string \"verifier\", and an unknown key is st
   const unknown = [];
   validateTaskShapes([task({ rol: "verifier" })], unknown, label);
   ok(unknown.some((e) => e.includes("unknown key 'rol'")), unknown.join("\n"));
+});
+
+test("row 3b: role is a leaf's key — an agentless node carrying it is refused and never carries it", () => {
+  const compute = [];
+  validateTaskShapes([{ id: "agg", compute: "1 + 1", role: "verifier" }], compute, label);
+  ok(compute.some((e) => e.includes("compute tasks are agentless") && e.includes("role")), compute.join("\n"));
+
+  const integrate = [];
+  validateTaskShapes([{ id: "join", integrate: { into: "feat", from: ["a"] }, role: "verifier" }], integrate, label);
+  ok(integrate.some((e) => e.includes("integrate tasks are agentless") && e.includes("role")), integrate.join("\n"));
+
+  const container = [];
+  validateTaskShapes([{ id: "child", manifest: "child.json", role: "verifier" }], container, label);
+  ok(container.some((e) => e.includes("agentless container") && e.includes("role")), container.join("\n"));
+
+  // Whatever a hand-built plan says: normalisation never puts the role on a node
+  // that spawns no leaf, so `--resolved` cannot approve a constraint nothing holds.
+  const dir = tmp();
+  try {
+    const [normalized] = normalizeTasks([{ id: "agg", compute: "1 + 1", role: "verifier" }], {
+      cwd: dir, resultsDir: dir, cfg: CFG, defaultTimeoutMs: 1000, errors: [], label, io: { stdout: () => {} },
+    });
+    equal("role" in normalized, false, "an agentless node carries no role");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test("row 4: the verifier-prefix warning fires on edits or a shared workspace, never on Bash alone or on the field", () => {

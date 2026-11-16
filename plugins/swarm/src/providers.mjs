@@ -53,6 +53,16 @@ function modelShapeProblem(authored) {
   return null;
 }
 
+// `[1m]` is the CLI window suffix dispatch appends from `contextWindow`
+// (dispatch.mjs), so an authored one is a field in the wrong place, not a model id.
+function claudeModelProblem(model) {
+  if (!isClaudeModel(model)) return `model '${model}' is not a Claude model — provider "claude" needs a full id such as "claude-opus-5"`;
+  if (model.endsWith("[1m]")) {
+    return `model '${model}' carries the "[1m]" window suffix — drop it and set "contextWindow": "1m" beside "model"; dispatch appends the suffix itself`;
+  }
+  return null;
+}
+
 // Shared by the codex descriptor here and the real adapter in codex.mjs, which
 // does not go through descriptor(): an Ollama tag or a Claude id can never be a
 // Codex model, whatever the roster says.
@@ -290,7 +300,7 @@ export function defaultProviderAdapters({ codexAdapter, ollamaCapabilities = {} 
       runnerId: "claude",
       defaultEnabled: true,
       rosterHydration: "local",
-      validateModel: (model) => isClaudeModel(model) ? null : `model '${model}' is not a Claude model — provider "claude" needs a full id such as "claude-opus-5"`,
+      validateModel: claudeModelProblem,
       capabilities: {
         preflight: preflightClaude,
         discoverModels: readClaudeCatalog,

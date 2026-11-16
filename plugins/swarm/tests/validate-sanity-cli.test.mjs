@@ -48,6 +48,18 @@ test("row 13: the verifier incident shape is refused, naming the edit tools and 
   }
 });
 
+test("row 13: role on an agentless node is refused, not approved by --resolved", () => {
+  const w = world([leaf({ id: "a" }), { id: "agg", compute: "1 + 1", role: "verifier" }]);
+  try {
+    const r = cli(w, ["validate", w.path, "--resolved"]);
+    equal(r.status, 1, r.stdout + r.stderr);
+    ok(r.stderr.includes("compute tasks are agentless") && r.stderr.includes("role"), r.stderr);
+    ok(!r.stdout.includes("resolved manifest:"), `nothing is approved:\n${r.stdout}`);
+  } finally {
+    cleanup(w);
+  }
+});
+
 test("row 13: a 3 KB prompt in \"model\" is refused, and the 3 KB is not echoed back", () => {
   const prompt = Array.from({ length: 60 }, (_, i) => `step ${i}: read the file and report on it`).join(" ");
   ok(prompt.length > 2000, `fixture is the incident's size: ${prompt.length}`);

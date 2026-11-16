@@ -53,6 +53,16 @@ test("a model that is valid but not for the named provider is refused by that pr
   deepEqual(registry.get("ollama").validateTask({ provider: "ollama", model: "gpt-oss:20b-cloud" }), []);
 });
 
+test("a [1m]-suffixed Claude id is refused by name, pointing at contextWindow", () => {
+  const registry = createProviderRegistry(defaultProviderAdapters());
+  const problems = registry.get("claude").validateTask({ provider: "claude", model: "claude-opus-5[1m]" }, { config });
+  equal(problems.length, 1, problems.join("\n"));
+  ok(problems[0].includes('"[1m]" window suffix'), problems[0]);
+  ok(problems[0].includes('"contextWindow": "1m"'), `the fix is spelled: ${problems[0]}`);
+  ok(!problems[0].includes("not a Claude model"), `the id IS a Claude id; the suffix is the problem: ${problems[0]}`);
+  deepEqual(registry.get("claude").validateTask({ provider: "claude", model: "claude-opus-5" }, { config }), []);
+});
+
 test("provider resolution rejects whitespace-only models", () => {
   const registry = createProviderRegistry(defaultProviderAdapters());
   throws(() => registry.resolve({ model: "   ", provider: "claude" }, { config }), /non-empty model/);

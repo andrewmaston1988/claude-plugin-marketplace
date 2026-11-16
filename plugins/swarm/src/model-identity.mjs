@@ -1,11 +1,5 @@
-// Roster membership only. Shape and provider mismatch are `resolve()`'s job
-// (providers.mjs), so every seat meets them before this runs.
-//
-// What an absent name is worth depends on what the roster is: the Claude catalog
-// is read locally and exact, but it can predate a release, so only a catalog
-// younger than a week may refuse. Ollama and Codex rosters are network banks that
-// can be stale or empty on a fresh install, so an absent name there never refuses
-// — it warns and names the refresh.
+// Roster membership only — shape and provider mismatch are `resolve()`'s job.
+// Only a catalog younger than a week may refuse; network rosters never do.
 
 // Seven days, as the plan states it. A lagging catalog is the whole reason this
 // gate exists, so the number lives here and the test steps against it literally.
@@ -38,6 +32,9 @@ export function checkModelIdentity({
 }) {
   const id = String(model || "");
   if (!id) return;
+  // A `[1m]` id is refused by the claude adapter with the field that fixes it; a
+  // roster comparison here would blame the catalog for a suffix dispatch appends.
+  if (provider === "claude" && id.endsWith("[1m]")) return;
   const ids = rosterIds(cache, provider);
   // An empty roster is not evidence of a typo — a fresh install has none.
   if (!ids.length || ids.includes(id)) return;

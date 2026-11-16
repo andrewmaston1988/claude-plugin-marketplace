@@ -49,14 +49,16 @@ test("row 9: no earlier run means no warning", () => {
   }
 });
 
-test("row 10: changed definition, new task, and a keyless legacy result", () => {
+test("row 10: changed definition, new task, a failed result, and a keyless legacy result", () => {
   const dir = runDir();
   try {
     writeResult(dir, "changed", { id: "changed", ok: true, key: "0000000000000000" });
     writeResult(dir, "legacy", { id: "legacy", ok: true });
-    const [line] = preview(dir, [task("changed"), task("legacy"), task("added")]);
+    writeResult(dir, "failed", { id: "failed", ok: false, key: "3333333333333333" });
+    const [line] = preview(dir, [task("changed"), task("legacy"), task("added"), task("failed")]);
     ok(line.includes("changed (definition changed)"), line);
     ok(line.includes("added (new)"), line);
+    ok(line.includes("failed (previous run failed)"), `only an ok result is reusable: ${line}`);
     ok(!line.includes("legacy"), `a pre-key ok result is reused, as cacheHit does: ${line}`);
   } finally {
     rmSync(dir, { recursive: true, force: true });
@@ -119,6 +121,32 @@ test("row 12: liveness, unreadable results, and no write to run.log", () => {
   }
 });
 
+test("row 12: the engine label names the state the dir actually shows", () => {
+  // Results with no run.log: no engine holds this dir, and nothing may say one does.
+  const bare = runDir();
+  try {
+    writeResult(bare, "changed", { id: "changed", ok: true, key: "0000000000000000" });
+    ok(preview(bare, [task("changed")])[0].includes("(no run.log)"), preview(bare, [task("changed")])[0]);
+  } finally {
+    rmSync(bare, { recursive: true, force: true });
+  }
+
+  const dir = runDir();
+  try {
+    writeResult(dir, "changed", { id: "changed", ok: true, key: "0000000000000000" });
+    writeFileSync(join(dir, "run.log"), '{"ts":"2026-11-15T10:00:00.000Z","event":"run-start","tasks":[]}\n');
+    const at = Date.parse("2026-11-15T10:00:00Z");
+    const stopped = () => ({ finishedMs: null, stoppedMs: at, abortedMs: null });
+    const aborted = () => ({ finishedMs: null, stoppedMs: null, abortedMs: at });
+    ok(preview(dir, [task("changed")], { liveness: stopped })[0].includes("(stopped)"));
+    ok(preview(dir, [task("changed")], { liveness: aborted })[0].includes("(aborted)"));
+    // A stop is terminal, and it is not a plain finish.
+    ok(!preview(dir, [task("changed")], { liveness: stopped })[0].includes("(finished)"));
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("row 12: the default liveness is the run's real heartbeat", () => {
   const dir = runDir();
   try {
@@ -127,9 +155,10 @@ test("row 12: the default liveness is the run's real heartbeat", () => {
     const beat = join(dir, "heartbeat");
     writeFileSync(beat, new Date().toISOString() + " 1234\n");
     ok(resumePreview({ resultsDir: dir, tasks: [task("changed")] })[0].includes("(live engine)"));
+    // No summary and a quiet heartbeat is an aborted run, never a plain finish.
     const stale = new Date(Date.now() - 600_000);
     utimesSync(beat, stale, stale);
-    ok(resumePreview({ resultsDir: dir, tasks: [task("changed")] })[0].includes("(finished)"));
+    ok(resumePreview({ resultsDir: dir, tasks: [task("changed")] })[0].includes("(aborted)"));
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

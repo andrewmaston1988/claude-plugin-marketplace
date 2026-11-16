@@ -191,8 +191,9 @@ export function normalizeTasks(rawTasks, { cwd, resultsDir, cfg, defaultTimeoutM
       ...(!isCompute && !isManifest && !isIntegrate && fallbackProvider && { fallbackProvider }),
       ...(!isCompute && !isManifest && !isIntegrate && typeof t.seatReason === "string" && { seatReason: t.seatReason }),
       // Carried so `--resolved` and the run's own snapshot record the role the
-      // refusals were judged on — the plan you approve is the one that ran.
-      ...(t.role !== undefined && { role: t.role }),
+      // refusals were judged on — the plan you approve is the one that ran. An
+      // agentless node has no leaf to carry it; the shape gate refuses it there.
+      ...(!isCompute && !isManifest && !isIntegrate && t.role !== undefined && { role: t.role }),
       effort: isCompute || isManifest || isIntegrate ? undefined : resolvedEffort,
       // An authored list wins whole. The default is filled in HERE — not appended at
       // dispatch — so the snapshot and the leaf's own result record the list it got.

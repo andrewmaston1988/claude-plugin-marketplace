@@ -5,7 +5,7 @@ import { existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { readResult, resultPath } from "./results.mjs";
 import { runLiveness } from "./runlog.mjs";
-import { taskKey } from "./task-key.mjs";
+import { reusable } from "./task-key.mjs";
 
 // A result file that exists but does not parse (a live engine mid-write) is not
 // a missing one — "new" would understate what resume does.
@@ -27,14 +27,23 @@ function holdsResults(dir) {
   }
 }
 
-// Why this task runs again, or null when its stored result is reusable — the
-// same predicate cacheHit applies, read-only.
+// Why this task runs again, or null when its stored result is reusable.
 function rerunReason(prior, task) {
   if (!prior) return "new";
   if (prior.unreadable) return "unreadable";
-  if (prior.ok !== true) return "previous run failed";
-  if (prior.key === undefined || prior.key === taskKey(task)) return null;
-  return "definition changed";
+  if (reusable(prior, task)) return null;
+  return prior.ok !== true ? "previous run failed" : "definition changed";
+}
+
+// runLiveness reports all-null both for a live engine and for a dir with no
+// run.log at all, so the log's presence is what tells the two apart. A stopped or
+// aborted run is its own terminal state, never a plain finish.
+function engineState(dir, state) {
+  if (!existsSync(join(dir, "run.log"))) return "no run.log";
+  if (state.stoppedMs != null) return "stopped";
+  if (state.abortedMs != null) return "aborted";
+  if (state.finishedMs != null) return "finished";
+  return "live engine";
 }
 
 export function resumePreview(plan, { readResult: read = readPreviewResult, liveness = runLiveness } = {}) {
@@ -56,8 +65,7 @@ export function resumePreview(plan, { readResult: read = readPreviewResult, live
   }
   const rerun = tasks.filter((t) => reason.get(t.id));
   if (!rerun.length) return [];
-  const state = liveness(dir);
-  const live = state.finishedMs == null && state.stoppedMs == null && state.abortedMs == null;
+  const state = engineState(dir, liveness(dir));
   const listed = rerun.map((t) => `${t.id} (${reason.get(t.id)})`).join(", ");
   // Clones and child leaves exist only after expansion, so their own keys are
   // unknowable here — name the parent and say when they get checked.
@@ -66,5 +74,5 @@ export function resumePreview(plan, { readResult: read = readPreviewResult, live
     ...(t.childPlan ? [`child leaves of ${t.id} are checked when they expand`] : []),
   ]);
   const tail = expanded.length ? ` — ${expanded.join("; ")}` : "";
-  return [`results dir ${dir} holds an earlier run (${live ? "live engine" : "finished"}); on resume these re-execute: ${listed}${tail}`];
+  return [`results dir ${dir} holds an earlier run (${state}); on resume these re-execute: ${listed}${tail}`];
 }

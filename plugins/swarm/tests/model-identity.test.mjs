@@ -156,6 +156,19 @@ test("row 7: a catalog older than 7 days warns instead of refusing, naming its a
   ok(warnings[0].includes("9 days old"), warnings[0]);
 });
 
+test("a [1m]-suffixed id is the adapter's refusal, never a catalog-membership one", () => {
+  // The base id IS listed; the suffix is a field in the wrong place, so this gate
+  // must stay silent and let the adapter say where it belongs.
+  const errors = [];
+  const warnings = [];
+  checkModelIdentity({
+    model: "claude-opus-5[1m]", provider: "claude", cache: CATALOG,
+    catalogFetchedAt: NOW - DAY, label: "task 'x'", errors, warnings, now: NOW,
+  });
+  deepEqual(errors, []);
+  deepEqual(warnings, []);
+});
+
 test("row 7: an empty Claude catalog checks nothing", () => {
   const errors = [];
   const warnings = [];

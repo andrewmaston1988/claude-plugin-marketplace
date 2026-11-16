@@ -108,8 +108,9 @@ commits HEAD does not have, so a previous run's phases cannot be silently discar
 ## How a verifier link works
 
 Set `"role": "verifier"` on a reporting leaf so `swarm validate` enforces the verifier
-contract: it cannot hold `Edit`, `Write` or `NotebookEdit`, and it cannot name a writers'
-`workspace`. `Bash` is allowed for inspecting commits; the verifier gets its own private tree.
+contract: it cannot hold `Edit`, `Write` or `NotebookEdit`, and it cannot name any
+`workspace`. `Bash` is allowed for inspecting commits, and a verifier holding it runs in its
+own private tree; a read-only one gets no tree and reads the live repo it was pointed at.
 
 A verifier needs no `Write` tool to report, because its findings do not travel
 through files:
