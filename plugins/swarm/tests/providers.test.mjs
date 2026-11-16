@@ -53,10 +53,11 @@ test("a model that is valid but not for the named provider is refused by that pr
   deepEqual(registry.get("ollama").validateTask({ provider: "ollama", model: "gpt-oss:20b-cloud" }), []);
 });
 
-test("provider resolution rejects whitespace-only models and canonicalizes surrounding whitespace", () => {
+test("provider resolution rejects whitespace-only models", () => {
   const registry = createProviderRegistry(defaultProviderAdapters());
   throws(() => registry.resolve({ model: "   ", provider: "claude" }, { config }), /non-empty model/);
-  deepEqual(registry.resolve({ provider: "claude", model: "  claude-sonnet-5  " }, { config }), { provider: "claude", model: "claude-sonnet-5" });
+  // Surrounding whitespace is a malformed model now — there is no trim that saves it.
+  throws(() => registry.resolve({ provider: "claude", model: "  claude-sonnet-5  " }, { config }), /not a model id/);
 });
 
 test("a registered fourth provider resolves by id without a production branch", () => {
