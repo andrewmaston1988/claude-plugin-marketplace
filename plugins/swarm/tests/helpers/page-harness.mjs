@@ -93,7 +93,9 @@ function makeElement(tag, ids) {
     // A template's markup parses into .content, NOT childNodes — morph reads
     // tpl.content; a template never has children of its own.
     let content = null;
-    Object.defineProperty(el, "innerHTML", { get: () => "", set: (v) => { content = parseHtml(String(v), ids); } });
+    // rawHtml keeps the string the page built: parsing decodes `&amp;lt;` to `&lt;`,
+    // so a double-escape is invisible in the tree and visible only here.
+    Object.defineProperty(el, "innerHTML", { get: () => "", set: (v) => { el.rawHtml = String(v); content = parseHtml(String(v), ids); } });
     Object.defineProperty(el, "content", { get: () => content });
   } else {
     Object.defineProperty(el, "innerHTML", {
@@ -181,6 +183,7 @@ export function loadPage(opts = {}) {
   let esClosed = 0;
   const fetchLog = [];
   const pendingFetches = [];
+  const templates = [];
   // The haptic is the only celebration instrument that can COUNT: two celebrations
   // of the same run write the same document.title, so the title cannot tell one
   // fire from two. navigator.vibrate has no test surface on a real phone (the
@@ -204,7 +207,7 @@ export function loadPage(opts = {}) {
     addEventListener: (t, f) => { (docListeners[t] ||= []).push(f); },
     documentElement,
     querySelector: (sel) => (sel.startsWith("#") && !sel.includes(" ") && ids.has(sel.slice(1))) ? ids.get(sel.slice(1)) : (chrome[sel] || makeElement("div", ids)),
-    createElement: (tag) => makeElement(tag, ids),
+    createElement: (tag) => { const el = makeElement(tag, ids); if (tag === "template") templates.push(el); return el; },
     // live.js, logos.js and perf.js really run in this context: the page needs
     // window.swarmLive, window.swarmLogos and window.perfViews. A test that hands in
     // perfViews owns that contract, so the real perf script stays out of its way.
@@ -318,6 +321,8 @@ export function loadPage(opts = {}) {
     },
     // The screen the user sees is header + main together — the flicker wipes both.
     screenText: () => `${hdr.textContent}\n${main.textContent}`,
+    // Every setHtml payload in paint order, as built — the only view of escaping.
+    rawHtml: () => templates.map((t) => t.rawHtml || "").join("\n"),
     docTitle: () => document.title,
     vibrations: () => vibrateCalls,
     seam: () => window.__swarmPage,
