@@ -413,6 +413,11 @@ source array, or a failed clone, behave exactly as they do for a hand-listed `fr
                               # after ("ready")
 ```
 
+The append-only taken-port log lives outside the run dir at
+`~/.swarm/taken/<encoded-repo-toplevel>.jsonl`; when it grows past 1 MB, the previous
+log rotates to `.jsonl.1`. Prune uses those records only as evidence that a lane was taken
+into a branch and later landed on the default branch.
+
 **Trees are scratch and live outside the run dir.** A writer's tree goes to
 `<treeRoot>/<encoded-repo-toplevel>/<run>/<name>` — `treeRoot` from config, default
 `~/.swarm/worktrees` — so a run dir holds results and these records alone, and deleting the
@@ -449,7 +454,10 @@ detach option; push a branch under a name outside `swarm/` to preserve its remot
 kept and named, not refused: every row with unlanded commits or uncommitted changes stays, named on
 stderr with its counts, and the command exits 1; a later prune takes the rest once its work
 lands. `--dry-run` previews which rows would go and which would stay and removes nothing;
-`--discard-unlanded` destroys the blocked work too, whether or not the branch landed. `swarm status --mine`
+`--discard-unlanded` destroys the blocked work too, whether or not the branch landed. A lane
+ported into a non-default branch also counts as landed once that branch's work is proved on the
+default branch, even if later review edits rewrote the lane's lines; a pushed but unmerged branch
+does not count. `swarm status --mine`
 lists this session's finished runs still
 holding worktrees. The dispatching session takes what it needs from each finished run only after its work has landed (merged) or been taken (pushed or merged into your branch), then
 prunes it with `swarm prune`; it does not ask the operator. Each kept row is named with why:
