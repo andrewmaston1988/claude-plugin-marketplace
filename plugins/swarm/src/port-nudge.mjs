@@ -7,6 +7,9 @@ import { enginePath, runsKeyFor } from "./config.mjs";
 import { realRepoToplevel } from "./manifest-leaf-guard.mjs";
 import { inLeafOrAutonomous, projectRunsHoldingWorktrees } from "./prune-nudge.mjs";
 import { blockers, checkoutBase, plan, runForPrune } from "./prune.mjs";
+import { absorbed } from "./landed.mjs";
+import { portInProgress } from "./port-complete.mjs";
+import { appendTaken, readTaken, refreshTaken } from "./taken.mjs";
 import { runLiveness } from "./runlog.mjs";
 import { listTreeRecords } from "./worktree.mjs";
 import { normalizeForCompare } from "./roots.mjs";
@@ -129,6 +132,7 @@ export function portedRuns({ home, toplevel, sessionId, base, branch, portingTre
   const dirs = [...new Set([...mine, ...foreignTouchedRuns({ home, toplevel, touched, fs })])]
     .filter((dir) => !alreadyPortNudged(dir, sessionId, fs))
     .sort((a, b) => runFinishedAt(b, fs) - runFinishedAt(a, fs));
+  const taken = dirs.length ? readTaken({ home, toplevel, fs }) : new Map();
 
   const startedMs = Date.now();
   const out = [];
@@ -138,7 +142,7 @@ export function portedRuns({ home, toplevel, sessionId, base, branch, portingTre
     const built = runForPrune(dir, { fs, spawnSync });
     if (built.error) continue;
     const planned = plan(built.run, git, fs, {
-      cfg, extraBases: [base], measureBytes: false, stopAtBlocker: true, deadline: startedMs + budgetMs,
+      cfg, extraBases: [base], measureBytes: false, stopAtBlocker: true, deadline: startedMs + budgetMs, taken,
     });
     // A stopped plan proves nothing; the run is measured again on the next port verb.
     if (planned.stopped) continue;
@@ -178,6 +182,56 @@ export function isPortPayload(payload, env = {}) {
   return !inLeafOrAutonomous(env);
 }
 
+const RECORD_LANE_CAP = 12;
+const RECORD_MIN_BUDGET_MS = 10_000;
+
+// origin/HEAD is the one name git records for a repo's default branch. With no remote the
+// answer is null and a port onto the landing branch records anyway: a stray line costs a
+// read, while a wrong skip would lose the proof this hook exists to keep.
+function defaultBranchName(git, tree) {
+  const origin = git(["symbolic-ref", "-q", "refs/remotes/origin/HEAD"], tree);
+  return origin.status === 0 && origin.stdout ? origin.stdout.replace(/^refs\/remotes\/origin\//, "") : null;
+}
+
+// The proof decays: a lane absorbed by this checkout's HEAD is unprovable once the branch
+// is rewritten, so it is written down while git can still answer — one record per lane,
+// at most RECORD_LANE_CAP per firing, and none once too little of the budget is left.
+// checkoutBase has already refused a detached HEAD and any swarm branch. Every failure
+// costs recall, never the turn.
+function recordPorts({ home, toplevel, tree, into, base, runs, git, fs, startedMs, budgetMs }) {
+  if (!into || into === defaultBranchName(git, tree)) return;
+  if (portInProgress(tree, git)) return;
+  refreshTaken({ home, toplevel, into, head: base, git, fs });
+  if (!runs.length) return;
+  const known = readTaken({ home, toplevel, fs });
+  let left = RECORD_LANE_CAP;
+  for (const run of runs) {
+    const name = basename(run.dir);
+    for (const row of run.rows) {
+      if (!row.branch || !row.repo) continue;
+      const key = `${name}\n${row.branch}`;
+      if (known.has(key)) continue;
+      if (left <= 0 || budgetMs - (Date.now() - startedMs) < RECORD_MIN_BUDGET_MS) return;
+      try {
+        const tip = git(["rev-parse", "--verify", `${row.branch}^{commit}`], row.repo);
+        if (tip.status !== 0 || !tip.stdout) continue;
+        left -= 1;
+        // Ancestry, then absorption: never unlandedCount, whose ref-reachability shortcut
+        // would let an unrelated branch gate a record for a port this HEAD never saw.
+        const ancestor = git(["merge-base", "--is-ancestor", row.branch, base], row.repo);
+        const proven = ancestor.status === 0
+          || (ancestor.status === 1 && absorbed(base, row.branch, row.repo, git));
+        if (!proven) continue;
+        appendTaken({
+          home, toplevel, fs,
+          records: [{ run: name, branch: row.branch, laneTip: tip.stdout, repo: row.repo, into, portCommit: base, intoTip: base }],
+        });
+        known.set(key, true);
+      } catch { /* one lane git cannot answer costs that lane, not the firing */ }
+    }
+  }
+}
+
 // The whole hook flow below the CLI seams, so a test can count git calls. Returns the
 // line to print, or "" when there is nothing to say.
 export function runPortNudge({ payload, env = {}, config, home, git, spawn, fs, budgetMs = 20_000 }) {
@@ -202,13 +256,15 @@ export function runPortNudge({ payload, env = {}, config, home, git, spawn, fs, 
   if (!base) return "";
   const head = git(["symbolic-ref", "-q", "HEAD"], tree);
   if (head.status !== 0 || !head.stdout) return "";
+  const branch = head.stdout.replace(/^refs\/heads\//, "");
 
+  const startedMs = Date.now();
   const runs = portedRuns({
     home,
     toplevel,
     sessionId,
     base,
-    branch: head.stdout.replace(/^refs\/heads\//, ""),
+    branch,
     portingTree: tree,
     touched: readTouched({ home, sessionId, fs }),
     cfg: config,
@@ -217,6 +273,9 @@ export function runPortNudge({ payload, env = {}, config, home, git, spawn, fs, 
     spawnSync: spawn,
     budgetMs,
   });
+  // Recorded before the silence test: a run already nudged this session still needs its
+  // witness refreshed, and a lane recorded on one firing must not be measured again.
+  try { recordPorts({ home, toplevel, tree, into: branch, base, runs, git, fs, startedMs, budgetMs }); } catch { /* a lost record costs recall, never the turn */ }
   if (!runs.length) return "";
 
   const additionalContext = runs.map(portReason).join("\n");
