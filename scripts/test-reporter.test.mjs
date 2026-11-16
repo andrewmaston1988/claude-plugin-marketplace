@@ -47,6 +47,15 @@ function complete(file, { passed = true, ms = 100 } = {}) {
   };
 }
 
+/** The file-level test:pass/fail: also emitted, but relayed in FILE order
+ *  after the live complete, which is what the streaming test must not use. */
+function fileResult(file, { passed = true, ms = 100 } = {}) {
+  return {
+    type: passed ? "test:pass" : "test:fail",
+    data: { file, name: basename(file), nesting: 0, details: { duration_ms: ms, type: "test" } },
+  };
+}
+
 function start(file, name, nesting) {
   return { type: "test:start", data: { file, name, nesting } };
 }
@@ -135,6 +144,8 @@ test("A1: a file's line streams on test:complete, ahead of a slower file's detai
     complete(fast, { ms: 827 }), // live: b-fast ended first
     start(slow, "slow one", 0),
     leaf("test:pass", slow, "slow one", 0, 4000), // relayed in file order, last
+    fileResult(slow, { ms: 4450 }),
+    fileResult(fast, { ms: 827 }),
     complete(slow, { ms: 4450 }),
     summary({ tests: 2, passed: 2, failed: 0, skipped: 0, todo: 0 }, 4450),
   ]);
