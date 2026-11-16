@@ -88,12 +88,9 @@ export function buildCodexInvocation(task, prompt, context = {}) {
     writable.add(key);
     args.push("--add-dir", dir);
   }
-  // `codex exec` refuses to start outside a Git repository or a directory it trusts.
-  // A read-only leaf is a reader: swarm's allowedRoots check at validate already
-  // bounds where it may read, so the repo-root gate would only stop it reading logs
-  // or a data dump. A writer keeps the gate — it runs in its own worktree, which is
-  // a repository — except the generated digest, which launches from engine scratch.
-  // Keyed on the sandbox actually passed, so flag and sandbox cannot disagree.
+  // `codex exec` refuses to start outside a Git repository it trusts. A reader may start
+  // anywhere allowedRoots admits; a writer keeps the gate (its worktree is a repo), bar the
+  // digest, which launches from engine scratch. Keyed on the sandbox actually passed.
   if (sandbox === "read-only" || (task.isDigest === true && task.cwd !== task.originalCwd)) {
     args.push("--skip-git-repo-check");
   }

@@ -72,7 +72,7 @@ test("Codex: a read-only digest is read-only sandboxed, with no --add-dir and on
   ok(!invocation.argv.includes("--settings"));
 });
 
-// The rts-mobile shape: a read-only finder at a cwd that is no repository at all.
+// The hard shape: a read-only finder at a cwd that is no repository at all.
 // The allowance rides with the other exec flags, so a resumed turn still gets it.
 test("Codex: a read-only leaf gets one --skip-git-repo-check, before resume", () => {
   const leaf = buildCodexInvocation({
