@@ -18,18 +18,23 @@ const CLI = enginePath();
 export const PORT_RE = /\bgit\b(?:\s+-C\s+(?:"[^"]+"|'[^']+'|\S+)|\s+-c\s+\S+)*\s+(?:commit|merge|cherry-pick|rebase|am|pull)(?![\w-])/;
 
 const C_FLAG = /(?:^|\s)-C\s+("([^"]*)"|'([^']*)'|(\S+))/g;
+const LEADING_CD = /^\s*cd\s+("([^"]*)"|'([^']*)'|(\S+))\s*(?:&&|;)/;
 
-// The one distinct `-C` path the command names, else the payload's cwd. A `cd` inside
-// the command is not followed — this is the checkout git itself was pointed at.
+// The one distinct `-C` path the command names, else the shell's directory: one leading
+// `cd` is followed, since `cd <tree> && git cherry-pick` is the common port and the
+// payload's cwd is then some other checkout.
 export function portingTree(command, cwd) {
+  const text = String(command);
+  const cd = text.match(LEADING_CD);
+  const base = cd ? resolve(cwd, cd[2] ?? cd[3] ?? cd[4]) : cwd;
   const found = new Map();
-  for (const m of String(command).matchAll(C_FLAG)) {
+  for (const m of text.matchAll(C_FLAG)) {
     const path = m[2] ?? m[3] ?? m[4];
     if (!path) continue;
-    const abs = resolve(cwd, path);
+    const abs = resolve(base, path);
     found.set(normalizeForCompare(abs), abs);
   }
-  return found.size === 1 ? [...found.values()][0] : cwd;
+  return found.size === 1 ? [...found.values()][0] : base;
 }
 
 // Every swarm branch the command names, so a foreign run stays measurable after the
