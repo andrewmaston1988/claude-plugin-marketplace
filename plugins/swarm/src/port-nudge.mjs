@@ -125,18 +125,25 @@ function runFinishedAt(dir, fs) {
   try { return fs.statSync(dir).mtimeMs; } catch { return 0; }
 }
 
-// This session's finished runs, plus the foreign runs its commands named, measured with
-// `plan()` against the porting checkout's HEAD. Silent unless a run is wholly provable.
-export function portedRuns({ home, toplevel, sessionId, base, branch, portingTree, touched = [], cfg, git, fs, spawnSync, budgetMs = 20_000 }) {
+// This session's finished runs, plus the foreign runs its commands named, newest first.
+// The nudge line and the taken record share this one list, so they never disagree about
+// which runs a command is evidence for.
+export function candidateRuns({ home, toplevel, sessionId, touched = [], cfg, fs }) {
   const mine = projectRunsHoldingWorktrees({ home, toplevel, sessionId, cfg }).mine.map((r) => r.dir);
-  const dirs = [...new Set([...mine, ...foreignTouchedRuns({ home, toplevel, touched, fs })])]
-    .filter((dir) => !alreadyPortNudged(dir, sessionId, fs))
+  return [...new Set([...mine, ...foreignTouchedRuns({ home, toplevel, touched, fs })])]
     .sort((a, b) => runFinishedAt(b, fs) - runFinishedAt(a, fs));
-  const taken = dirs.length ? readTaken({ home, toplevel, fs }) : new Map();
+}
+
+// Those runs measured with `plan()` against the porting checkout's HEAD. Silent unless a
+// run is wholly provable.
+export function portedRuns({ home, toplevel, sessionId, base, branch, portingTree, touched = [], cfg, git, fs, spawnSync, budgetMs = 20_000, dirs }) {
+  const measured = (dirs ?? candidateRuns({ home, toplevel, sessionId, touched, cfg, fs }))
+    .filter((dir) => !alreadyPortNudged(dir, sessionId, fs));
+  const taken = measured.length ? readTaken({ home, toplevel, fs }) : new Map();
 
   const startedMs = Date.now();
   const out = [];
-  for (const dir of dirs) {
+  for (const dir of measured) {
     // The 30 s hook timeout is the hard edge; this keeps a many-run repo from reaching it.
     if (Date.now() - startedMs > budgetMs) break;
     const built = runForPrune(dir, { fs, spawnSync });
@@ -196,18 +203,22 @@ function defaultBranchName(git, tree) {
 // The proof decays: a lane absorbed by this checkout's HEAD is unprovable once the branch
 // is rewritten, so it is written down while git can still answer — one record per lane,
 // at most RECORD_LANE_CAP per firing, and none once too little of the budget is left.
+// Every kept tree of every run considered, never `plan()`'s rows: a run with one lane still
+// unported proves nothing to the nudge line yet still holds lanes this HEAD did port.
 // checkoutBase has already refused a detached HEAD and any swarm branch. Every failure
 // costs recall, never the turn.
-function recordPorts({ home, toplevel, tree, into, base, runs, git, fs, startedMs, budgetMs }) {
+function recordPorts({ home, toplevel, tree, into, base, dirs, git, fs, spawnSync, startedMs, budgetMs }) {
   if (!into || into === defaultBranchName(git, tree)) return;
   if (portInProgress(tree, git)) return;
   refreshTaken({ home, toplevel, into, head: base, git, fs });
-  if (!runs.length) return;
+  if (!dirs.length) return;
   const known = readTaken({ home, toplevel, fs });
   let left = RECORD_LANE_CAP;
-  for (const run of runs) {
-    const name = basename(run.dir);
-    for (const row of run.rows) {
+  for (const dir of dirs) {
+    const built = runForPrune(dir, { fs, spawnSync });
+    if (built.error) continue;
+    const name = basename(dir);
+    for (const row of built.run.worktreesKept) {
       if (!row.branch || !row.repo) continue;
       const key = `${name}\n${row.branch}`;
       if (known.has(key)) continue;
@@ -259,6 +270,8 @@ export function runPortNudge({ payload, env = {}, config, home, git, spawn, fs, 
   const branch = head.stdout.replace(/^refs\/heads\//, "");
 
   const startedMs = Date.now();
+  const touched = readTouched({ home, sessionId, fs });
+  const dirs = candidateRuns({ home, toplevel, sessionId, touched, cfg: config, fs });
   const runs = portedRuns({
     home,
     toplevel,
@@ -266,16 +279,17 @@ export function runPortNudge({ payload, env = {}, config, home, git, spawn, fs, 
     base,
     branch,
     portingTree: tree,
-    touched: readTouched({ home, sessionId, fs }),
+    touched,
     cfg: config,
     git,
     fs,
     spawnSync: spawn,
     budgetMs,
+    dirs,
   });
   // Recorded before the silence test: a run already nudged this session still needs its
-  // witness refreshed, and a lane recorded on one firing must not be measured again.
-  try { recordPorts({ home, toplevel, tree, into: branch, base, runs, git, fs, startedMs, budgetMs }); } catch { /* a lost record costs recall, never the turn */ }
+  // witness refreshed, and a partly ported run still holds lanes this HEAD did port.
+  try { recordPorts({ home, toplevel, tree, into: branch, base, dirs, git, fs, spawnSync: spawn, startedMs, budgetMs }); } catch { /* a lost record costs recall, never the turn */ }
   if (!runs.length) return "";
 
   const additionalContext = runs.map(portReason).join("\n");

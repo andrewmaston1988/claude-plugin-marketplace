@@ -89,42 +89,45 @@ test("row 2: a completed port records each lane its HEAD proves", () => withFixt
 }));
 
 test("row 3(a): a conflicted pick records nothing until it is finished", () => withFixture((f) => {
-  const lane = f.leaf("run-3a", "lane");
-  // The lane's only change is the one the port base rewrites: picking it conflicts, and
-  // the resolved commit is what must absorb the whole lane.
-  must(["reset", "--hard", "main"], lane.path);
-  writeCommit(lane.path, "a.txt", "lane\n", "lane edits a");
-  f.run("run-3a", { launcher: SESSION, leaves: [lane] });
-  const tip = must(["rev-parse", "HEAD"], lane.path);
+  // One lane already absorbed, one whose pick is left open: the absorbed lane is
+  // provable at this HEAD, and only git's own marker can keep it out of the log.
+  const done = f.leaf("run-3a", "done");
+  const open = f.leaf("run-3a", "open");
+  must(["reset", "--hard", "main"], open.path);
+  writeCommit(open.path, "a.txt", "open\n", "open edits a");
+  f.run("run-3a", { launcher: SESSION, leaves: [done, open] });
+  const tip = must(["rev-parse", "HEAD"], open.path);
 
   const port = f.porting("porting", "feat");
   writeCommit(port, "a.txt", "port\n", "port edits a");
-  const pick = f.git(["cherry-pick", tip], port);
-  ok(pick.status !== 0, "precondition: the fixture's pick conflicts");
+  f.cherryPick(port, done.sha);
+  ok(f.git(["cherry-pick", tip], port).status !== 0, "precondition: the pick conflicts");
   ok(fs.existsSync(resolve(port, must(["rev-parse", "--git-path", "CHERRY_PICK_HEAD"], port))), "CHERRY_PICK_HEAD is set");
 
   fire(f, port, `git cherry-pick ${tip}`);
   equal(logRecords(f).length, 0, "an open pick is not a port");
 
-  fs.writeFileSync(resolve(port, "a.txt"), "lane\n");
+  fs.writeFileSync(resolve(port, "a.txt"), "open\n");
   must(["add", "a.txt"], port);
   must(["cherry-pick", "--continue", "--no-edit"], port);
   const finished = must(["rev-parse", "HEAD"], port);
   fire(f, port, "git cherry-pick --continue");
-  const rec = logRecords(f).find((r) => r.branch === lane.branch);
-  ok(rec, "the finished port records");
-  equal(rec.portCommit, finished);
+  const recs = logRecords(f);
+  equal(recs.length, 2, "the finished port records both lanes");
+  ok(recs.every((r) => r.portCommit === finished), "at the HEAD git settled on");
 }));
 
 test("row 3(b): unmerged index entries record nothing", () => withFixture((f) => {
-  const lane = f.leaf("run-3b", "lane");
-  must(["reset", "--hard", "main"], lane.path);
-  writeCommit(lane.path, "a.txt", "lane\n", "lane edits a");
-  f.run("run-3b", { launcher: SESSION, leaves: [lane] });
-  const tip = must(["rev-parse", "HEAD"], lane.path);
+  const done = f.leaf("run-3b", "done");
+  const open = f.leaf("run-3b", "open");
+  must(["reset", "--hard", "main"], open.path);
+  writeCommit(open.path, "a.txt", "open\n", "open edits a");
+  f.run("run-3b", { launcher: SESSION, leaves: [done, open] });
+  const tip = must(["rev-parse", "HEAD"], open.path);
 
   const port = f.porting("porting", "feat");
   writeCommit(port, "a.txt", "port\n", "port edits a");
+  f.cherryPick(port, done.sha);
   // `-n` leaves the conflict in the index with no CHERRY_PICK_HEAD behind it.
   ok(f.git(["cherry-pick", "-n", tip], port).status !== 0, "precondition: the pick conflicts");
   ok(!fs.existsSync(resolve(port, must(["rev-parse", "--git-path", "CHERRY_PICK_HEAD"], port))), "no CHERRY_PICK_HEAD");
@@ -133,11 +136,11 @@ test("row 3(b): unmerged index entries record nothing", () => withFixture((f) =>
   fire(f, port, `git cherry-pick -n ${tip}`);
   equal(logRecords(f).length, 0, "an unmerged index is not a port");
 
-  fs.writeFileSync(resolve(port, "a.txt"), "lane\n");
+  fs.writeFileSync(resolve(port, "a.txt"), "open\n");
   must(["add", "a.txt"], port);
   must(["commit", "-qm", "pick the lane"], port);
   fire(f, port, "git commit -m pick");
-  ok(logRecords(f).some((r) => r.branch === lane.branch), "the resolved port records");
+  equal(logRecords(f).length, 2, "the resolved port records both lanes");
 }));
 
 test("row 3(c): a port onto the default branch records nothing", () => withFixture((f) => {
