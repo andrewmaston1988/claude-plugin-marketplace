@@ -600,6 +600,41 @@ test("A7: --fast is refused with --wsl", async () => {
   assert.match(errors.join("\n"), /--wsl cannot be combined with --fast/);
 });
 
+test("A10: --wsl refuses --reporter and --orphans, rather than ignoring them", async () => {
+  for (const flag of ["--reporter=agent", "--orphans"]) {
+    const errors = [];
+    const refuse = () => {
+      throw new Error(`--wsl ${flag} spawned a process`);
+    };
+    const code = await main(["--wsl", flag], {
+      _spawn: refuse, _spawnSync: refuse, _log: () => {}, _err: (line) => errors.push(line),
+    });
+    assert.equal(code, 2, flag);
+    assert.match(errors.join("\n"), new RegExp(`--wsl cannot be combined with ${flag.split("=")[0]}`));
+  }
+});
+
+test("A10: --reporter=x exits 2 naming the two modes", async (t) => {
+  const repo = makeRepo(t);
+  write(repo, "seed.mjs");
+  commitAll(repo, "seed"); // a resolvable base, so only the flag check can exit 2
+  const errors = [];
+  const refuse = () => {
+    throw new Error("a rejected --reporter still ran a suite");
+  };
+  // An empty registry keeps the mutant's path cheap: without the check the
+  // bad mode is accepted and the run reaches "nothing selected" as exit 0.
+  const code = await main(["--reporter=x"], {
+    cwd: repo,
+    _suites: [],
+    _spawn: refuse,
+    _log: () => {},
+    _err: (line) => errors.push(line),
+  });
+  assert.equal(code, 2);
+  assert.match(errors.join("\n"), /--reporter must be agent or default, not x/);
+});
+
 // --- --orphans -------------------------------------------------------------
 
 test("A8: --orphans exits 1 on a stray test and 0 once notRun lists it", async (t) => {

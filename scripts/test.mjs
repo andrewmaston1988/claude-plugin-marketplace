@@ -328,6 +328,8 @@ export async function main(argv = process.argv.slice(2), options = {}) {
       ["--against", Boolean(against)],
       ["--all", all],
       ["--fast", fast],
+      ["--reporter", Boolean(reporter)],
+      ["--orphans", orphansOnly],
     ];
     const conflict = flags.find(([, given]) => given);
     if (conflict) return usage(`--wsl cannot be combined with ${conflict[0]}`, _err);
