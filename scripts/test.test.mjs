@@ -293,16 +293,27 @@ test("lockfiles and plugin manifests run the whole suite", (t) => {
   }
 });
 
-test("a change under scripts/ or .github/ runs the repo suite", (t) => {
+test("a change under scripts/ runs the repo suite, not a plugin's", (t) => {
   const repo = graphFixture(t);
   const suites = [suiteOf("fix", [FIX_GLOB]), suiteOf("repo", ["scripts/*.test.mjs"])];
-  for (const path of ["scripts/x.mjs", ".github/workflows/test.yml"]) {
-    const { entries } = select({ suites, changed: [path], repoRoot: repo });
-    const repoEntries = entries.filter((entry) => entry.suite === "repo");
-    assert.equal(repoEntries.length, 1, path);
-    assert.equal(repoEntries[0].why, `fallback: ${path}`);
-    const attributed = entries.filter((entry) => entry.suite === "fix" && entry.why !== "windows");
-    assert.deepEqual(attributed, [], "a repo-level change must not select a plugin test");
+  const path = "scripts/x.mjs";
+  const { entries } = select({ suites, changed: [path], repoRoot: repo });
+  const repoEntries = entries.filter((entry) => entry.suite === "repo");
+  assert.equal(repoEntries.length, 1, path);
+  assert.equal(repoEntries[0].why, `fallback: ${path}`);
+  const attributed = entries.filter((entry) => entry.suite === "fix" && entry.why !== "windows");
+  assert.deepEqual(attributed, [], "a repo-level change must not select a plugin test");
+});
+
+test("a workflow change selects every suite, because it decides what CI runs", (t) => {
+  const repo = graphFixture(t);
+  const suites = [suiteOf("fix", [FIX_GLOB]), suiteOf("repo", ["scripts/*.test.mjs"])];
+  const path = ".github/workflows/test.yml";
+  const { entries } = select({ suites, changed: [path], repoRoot: repo });
+  for (const name of ["fix", "repo"]) {
+    const chosenSuite = entries.filter((entry) => entry.suite === name);
+    assert.ok(chosenSuite.length > 0, `${name} was not selected by ${path}`);
+    assert.ok(chosenSuite.every((entry) => entry.why === `fallback: ${path}`), name);
   }
 });
 
