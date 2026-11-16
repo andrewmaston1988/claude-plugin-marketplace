@@ -768,7 +768,8 @@
     const done = n("ok", "skipped");
     const failed = n("failed", "failed:timeout", "failed:stopped", "blocked");
     const tok = fmtTok(tasks.reduce((a, t) => a + tokWork(t.tokens), 0));
-    const cost = run.costText ? ` · ${esc(run.costText)}` : "";
+    // tile() escapes the subtitle it is given; escaping here renders `&lt;` literally.
+    const cost = run.costText ? ` · ${run.costText}` : "";
     // The tap must land on a document the run actually has: a report-only run has
     // no digest, and the digest route 404s without one.
     const dhref = (run.digestPath || run.reportPath) ? `#/run/${enc(run.project)}/${enc(run.name)}/${run.digestPath ? "digest" : "report"}` : null;
