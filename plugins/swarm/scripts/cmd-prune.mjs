@@ -4,7 +4,8 @@
 // text stays in swarm.mjs and is passed in, so a bare `prune` still prints the same
 // block as every other bad invocation.
 import { join, resolve } from "node:path";
-import { getConfig } from "../src/config.mjs";
+import { getConfig, swarmHome } from "../src/config.mjs";
+import { readTaken } from "../src/taken.mjs";
 import { runLiveness } from "../src/runlog.mjs";
 import { writeSummary } from "../src/results.mjs";
 import { plan as planPrune, execute as executePrune, formatPrune, workCounts, blockers as pruneBlockers, makeGit, runForPrune, checkoutBase } from "../src/prune.mjs";
@@ -41,8 +42,15 @@ export async function cmdPrune(rest, { usage }) {
   // leaves behind — but only when it is this repo on a named non-swarm branch.
   const extraBases = [checkoutBase(git, process.cwd(), run.repos, prefix)].filter(Boolean);
 
+  // The taken log lives per repo and a run may span several: merge what each one holds.
+  // A repo with no log contributes nothing, and prune behaves exactly as before.
+  const taken = new Map();
+  for (const toplevel of run.repos) {
+    for (const [key, record] of readTaken({ home: swarmHome(), toplevel, fs })) taken.set(key, record);
+  }
+
   // The report describes every row, so it never stops at a blocker or a clock.
-  const { rows } = planPrune(run, git, fs, { cfg, extraBases, measureBytes: true, stopAtBlocker: false, deadline: Infinity });
+  const { rows } = planPrune(run, git, fs, { cfg, extraBases, measureBytes: true, stopAtBlocker: false, deadline: Infinity, taken });
   if (!rows.length) {
     out(`swarm: ${dir} has no kept worktrees or branches — nothing to prune.`);
     return 0;
@@ -57,7 +65,7 @@ export async function cmdPrune(rest, { usage }) {
     if (go.length) out(formatPrune(go, { dryRun: true }));
     if (stay.length) {
       out(`swarm: would keep ${rowCount(stay.length)} that still ${stay.length === 1 ? "holds" : "hold"} work:`);
-      for (const row of stay) out(`  ${rowLabel(row)}: ${workCounts(row).join(", ")}`);
+      for (const row of stay) out(`  ${rowLabel(row)}: ${keptDetail(row)}`);
     }
     return 0;
   }
@@ -74,7 +82,7 @@ export async function cmdPrune(rest, { usage }) {
   if (hadSummary) writeSummary(dir, { ...summary, worktreesKept: kept.filter((wt) => fs.existsSync(wt.path)) });
   // The report follows execute: a removal git refused is kept, never printed as freed.
   if (removed.length) out(formatPrune(removed));
-  for (const row of stay) err(`  ${rowLabel(row)}: ${workCounts(row).join(", ")}`);
+  for (const row of stay) err(`  ${rowLabel(row)}: ${keptDetail(row)}`);
   for (const { row, reason } of refused) {
     err(`  ${rowLabel(row)}: ${workCounts(row).join(", ") || firstLine(reason) || "still present"}`);
   }
@@ -92,6 +100,9 @@ export async function cmdPrune(rest, { usage }) {
 }
 
 const rowLabel = (row) => `${row.path ?? "(no tree)"} ${row.branch ?? "(detached)"}`;
+// A kept row's taken reason is the actionable half: the count says how much, the reason
+// says why it stays (the branch it was ported into, and why that is not proved landed).
+const keptDetail = (row) => [workCounts(row).join(", "), row.taken].filter(Boolean).join("; ") || "still present";
 const rowCount = (n) => `${n} row${n === 1 ? "" : "s"}`;
 const firstLine = (text) => (text || "").split(/\r?\n/).map((s) => s.trim()).find(Boolean) || "";
 

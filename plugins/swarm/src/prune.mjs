@@ -1,6 +1,7 @@
-import { join, resolve, dirname } from "node:path";
+import { join, resolve, dirname, basename } from "node:path";
 import { existsSync, readdirSync } from "node:fs";
 import { unlandedCount, isSwarmRef } from "./landed.mjs";
+import { takenVerdict } from "./taken.mjs";
 import { treeDirFor, runOfTree, listTreeRecords, legacyTreeDirs, treeRecordPath, treeRootFor, runScopeKey } from "./worktree.mjs";
 import { isUnderRoot, normalizeForCompare } from "./roots.mjs";
 import { getConfig } from "./config.mjs";
@@ -224,7 +225,11 @@ function treeFacts(git, path) {
 // `deadline` (epoch ms, Infinity for none) and `stopAtBlocker` exist to bound a caller
 // that only needs a verdict, not a full report: a stopped plan returns `stopped: true`
 // and must be read as unmeasured, never as an empty or partial result.
-export function plan(run, git, fs, { cfg, extraBases, measureBytes, stopAtBlocker, deadline } = {}) {
+// `taken` (a `readTaken` map, or null) settles a lane whose commits were ported into a
+// feature branch that has since landed: content checks cannot see that, the recorded proof
+// can. Consulted only where the content checks already said unlanded, so a clean row costs
+// no extra git call.
+export function plan(run, git, fs, { cfg, extraBases, measureBytes, stopAtBlocker, deadline, taken = null } = {}) {
   if (!Array.isArray(extraBases)) throw new TypeError("plan requires an extraBases array");
   if (typeof measureBytes !== "boolean") throw new TypeError("plan requires measureBytes");
   if (typeof stopAtBlocker !== "boolean") throw new TypeError("plan requires stopAtBlocker");
@@ -243,9 +248,21 @@ export function plan(run, git, fs, { cfg, extraBases, measureBytes, stopAtBlocke
     if (Date.now() >= deadline) { stopped = true; return false; }
     return true;
   };
+  const runName = taken && run.resultsDir ? basename(resolve(run.resultsDir)) : null;
+  const applyTaken = (row) => {
+    if (!runName || !row.branch || !(row.unlanded > 0)) return row;
+    const record = taken.get(`${runName}\n${row.branch}`);
+    if (!record) return row;
+    const tip = git(["rev-parse", "--verify", `${row.branch}^{commit}`], row.repo);
+    const laneTip = tip.status === 0 && tip.stdout ? tip.stdout : null;
+    const verdict = takenVerdict({ record, laneTip, repo: row.repo, prefix, gitRunner: git });
+    // `taken` rides on a kept row too: the CLI prints why it could not be proved.
+    return { ...row, ...(verdict.landed && { unlanded: 0 }), taken: verdict.reason };
+  };
   const finishRow = (row) => {
-    rows.push(row);
-    if (stopAtBlocker && blockers([row]).length) stopped = true;
+    const measured = applyTaken(row);
+    rows.push(measured);
+    if (stopAtBlocker && blockers([measured]).length) stopped = true;
   };
   // The path is kept AS GIVEN — the injected `fs` keys on it, and a summary's own
   // spelling is what the report prints. Only the dedupe key is normalised, so the three
