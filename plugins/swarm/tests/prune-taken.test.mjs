@@ -8,7 +8,7 @@ import * as fs from "node:fs";
 import { join } from "node:path";
 import { appendTaken } from "../src/taken.mjs";
 import { runPortNudge } from "../src/port-nudge.mjs";
-import { git, must, takenFixture } from "./helpers/port-fixture.mjs";
+import { git, must, takenFixture, publishDefault } from "./helpers/port-fixture.mjs";
 import { runCli } from "./helpers/cli.mjs";
 
 const SESSION = "sess-taken";
@@ -40,6 +40,7 @@ const prune = (f, args = []) => runCli(["prune", ...args, f.runDir], { cwd: f.re
 
 test("row 10: a lane ported then superseded is pruned without --discard-unlanded", () => withFixture((f) => {
   recordPort(f);
+  publishDefault(f.repo);
   const r = prune(f);
   equal(r.status, 0, r.stderr);
   ok(r.stdout.includes("freed"), r.stdout);
@@ -85,6 +86,7 @@ test("row 11: a lane with no record keeps today's message", () => withFixture((f
 // the port is also what lets a HEAD-moving command name the run from the main checkout.
 test("row 12: the port nudge counts a taken lane once the squash lands", () => withFixture((f) => {
   recordPort(f);
+  publishDefault(f.repo);
   const out = runPortNudge({
     payload: {
       session_id: SESSION,

@@ -26,6 +26,13 @@ export function writeCommit(cwd, file, body, message) {
   must(["commit", "-qm", message], cwd);
 }
 
+// The only thing that names a repo's default branch: a remote's HEAD. A fixture without
+// one has no default branch, and the landing checks must say so.
+export function publishDefault(repo, { branch = "main", remote = "origin" } = {}) {
+  must(["update-ref", `refs/remotes/${remote}/${branch}`, must(["rev-parse", branch], repo)], repo);
+  must(["symbolic-ref", `refs/remotes/${remote}/HEAD`, `refs/remotes/${remote}/${branch}`], repo);
+}
+
 export function portFixture() {
   const home = mkdtempSync(join(tmpdir(), "port-nudge-"));
   const repo = join(home, "repo");
@@ -110,7 +117,7 @@ export function portFixture() {
   };
 }
 
-// The shape reported in tv11-build-1 (2026-11-15): the lane's two commits were
+// The shape a superseded port leaves: the lane's two commits were
 // cherry-picked into feature branch `branch` (the second resolved through
 // `--continue`), a review commit rewrote the same lines, the branch was
 // squash-landed on main and deleted. Nothing on main holds a lane commit or its

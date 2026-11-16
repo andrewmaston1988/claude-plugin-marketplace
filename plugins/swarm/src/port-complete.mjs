@@ -11,11 +11,12 @@ const MARKERS = ["CHERRY_PICK_HEAD", "REVERT_HEAD", "MERGE_HEAD", "rebase-merge"
 export function portInProgress(tree, git) {
   if (typeof git !== "function") throw new TypeError("portInProgress requires a git runner");
   try {
-    for (const name of MARKERS) {
-      const marker = git(["rev-parse", "--git-path", name], tree);
-      if (marker.status !== 0 || !marker.stdout) return true;
-      if (existsSync(resolve(tree, marker.stdout))) return true;
-    }
+    const markers = git(["rev-parse", ...MARKERS.flatMap((name) => ["--git-path", name])], tree);
+    if (markers.status !== 0 || !markers.stdout) return true;
+    const paths = String(markers.stdout).split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
+    // A short answer means git could not name every marker.
+    if (paths.length !== MARKERS.length) return true;
+    if (paths.some((path) => existsSync(resolve(tree, path)))) return true;
     const unmerged = git(["diff", "--name-only", "--diff-filter=U"], tree);
     return unmerged.status !== 0 || Boolean(String(unmerged.stdout || "").trim());
   } catch {

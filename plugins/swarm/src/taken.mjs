@@ -3,16 +3,18 @@
 // never rewritten. Landing is decided later, against the default branch alone.
 import { dirname, join } from "node:path";
 import { runsKeyFor } from "./config.mjs";
-import { landedOnDefault } from "./landed.mjs";
+import { gitOf, landedOnDefault } from "./landed.mjs";
+import { normalizeForCompare } from "./roots.mjs";
 
-const TIMEOUT = 60000;
 const MAX_LOG_BYTES = 1024 * 1024;
 
 export function takenLogPath(home, toplevel) {
   return join(home, "taken", `${runsKeyFor(toplevel)}.jsonl`);
 }
 
-const recordKey = (rec) => `${rec.run}\n${rec.branch}`;
+// A run's lanes carry the same names in every repo it spans, so the repo is part of the key.
+export const takenKey = ({ run, repo, branch }) =>
+  `${run}\n${repo ? normalizeForCompare(repo) : ""}\n${branch}`;
 
 // Past 1 MB the log becomes `.1` and readers take both. Windows will not rename
 // onto an existing file, so the older rotation goes first; a race here loses the
@@ -38,7 +40,7 @@ export function appendTaken({ home, toplevel, records, fs }) {
   fs.appendFileSync(logPath, text);
 }
 
-// Newest line per (run, lane) wins; `.1` is the older rotation, so it is read first.
+// Newest line per lane wins; `.1` is the older rotation, so it is read first.
 // A run whose dir is gone is history no prune can act on.
 export function readTaken({ home, toplevel, fs }) {
   const logPath = takenLogPath(home, toplevel);
@@ -53,7 +55,7 @@ export function readTaken({ home, toplevel, fs }) {
       try { rec = JSON.parse(line); } catch { continue; }
       if (typeof rec?.run !== "string" || typeof rec?.branch !== "string") continue;
       if (!fs.existsSync(join(runsRoot, rec.run))) continue;
-      out.set(recordKey(rec), rec);
+      out.set(takenKey(rec), rec);
     }
   }
   return out;
@@ -61,17 +63,21 @@ export function readTaken({ home, toplevel, fs }) {
 
 // A later firing on the same branch moves the witness forward, but only along descent:
 // a reset or recreated branch stops refreshing instead of overwriting the proof.
-// `portCommit` is the original witness and never changes.
-export function refreshTaken({ home, toplevel, into, head, git, fs }) {
+// `portCommit` is the original witness and never changes. `deadline` (epoch ms) keeps a
+// call-heavy firing inside the hook's own budget.
+export function refreshTaken({ home, toplevel, into, head, git, fs, known, deadline = Infinity }) {
   if (!into || !head) return [];
+  const records = known ?? readTaken({ home, toplevel, fs });
   const moved = [];
-  for (const rec of readTaken({ home, toplevel, fs }).values()) {
+  for (const rec of records.values()) {
     if (rec.into !== into || rec.intoTip === head) continue;
-    const r = git(["merge-base", "--is-ancestor", rec.intoTip, head], toplevel, { timeout: TIMEOUT });
+    if (Date.now() >= deadline) break;
+    const r = gitOf(git, ["merge-base", "--is-ancestor", rec.intoTip, head], toplevel);
     if (r.status !== 0) continue;
     const refreshed = { ...rec, intoTip: head };
     delete refreshed.at;
     moved.push(refreshed);
+    records.set(takenKey(refreshed), refreshed);
   }
   appendTaken({ home, toplevel, records: moved, fs });
   return moved;
@@ -79,10 +85,6 @@ export function refreshTaken({ home, toplevel, into, head, git, fs }) {
 
 function lines(text) {
   return String(text).split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
-}
-
-function gitOf(gitRunner, args, repo) {
-  return gitRunner(args, repo, { timeout: TIMEOUT });
 }
 
 // The branch's tip, local first, then the first remote-tracking copy of the same name.

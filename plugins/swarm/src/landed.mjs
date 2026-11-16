@@ -5,7 +5,7 @@ const TIMEOUT = 60000;
 const TOUCHING_SCAN_CAP = 20;
 const MERGE_TREE_MIN_VERSION = [2, 38];
 
-function gitOf(gitRunner, args, repo, opts = {}) {
+export function gitOf(gitRunner, args, repo, opts = {}) {
   return gitRunner(args, repo, { timeout: TIMEOUT, ...opts });
 }
 
@@ -45,6 +45,35 @@ export function isSwarmRef(refname, prefix) {
     .replace(/^refs\/heads\//, "")
     .replace(/^refs\/remotes\/[^/]+\//, "");
   return bare.startsWith(prefix);
+}
+
+// A remote's HEAD is the name git records for a repo's default branch, and a clone's
+// remote need not be called `origin`. No remote HEAD names none.
+export function defaultBranch(gitRunner, repo) {
+  const heads = gitOf(gitRunner, ["for-each-ref", "--format=%(refname) %(symref)", "refs/remotes"], repo);
+  if (heads.status !== 0 || !heads.stdout) return null;
+  for (const line of heads.stdout.split(/\r?\n/)) {
+    const [ref, target] = line.trim().split(/\s+/);
+    const m = /^refs\/remotes\/([^/]+)\/(.+)$/.exec(target || "");
+    if (ref?.endsWith("/HEAD") && m) return { remote: m[1], name: m[2] };
+  }
+  return null;
+}
+
+export const defaultBranchName = (gitRunner, repo) => defaultBranch(gitRunner, repo)?.name ?? null;
+
+// The default branch as this repo sees it: the local branch of that name where it
+// exists, then the remote-tracking copy. Never the checkout — during a port that is
+// the branch the caller is asking about.
+function defaultCommits(repo, gitRunner) {
+  const found = defaultBranch(gitRunner, repo);
+  if (!found) return [];
+  const commits = [];
+  for (const ref of [`refs/heads/${found.name}`, `refs/remotes/${found.remote}/${found.name}`]) {
+    const r = gitOf(gitRunner, ["rev-parse", "--verify", `${ref}^{commit}`], repo);
+    if (r.status === 0 && r.stdout && !commits.includes(r.stdout)) commits.push(r.stdout);
+  }
+  return commits;
 }
 
 // The default branch and the checked-out branch: where work lands. Remote refs
@@ -179,20 +208,22 @@ export function absorbed(base, branch, repo, gitRunner) {
 
 // True only when the default branch holds `sha` or absorbs it — never any other ref,
 // so a pushed-but-unmerged feature branch reads unlanded. Fail-closed: an unreadable
-// sha or a git error is false, the safe answer for a caller deciding what may be lost.
+// sha, a repo whose remotes name no default branch, or a git error is false, the safe
+// answer for a caller deciding what may be lost.
 export function landedOnDefault(sha, repo, { prefix, gitRunner } = {}) {
   if (typeof prefix !== "string" || !prefix) throw new TypeError("landedOnDefault requires the branch prefix");
   if (typeof gitRunner !== "function") throw new TypeError("landedOnDefault requires a gitRunner");
   try {
     const commit = gitOf(gitRunner, ["rev-parse", "--verify", `${sha}^{commit}`], repo);
     if (commit.status !== 0 || !commit.stdout) return false;
-    // The first candidate base is origin/HEAD's target whenever a remote exists.
-    const base = candidateBases(repo, prefix, gitRunner)[0];
-    if (!base) return false;
-    const contains = gitOf(gitRunner, ["merge-base", "--is-ancestor", commit.stdout, base], repo);
-    if (contains.status === 0) return true;
-    if (contains.status !== 1) return false;
-    return absorbed(base, commit.stdout, repo, gitRunner);
+    const bases = defaultCommits(repo, gitRunner);
+    if (!bases.length) return false;
+    for (const base of bases) {
+      const contains = gitOf(gitRunner, ["merge-base", "--is-ancestor", commit.stdout, base], repo);
+      if (contains.status === 0) return true;
+      if (contains.status !== 1) return false;
+    }
+    return bases.some((base) => absorbed(base, commit.stdout, repo, gitRunner));
   } catch {
     return false;
   }

@@ -7,9 +7,9 @@ import { enginePath, runsKeyFor } from "./config.mjs";
 import { realRepoToplevel } from "./manifest-leaf-guard.mjs";
 import { inLeafOrAutonomous, projectRunsHoldingWorktrees } from "./prune-nudge.mjs";
 import { blockers, checkoutBase, plan, runForPrune } from "./prune.mjs";
-import { absorbed } from "./landed.mjs";
+import { absorbed, defaultBranchName } from "./landed.mjs";
 import { portInProgress } from "./port-complete.mjs";
-import { appendTaken, readTaken, refreshTaken } from "./taken.mjs";
+import { appendTaken, readTaken, refreshTaken, takenKey } from "./taken.mjs";
 import { runLiveness } from "./runlog.mjs";
 import { listTreeRecords } from "./worktree.mjs";
 import { normalizeForCompare } from "./roots.mjs";
@@ -136,20 +136,21 @@ export function candidateRuns({ home, toplevel, sessionId, touched = [], cfg, fs
 
 // Those runs measured with `plan()` against the porting checkout's HEAD. Silent unless a
 // run is wholly provable.
-export function portedRuns({ home, toplevel, sessionId, base, branch, portingTree, touched = [], cfg, git, fs, spawnSync, budgetMs = 20_000, dirs }) {
+export function portedRuns({ home, toplevel, sessionId, base, branch, portingTree, touched = [], cfg, git, fs, spawnSync, budgetMs = 20_000, dirs, taken, buildRun }) {
   const measured = (dirs ?? candidateRuns({ home, toplevel, sessionId, touched, cfg, fs }))
     .filter((dir) => !alreadyPortNudged(dir, sessionId, fs));
-  const taken = measured.length ? readTaken({ home, toplevel, fs }) : new Map();
+  const records = taken ?? (measured.length ? readTaken({ home, toplevel, fs }) : new Map());
+  const build = buildRun ?? ((dir) => runForPrune(dir, { fs, spawnSync }));
 
   const startedMs = Date.now();
   const out = [];
   for (const dir of measured) {
     // The 30 s hook timeout is the hard edge; this keeps a many-run repo from reaching it.
     if (Date.now() - startedMs > budgetMs) break;
-    const built = runForPrune(dir, { fs, spawnSync });
+    const built = build(dir);
     if (built.error) continue;
     const planned = plan(built.run, git, fs, {
-      cfg, extraBases: [base], measureBytes: false, stopAtBlocker: true, deadline: startedMs + budgetMs, taken,
+      cfg, extraBases: [base], measureBytes: false, stopAtBlocker: true, deadline: startedMs + budgetMs, taken: records,
     });
     // A stopped plan proves nothing; the run is measured again on the next port verb.
     if (planned.stopped) continue;
@@ -192,44 +193,25 @@ export function isPortPayload(payload, env = {}) {
 const RECORD_LANE_CAP = 12;
 const RECORD_MIN_BUDGET_MS = 10_000;
 
-// A remote's HEAD is the name git records for a repo's default branch, and a clone's remote
-// need not be called `origin`. With no remote at all the answer is null and a port onto the
-// landing branch records anyway: a stray line costs a read, while a wrong skip would lose
-// the proof this hook exists to keep.
-function defaultBranchName(git, tree) {
-  const heads = git(["for-each-ref", "--format=%(refname) %(symref)", "refs/remotes"], tree);
-  if (heads.status !== 0 || !heads.stdout) return null;
-  for (const line of heads.stdout.split(/\r?\n/)) {
-    const [ref, target] = line.trim().split(/\s+/);
-    const m = /^refs\/remotes\/[^/]+\/(.+)$/.exec(target || "");
-    if (ref?.endsWith("/HEAD") && m) return m[1];
-  }
-  return null;
-}
-
 // The proof decays: a lane absorbed by this checkout's HEAD is unprovable once the branch
-// is rewritten, so it is written down while git can still answer — one record per lane,
-// at most RECORD_LANE_CAP per firing, and none once too little of the budget is left.
-// Every kept tree of every run considered, never `plan()`'s rows: a run with one lane still
-// unported proves nothing to the nudge line yet still holds lanes this HEAD did port.
-// checkoutBase has already refused a detached HEAD and any swarm branch. Every failure
-// costs recall, never the turn.
-function recordPorts({ home, toplevel, tree, into, base, dirs, git, fs, spawnSync, startedMs, budgetMs }) {
+// is rewritten, so it is written down while git can still answer.
+function recordPorts({ home, toplevel, tree, into, base, dirs, git, fs, buildRun, taken, startedMs, budgetMs }) {
   if (!into || into === defaultBranchName(git, tree)) return;
   if (portInProgress(tree, git)) return;
-  refreshTaken({ home, toplevel, into, head: base, git, fs });
-  if (!dirs.length) return;
-  const known = readTaken({ home, toplevel, fs });
+  const deadline = startedMs + budgetMs - RECORD_MIN_BUDGET_MS;
+  refreshTaken({ home, toplevel, into, head: base, git, fs, known: taken, deadline });
+  if (!dirs.length || Date.now() >= deadline) return;
+  const known = taken;
   let left = RECORD_LANE_CAP;
   for (const dir of dirs) {
-    const built = runForPrune(dir, { fs, spawnSync });
+    const built = buildRun(dir);
     if (built.error) continue;
     const name = basename(dir);
     for (const row of built.run.worktreesKept) {
       if (!row.branch || !row.repo) continue;
-      const key = `${name}\n${row.branch}`;
+      const key = takenKey({ run: name, repo: row.repo, branch: row.branch });
       if (known.has(key)) continue;
-      if (left <= 0 || budgetMs - (Date.now() - startedMs) < RECORD_MIN_BUDGET_MS) return;
+      if (left <= 0 || Date.now() >= deadline) return;
       try {
         const tip = git(["rev-parse", "--verify", `${row.branch}^{commit}`], row.repo);
         if (tip.status !== 0 || !tip.stdout) continue;
@@ -279,6 +261,13 @@ export function runPortNudge({ payload, env = {}, config, home, git, spawn, fs, 
   const startedMs = Date.now();
   const touched = readTouched({ home, sessionId, fs });
   const dirs = candidateRuns({ home, toplevel, sessionId, touched, cfg: config, fs });
+  // One read of the taken log, one build per run: the nudge line and the record share both.
+  const taken = readTaken({ home, toplevel, fs });
+  const built = new Map();
+  const buildRun = (dir) => {
+    if (!built.has(dir)) built.set(dir, runForPrune(dir, { fs, spawnSync: spawn }));
+    return built.get(dir);
+  };
   const runs = portedRuns({
     home,
     toplevel,
@@ -293,10 +282,12 @@ export function runPortNudge({ payload, env = {}, config, home, git, spawn, fs, 
     spawnSync: spawn,
     budgetMs,
     dirs,
+    taken,
+    buildRun,
   });
   // Recorded before the silence test: a run already nudged this session still needs its
   // witness refreshed, and a partly ported run still holds lanes this HEAD did port.
-  try { recordPorts({ home, toplevel, tree, into: branch, base, dirs, git, fs, spawnSync: spawn, startedMs, budgetMs }); } catch { /* a lost record costs recall, never the turn */ }
+  try { recordPorts({ home, toplevel, tree, into: branch, base, dirs, git, fs, buildRun, taken, startedMs, budgetMs }); } catch { /* a lost record costs recall, never the turn */ }
   if (!runs.length) return "";
 
   const additionalContext = runs.map(portReason).join("\n");

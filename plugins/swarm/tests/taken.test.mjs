@@ -8,10 +8,10 @@ import * as fs from "node:fs";
 import { mkdirSync, statSync, existsSync, readFileSync, writeFileSync, renameSync, rmSync } from "node:fs";
 import { join, resolve, sep } from "node:path";
 import { spawn } from "node:child_process";
-import { takenLogPath, appendTaken, readTaken, refreshTaken, takenVerdict } from "../src/taken.mjs";
+import { takenLogPath, appendTaken, readTaken, refreshTaken, takenKey, takenVerdict } from "../src/taken.mjs";
 import { portInProgress } from "../src/port-complete.mjs";
 import { landedOnDefault } from "../src/landed.mjs";
-import { portFixture, must, writeCommit, git } from "./helpers/port-fixture.mjs";
+import { portFixture, must, writeCommit, git, publishDefault } from "./helpers/port-fixture.mjs";
 import { initRepo } from "./helpers/worktree-fixtures.mjs";
 
 const PREFIX = "swarm/";
@@ -29,6 +29,8 @@ const rec = (over = {}) => ({
   at: "2026-01-01T00:00:00.000Z",
   ...over,
 });
+
+const key = (run, branch, repo = "/repo") => takenKey({ run, repo, branch });
 
 function withFixture(fn) {
   const f = portFixture();
@@ -171,9 +173,9 @@ test("row 5: readTaken keeps the newest line per (run, lane) across .1 and the l
   appendTaken({ home: f.home, toplevel: f.toplevel, fs, records: [rec({ intoTip: "new" })] });
 
   const map = readTaken({ home: f.home, toplevel: f.toplevel, fs });
-  equal(map.get("run-a\nswarm/run-a/leaf").intoTip, "new", "the live log wins over the rotation");
-  equal(map.get("run-b\nswarm/run-b/leaf").intoTip, "only-b", "a line only the rotation holds is still read");
-  equal(map.has("run-gone\nswarm/run-gone/leaf"), false, "a run whose dir is gone is history, not a record");
+  equal(map.get(key("run-a", "swarm/run-a/leaf")).intoTip, "new", "the live log wins over the rotation");
+  equal(map.get(key("run-b", "swarm/run-b/leaf")).intoTip, "only-b", "a line only the rotation holds is still read");
+  equal(map.has(key("run-gone", "swarm/run-gone/leaf")), false, "a run whose dir is gone is history, not a record");
 
   const before = readFileSync(log, "utf8");
   appendTaken({ home: f.home, toplevel: f.toplevel, fs, records: [rec({ run: "run-b", branch: "swarm/run-b/other" })] });
@@ -201,11 +203,11 @@ test("row 6: refreshTaken moves only records on the branch, along descent", () =
   refreshTaken({ home: f.home, toplevel: f.toplevel, into: "feature", head: c2, git: f.git, fs });
 
   const map = readTaken({ home: f.home, toplevel: f.toplevel, fs });
-  const a = map.get("run-a\nswarm/run-a/leaf");
+  const a = map.get(key("run-a", "swarm/run-a/leaf"));
   equal(a.intoTip, c2, "a descendant head moves intoTip");
   equal(a.portCommit, "port", "portCommit is the original witness and never changes");
-  equal(map.get("run-b\nswarm/run-b/leaf").intoTip, c1, "another branch's record is untouched");
-  equal(map.get("run-c\nswarm/run-c/leaf").intoTip, c3, "a head below intoTip is a reset, not a refresh");
+  equal(map.get(key("run-b", "swarm/run-b/leaf")).intoTip, c1, "another branch's record is untouched");
+  equal(map.get(key("run-c", "swarm/run-c/leaf")).intoTip, c3, "a head below intoTip is a reset, not a refresh");
   equal(logLines(log).length, lines + 1, "exactly one refresh line is appended");
 
   refreshTaken({ home: f.home, toplevel: f.toplevel, into: "feature", head: c2, git: f.git, fs });
@@ -222,6 +224,7 @@ test("row 7: takenVerdict reads the target's tip, then the recorded tip, against
   const review = must(["rev-parse", "HEAD"], b);
   must(["merge", "-q", "--squash", "feature"], f.repo);
   must(["commit", "-qm", "squash feature"], f.repo);
+  publishDefault(f.repo);
   const verdict = (record, laneTip = lane.sha, gitRunner = f.git) =>
     takenVerdict({ record, laneTip, repo: f.toplevel, prefix: PREFIX, gitRunner });
 
@@ -251,8 +254,36 @@ test("row 7: takenVerdict reads the target's tip, then the recorded tip, against
 test("row 8: landedOnDefault is true for a commit the default branch contains", () => withRepo((repo) => {
   writeCommit(repo, "a.txt", "main work\n", "main work");
   const tip = must(["rev-parse", "HEAD"], repo);
+  publishDefault(repo);
 
   equal(landedOnDefault(tip, repo, OPTS), true);
+}));
+
+// The default branch is named by a remote HEAD alone. The checkout during a port IS the
+// port branch, so reading it as the default measures the branch against itself and frees
+// a lane whose work never landed — on an irreversible delete.
+test("row 8: with no remote there is no default branch, and a taken lane stays unlanded", () => withRepo((repo) => {
+  must(["checkout", "-q", "-b", "feat"], repo);
+  writeCommit(repo, "feat.txt", "feat work\n", "feat work");
+  const tip = must(["rev-parse", "HEAD"], repo);
+  const record = rec({ repo, into: "feat", portCommit: must(["rev-parse", "HEAD~1"], repo), intoTip: tip });
+
+  equal(landedOnDefault(tip, repo, OPTS), false, "the checkout is not a default branch");
+  const v = takenVerdict({ record, laneTip: record.laneTip, repo, prefix: PREFIX, gitRunner: git });
+  equal(v.landed, false, "a lane taken into the checkout's own branch is not landed");
+}));
+
+test("row 8: the remote naming the default branch need not be origin", () => withRepo((repo) => {
+  must(["checkout", "-q", "-b", "feat"], repo);
+  writeCommit(repo, "feat.txt", "feat work\n", "feat work");
+  must(["checkout", "-q", "main"], repo);
+  writeCommit(repo, "landed.txt", "landed work\n", "landed work");
+  const landed = must(["rev-parse", "HEAD"], repo);
+  publishDefault(repo, { remote: "upstream" });
+  must(["checkout", "-q", "feat"], repo);
+  equal(git(["merge-base", "--is-ancestor", landed, "HEAD"], repo).status, 1, "HEAD is on the port branch");
+
+  equal(landedOnDefault(landed, repo, OPTS), true, "upstream's HEAD names the default branch");
 }));
 
 test("row 8: landedOnDefault is true for a commit the default branch absorbs", () => withRepo((repo) => {
@@ -263,6 +294,7 @@ test("row 8: landedOnDefault is true for a commit the default branch absorbs", (
   must(["checkout", "-q", "main"], repo);
   must(["merge", "-q", "--squash", "swarm/leaf"], repo);
   must(["commit", "-qm", "squash leaf"], repo);
+  publishDefault(repo);
   ok(must(["rev-parse", "HEAD"], repo) !== laneTip, "precondition: the squash is a new commit");
 
   equal(landedOnDefault(laneTip, repo, OPTS), true);
@@ -278,6 +310,7 @@ test("row 8: a commit only a non-default local ref holds is not landed", () => w
 }));
 
 test("row 13(a): a branch pushed but never merged is not landed", () => withRepo((repo) => {
+  publishDefault(repo);
   must(["checkout", "-q", "-b", "feat", "main"], repo);
   writeCommit(repo, "feat.txt", "feat work\n", "feat work");
   const featTip = must(["rev-parse", "HEAD"], repo);
@@ -398,6 +431,6 @@ test("row 14: past 1 MB the log rotates to .1 and readers see both", () => withF
   ok(existsSync(`${log}.1`), "the full log is rotated aside");
   ok(statSync(log).size < 1024, "the live log restarts with the new line");
   const map = readTaken({ home: f.home, toplevel: f.toplevel, fs });
-  equal(map.get("old-run\nswarm/old-run/leaf").intoTip, "old", "rotation keeps the older lines readable");
-  equal(map.get("new-run\nswarm/new-run/leaf").intoTip, "c".repeat(40));
+  equal(map.get(key("old-run", "swarm/old-run/leaf")).intoTip, "old", "rotation keeps the older lines readable");
+  equal(map.get(key("new-run", "swarm/new-run/leaf")).intoTip, "c".repeat(40));
 }));

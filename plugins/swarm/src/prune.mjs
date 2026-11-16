@@ -1,7 +1,7 @@
 import { join, resolve, dirname, basename } from "node:path";
 import { existsSync, readdirSync } from "node:fs";
 import { unlandedCount, isSwarmRef } from "./landed.mjs";
-import { takenVerdict } from "./taken.mjs";
+import { takenKey, takenVerdict } from "./taken.mjs";
 import { treeDirFor, runOfTree, listTreeRecords, legacyTreeDirs, treeRecordPath, treeRootFor, runScopeKey } from "./worktree.mjs";
 import { isUnderRoot, normalizeForCompare } from "./roots.mjs";
 import { getConfig } from "./config.mjs";
@@ -251,7 +251,7 @@ export function plan(run, git, fs, { cfg, extraBases, measureBytes, stopAtBlocke
   const runName = taken && run.resultsDir ? basename(resolve(run.resultsDir)) : null;
   const applyTaken = (row) => {
     if (!runName || !row.branch || !(row.unlanded > 0)) return row;
-    const record = taken.get(`${runName}\n${row.branch}`);
+    const record = taken.get(takenKey({ run: runName, repo: row.repo, branch: row.branch }));
     if (!record) return row;
     const tip = git(["rev-parse", "--verify", `${row.branch}^{commit}`], row.repo);
     const laneTip = tip.status === 0 && tip.stdout ? tip.stdout : null;
