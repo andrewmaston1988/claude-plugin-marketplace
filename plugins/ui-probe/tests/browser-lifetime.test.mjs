@@ -36,9 +36,10 @@ const fold = (path) => {
 };
 
 // The real listing: every process holding this exact profile, renderer children included.
-function holdersOf(profile) {
+async function holdersOf(profile) {
   const target = fold(profile);
-  return listProcesses().filter((entry) => {
+  const processes = await listProcesses();
+  return processes.filter((entry) => {
     const found = profileFromCommandLine(entry.cmd);
     return found != null && fold(found) === target;
   });
@@ -47,7 +48,7 @@ function holdersOf(profile) {
 async function nobodyHolds(profile, deadlineMs = HOLD_DEADLINE_MS) {
   const started = Date.now();
   for (;;) {
-    const holders = holdersOf(profile);
+    const holders = await holdersOf(profile);
     if (holders.length === 0) return;
     if (Date.now() - started >= deadlineMs) {
       assert.fail(`${holders.length} process(es) still hold ${profile}: ${JSON.stringify(holders)}`);

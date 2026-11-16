@@ -3,10 +3,13 @@
 // them. This module is the backstop. It finds browsers whose profile is ours, judges
 // ownership from a per-profile owner file, and stops the orphans in one batched call.
 
-import { spawnSync } from "node:child_process";
+import { execFile as execFileCallback } from "node:child_process";
+import { promisify } from "node:util";
 import { readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+
+const execFileAsync = promisify(execFileCallback);
 
 export const PROFILE_PREFIX = "ui-probe-profile-";
 export const OWNER_FILE = "ui-probe.owner";
@@ -20,6 +23,10 @@ export const REAP_BUDGET_MS = 5000;
 
 const PROCESS_QUERY_TIMEOUT_MS = 3000;
 const LOCK_TIMEOUT_MS = 5000;
+const MAX_BUFFER = 4 * 1024 * 1024;
+// Stop-Process returns before the process is gone, and a browser root takes its children with it.
+const KILL_SETTLE_TRIES = 5;
+const KILL_SETTLE_MS = 100;
 
 const DEFAULT_FS = { readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync };
 const BROWSER_NAME = /\b(?:msedge|chrome|chromium|brave)(?:\.exe)?\b/i;
@@ -93,21 +100,24 @@ export function isUiProbeProfile(profile, { tmpDir = tmpdir(), platform = proces
 
 // --- process listing ----------------------------------------------------------
 
-function runPowerShell(script, { _spawnSync = spawnSync, timeoutMs = REAP_BUDGET_MS, capture = true } = {}) {
+// Async on purpose: launch() caps the reap with a timer on this same event loop, and a
+// synchronous spawn would block that timer for as long as the child ran.
+async function runPowerShell(script, { _execFile = execFileAsync, timeoutMs = REAP_BUDGET_MS } = {}) {
   const args = ["-NoProfile", "-NonInteractive", "-Command", script];
-  const options = capture
-    ? { encoding: "utf8", windowsHide: true, timeout: timeoutMs }
-    : { stdio: "ignore", windowsHide: true, timeout: timeoutMs };
+  const options = { encoding: "utf8", windowsHide: true, timeout: timeoutMs, maxBuffer: MAX_BUFFER };
   let last;
   for (const exe of ["pwsh", "powershell"]) {
-    const result = _spawnSync(exe, args, options);
-    if (result?.error?.code === "ENOENT") {
-      last = result.error;
-      continue;
+    try {
+      const { stdout } = await _execFile(exe, args, options);
+      return stdout ?? "";
+    } catch (error) {
+      if (error?.code === "ENOENT") {
+        last = error;
+        continue;
+      }
+      if (typeof error?.code === "number") throw new Error(`${exe} exited ${error.code}`);
+      throw error;
     }
-    if (result?.error) throw result.error;
-    if (result?.status !== 0) throw new Error(`${exe} exited ${result?.status ?? "unknown"}`);
-    return result.stdout ?? "";
   }
   throw last ?? new Error("no PowerShell host available");
 }
@@ -135,12 +145,12 @@ function parseCimProcesses(stdout) {
 }
 
 /** Browser candidates only: server-side filter keeps the JSON small on a busy host. */
-export function listProcessesWindows({ _spawnSync = spawnSync, timeoutMs = LOCK_TIMEOUT_MS } = {}) {
-  const stdout = runPowerShell(
+export async function listProcessesWindows({ _execFile = execFileAsync, timeoutMs = LOCK_TIMEOUT_MS } = {}) {
+  const stdout = await runPowerShell(
     "Get-CimInstance Win32_Process " +
       "| Where-Object { $_.CommandLine -like '*ui-probe-profile-*' } " +
       "| Select-Object ProcessId,CommandLine | ConvertTo-Json -Compress",
-    { _spawnSync, timeoutMs },
+    { _execFile, timeoutMs },
   );
   return parseCimProcesses(stdout);
 }
@@ -161,15 +171,14 @@ function parsePsProcesses(stdout) {
   return processes;
 }
 
-export function listProcessesPosix({ _spawnSync = spawnSync, timeoutMs = LOCK_TIMEOUT_MS } = {}) {
-  const result = _spawnSync("ps", ["-eo", "pid,args"], {
+export async function listProcessesPosix({ _execFile = execFileAsync, timeoutMs = LOCK_TIMEOUT_MS } = {}) {
+  const { stdout } = await _execFile("ps", ["-eo", "pid,args"], {
     encoding: "utf8",
     windowsHide: true,
     timeout: timeoutMs,
+    maxBuffer: MAX_BUFFER,
   });
-  if (result?.error) throw result.error;
-  if (result?.status !== 0) throw new Error(`ps exited ${result?.status ?? "unknown"}`);
-  return parsePsProcesses(result.stdout ?? "");
+  return parsePsProcesses(stdout ?? "");
 }
 
 export function listProcesses({ platform = process.platform, ...options } = {}) {
@@ -178,32 +187,30 @@ export function listProcesses({ platform = process.platform, ...options } = {}) 
 
 /** Creation time of `pid` in epoch ms, or null when the OS cannot say. Never guess:
  *  a null here is what keeps a live browser safe from a reused-PID verdict. */
-export function queryProcessStart(pid, {
+export async function queryProcessStart(pid, {
   platform = process.platform,
-  _spawnSync = spawnSync,
+  _execFile = execFileAsync,
   timeoutMs = PROCESS_QUERY_TIMEOUT_MS,
 } = {}) {
   if (!Number.isInteger(pid) || pid <= 0) return null;
   if (platform === "win32") {
-    let stdout;
     try {
-      stdout = runPowerShell(
+      const stdout = await runPowerShell(
         `Get-CimInstance Win32_Process -Filter "ProcessId=${pid}" ` +
           "| ForEach-Object { $_.CreationDate.ToUniversalTime().ToString('o') }",
-        { _spawnSync, timeoutMs },
+        { _execFile, timeoutMs },
       );
+      return parseStartTime(stdout);
     } catch {
       return null;
     }
-    return parseStartTime(stdout);
   }
-  const result = _spawnSync("ps", ["-o", "lstart=", "-p", String(pid)], {
-    encoding: "utf8",
-    windowsHide: true,
-    timeout: timeoutMs,
-  });
-  if (result?.error || result?.status !== 0) return null;
-  return parseStartTime(result.stdout);
+  try {
+    const options = { encoding: "utf8", windowsHide: true, timeout: timeoutMs };
+    return parseStartTime((await _execFile("ps", ["-o", "lstart=", "-p", String(pid)], options)).stdout);
+  } catch {
+    return null;
+  }
 }
 
 function parseStartTime(text) {
@@ -215,49 +222,56 @@ function parseStartTime(text) {
 
 // --- killing ------------------------------------------------------------------
 
-/** One batched stop per platform: N orphans must not cost N process launches. */
-export function killPids(pids, {
-  platform = process.platform,
-  _spawnSync = spawnSync,
-  _kill = process.kill,
-  timeoutMs = LOCK_TIMEOUT_MS,
-} = {}) {
+function parseIds(text) {
+  return String(text ?? "")
+    .split(/[\s,]+/)
+    .map((part) => Number(part))
+    .filter((pid) => Number.isInteger(pid) && pid > 0);
+}
+
+// One invocation, and it reads the survivors back: Stop-Process exits 0 even for a process it
+// could not stop, so the exit code alone would report kills that never happened.
+function stopScript(ids) {
+  return `$ids = @(${ids.join(",")}); Stop-Process -Id $ids -Force -ErrorAction SilentlyContinue; ` +
+    `$alive = @(); for ($i = 0; $i -lt ${KILL_SETTLE_TRIES}; $i++) { ` +
+    "$alive = @($ids | Where-Object { Get-Process -Id $_ -ErrorAction SilentlyContinue } | ForEach-Object { $_.Id }); " +
+    `if ($alive.Count -eq 0) { break }; Start-Sleep -Milliseconds ${KILL_SETTLE_MS} }; $alive -join ','`;
+}
+
+/** One batched stop per platform: N orphans must not cost N process launches. Only PIDs the
+ *  call verified gone are reported killed; a survivor keeps its profile folder. */
+export async function killPids(pids, { platform = process.platform, _execFile = execFileAsync, _kill = process.kill, _alive = pidAlive, timeoutMs = LOCK_TIMEOUT_MS } = {}) {
   const ids = [...new Set((pids ?? []).filter((pid) => Number.isInteger(pid) && pid > 0))];
-  if (ids.length === 0) return { killed: [] };
+  if (ids.length === 0) return { killed: [], failed: [] };
+  const split = (survivors) => ({
+    killed: ids.filter((pid) => !survivors.has(pid)),
+    failed: ids.filter((pid) => survivors.has(pid)),
+  });
   if (platform === "win32") {
-    // Validated integers cannot inject into the script; -Id takes the whole list.
-    runPowerShell(`Stop-Process -Id ${ids.join(",")} -Force -ErrorAction SilentlyContinue`, {
-      _spawnSync,
-      timeoutMs,
-      capture: false,
-    });
-    return { killed: ids };
-  }
-  for (const pid of ids) {
     try {
-      _kill(pid, "SIGKILL");
+      const wanted = new Set(ids);
+      const stdout = await runPowerShell(stopScript(ids), { _execFile, timeoutMs });
+      return split(new Set(parseIds(stdout).filter((pid) => wanted.has(pid))));
     } catch {
-      // Already gone: nothing to report.
+      // Unverified is not killed: claim nothing and let the next reap retry.
+      return { killed: [], failed: ids };
     }
   }
-  return { killed: ids };
+  for (const pid of ids) {
+    try { _kill(pid, "SIGKILL"); } catch { /* already gone: the survivor check is the verdict */ }
+  }
+  return split(new Set(ids.filter((pid) => _alive(pid))));
 }
 
 /** Stop the browser holding exactly `profile`. Best effort: the caller is already
  *  failing for another reason, and the next launch's reaper is the backstop. */
-export async function killBrowserForProfile(profile, {
-  _list = listProcesses,
-  _kill = killPids,
-  platform = process.platform,
-  timeoutMs = REAP_BUDGET_MS,
-  _spawnSync = spawnSync,
-} = {}) {
+export async function killBrowserForProfile(profile, { _list = listProcesses, _kill = killPids, platform = process.platform, timeoutMs = REAP_BUDGET_MS, _execFile = execFileAsync } = {}) {
   const target = foldPath(profile, platform);
   let processes;
   try {
-    processes = await _list({ platform, timeoutMs, _spawnSync });
+    processes = await _list({ platform, timeoutMs, _execFile });
   } catch {
-    return { killed: [] };
+    return { killed: [], failed: [] };
   }
   const pids = [];
   for (const entry of Array.isArray(processes) ? processes : []) {
@@ -267,20 +281,29 @@ export async function killBrowserForProfile(profile, {
     const found = profileFromCommandLine(commandLine);
     if (found && foldPath(found, platform) === target) pids.push(entry.pid);
   }
-  if (pids.length === 0) return { killed: [] };
+  if (pids.length === 0) return { killed: [], failed: [] };
   try {
-    return await _kill(pids, { platform, timeoutMs, _spawnSync });
+    return await _kill(pids, { platform, timeoutMs, _execFile });
   } catch {
-    return { killed: [] };
+    return { killed: [], failed: pids };
   }
 }
 
 // --- ownership verdicts -------------------------------------------------------
 
-function ownerStillAlive(owner, { isAlive, queryStart, toleranceMs }) {
+async function ownerStillAlive(owner, {
+  isAlive,
+  queryStart,
+  toleranceMs,
+  selfPid = process.pid,
+  selfStartMs = ownerStartMs(),
+}) {
   if (!owner) return false;
   if (!isAlive(owner.pid)) return false;
-  const start = queryStart(owner.pid);
+  // Our own pid needs no process spawn: the owner file we wrote carries the start time we
+  // already know, and a launch that runs twice would otherwise pay a lister for its own profile.
+  if (owner.pid === selfPid) return Math.abs(selfStartMs - owner.startMs) <= toleranceMs;
+  const start = await queryStart(owner.pid);
   if (start == null) return true; // unknown start: a live PID is not grounds to kill
   return Math.abs(start - owner.startMs) <= toleranceMs;
 }
@@ -296,13 +319,22 @@ function candidateFromProcess(entry, { tmpDir, platform }) {
   return { pid: entry.pid, profile };
 }
 
-function candidateVerdict(candidate, { fs, now, graceMs, toleranceMs, isAlive, queryStart }) {
+async function candidateVerdict(candidate, {
+  fs,
+  now,
+  graceMs,
+  toleranceMs,
+  isAlive,
+  queryStart,
+  selfPid,
+  selfStartMs,
+}) {
   const owner = readOwnerFile(candidate.profile, { fs });
   if (owner) {
-    if (!ownerStillAlive(owner, { isAlive, queryStart, toleranceMs })) return "orphan";
-    return "live";
+    const alive = await ownerStillAlive(owner, { isAlive, queryStart, toleranceMs, selfPid, selfStartMs });
+    return alive ? "live" : "orphan";
   }
-  const browserStart = queryStart(candidate.pid);
+  const browserStart = await queryStart(candidate.pid);
   if (browserStart == null) return "unknown";
   return now - browserStart > graceMs ? "orphan" : "young";
 }
@@ -332,7 +364,7 @@ function listProfileDirs(fs, tmpDir) {
 /** The pre-scan that keeps a clean machine from paying for a process listing.
  *  Skipping is only sound when nothing could be acted on: every owner alive and
  *  every folder still inside the grace. */
-export function preScanProfiles({
+export async function preScanProfiles({
   fs = DEFAULT_FS,
   now = Date.now,
   tmpDir = tmpdir(),
@@ -340,14 +372,15 @@ export function preScanProfiles({
   toleranceMs = START_TOLERANCE_MS,
   isAlive = pidAlive,
   queryStart = queryProcessStart,
+  selfPid = process.pid,
+  selfStartMs = ownerStartMs(),
 } = {}) {
   const profiles = listProfileDirs(fs, tmpDir);
   if (!profiles) return { skip: false, reason: "unreadable" };
   for (const profile of profiles) {
     const owner = readOwnerFile(profile.path, { fs });
-    if (!ownerStillAlive(owner, { isAlive, queryStart, toleranceMs })) {
-      return { skip: false, reason: owner ? "owner-gone" : "no-owner" };
-    }
+    const alive = await ownerStillAlive(owner, { isAlive, queryStart, toleranceMs, selfPid, selfStartMs });
+    if (!alive) return { skip: false, reason: owner ? "owner-gone" : "no-owner" };
     if (now() - profile.mtimeMs > graceMs) return { skip: false, reason: "stale" };
   }
   return { skip: true, reason: profiles.length === 0 ? "clean" : "owned" };
@@ -404,19 +437,19 @@ export async function reapOrphans({
 } = {}) {
   const started = now();
 
-  const prescan = preScanProfiles({ fs, now, tmpDir, graceMs, toleranceMs, isAlive, queryStart });
+  const prescan = await preScanProfiles({ fs, now, tmpDir, graceMs, toleranceMs, isAlive, queryStart });
   if (prescan.skip) {
-    return { skipped: "prescan", killed: [], swept: [], elapsedMs: now() - started };
+    return { skipped: "prescan", killed: [], failed: [], swept: [], elapsedMs: now() - started };
   }
 
   let processes;
   try {
     processes = await list({ platform, timeoutMs });
   } catch {
-    return { skipped: "listing-failed", killed: [], swept: [], elapsedMs: now() - started };
+    return { skipped: "listing-failed", killed: [], failed: [], swept: [], elapsedMs: now() - started };
   }
   if (!Array.isArray(processes)) {
-    return { skipped: "listing-failed", killed: [], swept: [], elapsedMs: now() - started };
+    return { skipped: "listing-failed", killed: [], failed: [], swept: [], elapsedMs: now() - started };
   }
 
   const candidates = [];
@@ -427,22 +460,32 @@ export async function reapOrphans({
 
   const orphans = [];
   for (const candidate of candidates) {
-    const verdict = candidateVerdict(candidate, { fs, now: now(), graceMs, toleranceMs, isAlive, queryStart });
+    const verdict = await candidateVerdict(candidate, {
+      fs,
+      now: now(),
+      graceMs,
+      toleranceMs,
+      isAlive,
+      queryStart,
+    });
     if (verdict === "orphan") orphans.push(candidate.pid);
   }
 
   let killed = [];
+  let failed = [];
   if (orphans.length > 0) {
     try {
       const result = await kill(orphans, { platform, timeoutMs });
-      killed = Array.isArray(result?.killed) ? result.killed : orphans;
+      killed = Array.isArray(result?.killed) ? result.killed : [];
+      failed = Array.isArray(result?.failed) ? result.failed : orphans.filter((pid) => !killed.includes(pid));
     } catch {
       // Best effort: a failed kill must not fail the launch. The next reap retries.
+      failed = orphans;
     }
   }
 
   const stopped = new Set(killed);
   const liveProfiles = candidates.filter((candidate) => !stopped.has(candidate.pid)).map((c) => c.profile);
   const swept = sweepProfiles({ fs, now, tmpDir, platform, graceMs, liveProfiles }).removed;
-  return { skipped: null, killed, swept, elapsedMs: now() - started };
+  return { skipped: null, killed, failed, swept, elapsedMs: now() - started };
 }

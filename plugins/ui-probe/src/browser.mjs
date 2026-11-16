@@ -82,12 +82,11 @@ async function devtoolsPort(profile, child, { _fs, _sleep }) {
 /** Best-effort reap. A lister that throws or overruns is the next launch's problem, not this one's. */
 async function reapWithinBudget(_reap, budgetMs) {
   let timer;
+  // A reap that rejects is this launch's best-effort skip, never its failure.
+  const reap = Promise.resolve().then(() => _reap()).catch(() => {});
   try {
-    await Promise.race([
-      Promise.resolve().then(() => _reap()),
-      new Promise((resolve) => { timer = setTimeout(resolve, budgetMs); }),
-    ]);
-  } catch { /* orphan cleanup is never a launch failure */ } finally {
+    await Promise.race([reap, new Promise((resolve) => { timer = setTimeout(resolve, budgetMs); })]);
+  } finally {
     clearTimeout(timer);
   }
 }
@@ -131,6 +130,8 @@ export async function launch({
     // only thing that says this profile still has a live probe behind it.
     _writeOwner(profile);
 
+    // --remote-debugging-pipe answered no CDP frame on Windows Edge while the browser was alive,
+    // so the transport cannot own the browser's lifetime; the reaper is the backstop instead.
     const args = [
       "--headless=new", "--remote-debugging-port=0", `--user-data-dir=${profile}`,
       "--no-first-run", "--no-default-browser-check", "--disable-extensions", "--disable-gpu",

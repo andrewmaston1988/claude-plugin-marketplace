@@ -221,23 +221,60 @@ test("row 5: a listing that failed or cannot be parsed skips the sweep", async (
   }
 });
 
+test("row 5: a browser that survived the stop keeps its profile from the sweep", async (t) => {
+  const dir = tempRoot(t);
+  const profile = profileFolder(dir, "survivor");
+  writeOwnerFile(profile, { pid: 9001, startMs: 1_000 });
+  aged(profile); // after the owner file, which would otherwise refresh the folder's mtime
+  const result = await reapOrphans({
+    tmpDir: dir,
+    listProcesses: () => [{ pid: 4001, cmd: cmdFor(profile) }],
+    kill: () => ({ killed: [], failed: [4001] }),
+    isAlive: () => false,
+    queryStart: () => null,
+  });
+  assert.deepEqual(result.killed, []);
+  assert.deepEqual(result.failed, [4001]);
+  assert.ok(existsSync(profile), "a browser reported as a survivor still holds its folder");
+});
+
 // --- row 8: batched kills -----------------------------------------------------
 
-test("row 8: N orphans reach one Stop-Process invocation on Windows", () => {
+test("row 8: N orphans reach one Stop-Process invocation on Windows", async () => {
   const calls = [];
   const pids = Array.from({ length: 19 }, (_, i) => 100 + i);
-  const result = killPids(pids, {
+  const result = await killPids(pids, {
     platform: "win32",
-    _spawnSync: (exe, args, options) => {
+    _execFile: async (exe, args, options) => {
       calls.push({ exe, args, options });
-      return { status: 0 };
+      return { status: 0, stdout: "" };
     },
   });
   assert.equal(calls.length, 1);
   assert.equal(calls[0].exe, "pwsh");
-  assert.match(calls[0].args[3], /Stop-Process -Id 100,101,/);
-  assert.equal(calls[0].options.stdio, "ignore");
+  assert.match(calls[0].args[3], /Stop-Process -Id \$ids/);
+  assert.match(calls[0].args[3], /\$ids = @\(100,101,/);
+  assert.match(calls[0].args[3], /Get-Process -Id/, "the same call reads the survivors back");
   assert.deepEqual(result.killed, pids);
+  assert.deepEqual(result.failed, []);
+});
+
+test("row 8: a PID that survives the stop is reported failed, not killed", async () => {
+  const result = await killPids([100, 101, 102], {
+    platform: "win32",
+    _execFile: async () => ({ stdout: "101\n" }),
+  });
+  assert.deepEqual(result.killed, [100, 102]);
+  assert.deepEqual(result.failed, [101]);
+});
+
+test("row 8: a stop that cannot be verified claims no kills", async () => {
+  const result = await killPids([100, 101], {
+    platform: "win32",
+    _execFile: async () => { throw Object.assign(new Error("pwsh exited 1"), { code: 1 }); },
+  });
+  assert.deepEqual(result.killed, []);
+  assert.deepEqual(result.failed, [100, 101]);
 });
 
 test("row 8: the 19-browser reap batches its kill and stays inside the budget", async (t) => {
@@ -265,10 +302,15 @@ test("row 8: the 19-browser reap batches its kill and stays inside the budget", 
   assert.ok(result.elapsedMs < 5000);
 });
 
-test("row 8: elsewhere the kill is one loop over the same PIDs", () => {
+test("row 8: elsewhere the kill is one loop over the same PIDs", async () => {
   const killed = [];
-  killPids([21, 21, 22, 0, -1, 1.5], { platform: "linux", _kill: (pid, signal) => killed.push([pid, signal]) });
+  const result = await killPids([21, 21, 22, 0, -1, 1.5], {
+    platform: "linux",
+    _kill: (pid, signal) => killed.push([pid, signal]),
+    _alive: () => false,
+  });
   assert.deepEqual(killed, [[21, "SIGKILL"], [22, "SIGKILL"]]);
+  assert.deepEqual(result.killed, [21, 22]);
 });
 
 // --- row 9: the pre-scan ------------------------------------------------------
@@ -288,8 +330,22 @@ test("row 9: a clean pre-scan never reaches the lister", async (t) => {
   assert.equal((await reapOrphans({ ...base, tmpDir: owned })).skipped, "prescan");
   assert.equal((await reapOrphans({ ...base, tmpDir: empty })).skipped, "prescan");
   assert.equal(listed, 0);
-  assert.equal(preScanProfiles({ tmpDir: owned }).reason, "owned");
-  assert.equal(preScanProfiles({ tmpDir: empty }).reason, "clean");
+  const prescan = { isAlive: (pid) => pid === 9001, queryStart: () => 1_000 };
+  assert.equal((await preScanProfiles({ tmpDir: owned, ...prescan })).reason, "owned");
+  assert.equal((await preScanProfiles({ tmpDir: empty, ...prescan })).reason, "clean");
+});
+
+test("row 9: the caller's own owner file is read locally, with no process spawn", async (t) => {
+  const dir = tempRoot(t);
+  const profile = profileFolder(dir, "self");
+  writeOwnerFile(profile, { pid: process.pid, startMs: ownerStartMs() });
+  let queried = 0;
+  const result = await preScanProfiles({
+    tmpDir: dir,
+    queryStart: () => { queried += 1; return null; },
+  });
+  assert.equal(result.reason, "owned");
+  assert.equal(queried, 0, "our own pid's start time is already known");
 });
 
 test("row 9: one stale folder opens the gate to the lister", async (t) => {
@@ -310,87 +366,94 @@ test("row 9: one stale folder opens the gate to the lister", async (t) => {
 
 // --- listers and the owner-liveness query -------------------------------------
 
-test("the Windows lister parses both CIM shapes and refuses what it cannot read", () => {
-  const one = listProcessesWindows({
-    _spawnSync: (exe, args) => {
+test("the Windows lister parses both CIM shapes and refuses what it cannot read", async () => {
+  const one = await listProcessesWindows({
+    _execFile: async (exe, args) => {
       assert.equal(exe, "pwsh");
       assert.match(args[3], /Get-CimInstance Win32_Process/);
       assert.match(args[3], /ui-probe-profile-/);
-      return { status: 0, stdout: JSON.stringify({ ProcessId: 12, CommandLine: cmdFor("x") }) };
+      return { stdout: JSON.stringify({ ProcessId: 12, CommandLine: cmdFor("x") }) };
     },
   });
   assert.deepEqual(one, [{ pid: 12, cmd: cmdFor("x") }]);
-  const many = listProcessesWindows({
-    _spawnSync: () => ({
-      status: 0,
+  const many = await listProcessesWindows({
+    _execFile: async () => ({
       stdout: JSON.stringify([{ ProcessId: 1, CommandLine: "a" }, { ProcessId: 2, CommandLine: null }]),
     }),
   });
   assert.deepEqual(many, [{ pid: 1, cmd: "a" }, { pid: 2, cmd: "" }]);
-  assert.deepEqual(listProcessesWindows({ _spawnSync: () => ({ status: 0, stdout: "" }) }), []);
+  assert.deepEqual(await listProcessesWindows({ _execFile: async () => ({ stdout: "" }) }), []);
   // A command line carrying a raw control character is not valid JSON text, but it is still a
   // listing: refusing it would disable the reaper on any machine that has such a process.
-  const control = listProcessesWindows({
-    _spawnSync: () => ({ status: 0, stdout: '[{"ProcessId":3,"CommandLine":"x\u001ay"}]' }),
+  const control = await listProcessesWindows({
+    _execFile: async () => ({ stdout: '[{"ProcessId":3,"CommandLine":"x\u001ay"}]' }),
   });
   assert.deepEqual(control, [{ pid: 3, cmd: "x y" }]);
-  assert.throws(
-    () => listProcessesWindows({ _spawnSync: () => ({ status: 0, stdout: "not json" }) }),
+  await assert.rejects(
+    () => listProcessesWindows({ _execFile: async () => ({ stdout: "not json" }) }),
     /could not parse the process listing/,
   );
-  assert.throws(() => listProcessesWindows({ _spawnSync: () => ({ status: 1, stdout: "" }) }), /exited 1/);
+  await assert.rejects(
+    () => listProcessesWindows({ _execFile: async () => { throw Object.assign(new Error("failed"), { code: 1 }); } }),
+    /exited 1/,
+  );
 });
 
-test("the Windows lister falls back to powershell only when pwsh is absent", () => {
+test("the Windows lister falls back to powershell only when pwsh is absent", async () => {
   const seen = [];
-  listProcessesWindows({
-    _spawnSync: (exe) => {
+  await listProcessesWindows({
+    _execFile: async (exe) => {
       seen.push(exe);
-      if (exe === "pwsh") return { error: Object.assign(new Error("absent"), { code: "ENOENT" }) };
-      return { status: 0, stdout: "" };
+      if (exe === "pwsh") throw Object.assign(new Error("absent"), { code: "ENOENT" });
+      return { stdout: "" };
     },
   });
   assert.deepEqual(seen, ["pwsh", "powershell"]);
 });
 
-test("the POSIX lister parses ps output and refuses a listing it cannot read", () => {
+test("the POSIX lister parses ps output and refuses a listing it cannot read", async () => {
   const stdout = "  PID COMMAND\n   42 msedge --user-data-dir=/tmp/ui-probe-profile-a\n   43 chrome";
-  assert.deepEqual(listProcessesPosix({ _spawnSync: () => ({ status: 0, stdout }) }), [
+  assert.deepEqual(await listProcessesPosix({ _execFile: async () => ({ stdout }) }), [
     { pid: 42, cmd: "msedge --user-data-dir=/tmp/ui-probe-profile-a" },
     { pid: 43, cmd: "chrome" },
   ]);
-  assert.deepEqual(listProcessesPosix({ _spawnSync: () => ({ status: 0, stdout: "" }) }), []);
-  assert.throws(
-    () => listProcessesPosix({ _spawnSync: () => ({ status: 0, stdout: "garbage\n" }) }),
+  assert.deepEqual(await listProcessesPosix({ _execFile: async () => ({ stdout: "" }) }), []);
+  await assert.rejects(
+    () => listProcessesPosix({ _execFile: async () => ({ stdout: "garbage\n" }) }),
     /could not parse the process listing/,
   );
-  assert.throws(() => listProcessesPosix({ _spawnSync: () => ({ status: 1, stdout: "" }) }), /exited 1/);
+  await assert.rejects(
+    () => listProcessesPosix({ _execFile: async () => { throw new Error("ps failed"); } }),
+    /ps failed/,
+  );
 });
 
-test("the owner-liveness query reads the OS start time or returns unknown", () => {
+test("the owner-liveness query reads the OS start time or returns unknown", async () => {
   const iso = "2026-11-16T10:00:00.0000000Z";
-  const windows = queryProcessStart(456, {
+  const windows = await queryProcessStart(456, {
     platform: "win32",
-    _spawnSync: (exe, args) => {
+    _execFile: async (exe, args) => {
       assert.equal(exe, "pwsh");
       assert.match(args[3], /ProcessId=456/);
       assert.match(args[3], /CreationDate/);
-      return { status: 0, stdout: `${iso}\n` };
+      return { stdout: `${iso}\n` };
     },
   });
   assert.equal(windows, Date.parse(iso));
-  const linux = queryProcessStart(789, {
+  const linux = await queryProcessStart(789, {
     platform: "linux",
-    _spawnSync: (exe, args) => {
+    _execFile: async (exe, args) => {
       assert.equal(exe, "ps");
       assert.deepEqual(args, ["-o", "lstart=", "-p", "789"]);
-      return { status: 0, stdout: "Sun Nov 16 10:00:00 2026\n" };
+      return { stdout: "Sun Nov 16 10:00:00 2026\n" };
     },
   });
   assert.equal(linux, Date.parse("Sun Nov 16 10:00:00 2026"));
-  assert.equal(queryProcessStart(1, { platform: "linux", _spawnSync: () => ({ status: 1 }) }), null);
-  assert.equal(queryProcessStart(1, { platform: "win32", _spawnSync: () => ({ status: 0, stdout: "" }) }), null);
-  assert.equal(queryProcessStart(0, { platform: "linux", _spawnSync: () => { throw new Error("must not run"); } }), null);
+  const failed = async () => { throw new Error("ps exited 1"); };
+  assert.equal(await queryProcessStart(1, { platform: "linux", _execFile: failed }), null);
+  assert.equal(await queryProcessStart(1, { platform: "win32", _execFile: async () => ({ stdout: "" }) }), null);
+  const never = async () => { throw new Error("must not run"); };
+  assert.equal(await queryProcessStart(0, { platform: "linux", _execFile: never }), null);
 });
 
 // --- owner file helpers -------------------------------------------------------
