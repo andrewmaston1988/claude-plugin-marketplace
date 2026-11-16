@@ -207,8 +207,8 @@ function recordPorts({ home, toplevel, tree, into, base, dirs, cfg, git, fs, bui
     const built = buildRun(dir);
     if (built.error) continue;
     const name = basename(dir);
-    // The lanes prune's own discovery finds, never the summary alone: a killed run may have
-    // written none, and a partial prune leaves one that names no surviving tree.
+    // The lanes prune's own discovery finds, never the summary alone: a stopped run's own
+    // report is not authoritative for what it still holds, and a partial prune empties it.
     for (const lane of discoveredLanes(built.run, git, fs, { cfg })) {
       if (!lane.branch || !lane.repo) continue;
       const key = takenKey({ run: name, repo: lane.repo, branch: lane.branch });
