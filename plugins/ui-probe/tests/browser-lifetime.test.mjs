@@ -121,10 +121,8 @@ test("row 1: a killed probe's browser is ended by the next launch's reaper", { s
       },
     });
     assert.ok(reaped, "the next launch ran the reaper");
-    assert.ok(
-      reaped.killed.length > 0,
-      `the reaper stopped the orphan rather than finding nothing: ${JSON.stringify(reaped)}`,
-    );
+    // Who stopped it is not the assertion: another file's launch may reap it first, and the
+    // rule is only that no browser outlives its owner's death.
     await nobodyHolds(profile);
   } finally {
     if (next) await next.close();
