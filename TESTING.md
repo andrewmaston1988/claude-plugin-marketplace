@@ -18,6 +18,8 @@ node scripts/test.mjs --list
 node scripts/test.mjs --against master --list
 node scripts/test.mjs --suite swarm
 node scripts/test.mjs --all
+node scripts/test.mjs --fast
+node scripts/test.mjs --orphans
 node scripts/test.mjs --wsl
 ```
 
@@ -26,10 +28,30 @@ node scripts/test.mjs --wsl
 - `--suite <name>`: select one whole suite. Also accepts `--suite=<name>`; cannot combine with `--all`.
 - `--against <ref>`: override the diff base. Also accepts `--against=<ref>`.
 - `--list`: print `<suite> <file> <why>` without installing or running tests. Reasons are `changed: <path>`, `fallback: <path>`, `windows`, or `suite` for whole-suite selection.
-- `--wsl`: sync the mirror and run `node scripts/test.mjs --all` there. Combining it with `--list`, `--suite`, `--all` or `--against` exits 2 naming the conflicting flag, because that run is always the whole regression.
+- `--reporter=agent|default`: override the output mode, which is otherwise detected; see Output.
+- `--fast`: skip files this machine measured over 30 s, whose bytes are unchanged and whose measurement is under 7 days old. It names what it skipped, and with nothing recorded it runs everything and says so. A run it empties reports `skipped` (ok), not a failure. Refused with `--wsl`, which is always the full regression.
+- `--if-selected`: requires `--suite`. Runs that suite whole when the diff selects any of its files for a reason other than `windows`; otherwise prints `[test] <name>: not selected by this diff` and exits 0. A selection error exits 2 rather than skipping.
+- `--orphans`: print every test file no suite runs, and exit 1 when there are any. Runs no tests.
+- `--wsl`: sync the mirror and run `node scripts/test.mjs --all` there. Combining it with `--list`, `--suite`, `--all`, `--against` or `--fast` exits 2 naming the conflicting flag, because that run is always the whole regression.
 - `--help` or `-h`: print usage.
 
-Exit 0 means success, including an empty diff selection. Exit 1 means a test run failed or timed out, or a whole-suite run matched no file. Exit 2 means a request or prerequisite failed, such as an unknown suite, unresolved diff base, or unavailable WSL distro. WSL returns the remote runner's exit code once it starts.
+Exit 0 means success, including an empty diff selection or a run `--fast` emptied. Exit 1 means a test run failed or timed out, a whole-suite run matched no file, or `--orphans` found one. Exit 2 means a request or prerequisite failed, such as an unknown suite, unresolved diff base, or unavailable WSL distro. WSL returns the remote runner's exit code once it starts.
+
+## Output
+
+A file prints its line the moment it finishes: `✓ tests/a.test.mjs  12.3s`, or `✗` when it failed. Node relays per-test detail in file order, so only the file-level completion is live; that is what the line is built from. While nothing finishes, `… still running (65s): <files>` prints every 60 s, so a silent run always names a file that is still working.
+
+At the end the run prints each failing test with its error and a code frame, the 10 slowest tests over 1000 ms, and the totals. The full per-test record of every run always goes to `test-results/<label>.log`, whose path the runner prints. `test-results/` is ignored by git.
+
+A run killed at its timeout names the files it still had in flight, read from `test-results/<label>.<pid>.inflight.json` — the record of what the killed child could not report itself.
+
+### Agent mode
+
+Run by an agent, output follows Vitest's `agent` reporter: failures and their errors only, with no per-file lines, slowest list or totals. It switches on when an agent's variable is set — `CLAUDECODE`, `AI_AGENT`, or the variables `std-env` recognises. `--reporter=agent` or `--reporter=default` overrides the detection. Two things stay in every mode, including agent mode: the heartbeat, because a silent run is the problem this exists to solve, and the runner's one `[test] <label>: PASS|FAIL` line, which is the exit evidence. The log file holds the full tree.
+
+## Orphan tests
+
+A `*.test.mjs` file that no suite's globs expand to and that `notRun` does not list is never executed. Every run names such files on stderr, and `--orphans` exits 1 on them. A test deliberately left out belongs in `test-suites.mjs`'s `notRun` with the reason, so its absence is a recorded decision rather than an accident.
 
 ## Diff selection
 
@@ -110,6 +132,10 @@ Build absolute paths from temporary directories using platform path utilities; d
 
 ## CI
 
-[.github/workflows/test.yml](.github/workflows/test.yml) runs on pull requests and pushes to `master`, using `ubuntu-latest` and Node.js 22. Each suite job calls this runner with `--suite <name>`.
+[.github/workflows/test.yml](.github/workflows/test.yml) runs on pull requests and pushes to `master`, using `ubuntu-latest` and Node.js 22.
 
-CI additionally checks the 500-line growth ratchet, configures swarm's Git identity, plants and verifies read-only home sentinels for swarm, and checks ui-probe's plugin file types. Local suite runs do not perform those extra workflow steps. Windows coverage is the local sign-off gate.
+Each suite job is diff-aware and selects itself. On a pull request it runs `node scripts/test.mjs --suite <name> --if-selected --against <base sha>`: the suite runs whole when the diff selects it, and the job is green with `[test] <name>: not selected by this diff` when it does not. On a push to `master` it runs `--suite <name>`, the whole suite. Every job checks out with `fetch-depth: 0`, because a shallow clone cannot compute the diff. A change to the runner — `scripts/test.mjs`, `scripts/test-lib/**`, `scripts/test-suites.mjs`, or the workflow — selects every suite.
+
+The always-running `file-size` job also runs `node scripts/test.mjs --orphans`, so a test file nothing runs fails the PR.
+
+CI additionally checks the 500-line growth ratchet, configures swarm's Git identity, plants and verifies read-only home sentinels for swarm, and checks ui-probe's plugin file types. Local suite runs do not perform those extra workflow steps. Windows coverage is the local sign-off gate; a PR no longer runs the full regression.

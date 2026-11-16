@@ -25,6 +25,9 @@ jobs:
         # base and exits 0. Neither field present (e.g. workflow_dispatch)
         # yields an empty ref, which the checker fails closed on (exit 2).
         run: node scripts/check-file-size.mjs --against "${{ github.event.pull_request.base.sha || github.event.before }}"
+      - name: Orphan test files
+        # A test file no suite runs is a green CI that proves nothing.
+        run: node scripts/test.mjs --orphans
 
   # Every test job below runs the runner, so CI and a local `node
   # scripts/test.mjs --suite <name>` execute the same commands. The suites and
@@ -36,39 +39,50 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          # The diff needs its base commit, which a shallow clone lacks.
+          fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
       - name: Run tests
-        run: node scripts/test.mjs --suite checkpoint
+        # A PR runs the suite only when the diff selects it; a push to master
+        # always runs it whole.
+        run: node scripts/test.mjs --suite checkpoint ${{ github.event_name == 'pull_request' && format('--if-selected --against {0}', github.event.pull_request.base.sha) || '' }}
 
   slack-bridge:
     name: slack-bridge
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
       - name: Unit tests
-        run: node scripts/test.mjs --suite slack-bridge
+        run: node scripts/test.mjs --suite slack-bridge ${{ github.event_name == 'pull_request' && format('--if-selected --against {0}', github.event.pull_request.base.sha) || '' }}
 
   claude-peers:
     name: claude-peers
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
       - name: Run tests
-        run: node scripts/test.mjs --suite claude-peers
+        run: node scripts/test.mjs --suite claude-peers ${{ github.event_name == 'pull_request' && format('--if-selected --against {0}', github.event.pull_request.base.sha) || '' }}
 
   swarm:
     name: swarm
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
@@ -95,7 +109,7 @@ jobs:
       # suite resolves the throwaway home whether the runner or a person starts
       # it. The suite's cwd (plugins/swarm) comes from the registry.
       - name: Run tests
-        run: node scripts/test.mjs --suite swarm
+        run: node scripts/test.mjs --suite swarm ${{ github.event_name == 'pull_request' && format('--if-selected --against {0}', github.event.pull_request.base.sha) || '' }}
       - name: Verify home sentinels untouched
         if: always()
         run: |
@@ -113,6 +127,8 @@ jobs:
       UI_PROBE_REQUIRE_BROWSER: 1
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
@@ -124,13 +140,15 @@ jobs:
             exit 1
           fi
       - name: Run tests
-        run: node scripts/test.mjs --suite ui-probe
+        run: node scripts/test.mjs --suite ui-probe ${{ github.event_name == 'pull_request' && format('--if-selected --against {0}', github.event.pull_request.base.sha) || '' }}
 
   pipeline:
     name: pipeline
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
@@ -139,37 +157,43 @@ jobs:
       # The suite's runs carry `install: npm ci`, hash-gated, so CI's own
       # install step is gone rather than duplicated.
       - name: Run tests
-        run: node scripts/test.mjs --suite pipeline
+        run: node scripts/test.mjs --suite pipeline ${{ github.event_name == 'pull_request' && format('--if-selected --against {0}', github.event.pull_request.base.sha) || '' }}
 
   agent-investigation:
     name: agent-investigation
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
       - name: Run tests
-        run: node scripts/test.mjs --suite agent-investigation
+        run: node scripts/test.mjs --suite agent-investigation ${{ github.event_name == 'pull_request' && format('--if-selected --against {0}', github.event.pull_request.base.sha) || '' }}
 
   discipline:
     name: discipline
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
       - name: Run tests
-        run: node scripts/test.mjs --suite discipline
+        run: node scripts/test.mjs --suite discipline ${{ github.event_name == 'pull_request' && format('--if-selected --against {0}', github.event.pull_request.base.sha) || '' }}
 
   repo:
     name: repo
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
       - name: Run tests
-        run: node scripts/test.mjs --suite repo
+        run: node scripts/test.mjs --suite repo ${{ github.event_name == 'pull_request' && format('--if-selected --against {0}', github.event.pull_request.base.sha) || '' }}

@@ -96,6 +96,17 @@ test("every --suite CI names is a registry suite", () => {
   }
 });
 
+test("every CI suite job selects itself from the diff and has its base history", () => {
+  const yml = readFileSync(WORKFLOW, "utf8");
+  const blocks = yml.split(/^  [a-z-]+:$/m).filter((block) => /run: node scripts\/test\.mjs --suite/.test(block));
+  assert.equal(blocks.length, SUITES.length, "a suite job is missing from the workflow");
+  for (const block of blocks) {
+    assert.match(block, /--if-selected --against/, "a suite job runs whatever the diff touches");
+    assert.match(block, /fetch-depth: 0/, "a suite job cannot see its diff base in a shallow clone");
+  }
+  assert.match(yml, /run: node scripts\/test\.mjs --orphans/, "the always-running job checks no orphans");
+});
+
 test("every CI-only step the runner does not own is still there by name", () => {
   const yml = readFileSync(WORKFLOW, "utf8");
   const kept = ["500-line growth ratchet", "Configure git identity", "Plant read-only home sentinels",
