@@ -50,10 +50,12 @@ export const childPlanOf = (...tasks) => ({ tasks });
 
 
 // A fake worktree module: records every collect() so a test can assert the
-// shared tree is collected once, by the group's last link.
-export function fakeWorktree(collectCalls) {
+// shared tree is collected once, by the group's last link. `failPrepare` throws
+// for the tasks it matches, to force a launch-time failure synchronously.
+export function fakeWorktree(collectCalls, { failPrepare } = {}) {
   return {
     prepareIsolation: (t, cfg, resultsDir) => {
+      if (failPrepare?.(t)) throw new Error(`prepare refused for ${t.id}`);
       const name = t.worktreeName || t.id;
       return {
         path: treeDirFor(resultsDir, name, cfg), branch: `swarm/${name}`, name,
