@@ -26,10 +26,17 @@ function diverged() {
 
 const marker = (tree, name) => resolve(tree, must(["rev-parse", "--git-path", name], tree));
 
-// The command must stop, and the state it leaves must read in progress.
-function stopped(f, tree, args) {
+// The command must stop, and the state it leaves must read in progress. Resolving the
+// index proves git's own marker still speaks, not the unmerged entry every conflict
+// leaves behind — so each marker name is pinned on its own.
+function stopped(f, tree, args, markerName) {
   equal(git(args, tree).status, 1, `${args.join(" ")} must stop on a conflict`);
-  equal(portInProgress(tree, f.git), true, args.join(" "));
+  ok(existsSync(marker(tree, markerName)), `${markerName} after ${args.join(" ")}`);
+  equal(portInProgress(tree, f.git), true, `${args.join(" ")}: unmerged`);
+  must(["checkout", "--ours", "--", "a.txt"], tree);
+  must(["add", "--", "a.txt"], tree);
+  equal(must(["diff", "--name-only", "--diff-filter=U"], tree), "", `${args.join(" ")}: index resolved`);
+  equal(portInProgress(tree, f.git), true, `${args.join(" ")}: the marker alone`);
 }
 
 test("row 4: every in-progress state reads in progress, and each abort clears it", () => {
@@ -37,37 +44,35 @@ test("row 4: every in-progress state reads in progress, and each abort clears it
   try {
     equal(portInProgress(port, f.git), false, "a clean porting checkout");
 
-    stopped(f, port, ["merge", "main"]);
-    ok(existsSync(marker(port, "MERGE_HEAD")), "MERGE_HEAD");
+    stopped(f, port, ["merge", "main"], "MERGE_HEAD");
     must(["merge", "--abort"], port);
     equal(portInProgress(port, f.git), false, "a merge abort clears it");
 
-    stopped(f, port, ["cherry-pick", mainChange]);
-    ok(existsSync(marker(port, "CHERRY_PICK_HEAD")), "CHERRY_PICK_HEAD");
+    stopped(f, port, ["cherry-pick", mainChange], "CHERRY_PICK_HEAD");
     must(["cherry-pick", "--abort"], port);
     equal(portInProgress(port, f.git), false, "a pick abort clears it");
 
-    stopped(f, port, ["revert", "--no-edit", mainChange]);
-    ok(existsSync(marker(port, "REVERT_HEAD")), "REVERT_HEAD");
+    stopped(f, port, ["revert", "--no-edit", mainChange], "REVERT_HEAD");
     must(["revert", "--abort"], port);
 
-    stopped(f, port, ["rebase", "main"]);
-    ok(existsSync(marker(port, "rebase-merge")), "rebase-merge");
+    stopped(f, port, ["rebase", "main"], "rebase-merge");
     must(["rebase", "--abort"], port);
 
-    stopped(f, port, ["rebase", "--apply", "main"]);
-    ok(existsSync(marker(port, "rebase-apply")), "rebase-apply");
+    stopped(f, port, ["rebase", "--apply", "main"], "rebase-apply");
     must(["rebase", "--abort"], port);
     equal(portInProgress(port, f.git), false, "a rebase abort clears it");
 
-    // A multi-commit pick queues a sequencer. `--quit` drops the markers but leaves the
-    // index unmerged, which the last check must catch on its own.
-    stopped(f, port, ["cherry-pick", mainChange, second]);
-    ok(existsSync(marker(port, "sequencer")), "a multi-commit pick queues a sequencer");
-    ok(existsSync(marker(port, "CHERRY_PICK_HEAD")), "and a pick head");
+    // A multi-commit pick queues a sequencer. `--quit` then drops the markers, so the
+    // last check must catch an index left unmerged with nothing else to name it.
+    stopped(f, port, ["cherry-pick", mainChange, second], "sequencer");
     must(["cherry-pick", "--quit"], port);
-    ok(!existsSync(marker(port, "sequencer")), "--quit drops the sequencer");
+    equal(portInProgress(port, f.git), false, "a quit over a resolved index leaves nothing");
+    must(["reset", "--hard", "-q"], port);
+
+    equal(git(["cherry-pick", mainChange], port).status, 1, "a single pick stops on the conflict");
+    must(["cherry-pick", "--quit"], port);
     ok(!existsSync(marker(port, "CHERRY_PICK_HEAD")), "--quit drops CHERRY_PICK_HEAD");
+    ok(!existsSync(marker(port, "sequencer")), "--quit drops the sequencer");
     ok(must(["diff", "--name-only", "--diff-filter=U"], port) !== "", "the index is still unmerged");
     equal(portInProgress(port, f.git), true, "an unmerged index alone is in progress");
   } finally { f.cleanup(); }
