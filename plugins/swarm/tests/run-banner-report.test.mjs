@@ -174,6 +174,20 @@ test("a live run with no leaf running banners the live floor, not a queued run",
   assert.ok(text.includes("0 running"), "the floor states the running count rather than claiming nothing started");
 });
 
+// tile() escapes the subtitle it is handed, so a cost text escaped on the way in
+// renders `&lt;` as the literal `&amp;lt;`. Asserted on the built markup: parsing
+// decodes the double escape back to a single one, so the tree cannot see it.
+test("the banner's cost text is escaped once, not twice", async () => {
+  const { P } = await bannerOf({ finishedMs: Date.now(), costText: "<0.1% of week", byState: { ok: 1 } });
+  const html = P.rawHtml();
+  const bannerAt = html.lastIndexOf('<div class="banner');
+  assert.ok(bannerAt >= 0, "the run screen rendered its banner");
+  const subAt = html.indexOf('<div class="s">', bannerAt) + '<div class="s">'.length;
+  const sub = html.slice(subAt, html.indexOf("</div>", subAt));
+  assert.equal(sub.split("&lt;0.1% of week").length - 1, 1, `escaped exactly once: ${sub}`);
+  assert.ok(!sub.includes("&amp;lt;"), `escaped twice: ${sub}`);
+});
+
 // ── the run's chrome stays on the run screen ─────────────────────────────
 
 // buildNode feeds renderRunHtml a manifest node's SUBGRAPH while still passing the
