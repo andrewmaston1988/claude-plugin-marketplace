@@ -32,6 +32,40 @@ export const ROSTER_HYDRATION = new Set(["local", "network"]);
 // milliseconds, and if it is not, nothing is gained by waiting longer than this.
 const PROBE_TIMEOUT_MS = 2000;
 
+// A model is one id. Whitespace or a control character means the field is not a
+// model at all — a constant clash once set it to a 3 KB prompt — and trimming
+// would hide exactly that, so the shape is judged before the trim.
+const MODEL_MAX_CHARS = 200;
+const MODEL_SHAPE_RE = /[\s\u0000-\u001f\u007f]/;
+
+const quoteModel = (text) =>
+  JSON.stringify(text.slice(0, 60)) + (text.length > 60 ? `… (${text.length} characters)` : "");
+
+function modelShapeProblem(authored) {
+  if (MODEL_SHAPE_RE.test(authored)) {
+    return `model ${quoteModel(authored)} is not a model id — it carries whitespace or a control character; ` +
+      `"model" takes one id such as "claude-opus-5", and prompt text belongs in "prompt"`;
+  }
+  if (authored.length > MODEL_MAX_CHARS) {
+    return `model ${quoteModel(authored)} is ${authored.length} characters, over the ${MODEL_MAX_CHARS}-character limit — ` +
+      `"model" takes one id such as "claude-opus-5", and prompt text belongs in "prompt"`;
+  }
+  return null;
+}
+
+// Shared by the codex descriptor here and the real adapter in codex.mjs, which
+// does not go through descriptor(): an Ollama tag or a Claude id can never be a
+// Codex model, whatever the roster says.
+export function codexModelProblem(model) {
+  const value = String(model || "");
+  if (!value) return null;
+  if (isClaudeModel(value)) return `model '${value}' is a Claude model — use "provider": "claude"`;
+  if (value.includes(":")) {
+    return `model '${value}' carries an Ollama tag (a ":suffix") — provider "codex" takes a Codex model id such as "gpt-5"`;
+  }
+  return null;
+}
+
 // Shape test local to this module: config.mjs owns its own for the user-file validation
 // rules, and importing it here would couple the two.
 function isConfigObject(v) {
@@ -282,6 +316,7 @@ export function defaultProviderAdapters({ codexAdapter, ollamaCapabilities = {} 
       runnerId: "codex",
       defaultEnabled: false,
       rosterHydration: "network",
+      validateModel: codexModelProblem,
     }),
   ];
 }
@@ -337,6 +372,8 @@ export function createProviderRegistry(initial = []) {
   function resolve(task, { config = {}, allowDisabled = false } = {}) {
     const authoredModel = task?.model;
     if (typeof authoredModel !== "string" || !authoredModel.trim()) throw new Error("provider resolution requires a non-empty model");
+    const malformed = modelShapeProblem(authoredModel);
+    if (malformed) throw new Error(malformed);
     const model = authoredModel.trim();
     if (typeof task.provider !== "string" || !task.provider.trim()) {
       throw new Error(
