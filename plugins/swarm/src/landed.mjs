@@ -177,6 +177,27 @@ export function absorbed(base, branch, repo, gitRunner) {
   return touching.some((commit) => absorbedByTree(commit, branch, repo, gitRunner, files));
 }
 
+// True only when the default branch holds `sha` or absorbs it — never any other ref,
+// so a pushed-but-unmerged feature branch reads unlanded. Fail-closed: an unreadable
+// sha or a git error is false, the safe answer for a caller deciding what may be lost.
+export function landedOnDefault(sha, repo, { prefix, gitRunner } = {}) {
+  if (typeof prefix !== "string" || !prefix) throw new TypeError("landedOnDefault requires the branch prefix");
+  if (typeof gitRunner !== "function") throw new TypeError("landedOnDefault requires a gitRunner");
+  try {
+    const commit = gitOf(gitRunner, ["rev-parse", "--verify", `${sha}^{commit}`], repo);
+    if (commit.status !== 0 || !commit.stdout) return false;
+    // The first candidate base is origin/HEAD's target whenever a remote exists.
+    const base = candidateBases(repo, prefix, gitRunner)[0];
+    if (!base) return false;
+    const contains = gitOf(gitRunner, ["merge-base", "--is-ancestor", commit.stdout, base], repo);
+    if (contains.status === 0) return true;
+    if (contains.status !== 1) return false;
+    return absorbed(base, commit.stdout, repo, gitRunner);
+  } catch {
+    return false;
+  }
+}
+
 // 0 when the branch's work is held elsewhere; otherwise a count (at least 1) of
 // what destroying it would lose; Infinity when git cannot answer.
 // `extraBases` are caller-supplied commits to try as absorption bases first — the
