@@ -77,6 +77,10 @@ A TV run, capture or probe also writes `tv-return.json` beside its other output,
 
 By default, before a click or tap the action allowlist refuses a non-GET form submit as `write_blocked`. A CDP network guard also blocks and records requests other than GET, HEAD, and OPTIONS. `--allow-writes` disables the action guard; on TV it allows intercepted writes only to `tv.testOrigin`, while writes to other origins remain blocked and recorded. Neither guard can stop a GET request with a side effect, and the network guard cannot stop writes made outside intercepted network requests. Use a safe target environment.
 
+## Browser lifetime
+
+A capture or run ends its browser with it, including when the launch fails part-way. A session killed outright cannot: on Windows the browser is not a child of the node process, so it survives. Every launch therefore reaps first — it stops browsers whose owner file names a dead or reused process, then removes `ui-probe-profile-*` folders under the temp directory older than an hour that no live browser holds. A process listing that fails is skipped, never read as an empty one, so a browser a live probe is using is never touched.
+
 ## Limitations
 
 Only Chromium-family browsers and CSS selectors are supported. There is no warm session, delta observation, or comparison in this release. A desktop browser at TV resolution does not reproduce a TV browser.

@@ -444,11 +444,10 @@ function printProblem(problem) {
 
 async function openBrowser(browserPath) {
   const { findBrowser, launch } = await import("../src/browser.mjs");
-  const { connect } = await import("../src/cdp.mjs");
   const raw = await launch({ browser: findBrowser({ browser: browserPath }) });
   let client;
   try {
-    client = await connect(raw.port);
+    client = await raw.attachPage();
   } catch (e) {
     await Promise.resolve(raw.close()).catch(() => {});
     throw e;

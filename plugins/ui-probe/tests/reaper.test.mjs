@@ -328,6 +328,12 @@ test("the Windows lister parses both CIM shapes and refuses what it cannot read"
   });
   assert.deepEqual(many, [{ pid: 1, cmd: "a" }, { pid: 2, cmd: "" }]);
   assert.deepEqual(listProcessesWindows({ _spawnSync: () => ({ status: 0, stdout: "" }) }), []);
+  // A command line carrying a raw control character is not valid JSON text, but it is still a
+  // listing: refusing it would disable the reaper on any machine that has such a process.
+  const control = listProcessesWindows({
+    _spawnSync: () => ({ status: 0, stdout: '[{"ProcessId":3,"CommandLine":"x\u001ay"}]' }),
+  });
+  assert.deepEqual(control, [{ pid: 3, cmd: "x y" }]);
   assert.throws(
     () => listProcessesWindows({ _spawnSync: () => ({ status: 0, stdout: "not json" }) }),
     /could not parse the process listing/,

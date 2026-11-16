@@ -113,7 +113,10 @@ function runPowerShell(script, { _spawnSync = spawnSync, timeoutMs = REAP_BUDGET
 }
 
 function parseCimProcesses(stdout) {
-  const text = String(stdout ?? "");
+  // ConvertTo-Json leaves control characters in a command line unescaped, and JSON forbids
+  // them inside a string. Any process carrying one would otherwise make every listing
+  // unreadable, so the reaper would never run again on that machine.
+  const text = String(stdout ?? "").replace(/[\u0000-\u001f]+/g, " ");
   if (!text.trim()) return []; // a successful empty listing licenses the sweep
   let parsed;
   try {
