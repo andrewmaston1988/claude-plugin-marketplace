@@ -5,7 +5,7 @@ const TIMEOUT = 60000;
 const TOUCHING_SCAN_CAP = 20;
 const MERGE_TREE_MIN_VERSION = [2, 38];
 
-function gitOf(gitRunner, args, repo, opts = {}) {
+export function gitOf(gitRunner, args, repo, opts = {}) {
   return gitRunner(args, repo, { timeout: TIMEOUT, ...opts });
 }
 
@@ -47,14 +47,45 @@ export function isSwarmRef(refname, prefix) {
   return bare.startsWith(prefix);
 }
 
+// A remote's HEAD is the name git records for a repo's default branch, and a clone's
+// remote need not be called `origin`. No remote HEAD names none.
+export function defaultBranch(gitRunner, repo) {
+  const heads = gitOf(gitRunner, ["for-each-ref", "--format=%(refname) %(symref)", "refs/remotes"], repo);
+  if (heads.status !== 0 || !heads.stdout) return null;
+  for (const line of heads.stdout.split(/\r?\n/)) {
+    const [ref, target] = line.trim().split(/\s+/);
+    const m = /^refs\/remotes\/([^/]+)\/(.+)$/.exec(target || "");
+    if (ref?.endsWith("/HEAD") && m) return { remote: m[1], name: m[2] };
+  }
+  return null;
+}
+
+export const defaultBranchName = (gitRunner, repo) => defaultBranch(gitRunner, repo)?.name ?? null;
+
+// The default branch as this repo sees it: the local branch of that name where it
+// exists, then the remote-tracking copy. Never the checkout — during a port that is
+// the branch the caller is asking about.
+export function defaultCommits(repo, gitRunner) {
+  const found = defaultBranch(gitRunner, repo);
+  if (!found) return [];
+  const commits = [];
+  for (const ref of [`refs/heads/${found.name}`, `refs/remotes/${found.remote}/${found.name}`]) {
+    const r = gitOf(gitRunner, ["rev-parse", "--verify", `${ref}^{commit}`], repo);
+    if (r.status === 0 && r.stdout && !commits.includes(r.stdout)) commits.push(r.stdout);
+  }
+  return commits;
+}
+
 // The default branch and the checked-out branch: where work lands. Remote refs
-// are not scanned — merge-tree across every ref costs seconds per branch.
+// are not scanned — merge-tree across every ref costs seconds per branch. The default
+// branch comes from the same any-remote HEAD rule the taken check uses, so the two
+// cannot disagree on a clone whose remote is not `origin`.
 export function candidateBases(repo, prefix, gitRunner) {
   const refs = [];
-  const origin = gitOf(gitRunner, ["symbolic-ref", "refs/remotes/origin/HEAD"], repo);
-  if (origin.status === 0 && origin.stdout) {
-    refs.push(origin.stdout);
-    refs.push(`refs/heads/${origin.stdout.replace(/^refs\/remotes\/origin\//, "")}`);
+  const found = defaultBranch(gitRunner, repo);
+  if (found) {
+    refs.push(`refs/remotes/${found.remote}/${found.name}`);
+    refs.push(`refs/heads/${found.name}`);
   }
   const head = gitOf(gitRunner, ["symbolic-ref", "-q", "HEAD"], repo);
   let detached = null;
@@ -175,6 +206,29 @@ export function absorbed(base, branch, repo, gitRunner) {
   if (!files.length) return false;
   const touching = touchingCommits(mb.stdout, base, files, repo, gitRunner);
   return touching.some((commit) => absorbedByTree(commit, branch, repo, gitRunner, files));
+}
+
+// True only when the default branch holds `sha` or absorbs it — never any other ref,
+// so a pushed-but-unmerged feature branch reads unlanded. `bases` are the default
+// branch's commits, resolved once per repo by the caller. Fail-closed: an unreadable
+// sha, a repo whose remotes name no default branch, or a git error is false, the safe
+// answer for a caller deciding what may be lost.
+export function landedOnDefault(sha, repo, { gitRunner, bases } = {}) {
+  if (typeof gitRunner !== "function") throw new TypeError("landedOnDefault requires a gitRunner");
+  if (!Array.isArray(bases)) throw new TypeError("landedOnDefault requires the default-branch bases");
+  try {
+    if (!bases.length) return false;
+    const commit = gitOf(gitRunner, ["rev-parse", "--verify", `${sha}^{commit}`], repo);
+    if (commit.status !== 0 || !commit.stdout) return false;
+    for (const base of bases) {
+      const contains = gitOf(gitRunner, ["merge-base", "--is-ancestor", commit.stdout, base], repo);
+      if (contains.status === 0) return true;
+      if (contains.status !== 1) return false;
+    }
+    return bases.some((base) => absorbed(base, commit.stdout, repo, gitRunner));
+  } catch {
+    return false;
+  }
 }
 
 // 0 when the branch's work is held elsewhere; otherwise a count (at least 1) of

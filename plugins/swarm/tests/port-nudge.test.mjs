@@ -12,7 +12,7 @@ import { checkoutBase, plan, blockers, runForPrune } from "../src/prune.mjs";
 import { pruneMarkerPath } from "../src/prune-nudge.mjs";
 import {
   PORT_RE, portingTree, namedSwarmBranches, recordTouched, readTouched, touchedPath, portMarkerPath,
-  foreignTouchedRuns, portedRuns, portReason, runPortNudge,
+  foreignTouchedRuns, portedRuns, portReason, runPortNudge, candidateRuns,
 } from "../src/port-nudge.mjs";
 import { portFixture, must, writeCommit } from "./helpers/port-fixture.mjs";
 import { runScopeKey } from "../src/worktree.mjs";
@@ -34,6 +34,16 @@ const payload = (over = {}) => ({
   hook_event_name: "PostToolUse",
   tool_name: "Bash",
   tool_input: { command: "git status" },
+  ...over,
+});
+
+// The seams portedRuns requires. `dirs` is read at call time, because a row creates its
+// runs as it goes.
+const portArgs = (f, over = {}) => ({
+  home: f.home, toplevel: f.toplevel, sessionId: SESSION, branch: "feat", portingTree: over.port,
+  touched: [], cfg: f.cfg, git: f.git, fs, spawnSync: f.spawn, budgetMs: 20_000,
+  taken: new Map(), buildRun: (dir) => runForPrune(dir, { fs, spawnSync: f.spawn }),
+  dirs: candidateRuns({ home: f.home, toplevel: f.toplevel, sessionId: SESSION, touched: over.touched ?? [], cfg: f.cfg, fs }),
   ...over,
 });
 
@@ -103,13 +113,10 @@ test("row 3: a cherry-pick is ported only when the porting checkout's HEAD is a 
     const { run } = runForPrune(dir, { fs, spawnSync: f.spawn });
 
     // Without the extra base the cherry-picked copy is invisible to git.
-    ok(blockers(plan(run, f.git, fs, { extraBases: [], measureBytes: false, stopAtBlocker: true, deadline: Infinity }).rows).length > 0,
+    ok(blockers(plan(run, f.git, fs, { extraBases: [], measureBytes: false, stopAtBlocker: true, deadline: Infinity, taken: null }).rows).length > 0,
       "with extraBases empty the run must read unlanded");
 
-    const reported = portedRuns({
-      home: f.home, toplevel: f.toplevel, sessionId: SESSION, base, branch: "feat", portingTree: port,
-      touched: [], cfg: f.cfg, git: f.git, fs, spawnSync: f.spawn, budgetMs: 20_000,
-    });
+    const reported = portedRuns(portArgs(f, { port, base }));
     equal(reported.length, 1);
     equal(reported[0].name, "run-1");
     equal(reported[0].dir, dir);
@@ -126,7 +133,7 @@ test("row 4: a replay is silent until the git commit that moves HEAD over it", (
     f.replay(port, "main", leaf.branch);
     equal(must(["rev-parse", "HEAD"], port), before, "git apply moves no HEAD");
 
-    const args = { home: f.home, toplevel: f.toplevel, sessionId: SESSION, branch: "feat", portingTree: port, touched: [], cfg: f.cfg, git: f.git, fs, spawnSync: f.spawn, budgetMs: 20_000 };
+    const args = portArgs(f, { port });
     deepEqual(portedRuns({ ...args, base: before }), [], "an unmoved HEAD proves nothing");
 
     must(["add", "-A"], port);
@@ -145,9 +152,8 @@ test("row 5: a partly landed run, a dirty tree, and a live run are all silent", 
     const two = f.leaf("run-1", "two");
     f.cherryPick(port, one.sha);
     const base = must(["rev-parse", "HEAD"], port);
-    const args = { home: f.home, toplevel: f.toplevel, sessionId: SESSION, base, branch: "feat", portingTree: port, touched: [], cfg: f.cfg, git: f.git, fs, spawnSync: f.spawn, budgetMs: 20_000 };
-
     f.run("run-1", { launcher: SESSION, leaves: [one, two] });
+    const args = portArgs(f, { port, base });
     deepEqual(portedRuns(args), [], "one unlanded branch keeps the whole run silent");
 
     // Land the second branch too, then leave an uncommitted file in its tree.
@@ -406,10 +412,7 @@ test("row 9: a branch-only row counts as a branch, and one unlanded row silences
     // A branch of the run's own namespace that no tree holds — landed on main.
     const swept = `swarm/${scope}/swept`;
     must(["branch", swept, "main"], f.repo);
-    const args = {
-      home: f.home, toplevel: f.toplevel, sessionId: SESSION, base: must(["rev-parse", "HEAD"], port),
-      branch: "feat", portingTree: port, touched: [], cfg: f.cfg, git: f.git, fs, spawnSync: f.spawn, budgetMs: 20_000,
-    };
+    const args = portArgs(f, { port, base: must(["rev-parse", "HEAD"], port) });
 
     const reported = portedRuns(args);
     equal(reported.length, 1);

@@ -6,7 +6,10 @@ import { basename, join, resolve } from "node:path";
 import { enginePath, runsKeyFor } from "./config.mjs";
 import { realRepoToplevel } from "./manifest-leaf-guard.mjs";
 import { inLeafOrAutonomous, projectRunsHoldingWorktrees } from "./prune-nudge.mjs";
-import { blockers, checkoutBase, plan, runForPrune } from "./prune.mjs";
+import { blockers, checkoutBase, discoveredLanes, plan, runForPrune } from "./prune.mjs";
+import { absorbed, defaultBranchName } from "./landed.mjs";
+import { portInProgress } from "./port-complete.mjs";
+import { appendTaken, readTaken, refreshTaken, takenKey } from "./taken.mjs";
 import { runLiveness } from "./runlog.mjs";
 import { listTreeRecords } from "./worktree.mjs";
 import { normalizeForCompare } from "./roots.mjs";
@@ -18,18 +21,23 @@ const CLI = enginePath();
 export const PORT_RE = /\bgit\b(?:\s+-C\s+(?:"[^"]+"|'[^']+'|\S+)|\s+-c\s+\S+)*\s+(?:commit|merge|cherry-pick|rebase|am|pull)(?![\w-])/;
 
 const C_FLAG = /(?:^|\s)-C\s+("([^"]*)"|'([^']*)'|(\S+))/g;
+const LEADING_CD = /^\s*cd\s+("([^"]*)"|'([^']*)'|(\S+))\s*(?:&&|;)/;
 
-// The one distinct `-C` path the command names, else the payload's cwd. A `cd` inside
-// the command is not followed — this is the checkout git itself was pointed at.
+// The one distinct `-C` path the command names, else the shell's directory: one leading
+// `cd` is followed, since `cd <tree> && git cherry-pick` is the common port and the
+// payload's cwd is then some other checkout.
 export function portingTree(command, cwd) {
+  const text = String(command);
+  const cd = text.match(LEADING_CD);
+  const base = cd ? resolve(cwd, cd[2] ?? cd[3] ?? cd[4]) : cwd;
   const found = new Map();
-  for (const m of String(command).matchAll(C_FLAG)) {
+  for (const m of text.matchAll(C_FLAG)) {
     const path = m[2] ?? m[3] ?? m[4];
     if (!path) continue;
-    const abs = resolve(cwd, path);
+    const abs = resolve(base, path);
     found.set(normalizeForCompare(abs), abs);
   }
-  return found.size === 1 ? [...found.values()][0] : cwd;
+  return found.size === 1 ? [...found.values()][0] : base;
 }
 
 // Every swarm branch the command names, so a foreign run stays measurable after the
@@ -117,23 +125,33 @@ function runFinishedAt(dir, fs) {
   try { return fs.statSync(dir).mtimeMs; } catch { return 0; }
 }
 
-// This session's finished runs, plus the foreign runs its commands named, measured with
-// `plan()` against the porting checkout's HEAD. Silent unless a run is wholly provable.
-export function portedRuns({ home, toplevel, sessionId, base, branch, portingTree, touched = [], cfg, git, fs, spawnSync, budgetMs = 20_000 }) {
+// This session's finished runs, plus the foreign runs its commands named, newest first.
+// The nudge line and the taken record share this one list, so they never disagree about
+// which runs a command is evidence for.
+export function candidateRuns({ home, toplevel, sessionId, touched = [], cfg, fs }) {
   const mine = projectRunsHoldingWorktrees({ home, toplevel, sessionId, cfg }).mine.map((r) => r.dir);
-  const dirs = [...new Set([...mine, ...foreignTouchedRuns({ home, toplevel, touched, fs })])]
-    .filter((dir) => !alreadyPortNudged(dir, sessionId, fs))
+  return [...new Set([...mine, ...foreignTouchedRuns({ home, toplevel, touched, fs })])]
     .sort((a, b) => runFinishedAt(b, fs) - runFinishedAt(a, fs));
+}
+
+// Those runs measured with `plan()` against the porting checkout's HEAD. Silent unless a
+// run is wholly provable. `dirs`, `taken` and `buildRun` are the caller's seams: the hook
+// reads the log and builds each run once and shares all three with the record pass.
+export function portedRuns({ home, toplevel, sessionId, base, branch, portingTree, touched = [], cfg, git, fs, spawnSync, budgetMs = 20_000, dirs, taken, buildRun }) {
+  if (!Array.isArray(dirs)) throw new TypeError("portedRuns requires the candidate run dirs");
+  if (!(taken instanceof Map)) throw new TypeError("portedRuns requires a taken map");
+  if (typeof buildRun !== "function") throw new TypeError("portedRuns requires a buildRun");
+  const measured = dirs.filter((dir) => !alreadyPortNudged(dir, sessionId, fs));
 
   const startedMs = Date.now();
   const out = [];
-  for (const dir of dirs) {
+  for (const dir of measured) {
     // The 30 s hook timeout is the hard edge; this keeps a many-run repo from reaching it.
     if (Date.now() - startedMs > budgetMs) break;
-    const built = runForPrune(dir, { fs, spawnSync });
+    const built = buildRun(dir);
     if (built.error) continue;
     const planned = plan(built.run, git, fs, {
-      cfg, extraBases: [base], measureBytes: false, stopAtBlocker: true, deadline: startedMs + budgetMs,
+      cfg, extraBases: [base], measureBytes: false, stopAtBlocker: true, deadline: startedMs + budgetMs, taken,
     });
     // A stopped plan proves nothing; the run is measured again on the next port verb.
     if (planned.stopped) continue;
@@ -173,6 +191,48 @@ export function isPortPayload(payload, env = {}) {
   return !inLeafOrAutonomous(env);
 }
 
+const RECORD_LANE_CAP = 12;
+const RECORD_MIN_BUDGET_MS = 10_000;
+
+// The proof decays: a lane absorbed by this checkout's HEAD is unprovable once the branch
+// is rewritten, so it is written down while git can still answer.
+function recordPorts({ home, toplevel, tree, into, base, dirs, cfg, git, fs, buildRun, taken, startedMs, budgetMs }) {
+  if (!into || into === defaultBranchName(git, tree)) return;
+  if (portInProgress(tree, git)) return;
+  const deadline = startedMs + budgetMs - RECORD_MIN_BUDGET_MS;
+  refreshTaken({ home, toplevel, into, head: base, git, fs, known: taken, deadline });
+  if (!dirs.length || Date.now() >= deadline) return;
+  let left = RECORD_LANE_CAP;
+  for (const dir of dirs) {
+    const built = buildRun(dir);
+    if (built.error) continue;
+    const name = basename(dir);
+    // The lanes prune's own discovery finds, never the summary alone: a stopped run's own
+    // report is not authoritative for what it still holds, and a partial prune empties it.
+    for (const lane of discoveredLanes(built.run, git, fs, { cfg })) {
+      if (!lane.branch || !lane.repo) continue;
+      const key = takenKey({ run: name, repo: lane.repo, branch: lane.branch });
+      if (taken.has(key)) continue;
+      if (left <= 0 || Date.now() >= deadline) return;
+      try {
+        const tip = git(["rev-parse", "--verify", `${lane.branch}^{commit}`], lane.repo);
+        if (tip.status !== 0 || !tip.stdout) continue;
+        left -= 1;
+        // Ancestry, then absorption: never unlandedCount, whose ref-reachability shortcut
+        // would let an unrelated branch gate a record for a port this HEAD never saw.
+        const ancestor = git(["merge-base", "--is-ancestor", lane.branch, base], lane.repo);
+        // Absorption is up to 20 merge-tree probes: too many to start on a spent budget.
+        const proven = ancestor.status === 0
+          || (ancestor.status === 1 && Date.now() < deadline && absorbed(base, lane.branch, lane.repo, git));
+        if (!proven) continue;
+        const record = { run: name, branch: lane.branch, laneTip: tip.stdout, repo: lane.repo, into, portCommit: base, intoTip: base };
+        appendTaken({ home, toplevel, fs, records: [record] });
+        taken.set(key, record);
+      } catch { /* one lane git cannot answer costs that lane, not the firing */ }
+    }
+  }
+}
+
 // The whole hook flow below the CLI seams, so a test can count git calls. Returns the
 // line to print, or "" when there is nothing to say.
 export function runPortNudge({ payload, env = {}, config, home, git, spawn, fs, budgetMs = 20_000 }) {
@@ -197,20 +257,40 @@ export function runPortNudge({ payload, env = {}, config, home, git, spawn, fs, 
   if (!base) return "";
   const head = git(["symbolic-ref", "-q", "HEAD"], tree);
   if (head.status !== 0 || !head.stdout) return "";
+  const branch = head.stdout.replace(/^refs\/heads\//, "");
 
+  const startedMs = Date.now();
+  const touched = readTouched({ home, sessionId, fs });
+  const dirs = candidateRuns({ home, toplevel, sessionId, touched, cfg: config, fs });
+  // One read of the taken log, one build per run: the nudge line and the record share both.
+  const taken = readTaken({ home, toplevel, fs });
+  const built = new Map();
+  const buildRun = (dir) => {
+    if (!built.has(dir)) built.set(dir, runForPrune(dir, { fs, spawnSync: spawn }));
+    return built.get(dir);
+  };
+  // Recorded before the measure, and before the silence test: a run already nudged this
+  // session still needs its witness refreshed, a partly ported run still holds lanes this
+  // HEAD did port, and a measure that spends the budget must not leave recording none of it.
+  try {
+    recordPorts({ home, toplevel, tree, into: branch, base, dirs, cfg: config, git, fs, buildRun, taken, startedMs, budgetMs });
+  } catch { /* a lost record costs recall, never the turn */ }
   const runs = portedRuns({
     home,
     toplevel,
     sessionId,
     base,
-    branch: head.stdout.replace(/^refs\/heads\//, ""),
+    branch,
     portingTree: tree,
-    touched: readTouched({ home, sessionId, fs }),
+    touched,
     cfg: config,
     git,
     fs,
     spawnSync: spawn,
     budgetMs,
+    dirs,
+    taken,
+    buildRun,
   });
   if (!runs.length) return "";
 
