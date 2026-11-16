@@ -201,7 +201,6 @@ function recordPorts({ home, toplevel, tree, into, base, dirs, git, fs, buildRun
   const deadline = startedMs + budgetMs - RECORD_MIN_BUDGET_MS;
   refreshTaken({ home, toplevel, into, head: base, git, fs, known: taken, deadline });
   if (!dirs.length || Date.now() >= deadline) return;
-  const known = taken;
   let left = RECORD_LANE_CAP;
   for (const dir of dirs) {
     const built = buildRun(dir);
@@ -210,7 +209,7 @@ function recordPorts({ home, toplevel, tree, into, base, dirs, git, fs, buildRun
     for (const row of built.run.worktreesKept) {
       if (!row.branch || !row.repo) continue;
       const key = takenKey({ run: name, repo: row.repo, branch: row.branch });
-      if (known.has(key)) continue;
+      if (taken.has(key)) continue;
       if (left <= 0 || Date.now() >= deadline) return;
       try {
         const tip = git(["rev-parse", "--verify", `${row.branch}^{commit}`], row.repo);
@@ -222,11 +221,9 @@ function recordPorts({ home, toplevel, tree, into, base, dirs, git, fs, buildRun
         const proven = ancestor.status === 0
           || (ancestor.status === 1 && absorbed(base, row.branch, row.repo, git));
         if (!proven) continue;
-        appendTaken({
-          home, toplevel, fs,
-          records: [{ run: name, branch: row.branch, laneTip: tip.stdout, repo: row.repo, into, portCommit: base, intoTip: base }],
-        });
-        known.set(key, true);
+        const record = { run: name, branch: row.branch, laneTip: tip.stdout, repo: row.repo, into, portCommit: base, intoTip: base };
+        appendTaken({ home, toplevel, fs, records: [record] });
+        taken.set(key, record);
       } catch { /* one lane git cannot answer costs that lane, not the firing */ }
     }
   }
