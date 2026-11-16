@@ -361,6 +361,23 @@ test("A6: the end block lists the 10 slowest tests, slowest first", async (t) =>
 
 // --- Integration surface for the runner ------------------------------------
 
+test("a file that crashes at load still prints, with its stderr as the failure evidence", async (t) => {
+  const root = makeRoot(t);
+  const file = join(root, "tests", "crash.test.mjs");
+  const reporter = createReporter({ env: envFor(root, { TEST_REPORTER: "agent" }), sleep: neverSleep });
+  const source = events([
+    dequeue(file),
+    stderr(file, "Error: load crash\n"),
+    stderr(file, "    at file:///x/crash.test.mjs:1:7\n"),
+    complete(file, { passed: false, ms: 400 }),
+    summary({ tests: 0, passed: 0, failed: 1, skipped: 0, todo: 0 }, 400),
+  ]);
+  const out = await drain(reporter, source);
+  assert.match(out, /^✗ tests\/crash\.test\.mjs {2}0\.4s$/m);
+  assert.match(out, /^FAIL tests\/crash\.test\.mjs$/m);
+  assert.match(out, /Error: load crash/);
+});
+
 test("the in-flight record is written per pid on file start and cleared at the end", async (t) => {
   const root = makeRoot(t);
   const file = join(root, "tests", "a.test.mjs");
