@@ -1,9 +1,9 @@
 // Imported first by every test file: points SWARM_HOME, HOME and USERPROFILE at a
 // throwaway dir so a run cannot read or write the real ~/.swarm or ~/.claude.
 // Child processes (node --test workers, CLI spawns) inherit it.
-import { copyFileSync, existsSync, linkSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { copyFileSync, linkSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { delimiter, join } from "node:path";
-import { homedir, tmpdir } from "node:os";
+import { tmpdir } from "node:os";
 import { after } from "node:test";
 
 // An inherited SWARM_HOME is only trustworthy when WE set it — the marker says so.
@@ -15,10 +15,23 @@ if (!process.env.SWARM_HOME || process.env.SWARM_TEST_HOME !== "1") {
   const dir = mkdtempSync(join(tmpdir(), "swarm-test-home-"));
   const binDir = join(dir, "bin");
   mkdirSync(binDir);
-  // Moving HOME hides git's global config, and tests commit. Point git at the
-  // real file before HOME moves away from it.
-  const globalConfig = join(homedir(), ".gitconfig");
-  if (!process.env.GIT_CONFIG_GLOBAL && existsSync(globalConfig)) process.env.GIT_CONFIG_GLOBAL = globalConfig;
+  // A test-owned config, never the operator's: theirs carries hooks that act on
+  // their machine (one MSYS spawn per git command on Windows) and LFS filters.
+  // A global FILE still loses to a repo-local core.hooksPath, which one test
+  // installs as its subject. Fixed values; autocrlf matches the operator's so
+  // content assertions see the same bytes.
+  const gitconfig = join(dir, ".gitconfig");
+  writeFileSync(gitconfig, [
+    "[user]",
+    "\tname = Swarm Test",
+    "\temail = swarm-test@example.invalid",
+    "[commit]",
+    "\tgpgsign = false",
+    "[core]",
+    "\tautocrlf = false",
+    "",
+  ].join("\n"));
+  process.env.GIT_CONFIG_GLOBAL = gitconfig;
   process.env.SWARM_HOME = dir;
   process.env.HOME = dir;
   process.env.USERPROFILE = dir;

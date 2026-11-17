@@ -3,6 +3,7 @@ import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { fakeSpawnFactory, makeIo, promptOf, sentPrompt, usageEnv, codexReading } from "./fake-io.mjs";
 import { treeDirFor } from "../../src/worktree.mjs";
+import { templateRepo } from "./template-repo.mjs";
 
 export { fakeSpawnFactory, makeIo, promptOf, sentPrompt, usageEnv, codexReading };
 export const SHIM = fileURLToPath(new URL("../shims/claude-shim.mjs", import.meta.url));
@@ -107,12 +108,12 @@ export function gitInRepo(args, cwd) {
 }
 
 export function initGitRepo() {
-  const repo = mkdtempSync(join(tmpdir(), "swarm-sched-repo-"));
-  spawnSync("git", ["init", "-q", "-b", "main"], { cwd: repo, windowsHide: true });
-  writeFileSync(join(repo, "a.txt"), "hello\n");
-  spawnSync("git", ["add", "."], { cwd: repo, windowsHide: true });
-  spawnSync("git", ["-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false", "commit", "-q", "-m", "init"], { cwd: repo, windowsHide: true });
-  return repo;
+  return templateRepo("scheduler", (repo) => {
+    spawnSync("git", ["init", "-q", "-b", "main"], { cwd: repo, windowsHide: true });
+    writeFileSync(join(repo, "a.txt"), "hello\n");
+    spawnSync("git", ["add", "."], { cwd: repo, windowsHide: true });
+    spawnSync("git", ["-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false", "commit", "-q", "-m", "init"], { cwd: repo, windowsHide: true });
+  });
 }
 
 export function commitAllInRepo(cwd, msg) {

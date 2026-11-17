@@ -1,5 +1,5 @@
 import "./helpers/isolate-home.mjs";
-import { test } from "node:test";
+import { test, before, after } from "node:test";
 import { equal } from "node:assert/strict";
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -41,21 +41,20 @@ function world() {
   };
 }
 
+// Both rows only read the repo and tree, so one build serves the file.
+let w;
+before(() => { w = world(); });
+after(() => { if (w) w.cleanup(); });
+
 test("loadManifest default governance io allows a treeRoot cwd by its source repo", () => {
-  const w = world();
-  try {
-    writeFileSync(w.manifest, JSON.stringify({ cwd: w.repo, tasks: [
-      { id: "impl", prompt: "work", provider: "claude", model: "claude-haiku-4-5-20251001", cwd: w.tree },
-    ] }));
-    equal(loadManifest(w.manifest, w.cfg, w.repo).tasks[0].cwd, w.tree);
-  } finally { w.cleanup(); }
+  writeFileSync(w.manifest, JSON.stringify({ cwd: w.repo, tasks: [
+    { id: "impl", prompt: "work", provider: "claude", model: "claude-haiku-4-5-20251001", cwd: w.tree },
+  ] }));
+  equal(loadManifest(w.manifest, w.cfg, w.repo).tasks[0].cwd, w.tree);
 });
 
 test("buildDispatch default governance io receives the configured treeRoot", () => {
-  const w = world();
-  try {
-    const task = { id: "impl", prompt: "work", provider: "claude", model: "claude-haiku-4-5-20251001",
-      cwd: w.tree, originalCwd: w.tree, allowedTools: "Read,Edit,Bash" };
-    equal(buildDispatch(task, task.prompt, w.cfg).provider, "claude");
-  } finally { w.cleanup(); }
+  const task = { id: "impl", prompt: "work", provider: "claude", model: "claude-haiku-4-5-20251001",
+    cwd: w.tree, originalCwd: w.tree, allowedTools: "Read,Edit,Bash" };
+  equal(buildDispatch(task, task.prompt, w.cfg).provider, "claude");
 });

@@ -57,7 +57,7 @@ test("every CI suite job selects itself from the diff and has its base history",
 
 test("every CI-only step the runner does not own is still there by name", () => {
   const yml = readFileSync(WORKFLOW, "utf8");
-  const kept = ["500-line bar", "Configure git identity", "Plant read-only home sentinels",
+  const kept = ["500-line bar", "Plant read-only home sentinels",
     "Verify home sentinels untouched", "Check plugin file types"];
   for (const name of kept) assert.match(yml, new RegExp(`name:\\s*${name}`), `CI lost "${name}"`);
 });
