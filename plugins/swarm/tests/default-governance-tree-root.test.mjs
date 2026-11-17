@@ -41,7 +41,7 @@ function world() {
   };
 }
 
-// Both rows only read this world, so one build serves the file.
+// Both rows only read the repo and tree, so one build serves the file.
 let w;
 before(() => { w = world(); });
 after(() => { if (w) w.cleanup(); });

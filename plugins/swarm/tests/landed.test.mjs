@@ -368,7 +368,7 @@ test("row 17: a branch touching 550 files measures landed, and no git argv nears
   const n = unlandedCount("swarm/leaf", repo, { prefix: PREFIX, gitRunner: rec.run, extraBases: [] });
   equal(n, 0);
   const longest = Math.max(...rec.calls.map((args) => args.join(" ").length));
-  ok(longest < 30000, `a path list on argv overflows a Windows command line: ${longest} chars`);
+  ok(longest < 30000, `the path list must stay under the row's 30,000-char limit: ${longest} chars`);
   ok(rec.calls.some((args) => args[0] === "check-attr" && args.includes("--stdin")), "the path list travels on stdin");
 }));
 

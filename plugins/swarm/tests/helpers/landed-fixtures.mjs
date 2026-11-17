@@ -31,7 +31,8 @@ export function importTouchingCommits(repo, { path, count }) {
   run(["fast-import", "--quiet", "--done"], repo, `${stream}done\n`);
 }
 
-// Long enough that a few hundred of these names exceed a Windows command line.
+// Long enough that a few hundred of these names push the joined path list past
+// the argv row's 30,000-char threshold.
 export const argvOverflowName = (i) =>
   `a/${String(i).padStart(4, "0")}-a-name-long-enough-to-overflow-a-command-line.txt`;
 
