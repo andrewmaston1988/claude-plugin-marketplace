@@ -14,7 +14,8 @@ const minted = home === tmpdir() || home.startsWith(tmpdir() + sep);
 if (process.env.PIPELINE_TEST_HOME !== "1" || !minted) {
   const dir = mkdtempSync(join(tmpdir(), "pipeline-test-home-"));
   process.env.HOME = dir;
-  process.env.USERPROFILE = dir;  // getPaths() prefers the XDG vars on Linux; left set they would point the
+  process.env.USERPROFILE = dir;
+  // getPaths() prefers the XDG vars on Linux; left set they would point the
   // suite at the operator's real data dir even with HOME moved.
   delete process.env.XDG_CONFIG_HOME;
   delete process.env.XDG_DATA_HOME;
