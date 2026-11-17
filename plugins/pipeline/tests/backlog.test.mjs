@@ -10,6 +10,7 @@
 //  - directory doesn't exist → returns []
 //  - virtual rows have virtual=true flag
 
+import "./helpers/isolate-home.mjs";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync, mkdirSync, writeFileSync } from "node:fs";

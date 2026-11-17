@@ -4,6 +4,7 @@
 //   - no file → deep clone of PIPELINE_DEFAULTS
 //   - partial user file → user values override; untouched defaults preserved
 //   - malformed JSON → defaults, no throw
+import "./helpers/isolate-home.mjs";
 import { test } from "node:test";
 import { equal, deepEqual } from "node:assert/strict";
 import { mkdtempSync, writeFileSync, rmSync } from "node:fs";

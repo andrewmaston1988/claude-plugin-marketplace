@@ -2,6 +2,7 @@
 //
 // Covers session-gen.mjs against the bundled dev/review/research/test/governor
 // templates plus operator override behaviour with per-file fallback.
+import "./helpers/isolate-home.mjs";
 import { test } from "node:test";
 import { equal, match, ok, throws } from "node:assert/strict";
 import { mkdtempSync, writeFileSync, rmSync, readFileSync, mkdirSync, existsSync } from "node:fs";

@@ -1,3 +1,4 @@
+import "./helpers/isolate-home.mjs";
 import { test } from "node:test";
 import { ok, equal, strictEqual } from "node:assert/strict";
 import { readFileSync, writeFileSync, unlinkSync } from "node:fs";

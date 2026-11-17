@@ -20,6 +20,7 @@
 //
 // The on-disk `~/.pipeline/config.json` is backed up and restored around
 // the suite.
+import "./helpers/isolate-home.mjs";
 import { test, before, after } from "node:test";
 import { equal, ok, match } from "node:assert/strict";
 import {

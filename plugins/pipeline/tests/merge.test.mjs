@@ -7,6 +7,7 @@
 // repos). These tests inject a fake `spawn` so we can observe exactly which
 // gh commands step5 issues, and override USERPROFILE so loadPipelineConfig
 // reads a fake config.
+import "./helpers/isolate-home.mjs";
 import { test } from "node:test";
 import { ok, equal } from "node:assert/strict";
 import {

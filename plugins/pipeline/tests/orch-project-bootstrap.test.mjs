@@ -7,6 +7,7 @@
 //  - bootstrap skips when project root already exists
 //  - cwd is non-null after bootstrap, allowing worktree creation
 
+import "./helpers/isolate-home.mjs";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync, mkdirSync, existsSync, readFileSync, writeFileSync } from "node:fs";

@@ -5,6 +5,7 @@
 // All cases drive the helper against real temp git repos (no mocks): the
 // helper is pure I/O against `git`, so mocking would test the mock.
 
+import "./helpers/isolate-home.mjs";
 import { test } from "node:test";
 import { strictEqual, ok } from "node:assert/strict";
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync } from "node:fs";

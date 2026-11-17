@@ -3,6 +3,7 @@
 // Covers the pieces of governor.mjs that don't actually spawn a subprocess:
 // context resolution, report-presence checks, and shouldSpawn* timing logic
 // with injected Date.
+import "./helpers/isolate-home.mjs";
 import { test } from "node:test";
 import { equal, ok, deepEqual } from "node:assert/strict";
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";

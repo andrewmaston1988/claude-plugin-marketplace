@@ -1,6 +1,7 @@
 // verify the parse-error contract for loadPipelineConfig / updatePipelineConfig.
 // Reads fall back to defaults and emit a stderr warning; writes throw before
 // touching the file so a mutator cannot blow away unrelated keys.
+import "./helpers/isolate-home.mjs";
 import { test } from "node:test";
 import { equal, deepEqual, match, ok } from "node:assert/strict";
 import { mkdtempSync, writeFileSync, readFileSync, rmSync } from "node:fs";

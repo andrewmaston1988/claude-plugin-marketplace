@@ -1,4 +1,5 @@
 // coordinator_goals table helpers round-trip tests
+import "./helpers/isolate-home.mjs";
 import { test } from "node:test";
 import { equal, ok, deepEqual } from "node:assert/strict";
 import { mkdtempSync, mkdirSync, rmSync } from "node:fs";

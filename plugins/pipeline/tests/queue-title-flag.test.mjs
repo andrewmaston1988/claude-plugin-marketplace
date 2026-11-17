@@ -3,6 +3,7 @@
 // neither, pr_title stays null and merge falls back to the feature slug. Drives
 // the real CLI against a throwaway project under a tmp HOME (so ~/.pipeline is
 // never touched), mirroring the parity runner's setup.
+import "./helpers/isolate-home.mjs";
 import { test } from "node:test";
 import { equal } from "node:assert/strict";
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";

@@ -1,4 +1,5 @@
 // Dashboard progress lookup — verify that correlation_id (not session_file basename) is used as the slug key
+import "./helpers/isolate-home.mjs";
 import { test } from "node:test";
 import { equal, deepEqual } from "node:assert/strict";
 import { mkdtempSync, mkdirSync, rmSync } from "node:fs";

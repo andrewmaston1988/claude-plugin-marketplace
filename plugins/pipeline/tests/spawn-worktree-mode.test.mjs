@@ -1,6 +1,7 @@
 // Phase 3b: one worktree per feature. All session types resolve to the same
 // path. The stash-pop-conflict recovery path is exercised by simulating the
 // dance against a temp git repo.
+import "./helpers/isolate-home.mjs";
 import { test } from "node:test";
 import { equal, ok } from "node:assert/strict";
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync } from "node:fs";

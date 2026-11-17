@@ -3,6 +3,7 @@
 // gate (depsMet waits_on + ancestor check) and queue-cluster topo ordering are
 // exercised at the integration layer; this pins the schema/persistence floor
 // the rest builds on.
+import "./helpers/isolate-home.mjs";
 import { test } from "node:test";
 import { equal, ok } from "node:assert/strict";
 import { mkdtempSync, mkdirSync, rmSync } from "node:fs";

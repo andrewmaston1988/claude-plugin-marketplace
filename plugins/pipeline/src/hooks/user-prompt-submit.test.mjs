@@ -1,7 +1,8 @@
+import "../../tests/helpers/isolate-home.mjs";
 import test from "node:test";
 import assert from "node:assert";
 import { spawnSync } from "node:child_process";
-import { writeFileSync, mkdirSync, rmSync } from "node:fs";
+import { readFileSync, writeFileSync, mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { homedir } from "node:os";
@@ -10,6 +11,17 @@ import { connectPath, upsertClaudeSession, getClaudeSession, getLastCheckpointSi
 
 const NODE_PATH = process.execPath;
 const HOOK_PATH = fileURLToPath(new URL("./user-prompt-submit.mjs", import.meta.url));
+
+// The hook logs under homedir()/.pipeline on every platform, so a grown count
+// here proves the spawn wrote inside the isolated home, not the operator's log.
+function hookLogLines() {
+  try {
+    const log = join(homedir(), ".pipeline", "logs", "user-prompt-submit.log");
+    return readFileSync(log, "utf8").split("\n").filter(Boolean).length;
+  } catch {
+    return 0;
+  }
+}
 
 test("resolveSessionId: returns sessionId from stdin when provided", () => {
   const stdinJson = { session_id: "test-123" };
@@ -90,6 +102,7 @@ test("upsertClaudeSession: preserves user_ts on null update", () => {
 });
 
 test("hook stdout contract: valid JSON on empty stdin", (t, done) => {
+  const before = hookLogLines();
   const result = spawnSync(NODE_PATH, [
     HOOK_PATH,
   ], {
@@ -103,6 +116,7 @@ test("hook stdout contract: valid JSON on empty stdin", (t, done) => {
     assert(parsed.hookSpecificOutput, "should have hookSpecificOutput");
     assert.equal(parsed.hookSpecificOutput.hookEventName, "UserPromptSubmit", "hookEventName should be UserPromptSubmit");
     assert.equal(typeof parsed.hookSpecificOutput.additionalContext, "string", "additionalContext should be a string");
+    assert(hookLogLines() > before, "hook must log inside the isolated home");
     done();
   } catch (err) {
     done(err);
@@ -110,6 +124,7 @@ test("hook stdout contract: valid JSON on empty stdin", (t, done) => {
 });
 
 test("hook stdout contract: valid JSON on malformed stdin", (t, done) => {
+  const before = hookLogLines();
   const result = spawnSync(NODE_PATH, [
     HOOK_PATH,
   ], {
@@ -122,6 +137,7 @@ test("hook stdout contract: valid JSON on malformed stdin", (t, done) => {
     const parsed = JSON.parse(output);
     assert(parsed.hookSpecificOutput, "should have hookSpecificOutput");
     assert.equal(parsed.hookSpecificOutput.hookEventName, "UserPromptSubmit");
+    assert(hookLogLines() > before, "hook must log inside the isolated home");
     done();
   } catch (err) {
     done(err);
@@ -136,6 +152,7 @@ test("hook: database write on valid JSON", (t, done) => {
     cwd: process.cwd(),
   });
 
+  const before = hookLogLines();
   const result = spawnSync(NODE_PATH, [
     HOOK_PATH,
   ], {
@@ -147,6 +164,7 @@ test("hook: database write on valid JSON", (t, done) => {
     const output = result.stdout.trim().split("\n").pop();
     const parsed = JSON.parse(output);
     assert(parsed.hookSpecificOutput, "should emit valid JSON");
+    assert(hookLogLines() > before, "hook must log inside the isolated home");
     done();
   } catch (err) {
     done(err);
@@ -160,6 +178,7 @@ test("hook stdout contract: valid JSON when session_id absent from stdin (exerci
     cwd: process.cwd(),
   });
 
+  const before = hookLogLines();
   const result = spawnSync(NODE_PATH, [
     HOOK_PATH,
   ], {
@@ -173,6 +192,7 @@ test("hook stdout contract: valid JSON when session_id absent from stdin (exerci
     assert(parsed.hookSpecificOutput, "should have hookSpecificOutput");
     assert.equal(parsed.hookSpecificOutput.hookEventName, "UserPromptSubmit");
     assert.equal(typeof parsed.hookSpecificOutput.additionalContext, "string", "additionalContext should be a string");
+    assert(hookLogLines() > before, "hook must log inside the isolated home");
     done();
   } catch (err) {
     done(err);

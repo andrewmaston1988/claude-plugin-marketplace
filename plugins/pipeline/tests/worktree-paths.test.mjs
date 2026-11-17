@@ -3,6 +3,7 @@
 // Verifies both resolvers and their substitution helpers under defaults,
 // operator-style overrides, and edge cases (null projectRoot, bare branches,
 // shared-worktree semantics for orchestrator-spawned sessions).
+import "./helpers/isolate-home.mjs";
 import { test } from "node:test";
 import { equal, deepEqual, throws, ok } from "node:assert/strict";
 import { homedir } from "node:os";

@@ -1,3 +1,4 @@
+import "../../tests/helpers/isolate-home.mjs";
 import { test } from "node:test";
 import { ok, equal, strictEqual } from "node:assert/strict";
 import { mkdtempSync, mkdirSync, rmSync } from "node:fs";

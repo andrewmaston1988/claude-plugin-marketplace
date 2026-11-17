@@ -12,6 +12,7 @@
 // op, then rewrites input.json in the new shape and drops the obsolete
 // expected.db.sql.
 
+import "./helpers/isolate-home.mjs";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {

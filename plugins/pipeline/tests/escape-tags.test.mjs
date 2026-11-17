@@ -3,6 +3,7 @@
 // message) as markup. Without it the parser splits a multi-part tag, recurses
 // into _attr(), and crashes on `null.slice(2,-1)` (blessed program.js). Pure
 // string logic, so unlike the render functions it is safe to unit-test directly.
+import "./helpers/isolate-home.mjs";
 import { test } from "node:test";
 import { equal, deepEqual, ok } from "node:assert/strict";
 import { escapeTags } from "../src/dashboard/tui/style.mjs";

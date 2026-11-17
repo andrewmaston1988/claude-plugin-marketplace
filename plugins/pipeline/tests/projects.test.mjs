@@ -7,6 +7,7 @@
 //    across two projects without collision
 //  - listEnabledProjects respects the enabled flag
 
+import "./helpers/isolate-home.mjs";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync, mkdirSync, writeFileSync } from "node:fs";

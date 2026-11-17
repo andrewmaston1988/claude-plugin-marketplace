@@ -2,6 +2,7 @@
 //
 // Focused per-check tests rather than end-to-end, so test results don't depend
 // on the host's `claude` CLI presence.
+import "./helpers/isolate-home.mjs";
 import { test } from "node:test";
 import { equal, ok, match, deepEqual } from "node:assert/strict";
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";

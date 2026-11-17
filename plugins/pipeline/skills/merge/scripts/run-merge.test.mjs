@@ -3,6 +3,7 @@
 // The driver changes no merge behaviour: it resolves the inputs the merge
 // SKILL.md used to resolve by hand, performs the pre-checks, and invokes
 // merge.mjs unchanged. These tests pin the port, not the merge.
+import "../../../tests/helpers/isolate-home.mjs";
 import { test } from "node:test";
 import { equal, deepEqual, ok, match } from "node:assert/strict";
 import { readFileSync, mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync } from "node:fs";

@@ -3,6 +3,7 @@
 // Covers the post-claudeBase-removal model: queue-plan stores absolute paths,
 // lookupPlanFile reads from rows, step6bArchive walks distinct plan-dirs from
 // done-rows.
+import "./helpers/isolate-home.mjs";
 import { test } from "node:test";
 import { equal, ok } from "node:assert/strict";
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync } from "node:fs";

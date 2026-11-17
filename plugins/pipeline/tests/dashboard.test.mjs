@@ -1,5 +1,6 @@
 // dashboard shared loaders — read-only data accessors used by both
 // TUI and web. UI rendering is not auto-tested (matches Python upstream).
+import "./helpers/isolate-home.mjs";
 import { test } from "node:test";
 import { equal, ok } from "node:assert/strict";
 import { mkdtempSync, mkdirSync, rmSync } from "node:fs";
@@ -80,15 +81,10 @@ test("loadRecentCycles: feature filter", () => {
 });
 
 test("loadOrchState: returns absent shape when no state file", () => {
-  const orig = process.env.PIPELINE_STATE_FILE;
-  try {
-    // Even with no state file, loader should return a stable shape, not throw
-    const s = loadOrchState();
-    ok(typeof s === "object");
-    ok("status" in s);
-    ok("pid" in s);
-    ok("alive" in s);
-  } finally {
-    if (orig !== undefined) process.env.PIPELINE_STATE_FILE = orig;
-  }
+  // Even with no state file, loader should return a stable shape, not throw
+  const s = loadOrchState();
+  ok(typeof s === "object");
+  ok("status" in s);
+  ok("pid" in s);
+  ok("alive" in s);
 });

@@ -1,6 +1,7 @@
 // research-complete — stored plan paths must be absolute: the orchestrator
 // reads plan_file verbatim at spawn time, so a bare filename parks the row
 // at manual with [plan-file-missing]. Pins the resolve + fail-fast behaviour.
+import "./helpers/isolate-home.mjs";
 import { test } from "node:test";
 import { equal, ok, match } from "node:assert/strict";
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
