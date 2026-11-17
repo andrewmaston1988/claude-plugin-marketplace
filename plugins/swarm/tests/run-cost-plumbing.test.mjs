@@ -49,7 +49,7 @@ test("a leaf that reports no turn count leaves every reader's numTurns absent", 
     equal(readRun(p.resultsDir).tasks.find((t) => t.id === "a").numTurns, undefined);
   }));
 
-test("re-asks sum their turns with the first attempt's, so each is counted as a request", async () => {
+test("re-asks sum their turns with the first attempt's, so each is counted as a request", () => {
   let call = 0;
   return withRun([task("a", { returns: SITES })], (c) => {
     call += 1;
@@ -92,7 +92,7 @@ test("swarm ask: the ask entry carries its own turns, and the summary row sums t
   }
 });
 
-test("a rate-limited attempt's turns count toward the leaf's requests", async () => {
+test("a rate-limited attempt's turns count toward the leaf's requests", () => {
   let calls = 0;
   const limited = JSON.stringify({ type: "result", subtype: "error_during_execution", is_error: true, result: "429 rate limit", num_turns: 2 }) + "\n";
   return withRun([task("a")], () => (++calls === 1 ? { exit: 1, output: limited } : { output: turnsStream("done", "s-1", 3) }),
@@ -110,7 +110,7 @@ test("a cache-replayed leaf keeps its recorded turns on the summary row", async 
     equal(again.summary.tasks.find((t) => t.id === "a").numTurns, 4);
   }));
 
-test("a run-start resets the turn counts it read from an earlier attempt", async () => {
+test("a run-start resets the turn counts it read from an earlier attempt", () => {
   const ev = (o) => JSON.stringify({ ts: "2026-09-29T00:00:00Z", ...o });
   const log = [
     ev({ event: "run-start", tasks: ["a"] }),

@@ -49,7 +49,7 @@ test("swarm wait blocks across polls until the run settles", async () => {
   equal(s.slept[0], 5000, "polls every few seconds");
 });
 
-test("swarm wait exits 0 when every leaf is ok or skipped", async () => {
+test("swarm wait exits 0 when every leaf is ok or skipped", () => {
   equal(settledCode(runOf({ states: { a: "ok", b: "skipped" } })), EXIT_CLEAN, "ok and skipped are both clean");
 });
 

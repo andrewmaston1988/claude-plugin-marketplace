@@ -69,7 +69,7 @@ async function installInto(dir) {
   return { home, userBin, resolver: join(userBin, "swarm-resolver.mjs"), bashShim: join(userBin, "swarm"), cmdShim: join(userBin, "swarm.cmd"), result: r };
 }
 
-test("row 1 (text): bash wrapper is LF + shebang; .cmd is CRLF + @echo off; both quote node and resolver and pass bin/swarm.mjs first", async () => {
+test("row 1 (text): bash wrapper is LF + shebang; .cmd is CRLF + @echo off; both quote node and resolver and pass bin/swarm.mjs first", () => {
   const node = "C:\\Program Files\\nodejs\\node.exe";
   const resolver = "C:\\Users\\a\\.local\\bin\\swarm-resolver.mjs";
   const bash = bashWrapper(node, resolver);
@@ -133,7 +133,7 @@ test("row 5 (idempotence): a second install over the same dir leaves exactly the
   }
 });
 
-test("row 6: the real bin/swarm.mjs — not a fixture stand-in — dispatches the engine", async () => {
+test("row 6: the real bin/swarm.mjs — not a fixture stand-in — dispatches the engine", () => {
   const dir = tmp();
   try {
     const env = {
@@ -227,7 +227,7 @@ test("row 8: statusline mode still exits 0 on failure after the D5 change", asyn
 // The .cmd wrapper is meaningless on POSIX — an unrunnable file in ~/.local/bin —
 // and the reference wizard gates it on win32 for the same reason. `platform` is a
 // parameter so both branches are exercised from either OS.
-test("installPlan writes the .cmd only on win32", async () => {
+test("installPlan writes the .cmd only on win32", () => {
   const args = { userBin: "/tmp/bin", nodePath: "node", resolverSrc: RESOLVER_SRC };
   const names = (p) => installPlan({ ...args, platform: p }).map((e) => basename(e.path)).sort();
   assert.deepEqual(names("win32"), ["swarm", "swarm-resolver.mjs", "swarm.cmd"]);
@@ -263,7 +263,7 @@ const runResolver = (home, env = {}) =>
     env: { ...process.env, ...fakeHomeEnv(home), SWARM_PLUGIN_REGISTRY: "", ...env },
   });
 
-test("codex: with no Claude registry, the engine runs from the Codex install", async () => {
+test("codex: with no Claude registry, the engine runs from the Codex install", () => {
   const dir = tmp();
   try {
     const home = join(dir, "home");
@@ -276,7 +276,7 @@ test("codex: with no Claude registry, the engine runs from the Codex install", a
   }
 });
 
-test("codex: a cached install whose config.toml does not enable it is not resolved", async () => {
+test("codex: a cached install whose config.toml does not enable it is not resolved", () => {
   const dir = tmp();
   try {
     const home = join(dir, "home");
@@ -292,7 +292,7 @@ test("codex: a cached install whose config.toml does not enable it is not resolv
   }
 });
 
-test("codex: the newest install by mtime wins, not the highest-sorting version string", async () => {
+test("codex: the newest install by mtime wins, not the highest-sorting version string", () => {
   const dir = tmp();
   try {
     const home = join(dir, "home");
@@ -310,7 +310,7 @@ test("codex: the newest install by mtime wins, not the highest-sorting version s
   }
 });
 
-test("codex: a Claude install takes precedence over a Codex one", async () => {
+test("codex: a Claude install takes precedence over a Codex one", () => {
   const dir = tmp();
   try {
     const home = join(dir, "home");
@@ -328,7 +328,7 @@ test("codex: a Claude install takes precedence over a Codex one", async () => {
   }
 });
 
-test("codex: an explicit SWARM_PLUGIN_REGISTRY suppresses the Codex fallback", async () => {
+test("codex: an explicit SWARM_PLUGIN_REGISTRY suppresses the Codex fallback", () => {
   const dir = tmp();
   try {
     const home = join(dir, "home");

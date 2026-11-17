@@ -172,7 +172,7 @@ test("validate: the seats block sits between the existing lines and never distur
   }
 });
 
-test("validate: the store is read once for the block, and not at all while silent (row 9)", async () => {
+test("validate: the store is read once for the block, and not at all while silent (row 9)", () => {
   const register = new URL("./fixtures/store-read-register.mjs", import.meta.url).href;
   const instrumented = (w) => spawnSync(process.execPath, ["--import", register, CLI, "validate", w.manifest], {
     cwd: w.dir,
@@ -1414,13 +1414,14 @@ test("report: missing report.md exits 1 with a readable error", async () => {
   }
 });
 
-test("serve: dashboard.enabled=false refuses to start (foreground and --daemon), names the key, writes no pid", async () => {
+test("serve: dashboard.enabled=false refuses to start (foreground and --daemon), names the key, writes no pid", () => {
   const dir = tmp();
   try {
     const home = join(dir, "home");
     mkdirSync(home, { recursive: true });
     writeFileSync(join(home, "config.json"), gateConfig({ dashboard: { enabled: false, port: 0, tray: false } }));
     for (const args of [["serve"], ["serve", "--daemon"]]) {
+      // Spawned on purpose: `serve` arms process.exit, which would kill this runner.
       const r = runCli(args, { cwd: dir, env: { SWARM_HOME: home } });
       equal(r.status, 0, r.stderr);
       ok(/dashboard: disabled/.test(r.stdout), r.stdout);

@@ -30,74 +30,74 @@ function fakeRun(dir) {
 
 const leaf = (id, result) => ({ id, model: "m", resultPath: `/r/${id}.json`, transcriptPath: `/r/${id}.log`, result });
 
-test("grade --init pre-fills a clean leaf's outcome as completed", async () => {
+test("grade --init pre-fills a clean leaf's outcome as completed", () => {
   equal(outcomeFor({ ok: true, exit: 0, output: "done" }), "completed", "an ok leaf with output is completed, not a placeholder");
 });
 
-test("grade --init pre-fills a timed-out leaf's outcome as timeout", async () => {
+test("grade --init pre-fills a timed-out leaf's outcome as timeout", () => {
   equal(outcomeFor({ ok: false, exit: null, timedOut: true, output: "was mid-edit" }), "timeout", "the record's timedOut flag wins over the generic failure");
 });
 
-test("grade --init pre-fills a failed leaf's outcome as failed", async () => {
+test("grade --init pre-fills a failed leaf's outcome as failed", () => {
   equal(outcomeFor({ ok: false, exit: 1, output: "boom" }), "failed", "a non-timeout non-zero exit is failed");
 });
 
 // The provider ran dry or throttled the leaf: a machinery fact the engine
 // recorded, not a judgement about the model. Pre-filling `failed` blames it.
-test("grade --init pre-fills quota and rate-limited from the recorded failureClass", async () => {
+test("grade --init pre-fills quota and rate-limited from the recorded failureClass", () => {
   equal(outcomeFor({ ok: false, exit: 1, failureClass: "quota", output: "usage limit reached" }), "quota");
   equal(outcomeFor({ ok: false, exit: 1, failureClass: "rate-limited", output: "429 too many requests" }), "rate-limited");
 });
 
 // `harness` is the grader's diagnosis after reading the transcript — the engine
 // never knows it, so a stray failureClass must not smuggle it into the skeleton.
-test("grade --init never pre-fills harness — it is the grader's diagnosis", async () => {
+test("grade --init never pre-fills harness — it is the grader's diagnosis", () => {
   equal(outcomeFor({ ok: false, exit: 1, failureClass: "harness", output: "lost path" }), "failed");
 });
 
-test("grade --init never pre-fills wrong — it is the grader's judgement", async () => {
+test("grade --init never pre-fills wrong — it is the grader's judgement", () => {
   for (const result of [{ ok: true, output: "x" }, { ok: false, output: "x" }, { ok: false, timedOut: true, output: "x" }]) {
     ok(outcomeFor(result) !== "wrong", "wrong is a verdict only a human reaches; the pre-fill must never reach it");
   }
 });
 
-test("grade --init leaves the outcome placeholder when the leaf said nothing", async () => {
+test("grade --init leaves the outcome placeholder when the leaf said nothing", () => {
   equal(outcomeFor({ ok: true, exit: 0, output: "" }), PLACEHOLDER, "a leaf with no output cannot be called completed, however it exited");
   equal(outcomeFor({ ok: true, exit: 0, output: "   \n" }), PLACEHOLDER, "whitespace-only output is no output");
 });
 
-test("grade --init still pre-fills timeout/failed for a leaf that produced no output", async () => {
+test("grade --init still pre-fills timeout/failed for a leaf that produced no output", () => {
   equal(outcomeFor({ ok: false, timedOut: true, output: "" }), "timeout", "the state settles it even with no output");
   equal(outcomeFor({ ok: false, exit: 1, output: "" }), "failed", "the state settles it even with no output");
 });
 
-test("grade --init leaves the outcome placeholder when no state is recorded", async () => {
+test("grade --init leaves the outcome placeholder when no state is recorded", () => {
   equal(outcomeFor(null), PLACEHOLDER, "an absent record keeps the placeholder");
   equal(outcomeFor({}), PLACEHOLDER, "a record with no ok flag keeps the placeholder");
   equal(outcomeFor({ ok: null, output: "x" }), PLACEHOLDER, "a null ok flag keeps the placeholder");
 });
 
-test("grade --init quotes the leaf's own TL;DR line", async () => {
+test("grade --init quotes the leaf's own TL;DR line", () => {
   equal(tldrLine("tl;dr: moved the icons across.\n\nDetail."), "tl;dr: moved the icons across.", "the TL;DR line is matched case-insensitively");
   equal(noteFor({ output: "TL;DR: moved the icons across.\n\nDetail." }), 'leaf says: "TL;DR: moved the icons across."', "the note is attributed to the leaf, not written as a verdict");
 });
 
-test("grade --init falls back to the first non-empty line when there is no TL;DR", async () => {
+test("grade --init falls back to the first non-empty line when there is no TL;DR", () => {
   equal(noteFor({ output: "\n\n  TypeError: x is not a function\n  at foo" }), 'leaf says: "TypeError: x is not a function"', "the first non-empty line is the fallback claim");
 });
 
-test("grade --init truncates a long note to about 200 characters", async () => {
+test("grade --init truncates a long note to about 200 characters", () => {
   const note = noteFor({ output: "x".repeat(500) });
   ok(note.length <= 'leaf says: "'.length + 200 + '…"'.length, `a note must stay short (got ${note.length} chars)`);
   ok(note.endsWith('…"'), "a truncated note is marked as truncated");
 });
 
-test("grade --init leaves the note empty when the leaf produced no output", async () => {
+test("grade --init leaves the note empty when the leaf produced no output", () => {
   equal(noteFor({ output: "" }), "", "no output means no claim to quote");
   equal(noteFor(null), "", "an absent record means no claim to quote");
 });
 
-test("buildSkeleton pre-fills outcome and note per leaf, and never a grade", async () => {
+test("buildSkeleton pre-fills outcome and note per leaf, and never a grade", () => {
   const skeleton = buildSkeleton([
     leaf("clean", { ok: true, exit: 0, output: "TL;DR: done" }),
     leaf("slow", { ok: false, timedOut: true, output: "was mid-edit" }),
@@ -133,7 +133,7 @@ test("grade --init writes pre-filled rows and still refuses to be appended unfil
   }
 });
 
-test("noteFor states an UNCOMMITTED_WORK failure from the engine's measurement", async () => {
+test("noteFor states an UNCOMMITTED_WORK failure from the engine's measurement", () => {
   const note = noteFor({
     ok: false, errorCode: "UNCOMMITTED_WORK", uncommitted: { files: 2, commitsAhead: 1 },
     output: "UNCOMMITTED_WORK: 2 files left uncommitted", rawOutput: "TL;DR: finished everything",
@@ -142,7 +142,7 @@ test("noteFor states an UNCOMMITTED_WORK failure from the engine's measurement",
   ok(!note.includes("finished everything"), "the leaf's own claim is not the note");
 });
 
-test("noteFor says an UNCOMMITTED_WORK tree could not be measured when git could not answer", async () => {
+test("noteFor says an UNCOMMITTED_WORK tree could not be measured when git could not answer", () => {
   const note = noteFor({
     ok: false, errorCode: "UNCOMMITTED_WORK", uncommitted: { files: null, commitsAhead: 0 },
     output: "UNCOMMITTED_WORK: the tree could not be measured",

@@ -51,7 +51,7 @@ function treeWithoutRecord(repo, dir, name = "impl") {
   return wt;
 }
 
-test("prune finds a tree in the run's scratch dir that neither a record nor summary.json names", async () => {
+test("prune finds a tree in the run's scratch dir that neither a record nor summary.json names", () => {
   const repo = initRepo();
   const dir = runDir("prune-scratch-discovery");
   let wt;
@@ -72,7 +72,7 @@ test("prune finds a tree in the run's scratch dir that neither a record nor summ
   }
 });
 
-test("prune's refusal is unchanged: unlanded work in a scratch-dir tree still blocks the destroy", async () => {
+test("prune's refusal is unchanged: unlanded work in a scratch-dir tree still blocks the destroy", () => {
   const repo = initRepo();
   const dir = runDir("prune-scratch-unlanded");
   let wt;
@@ -93,7 +93,7 @@ test("prune's refusal is unchanged: unlanded work in a scratch-dir tree still bl
   }
 });
 
-test("prune still discovers and removes a legacy <run>/wt-* tree — the pre-upgrade layout is untouched", async () => {
+test("prune still discovers and removes a legacy <run>/wt-* tree — the pre-upgrade layout is untouched", () => {
   const repo = initRepo();
   const dir = runDir("prune-legacy");
   const legacy = join(dir, "wt-impl");
@@ -113,7 +113,7 @@ test("prune still discovers and removes a legacy <run>/wt-* tree — the pre-upg
   }
 });
 
-test("the nudge counts a finished run's scratch-dir tree even when summary.json lists none", async () => {
+test("the nudge counts a finished run's scratch-dir tree even when summary.json lists none", () => {
   const repo = initRepo();
   const dir = runDir("nudge-scratch");
   let wt;
@@ -131,7 +131,7 @@ test("the nudge counts a finished run's scratch-dir tree even when summary.json 
   }
 });
 
-test("the nudge stays silent for a live run holding a scratch-dir tree", async () => {
+test("the nudge stays silent for a live run holding a scratch-dir tree", () => {
   const repo = initRepo();
   const dir = runDir("nudge-live");
   let wt;
@@ -242,7 +242,7 @@ test("swarm stop on a dead engine records the scratch-dir tree and prints its pr
 
 // History lives in the run dir, so a kept tree's root going missing can never cost
 // the run its record. The root is never created at all — nothing is deleted.
-test("a kept tree whose root is gone leaves the run's results, summary and dashboard row readable", async () => {
+test("a kept tree whose root is gone leaves the run's results, summary and dashboard row readable", () => {
   const dir = runDir("guard-gone-root");
   const goneTree = join(swarmHome(), "tree-root-never-created", runsKeyFor("C--code-lifecycle"), "guard-gone-root", "impl");
   try {
@@ -261,7 +261,7 @@ test("a kept tree whose root is gone leaves the run's results, summary and dashb
   }
 });
 
-test("treeDirFor and prune agree on where a recorded tree lives", async () => {
+test("treeDirFor and prune agree on where a recorded tree lives", () => {
   const repo = initRepo();
   const dir = runDir("agree-on-path");
   let wt;

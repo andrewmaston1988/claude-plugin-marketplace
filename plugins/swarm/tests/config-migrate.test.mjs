@@ -22,7 +22,7 @@ function read(p) {
 
 // --- the decisive row: refuse rather than land a file the next command rejects ---
 
-test("initConfig refuses to migrate a legacy value that would not load, and leaves the file alone", async () => {
+test("initConfig refuses to migrate a legacy value that would not load, and leaves the file alone", () => {
   const dir = tmp();
   try {
     const p = join(dir, "config.json");
@@ -37,7 +37,7 @@ test("initConfig refuses to migrate a legacy value that would not load, and leav
   }
 });
 
-test("a refused legacy migration names the legacy key the operator wrote, and the path it becomes", async () => {
+test("a refused legacy migration names the legacy key the operator wrote, and the path it becomes", () => {
   const dir = tmp();
   try {
     const p = join(dir, "config.json");
@@ -57,7 +57,7 @@ test("a refused legacy migration names the legacy key the operator wrote, and th
   }
 });
 
-test("a bad canonical config is refused as a write, not dressed up as a migration", async () => {
+test("a bad canonical config is refused as a write, not dressed up as a migration", () => {
   const dir = tmp();
   try {
     const p = join(dir, "config.json");
@@ -71,7 +71,7 @@ test("a bad canonical config is refused as a write, not dressed up as a migratio
   }
 });
 
-test("a bad canonical key is refused as a write even when the file also holds a legacy key", async () => {
+test("a bad canonical key is refused as a write even when the file also holds a legacy key", () => {
   const dir = tmp();
   try {
     const p = join(dir, "config.json");
@@ -87,7 +87,7 @@ test("a bad canonical key is refused as a write even when the file also holds a 
   }
 });
 
-test("a canonical leaf the fold never rewrote is refused as a write, not dressed up as a migration", async () => {
+test("a canonical leaf the fold never rewrote is refused as a write, not dressed up as a migration", () => {
   const dir = tmp();
   try {
     const p = join(dir, "config.json");
@@ -108,7 +108,7 @@ test("a canonical leaf the fold never rewrote is refused as a write, not dressed
   }
 });
 
-test("a malformed legacy value is refused with the same framing as a bad canonical one", async () => {
+test("a malformed legacy value is refused with the same framing as a bad canonical one", () => {
   const dir = tmp();
   try {
     const p = join(dir, "config.json");
@@ -128,7 +128,7 @@ test("a malformed legacy value is refused with the same framing as a bad canonic
 
 // --- the placement guard: validation runs AFTER the leaf fill ---
 
-test("initConfig still migrates a sparse legacy object — validation runs after the leaf fill, not before", async () => {
+test("initConfig still migrates a sparse legacy object — validation runs after the leaf fill, not before", () => {
   const dir = tmp();
   try {
     const p = join(dir, "config.json");
@@ -149,7 +149,7 @@ test("initConfig still migrates a sparse legacy object — validation runs after
 
 // --- all five checks, one row each: the extraction must not drop the ordering ---
 
-test("initConfig refuses every value loadConfig refuses — all five checks, one row each", async () => {
+test("initConfig refuses every value loadConfig refuses — all five checks, one row each", () => {
   const dir = tmp();
   try {
     const p = join(dir, "config.json");
@@ -178,7 +178,7 @@ test("initConfig refuses every value loadConfig refuses — all five checks, one
 
 // --- the fold is lossless for UNSHADOWED legacy leaves, and only those ---
 
-test("migration is lossless for legacy leaves canonical does not set, and canonical wins the overlap", async () => {
+test("migration is lossless for legacy leaves canonical does not set, and canonical wins the overlap", () => {
   const dir = tmp();
   try {
     const p = join(dir, "config.json");
@@ -202,7 +202,7 @@ test("migration is lossless for legacy leaves canonical does not set, and canoni
 
 // --- reporting ---
 
-test("initConfig reports migratedKeys and leaves migrated a boolean", async () => {
+test("initConfig reports migratedKeys and leaves migrated a boolean", () => {
   const dir = tmp();
   try {
     const p = join(dir, "config.json");
@@ -220,7 +220,7 @@ test("initConfig reports migratedKeys and leaves migrated a boolean", async () =
   }
 });
 
-test("initConfig reports no migratedKeys for an already-canonical file", async () => {
+test("initConfig reports no migratedKeys for an already-canonical file", () => {
   const dir = tmp();
   try {
     const p = join(dir, "config.json");
@@ -238,7 +238,7 @@ test("initConfig reports no migratedKeys for an already-canonical file", async (
 
 // --- the backup, with its negative half ---
 
-test("initConfig backs up the pre-migration file, and does not churn a backup without one", async () => {
+test("initConfig backs up the pre-migration file, and does not churn a backup without one", () => {
   const dir = tmp();
   try {
     const p = join(dir, "config.json");
@@ -294,7 +294,7 @@ test("config init prints the mapping it applied and where the previous file went
 
 // --- the single-key writer: the value being SET is what has to pass validation ---
 
-test("setConfigValue refuses a value loadConfig would reject, leaving the file byte-identical", async () => {
+test("setConfigValue refuses a value loadConfig would reject, leaving the file byte-identical", () => {
   const dir = tmp();
   try {
     const p = join(dir, "config.json");
@@ -314,7 +314,7 @@ test("setConfigValue refuses a value loadConfig would reject, leaving the file b
   }
 });
 
-test("setConfigValue writes a valid value, keeps every other line, and the next loadConfig accepts it", async () => {
+test("setConfigValue writes a valid value, keeps every other line, and the next loadConfig accepts it", () => {
   const dir = tmp();
   try {
     const p = join(dir, "config.json");

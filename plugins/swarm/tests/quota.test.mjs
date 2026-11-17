@@ -20,7 +20,7 @@ const USAGE_FIXTURE = {
   ],
 };
 
-test("matchQuota: recognises Anthropic limit messages, not rate limits", async () => {
+test("matchQuota: recognises Anthropic limit messages, not rate limits", () => {
   ok(matchQuota("Claude AI usage limit reached|1751210400", DEFAULT_QUOTA_PATTERNS));
   ok(matchQuota("You've hit your limit. Your limit will reset at 3pm", DEFAULT_QUOTA_PATTERNS));
   ok(matchQuota("out of extra usage credits", DEFAULT_QUOTA_PATTERNS));
@@ -28,14 +28,14 @@ test("matchQuota: recognises Anthropic limit messages, not rate limits", async (
   ok(!matchQuota("segfault", DEFAULT_QUOTA_PATTERNS));
 });
 
-test("parseQuotaReset: epoch suffix, human phrasing, or null", async () => {
+test("parseQuotaReset: epoch suffix, human phrasing, or null", () => {
   equal(parseQuotaReset("Claude AI usage limit reached|1751210400"), new Date(1751210400000).toISOString());
   equal(parseQuotaReset("Your limit will reset at 3pm (Europe/London)."), "3pm (Europe/London)");
   equal(parseQuotaReset("usage limit reached, resets at 2026-07-11T12:19:59Z"), "2026-07-11T12:19:59Z");
   equal(parseQuotaReset("segfault"), null);
 });
 
-test("parseUsageLimits: extracts limits with worst-by-percent", async () => {
+test("parseUsageLimits: extracts limits with worst-by-percent", () => {
   const p = parseUsageLimits(USAGE_FIXTURE);
   equal(p.limits.length, 3);
   equal(p.worst.kind, "session");
@@ -50,7 +50,7 @@ test("parseUsageLimits: extracts limits with worst-by-percent", async () => {
 // as account-wide exhaustion grounded every Claude leaf (Opus, Sonnet, Haiku) while
 // the Fable-scoped weekly bucket sat at 100% and the unscoped buckets had headroom;
 // the session doing the dispatch was itself running on Opus at the time.
-test("parseUsageLimits: a model-scoped limit at 100% does NOT exhaust the account", async () => {
+test("parseUsageLimits: a model-scoped limit at 100% does NOT exhaust the account", () => {
   const p = parseUsageLimits({
     limits: [
       { kind: "session", percent: 24, resets_at: "R1", scope: null },
@@ -63,7 +63,7 @@ test("parseUsageLimits: a model-scoped limit at 100% does NOT exhaust the accoun
   deepEqual(p.exhaustedScopes, [{ scope: "Fable", percent: 100, resetsAt: "R3" }]);
 });
 
-test("parseUsageLimits: an UNSCOPED limit at 100% DOES exhaust the account", async () => {
+test("parseUsageLimits: an UNSCOPED limit at 100% DOES exhaust the account", () => {
   const p = parseUsageLimits({
     limits: [
       { kind: "session", percent: 12, resets_at: "R1", scope: null },

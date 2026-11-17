@@ -57,7 +57,7 @@ test("race: two `swarm run` processes released together — exactly one engine s
     rmSync(dir, { recursive: true, force: true });
   }
 });
-test("ownership: a finished run leaves no claim behind — the next run starts", async () => {
+test("ownership: a finished run leaves no claim behind — the next run starts", () => {
   const dir = tmp();
   try {
     const home = join(dir, "home");
@@ -86,7 +86,7 @@ test("ownership: a finished run leaves no claim behind — the next run starts",
 // owner is dead, which is what `engineAlive` is asked. This is the end-to-end half of
 // the unit row — it proves `cmdRun` reaches the claim and proceeds, not just that the
 // claim function would have said yes.
-test("resume: a crashed engine's claim is cleared by the next run, with no manual step", async () => {
+test("resume: a crashed engine's claim is cleared by the next run, with no manual step", () => {
   const dir = tmp();
   try {
     const home = join(dir, "home");
@@ -173,7 +173,7 @@ test("ask: refused while an engine holds the claim, and its own claim is release
 // has — so it passes with `askLeaf`'s claim deleted. This one cannot: the lock says live
 // and there is no heartbeat at all, which is exactly the pre-heartbeat startup window a
 // second engine used to slip into. Only the claim itself refuses this ask.
-test("ask: a live claim refuses an ask that has no heartbeat to read", async () => {
+test("ask: a live claim refuses an ask that has no heartbeat to read", () => {
   const dir = tmp();
   try {
     const home = join(dir, "home");

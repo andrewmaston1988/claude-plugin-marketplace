@@ -37,7 +37,7 @@ test("status footer: with display.money the api-equivalent estimate leads the me
   ok(out.includes(`tokens · ${MONEY_TEXT}`), out);
 }));
 
-test("the closing tokens: line carries the cost text, and nothing when there is none", async () => {
+test("the closing tokens: line carries the cost text, and nothing when there is none", () => {
   const totalTokens = { input: 100, output: 20, cacheCreation: 0, cacheRead: 0 };
   const base = { summaryPath: "s.json", totalTokens };
   const priced = plain(formatClosing({ ...base, costText: MONEY_TEXT }));

@@ -203,7 +203,7 @@ test("grade --file records declared capabilities from the roster the reader serv
 // The closing block is the only mechanical prompt to grade — a SKILL.md step is
 // trust, and the store only fills if something asks. It must be printed by the
 // engine, last, and carry a runnable command.
-test("formatClosing: a run with :cloud leaves ends by asking for a grade", async () => {
+test("formatClosing: a run with :cloud leaves ends by asking for a grade", () => {
   const out = formatClosing({
     summaryPath: "C:/runs/r1/summary.json",
     gradeable: { count: 5, resultsDir: "C:/runs/r1", cli: "C:/swarm/scripts/swarm.mjs" },
@@ -219,7 +219,7 @@ test("formatClosing: a run with :cloud leaves ends by asking for a grade", async
 
 // Since grade-claude-tiers an all-Claude run IS gradeable; the no-ask case
 // is a run with nothing but agentless nodes (count 0).
-test("formatClosing: a run with no gradeable leaves is not asked to grade", async () => {
+test("formatClosing: a run with no gradeable leaves is not asked to grade", () => {
   const out = formatClosing({
     summaryPath: "C:/runs/r1/summary.json",
     gradeable: { count: 0, resultsDir: "C:/runs/r1", cli: "C:/swarm/scripts/swarm.mjs" },

@@ -82,7 +82,7 @@ function spawnHook(payload, home, entrypoint = "cli") {
 const FOOTER = "Take what you still need, then prune each run once its work has landed or been taken — do not ask the operator; `prune` deletes a run's worktrees and branches, never its results.";
 const reason1 = `1 worktree from runs in this session — run \`node ${CLI} status --mine\`, take what you still need, then prune each run once its work has landed or been taken — do not ask the operator.`;
 
-test("a finished run another session launched is counted, never listed", async () => {
+test("a finished run another session launched is counted, never listed", () => {
   const f = fixture();
   try {
     const tree = f.tree("tree");
@@ -97,7 +97,7 @@ test("a finished run another session launched is counted, never listed", async (
   } finally { f.cleanup(); }
 });
 
-test("the block reason is exactly one line: this session's worktree count, (and N others) only when N > 0, and the engine's status --mine", async () => {
+test("the block reason is exactly one line: this session's worktree count, (and N others) only when N > 0, and the engine's status --mine", () => {
   const reason = decidePruneNudge({ mine: [{ dir: "A", kept: 3 }], others: 9 }).reason;
   equal(reason, `3 worktrees from runs in this session (and 9 others) — run \`node ${CLI} status --mine\`, take what you still need, then prune each run once its work has landed or been taken — do not ask the operator.`);
   equal(reason.includes("\n"), false, "one line, whatever the run count");
@@ -139,7 +139,7 @@ test("the hook binary writes prune-nudged into the run it named, is silent on it
   } finally { f.cleanup(); }
 });
 
-test("a resume by another session (a new launcher) is nudged once more", async () => {
+test("a resume by another session (a new launcher) is nudged once more", () => {
   const f = fixture();
   try {
     const dir = f.run("holding", { kept: [f.tree("tree")], launcher: OTHER });
@@ -159,7 +159,7 @@ test("a resume by another session (a new launcher) is nudged once more", async (
   } finally { f.cleanup(); }
 });
 
-test("no session id in the payload makes the hook silent", async () => {
+test("no session id in the payload makes the hook silent", () => {
   const f = fixture();
   try {
     f.run("holding", { kept: [f.tree("tree")], launcher: SESSION });
@@ -230,7 +230,7 @@ test("swarm status --mine names no run once the session has nothing left holding
   } finally { f.cleanup(); }
 });
 
-test("the mine listing is built from the same runs the hook decides on", async () => {
+test("the mine listing is built from the same runs the hook decides on", () => {
   deepEqual(formatMineStatus({ mine: [], others: 0 }), ["swarm status --mine: no finished run this session dispatched is holding kept worktrees."]);
   deepEqual(formatMineStatus({ mine: [{ dir: "A", kept: 1 }], others: 0 }), [
     "swarm status --mine: 1 finished run this session dispatched holds 1 kept worktree.",
@@ -265,7 +265,7 @@ function sectionFrom(text, marker) {
   return lines.slice(start, end < 0 ? lines.length : end).join("\n");
 }
 
-test("nothing calls pruning a finished run the operator's call", async () => {
+test("nothing calls pruning a finished run the operator's call", () => {
   const skill = read("skills/swarm/SKILL.md");
   const roster = read("skills/swarm/references/reading-the-roster.md");
   const readmePrune = read("README.md").split(/\r?\n\r?\n/).filter((b) => b.includes("`swarm prune"))[0] || "";
@@ -294,7 +294,7 @@ test("nothing calls pruning a finished run the operator's call", async () => {
   }
 });
 
-test("the Claude Stop event is silent and leaves the prune marker unwritten", async () => {
+test("the Claude Stop event is silent and leaves the prune marker unwritten", () => {
   const f = fixture();
   try {
     const dir = f.run("holding", { kept: [f.tree("tree")], launcher: SESSION });
@@ -305,7 +305,7 @@ test("the Claude Stop event is silent and leaves the prune marker unwritten", as
   } finally { f.cleanup(); }
 });
 
-test("the Codex Stop event blocks with the literal reason", async () => {
+test("the Codex Stop event blocks with the literal reason", () => {
   const f = fixture();
   try {
     f.run("holding", { kept: [f.tree("tree")], launcher: SESSION });
@@ -315,7 +315,7 @@ test("the Codex Stop event blocks with the literal reason", async () => {
   } finally { f.cleanup(); }
 });
 
-test("the Codex UserPromptSubmit event is silent", async () => {
+test("the Codex UserPromptSubmit event is silent", () => {
   const f = fixture();
   try {
     const dir = f.run("holding", { kept: [f.tree("tree")], launcher: SESSION });
@@ -325,7 +325,7 @@ test("the Codex UserPromptSubmit event is silent", async () => {
     equal(existsSync(pruneMarkerPath(dir)), false);
   } finally { f.cleanup(); }
 });
-test("a headless Claude Stop event blocks, while UserPromptSubmit is silent", async () => {
+test("a headless Claude Stop event blocks, while UserPromptSubmit is silent", () => {
   const f = fixture();
   try {
     f.run("holding", { kept: [f.tree("tree")], launcher: SESSION });
