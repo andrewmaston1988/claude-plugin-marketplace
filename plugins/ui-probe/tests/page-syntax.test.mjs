@@ -61,6 +61,30 @@ test('every over sampler expression sent by a tv run parses on Chromium 69', asy
   assertParsesOnM69(expressionsSent(cdp));
 });
 
+// The type op's page scripts — the focus check and the value read — run on the same engine.
+test('every type op expression sent by a run parses on Chromium 69', async () => {
+  const cdp = stubCdp({
+    replies: [
+      { match: (expression) => expression.includes('el.focus()'), value: true },
+      { match: (expression) => expression.includes('activeElement'), value: 'abc', sticky: true },
+    ],
+    onSend: (method) => {
+      if (method === 'DOM.getDocument') return { root: { nodeId: 1 } };
+      if (method === 'DOM.querySelectorAll') return { nodeIds: [2] };
+      return undefined;
+    },
+  });
+  const result = await run({
+    id: 'type-syntax',
+    backend: 'tv',
+    steps: [{ type: { target: '#field', text: 'abc' } }, { type: { text: 'abc' } }],
+  }, { cdp, device: 'tv', guard, requireAssertion: false });
+
+  assert.deepEqual(result.steps.map((step) => step.outcome), ['passed', 'passed']);
+  assert.equal(expressionsSent(cdp).length, 3);
+  assertParsesOnM69(expressionsSent(cdp));
+});
+
 // The probe's own page scripts, including the navigate poll and the guided listen's prompt and
 // read loop, run on the same engine.
 test('every tv probe page script parses on Chromium 69', async () => {
