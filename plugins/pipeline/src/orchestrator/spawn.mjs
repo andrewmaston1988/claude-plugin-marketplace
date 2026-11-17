@@ -287,7 +287,6 @@ export function isProtectedBranch(branch, targetBranch, defaultBranch) {
 // Spawn a Claude session for one queued pipeline row. Takes the unified DB,
 // project name, registered project root, and pipeline row.
 export function spawnSession(project, row, sessionFile, projectRoot, { db, dryRun, logFn, stageSessionType, _cfg, _publishNotification = publishNotification }) {
-  // Injected config snapshot for tests; production callers omit it.
   const cfg      = _cfg ?? loadPipelineConfig();
   const feature  = row.feature;
   const notes    = row.notes_extra || "";
