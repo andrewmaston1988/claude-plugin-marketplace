@@ -1,4 +1,5 @@
-// 500-line bar: a change may not leave a file over it.
+// 500-line bar: a change may not take a file over the bar, and an over-bar
+// file may not grow.
 //
 //     already over the bar  AND  grew          ->  block
 //     at or under the bar   ->  over the bar   ->  block
@@ -23,6 +24,9 @@
 //     node scripts/check-file-size.mjs                 # the staged set
 //     node scripts/check-file-size.mjs --against <ref>  # <ref>..HEAD (CI)
 //     node scripts/check-file-size.mjs --all           # inventory the tree
+//
+// `--against` compares the `<ref>` and `HEAD` endpoints only, so a file that
+// crossed the bar and came back within the range reads as unchanged.
 //
 // Exit codes:
 //     0: no violations

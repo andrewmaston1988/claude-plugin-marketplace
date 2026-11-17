@@ -1,4 +1,4 @@
-// Tests for the 500-line growth ratchet (`scripts/check-file-size.mjs`).
+// Tests for the 500-line bar (`scripts/check-file-size.mjs`).
 //
 // `violations()` is pure over `[path, oldLines, newLines]`, so the rule is
 // testable without git trees. The tests below it run the real CLI against real
@@ -39,7 +39,7 @@ test("a grandfathered file edited to the same size is allowed", () => {
   assert.deepEqual(violations([["plugins/swarm/src/scheduler.mjs", 1615, 1615]]), []);
 });
 
-test("a file under the bar may grow freely", () => {
+test("a file under the bar may grow while it stays under it", () => {
   assert.deepEqual(violations([["plugins/swarm/src/tiny.mjs", 100, 499]]), []);
 });
 
@@ -82,7 +82,7 @@ test("a newly created file one line over the bar is blocked", () => {
   const found = violations([["plugins/swarm/src/new.mjs", 0, BAR + 1]]);
   assert.equal(found.length, 1, found);
   assert.match(found[0], /new\.mjs/);
-  assert.match(found[0], new RegExp(String(BAR + 1)));
+  assert.match(found[0], /501/);
 });
 
 test("a newly created file well over the bar is blocked", () => {
@@ -109,7 +109,7 @@ test("every offending file is reported in one run", () => {
 });
 
 test("the message names the bar so the fix is obvious", () => {
-  assert.match(violations([["a.mjs", 600, 601]])[0], new RegExp(String(BAR)));
+  assert.match(violations([["a.mjs", 600, 601]])[0], /500/);
 });
 
 test("a clean change produces no output at all", () => {
@@ -236,7 +236,7 @@ test("growth across a rename is still caught", (t) => {
 
   const r = runChecker(repo);
   assert.equal(r.status, 1, r.stdout + r.stderr);
-  assert.match(r.stderr, new RegExp(`${BAR + 100} -> ${BAR + 101}`));
+  assert.match(r.stderr, /600 -> 601/);
 });
 
 test("a deletion never trips the check", (t) => {
@@ -340,8 +340,8 @@ test("--against compares the base ref with HEAD, not with the working tree", (t)
 
   const r = runChecker(repo, "--against", base);
   assert.equal(r.status, 1, r.stdout + r.stderr);
-  assert.match(r.stderr, new RegExp(`${BAR + 100} -> ${BAR + 200}`));
-  assert.doesNotMatch(r.stderr, new RegExp(String(BAR + 400)));
+  assert.match(r.stderr, /600 -> 700/);
+  assert.doesNotMatch(r.stderr, /900/);
 });
 
 test("--against passes when the committed range is clean", (t) => {

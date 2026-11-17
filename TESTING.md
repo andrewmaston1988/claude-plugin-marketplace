@@ -140,4 +140,4 @@ Each suite job is diff-aware and selects itself. On a pull request it runs `node
 
 The always-running `file-size` job also runs `node scripts/test.mjs --orphans`, so a test file nothing runs fails the PR.
 
-CI additionally checks the 500-line growth ratchet, configures swarm's Git identity, plants and verifies read-only home sentinels for swarm, and checks ui-probe's plugin file types. Local suite runs do not perform those extra workflow steps. Windows coverage is the local sign-off gate; a PR no longer runs the full regression.
+CI additionally checks the 500-line bar, configures swarm's Git identity, plants and verifies read-only home sentinels for swarm, and checks ui-probe's plugin file types. Local suite runs do not perform those extra workflow steps. Windows coverage is the local sign-off gate; a PR no longer runs the full regression.
