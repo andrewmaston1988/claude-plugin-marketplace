@@ -57,9 +57,19 @@ export const SUITES = [
     name: "ui-probe",
     runs: [
       {
+        label: "browser",
         cwd: ".",
         globs: ["plugins/ui-probe/tests/*.test.mjs"],
         env: { UI_PROBE_REQUIRE_BROWSER: "1" },
+        timeoutMs: TEN_MIN,
+      },
+      {
+        // The bakeoff protocol smoke test is offline: every egress point is a
+        // fake injected at call time, so it needs neither a browser nor the
+        // plugin's env.
+        label: "bakeoff",
+        cwd: ".",
+        globs: ["bakeoff/ui-probe/protocols/tests/*.test.mjs"],
         timeoutMs: TEN_MIN,
       },
     ],
@@ -128,6 +138,12 @@ export const SUITES = [
     ],
   },
 ];
+
+/** Tests no suite runs, each with the reason it is left out. A deliberately
+ *  unrun test is a recorded decision; anything else the orphan check reports
+ *  is an accident. Empty today: the bakeoff smoke test runs offline, so
+ *  ui-probe registers it rather than exempting it. */
+export const notRun = [];
 
 /** The registry entry named `name`, or undefined. */
 export function findSuite(name) {

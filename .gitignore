@@ -2,6 +2,9 @@ node_modules/
 .DS_Store
 Thumbs.db
 
+# Test runner output: per-run logs, timings cache, in-flight records.
+test-results/
+
 # Plugin runtime state (never commit)
 config.local.json
 *.log
