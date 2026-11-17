@@ -127,15 +127,18 @@ test("both in-flight requests reject with the stdin error across a stall", async
 test("a reply landing in the yield window resolves the request and leaves the client open", async () => {
   let child;
   const spawnImpl = () => {
+    // A timer, not an immediate: the deadline (30 ms) and the reply (35 ms) both
+    // expire during the stall, so the timer phase orders them regardless of which
+    // loop phase the test body started in. An immediate can be drained first.
     const stdin = new Writable({
       write(chunk, _encoding, callback) {
-        setImmediate(() => {
+        setTimeout(() => {
           const message = JSON.parse(String(chunk));
           if (message.method === "account/usage/read") {
             child.stdout.push(`${JSON.stringify({ id: message.id, result: { ok: true } })}\n`);
           }
           callback();
-        });
+        }, 35);
       },
     });
     child = Object.assign(new EventEmitter(), {
@@ -150,13 +153,16 @@ test("a reply landing in the yield window resolves the request and leaves the cl
   try {
     const answered = client.request("account/usage/read");
     const slow = client.request("account/rateLimits/read", {}, { requestTimeoutMs: 5000 });
+    // `slow` must stay outstanding; it is rejected by the cleanup close below.
+    slow.catch(() => {});
     stall(40);
     deepEqual(await answered, { ok: true });
+    // A microtask is not enough: the deferred deadline sits in the check phase, so
+    // yield into the loop before reading whether the client survived it.
+    await new Promise((resolve) => setImmediate(resolve));
     equal(client.diagnostics.closed, false);
     equal(client.diagnostics.killed, false);
     equal(client.diagnostics.pending, 1);
-    // `slow` must stay outstanding; awaiting it would hang this row.
-    slow.catch(() => {});
   } finally {
     client.close();
   }
