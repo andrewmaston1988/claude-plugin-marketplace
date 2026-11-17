@@ -135,13 +135,13 @@ test("--wsl rejects a selection flag instead of silently running everything", as
   }
 });
 
-test("no plugin-dev in the distro list exits 2 and prints the setup pointer", async () => {
+test("no ubuntu in the distro list exits 2 and prints the setup pointer", async () => {
   const fake = makeFake({ distros: ["docker-desktop"] });
   const { result: code, stderr } = await withStderr(async () => (await run(fake)).code);
 
   assert.equal(code, 2);
   assert.match(stderr, /TESTING\.md/);
-  assert.match(stderr, /plugin-dev/);
+  assert.match(stderr, /the WSL distro "ubuntu" is not installed/);
   assert.equal(SETUP_POINTER.includes("TESTING.md"), true, "the pointer must name TESTING.md");
   assert.deepEqual(
     fake.calls.map((c) => c.args),
@@ -151,14 +151,14 @@ test("no plugin-dev in the distro list exits 2 and prints the setup pointer", as
 });
 
 test("the distro list decodes from UTF-16LE and from plain UTF-8", () => {
-  const utf16 = Buffer.from("docker-desktop\r\nplugin-dev\r\n", "utf16le");
-  assert.deepEqual(distroList(utf16), ["docker-desktop", "plugin-dev"]);
+  const utf16 = Buffer.from("docker-desktop\r\nubuntu\r\n", "utf16le");
+  assert.deepEqual(distroList(utf16), ["docker-desktop", "ubuntu"]);
   assert.deepEqual(
-    distroList(Buffer.from("docker-desktop\nplugin-dev\n", "utf8")),
-    ["docker-desktop", "plugin-dev"],
+    distroList(Buffer.from("docker-desktop\nubuntu\n", "utf8")),
+    ["docker-desktop", "ubuntu"],
   );
   assert.deepEqual(distroList(Buffer.from("")), []);
-  assert.deepEqual(distroList(Buffer.from("\uFEFFplugin-dev\r\n", "utf16le")), ["plugin-dev"]);
+  assert.deepEqual(distroList(Buffer.from("\uFEFFubuntu\r\n", "utf16le")), ["ubuntu"]);
 });
 
 test("a first sync clones, pins the checkout, rsyncs and then runs the command", async () => {
