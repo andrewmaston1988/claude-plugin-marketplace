@@ -79,6 +79,7 @@ const PAGES = {
   // inputs sharing a class so one selector matches more than one target.
   "/type.html": page(`
     <input id="field" class="field">
+    <button id="btn">Button</button>
     <p id="count">0</p>
     <div id="plain">not focusable</div>
     <div id="editable" contenteditable="true"></div>

@@ -82,7 +82,7 @@ test('every type op expression sent by a run parses on Chromium 69', async () =>
   }, { cdp, device: 'tv', guard, requireAssertion: false });
 
   assert.deepEqual(result.steps.map((step) => step.outcome), ['passed', 'passed']);
-  assert.equal(expressionsSent(cdp).length, 4);
+  assert.equal(expressionsSent(cdp).length, 5);
   assertParsesOnM69(expressionsSent(cdp));
 });
 

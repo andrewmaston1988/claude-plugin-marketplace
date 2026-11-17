@@ -94,6 +94,14 @@ test("row 5: a non-focusable target fails focus_failed instead of typing nowhere
   assert.equal(result.steps[1].failure, "focus_failed", JSON.stringify(result.steps));
 });
 
+test("row 12: a focusable non-editable target fails focus_failed and fires no input event", { skip: SKIP }, async () => {
+  const result = await runOn(page("/type.html", { type: { target: "#btn", text: "abc" } }), { requireAssertion: false });
+  assert.equal(result.steps[1].failure, "focus_failed", JSON.stringify(result.steps));
+
+  const fired = await evaluate(client, "document.getElementById('count').textContent");
+  assert.equal(fired, "0", "the page counted an input event with a non-editable target focused");
+});
+
 test("row 6: with no target, type types into the element the page focused", { skip: SKIP }, async () => {
   const result = await runOn(page("/type.html",
     { click: { target: "#field" } },
@@ -123,6 +131,7 @@ test("row 7: gapMs spaces the gaps between characters, so three characters wait 
   const cdp = stubCdp({
     replies: [
       { match: (expression) => expression.includes("el.focus()"), value: true },
+      { match: (expression) => expression.includes("isContentEditable"), value: { editable: true, value: "abc" } },
       { match: (expression) => expression.includes("isContentEditable"), value: { editable: true, value: "abc" } },
     ],
     onSend: (method) => {

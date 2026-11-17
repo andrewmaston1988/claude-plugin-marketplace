@@ -53,12 +53,11 @@ export async function typeText(args, state) {
     if (!(await evaluate(state.cdp, FOCUS_JS(args.target)))) {
       throw new StepFailure("failed", "focus_failed", `${args.target} did not take focus`);
     }
-  } else {
-    // The runner marks any op that returns as passed, so focus on body must fail here.
-    const active = await evaluate(state.cdp, ACTIVE_JS);
-    if (!active || !active.editable) {
-      throw new StepFailure("failed", "focus_failed", "no editable element holds focus");
-    }
+  }
+  // A focused target must also be editable; otherwise insertText silently goes nowhere.
+  const focused = await evaluate(state.cdp, ACTIVE_JS);
+  if (!focused || !focused.editable) {
+    throw new StepFailure("failed", "focus_failed", "no editable element holds focus");
   }
   const gapMs = args.gapMs ?? 0;
   for (const [index, char] of Array.from(args.text).entries()) {
