@@ -36,8 +36,10 @@ Two optional keys, both writer-only, both omitted by the common case:
 
 A writer whose `cwd` is not inside a git repository is refused — there is no repo to branch
 from. A reader has no such constraint: it reads wherever it was pointed, which is how a leaf
-reads logs or a data dump outside any repo. `compute`, `integrate` and `manifest` nodes spawn
-no leaf, so none of this applies, and naming either key on one is refused.
+reads logs or a data dump outside any repo, and a Codex reader is launched with
+`--skip-git-repo-check` for the same reason (`codex exec` otherwise refuses to start outside a
+repo or a directory it trusts). `compute`, `integrate` and `manifest` nodes spawn no leaf, so
+none of this applies, and naming either key on one is refused.
 
 ```json
 {

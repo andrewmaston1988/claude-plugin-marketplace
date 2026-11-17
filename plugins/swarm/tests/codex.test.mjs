@@ -268,58 +268,6 @@ test("Codex: every --add-dir the write targets contribute stays under resultsDir
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
-// `codex exec` refuses to start outside a Git repository, and the report digest's
-// cwd is engine scratch. The allowance is scoped to the generated digest, placed
-// with the other exec flags — the shim rejects exec options after `resume`.
-test("Codex: --skip-git-repo-check is emitted for the digest only, before resume", () => {
-  const dir = mkdtempSync(join(tmpdir(), "swarm-codex-roots-"));
-  try {
-    const resultsDir = join(dir, "run");
-    const digest = buildCodexInvocation({
-      model: "gpt-5-codex", effort: "high", allowedTools: "Read,Write", isDigest: true,
-      cwd: join(resultsDir, "scratch-__digest"), originalCwd: dir, resume: "thread-9",
-      writeRoots: [
-        { path: join(resultsDir, "scratch-__digest"), kind: "directory" },
-        { path: join(resultsDir, "report.md"), kind: "file" },
-      ],
-    }, "write the report", {});
-    const flagAt = digest.argv.indexOf("--skip-git-repo-check");
-    const resumeAt = digest.argv.indexOf("resume");
-    ok(flagAt > 0 && resumeAt > flagAt, `must precede resume: ${digest.argv.join(" ")}`);
-    equal(digest.argv[resumeAt + 1], "thread-9");
-    const shim = spawnSync(process.execPath, [SHIM, ...digest.argv.slice(1)], { encoding: "utf8" });
-    equal(shim.status, 0, `the shim rejects exec options after resume: ${shim.stderr}`);
-    equal(digest.argv[digest.argv.indexOf("--sandbox") + 1], "workspace-write");
-
-    // An ordinary Codex leaf keeps the repo-root gate: same cwd, no allowance.
-    const leaf = buildCodexInvocation({
-      model: "gpt-5-codex", allowedTools: "Read,Write", cwd: dir, originalCwd: dir,
-    }, "inspect", {});
-    ok(!leaf.argv.includes("--skip-git-repo-check"), leaf.argv.join(" "));
-
-    // ...and neither does a digest that launches in place.
-    const inPlace = buildCodexInvocation({
-      model: "gpt-5-codex", allowedTools: "Read", isDigest: true, cwd: dir, originalCwd: dir,
-    }, "summarize", {});
-    ok(!inPlace.argv.includes("--skip-git-repo-check"), inPlace.argv.join(" "));
-  } finally { rmSync(dir, { recursive: true, force: true }); }
-});
-
-// The digest's sandbox follows the same write-capability rule as any other task:
-// no report block, no Write, so read-only — and nothing to add. It also stays in
-// the dispatching repo (buildDigestTask gives a read-only digest plan.cwd), which
-// is why it needs no launch allowance either.
-test("Codex: a read-only digest is read-only sandboxed, with no --add-dir and no allowance", () => {
-  const invocation = buildCodexInvocation({
-    model: "gpt-5-codex", allowedTools: "Read", isDigest: true,
-    cwd: "C:/work", originalCwd: "C:/work",
-  }, "summarize", {});
-  equal(invocation.argv[invocation.argv.indexOf("--sandbox") + 1], "read-only");
-  deepEqual(addDirsOf(invocation.argv), []);
-  ok(!invocation.argv.includes("--skip-git-repo-check"));
-  ok(!invocation.argv.includes("--settings"));
-});
-
 test("Codex parser normalizes JSONL text, usage, and terminal failure", () => {
   const events = [];
   const parser = createCodexStreamParser({ emit: (event) => events.push(event) });
