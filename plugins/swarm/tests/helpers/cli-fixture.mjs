@@ -1,7 +1,8 @@
-import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { spawnSync } from "node:child_process";
+import { templateRepo } from "./template-repo.mjs";
 
 // Fixtures shared by the CLI test files. They live here rather than in
 // cli.test.mjs because importing a .test.mjs from another .test.mjs
@@ -35,10 +36,10 @@ export function commitAll(cwd, msg) {
 // the fixture HOME every row points at, pre-gated, so a row only writes its own config
 // keys when it has a reason to.
 export function tmp() {
-  const dir = mkdtempSync(join(tmpdir(), "swarm-cli-"));
-  spawnSync("git", ["init", "-q"], { cwd: dir, windowsHide: true });
-  writeFileSync(join(dir, "seed.txt"), "seed\n");
-  commitAll(dir, "init");
-  gateHome(join(dir, "home"));
-  return dir;
+  return templateRepo("cli", (dir) => {
+    spawnSync("git", ["init", "-q"], { cwd: dir, windowsHide: true });
+    writeFileSync(join(dir, "seed.txt"), "seed\n");
+    commitAll(dir, "init");
+    gateHome(join(dir, "home"));
+  });
 }
