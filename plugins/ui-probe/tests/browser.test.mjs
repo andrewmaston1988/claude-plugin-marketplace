@@ -81,11 +81,11 @@ function launchWith({ answers = 2, child = fakeChild(), fs = fakeFs(), reap, kil
     _reap: async (options) => {
       events.push("reap");
       calls.reaps += 1;
-      if (reap) await reap(options);
+      return reap ? await reap(options) : undefined;
     },
     _kill: async (profile) => {
       calls.kills.push(profile);
-      if (kill) await kill(profile);
+      return kill ? await kill(profile) : undefined;
     },
     _writeOwner: (profile, ...rest) => {
       events.push("owner");
@@ -123,18 +123,66 @@ test("the reaper runs before the owner file is written and the browser is spawne
   await session.close();
 });
 
-test("a rejecting reaper does not fail the launch", async () => {
+test("a rejecting reaper does not fail the launch, but is named", async () => {
   const { deps } = launchWith({ reap: async () => { throw new Error("lister blew up"); } });
-  const session = await launch(deps);
+  const warnings = [];
+  const original = console.warn;
+  console.warn = (message) => warnings.push(String(message));
+  let session;
+  try {
+    session = await launch(deps);
+  } finally {
+    console.warn = original;
+  }
   assert.equal(session.port, 9333);
+  assert.match(warnings.join("\n"), /the reap failed \(lister blew up\)/);
   await session.close();
 });
 
-test("a reaper that overruns its budget does not hold up the launch", { timeout: 15000 }, async () => {
+test("a reaper that overruns its budget does not hold up the launch, and is named", { timeout: 15000 }, async () => {
   const { deps } = launchWith({ reap: () => new Promise(() => {}) });
-  const session = await launch(deps);
+  const warnings = [];
+  const original = console.warn;
+  console.warn = (message) => warnings.push(String(message));
+  let session;
+  try {
+    session = await launch(deps);
+  } finally {
+    console.warn = original;
+  }
   assert.equal(session.port, 9333);
+  assert.match(warnings.join("\n"), /overran its 5000 ms budget/);
   await session.close();
+});
+
+test("launch logs one line when the reap did something and nothing on a clean machine", async () => {
+  const cases = [
+    { reap: { skipped: "prescan", killed: [], failed: [], swept: [] }, expected: null },
+    {
+      reap: { skipped: null, killed: [1, 2], failed: [], swept: ["p"] },
+      expected: /reaped 2 orphaned browsers; swept 1 profile folder/,
+    },
+    { reap: { skipped: null, killed: [], failed: [7], swept: [] }, expected: /could not stop 1 browser/ },
+    {
+      reap: { skipped: "listing-failed", killed: [], failed: [], swept: [] },
+      expected: /skipped \(listing-failed\)/,
+    },
+  ];
+  for (const { reap, expected } of cases) {
+    const { deps } = launchWith({ reap: async () => reap });
+    const warnings = [];
+    const original = console.warn;
+    console.warn = (message) => warnings.push(String(message));
+    let session;
+    try {
+      session = await launch(deps);
+    } finally {
+      console.warn = original;
+    }
+    await session.close();
+    if (expected) assert.match(warnings.join("\n"), expected);
+    else assert.deepEqual(warnings, [], "a clean, empty reap says nothing");
+  }
 });
 
 test("close sends Browser.close, waits for the port to stop answering, then removes the profile", async () => {
@@ -164,6 +212,33 @@ test("a port still answering after the poll window warns, kills by profile, then
   assert.match(warnings[0], /9333 still answering/);
   assert.deepEqual(calls.kills, [PROFILE]);
   assert.deepEqual(fs.removed, [PROFILE]);
+});
+
+test("a kill the module could not verify leaves the profile folder for the next reap", async () => {
+  const { deps, fs, calls } = launchWith({
+    answers: Number.POSITIVE_INFINITY,
+    kill: async () => ({ killed: [], failed: [4001] }),
+  });
+  const session = await launch(deps);
+  const warnings = [];
+  const original = console.warn;
+  console.warn = (message) => warnings.push(String(message));
+  try {
+    await session.close();
+  } finally {
+    console.warn = original;
+  }
+  assert.deepEqual(calls.kills, [PROFILE]);
+  assert.deepEqual(fs.removed, [], "an unverified kill is not grounds to delete the profile");
+  assert.match(warnings.join("\n"), /kept the browser profile/);
+});
+
+test("a launch that fails after the spawn keeps the profile when the kill is unverified", async () => {
+  const fs = fakeFs();
+  fs.existsSync = (path) => path.endsWith("msedge.exe");
+  const { deps } = launchWith({ fs, kill: async () => ({ killed: [], failed: [4001] }) });
+  await assert.rejects(launch(deps), /DevToolsActivePort/);
+  assert.deepEqual(fs.removed, [], "the folder stays for the next reap");
 });
 
 test("the profile removal is retried when the first attempt fails", async () => {

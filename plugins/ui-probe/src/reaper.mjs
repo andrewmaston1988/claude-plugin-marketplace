@@ -11,7 +11,6 @@ import {
   killPids,
   listProcesses,
   pidAlive,
-  queryProcessStart,
   queryProcessStarts,
 } from "./reaper-process.mjs";
 
@@ -128,18 +127,14 @@ export async function killBrowserForProfile(profile, { _list = listProcesses, _k
 // --- ownership verdicts -------------------------------------------------------
 
 /** The recorded start matches the OS one. Our own pid needs no process spawn: the owner
- *  file we wrote carries the start time we already know. */
+ *  file we wrote carries the start time we already know.
+ *
+ *  One-sided on purpose: PID reuse can only make the observed start later than the recorded
+ *  one, so a clock step that moves the recording forward must not read as reuse. */
 function startMatches(owner, { start, toleranceMs, selfPid = process.pid, selfStartMs = ownerStartMs() }) {
-  if (owner.pid === selfPid) return Math.abs(selfStartMs - owner.startMs) <= toleranceMs;
+  if (owner.pid === selfPid) return selfStartMs - owner.startMs <= toleranceMs;
   if (start == null) return true; // unknown start: a live PID is not grounds to kill
-  return Math.abs(start - owner.startMs) <= toleranceMs;
-}
-
-async function ownerStillAlive(owner, { isAlive, queryStart, toleranceMs, selfPid, selfStartMs }) {
-  if (!owner) return false;
-  if (!isAlive(owner.pid)) return false;
-  const start = owner.pid === selfPid ? null : await queryStart(owner.pid);
-  return startMatches(owner, { start, toleranceMs, selfPid, selfStartMs });
+  return start - owner.startMs <= toleranceMs;
 }
 
 function candidateFromProcess(entry, { tmpDir, platform }) {
@@ -153,24 +148,29 @@ function candidateFromProcess(entry, { tmpDir, platform }) {
   return { pid: entry.pid, profile };
 }
 
-async function candidateVerdict(candidate, {
-  fs,
-  now,
+/** The PID whose start time this candidate's verdict needs, or null when none is needed:
+ *  a dead owner is settled by liveness alone, and our own owner's start is already known. */
+function startPidFor({ candidate, owner }, { isAlive, selfPid }) {
+  if (!owner) return candidate.pid;
+  if (owner.pid === selfPid || !isAlive(owner.pid)) return null;
+  return owner.pid;
+}
+
+function candidateVerdict(owner, {
+  start,
+  at,
   graceMs,
   toleranceMs,
   isAlive,
-  queryStart,
   selfPid,
   selfStartMs,
 }) {
-  const owner = readOwnerFile(candidate.profile, { fs });
   if (owner) {
-    const alive = await ownerStillAlive(owner, { isAlive, queryStart, toleranceMs, selfPid, selfStartMs });
-    return alive ? "live" : "orphan";
+    if (!isAlive(owner.pid)) return "orphan";
+    return startMatches(owner, { start, toleranceMs, selfPid, selfStartMs }) ? "live" : "orphan";
   }
-  const browserStart = await queryStart(candidate.pid);
-  if (browserStart == null) return "unknown";
-  return now - browserStart > graceMs ? "orphan" : "young";
+  if (start == null) return "unknown";
+  return at - start > graceMs ? "orphan" : "young";
 }
 
 function listProfileDirs(fs, tmpDir) {
@@ -271,7 +271,6 @@ export async function sweepProfiles({
 export async function reapOrphans({
   listProcesses: list = listProcesses,
   kill = killPids,
-  queryStart = queryProcessStart,
   queryStarts = queryProcessStarts,
   isAlive = pidAlive,
   fs = DEFAULT_FS,
@@ -280,11 +279,15 @@ export async function reapOrphans({
   platform = process.platform,
   graceMs = PROFILE_GRACE_MS,
   toleranceMs = START_TOLERANCE_MS,
+  selfPid = process.pid,
+  selfStartMs = ownerStartMs(),
   timeoutMs = REAP_BUDGET_MS,
 } = {}) {
   const started = now();
 
-  const prescan = await preScanProfiles({ fs, now, tmpDir, graceMs, toleranceMs, isAlive, queryStarts });
+  const prescan = await preScanProfiles({
+    fs, now, tmpDir, graceMs, toleranceMs, isAlive, queryStarts, selfPid, selfStartMs,
+  });
   if (prescan.skip) {
     return { skipped: "prescan", killed: [], failed: [], swept: [], elapsedMs: now() - started };
   }
@@ -305,15 +308,18 @@ export async function reapOrphans({
     if (candidate) candidates.push(candidate);
   }
 
+  const judged = candidates.map((candidate) => ({ candidate, owner: readOwnerFile(candidate.profile, { fs }) }));
+  // One query for every PID the verdicts need: k live owners and k ownerless browsers must
+  // not cost k spawns.
+  const wanted = [...new Set(judged.map((entry) => startPidFor(entry, { isAlive, selfPid })).filter((pid) => pid != null))];
+  const starts = wanted.length === 0 ? new Map() : await queryStarts(wanted);
+
+  const at = now();
   const orphans = [];
-  for (const candidate of candidates) {
-    const verdict = await candidateVerdict(candidate, {
-      fs,
-      now: now(),
-      graceMs,
-      toleranceMs,
-      isAlive,
-      queryStart,
+  for (const { candidate, owner } of judged) {
+    const start = owner ? starts.get(owner.pid) : starts.get(candidate.pid);
+    const verdict = candidateVerdict(owner, {
+      start, at, graceMs, toleranceMs, isAlive, selfPid, selfStartMs,
     });
     if (verdict === "orphan") orphans.push(candidate.pid);
   }

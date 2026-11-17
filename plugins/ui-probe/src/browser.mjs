@@ -79,15 +79,50 @@ async function devtoolsPort(profile, child, { _fs, _sleep }) {
   throw new Error("browser never wrote DevToolsActivePort");
 }
 
-/** Best-effort reap. A lister that throws or overruns is the next launch's problem, not this one's. */
+/** Best-effort reap. A lister that throws or overruns is the next launch's problem, not this
+ *  one's, but the caller still gets a verdict so the failure is not silent. */
 async function reapWithinBudget(_reap, budgetMs) {
   let timer;
-  const reap = Promise.resolve().then(() => _reap()).catch(() => {});
+  const overran = { overran: true };
+  const reap = Promise.resolve().then(() => _reap()).catch((error) => ({ error }));
   try {
-    await Promise.race([reap, new Promise((resolve) => { timer = setTimeout(resolve, budgetMs); })]);
+    const result = await Promise.race([
+      reap,
+      new Promise((resolve) => { timer = setTimeout(() => resolve(overran), budgetMs); }),
+    ]);
+    return result === overran ? overran : (result ?? {});
   } finally {
     clearTimeout(timer);
   }
+}
+
+/** One line for a reap that did something or could not run; a clean, empty reap says nothing. */
+function logReap(result) {
+  if (!result) return;
+  if (result.error) {
+    console.warn(`ui-probe: the reap failed (${result.error?.message ?? result.error})`);
+    return;
+  }
+  if (result.overran) {
+    console.warn(`ui-probe: the reap overran its ${REAP_BUDGET_MS} ms budget and continues in the background`);
+    return;
+  }
+  const killed = result.killed?.length ?? 0;
+  const failed = result.failed?.length ?? 0;
+  const swept = result.swept?.length ?? 0;
+  // "prescan" is the clean fast path, not a skip worth reporting.
+  const skipped = result.skipped && result.skipped !== "prescan" ? result.skipped : null;
+  const parts = [];
+  if (killed) parts.push(`reaped ${killed} orphaned browser${killed === 1 ? "" : "s"}`);
+  if (failed) parts.push(`could not stop ${failed} browser${failed === 1 ? "" : "s"}`);
+  if (swept) parts.push(`swept ${swept} profile folder${swept === 1 ? "" : "s"}`);
+  if (skipped) parts.push(`skipped (${skipped})`);
+  if (parts.length > 0) console.warn(`ui-probe: ${parts.join("; ")}`);
+}
+
+/** A kill only licenses deleting the profile when the module could verify the browser gone. */
+function killVerified(result) {
+  return !(result?.failed?.length);
 }
 
 /** Windows holds the profile open for a moment after the browser goes, so one rmdir is not enough. */
@@ -119,7 +154,7 @@ export async function launch({
   const exe = findBrowser({ browser, _exists: _fs.existsSync, _spawnSync });
 
   // Whatever an earlier run left behind goes before this one adds to it.
-  await reapWithinBudget(_reap, REAP_BUDGET_MS);
+  logReap(await reapWithinBudget(_reap, REAP_BUDGET_MS));
 
   const profile = _fs.mkdtempSync(join(tmpdir(), "ui-probe-profile-"));
   let browserWs = null;
@@ -179,20 +214,29 @@ export async function launch({
         if (!dead) {
           console.warn(`ui-probe: browser on port ${port} still answering after Browser.close`);
           // It ignored the polite ask; the profile is the only handle left on it.
-          try { await _kill(profile); } catch { /* best effort — the warning above already names the failure */ }
+          try {
+            dead = killVerified(await _kill(profile));
+          } catch { /* unverified: the folder stays for the next reap */ }
         }
-        if (!(await removeProfile(profile, { _fs, _sleep }))) {
-          console.warn(`ui-probe: could not remove the browser profile at ${profile}`);
+        // A profile folder is deleted only when the browser holding it is verified gone.
+        if (dead) {
+          if (!(await removeProfile(profile, { _fs, _sleep }))) {
+            console.warn(`ui-probe: could not remove the browser profile at ${profile}`);
+          }
+        } else {
+          console.warn(`ui-probe: kept the browser profile at ${profile}; the browser could not be verified gone`);
         }
       },
     };
   } catch (error) {
     // Whatever failed, the browser we spawned must not outlive this call.
+    let gone = false;
     try {
       if (browserWs) browserWs.close();
-      await _kill(profile);
+      gone = killVerified(await _kill(profile));
     } catch { /* the rethrow below is the failure that matters */ }
-    if (!(await removeProfile(profile, { _fs, _sleep }))) {
+    // An unverified kill keeps the folder: the next reap retries rather than orphaning a browser.
+    if (gone && !(await removeProfile(profile, { _fs, _sleep }))) {
       console.warn(`ui-probe: could not remove the browser profile at ${profile}`);
     }
     throw error;

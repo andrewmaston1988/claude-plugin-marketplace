@@ -21,6 +21,7 @@ import {
   reapOrphans,
   writeOwnerFile,
 } from "../src/reaper.mjs";
+import { runPowerShell, survivorScript } from "../src/reaper-process.mjs";
 import { OLD, cmdFor, profileFolder, recorder, tempRoot } from "./reaper-support.mjs";
 
 // --- row 8: batched kills -----------------------------------------------------
@@ -62,6 +63,27 @@ test("row 8: a stop that cannot be verified claims no kills", async () => {
   assert.deepEqual(result.failed, [100, 101]);
 });
 
+// The generated script itself, not a fake stdout: an integer has no `.Id`, so any stage that
+// projects one reads every survivor as killed.
+test("row 8: the real read-back script names a survivor that was never stopped", { timeout: 60000 }, async (t) => {
+  if (process.platform !== "win32") {
+    t.skip("the generated script is PowerShell");
+    return;
+  }
+  const child = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { stdio: "ignore" });
+  const exited = new Promise((done) => child.once("exit", done));
+  t.after(async () => {
+    child.kill();
+    await exited;
+  });
+  const stdout = await runPowerShell(survivorScript([child.pid]), { timeoutMs: 20000 });
+  assert.deepEqual(
+    stdout.trim().split(/\s*,\s*/).filter(Boolean).map(Number),
+    [child.pid],
+    "a live PID reads back as its own integer",
+  );
+});
+
 // The budget is enforced by launch(), not here; a timing assertion on rows with a fake
 // lister and a recording killer passes whatever the clock does.
 test("row 8: the 19-browser reap batches its kill into one invocation", async (t) => {
@@ -78,7 +100,6 @@ test("row 8: the 19-browser reap batches its kill into one invocation", async (t
     listProcesses: () => processes,
     kill,
     isAlive: () => false,
-    queryStart: () => null,
     timeoutMs: 5000,
   });
   assert.equal(kill.calls.length, 1);
@@ -166,6 +187,12 @@ test("the Windows lister falls back to powershell only when pwsh is absent", asy
 test("the POSIX lister parses ps output and refuses a listing it cannot read", async () => {
   const stdout = "  PID COMMAND\n   42 msedge --user-data-dir=/tmp/ui-probe-profile-a\n   43 chrome";
   assert.deepEqual(await listProcessesPosix({ _execFile: async () => ({ stdout }) }), [
+    { pid: 42, cmd: "msedge --user-data-dir=/tmp/ui-probe-profile-a" },
+    { pid: 43, cmd: "chrome" },
+  ]);
+  // One argv that renders across two lines must cost the listing one row, not every row.
+  const wrapped = "  PID COMMAND\n   42 msedge --user-data-dir=/tmp/ui-probe-profile-a\n   continuation\n   43 chrome";
+  assert.deepEqual(await listProcessesPosix({ _execFile: async () => ({ stdout: wrapped }) }), [
     { pid: 42, cmd: "msedge --user-data-dir=/tmp/ui-probe-profile-a" },
     { pid: 43, cmd: "chrome" },
   ]);

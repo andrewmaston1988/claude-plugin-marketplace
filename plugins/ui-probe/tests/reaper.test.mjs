@@ -31,7 +31,6 @@ test("row 3: a browser whose owner is dead is stopped", async (t) => {
     listProcesses: () => [{ pid: 4001, cmd: cmdFor(profile) }],
     kill,
     isAlive: () => false,
-    queryStart: () => null,
   });
   assert.deepEqual(kill.calls, [{ pids: [4001], options: { platform: process.platform, timeoutMs: 5000 } }]);
   assert.deepEqual(result.killed, [4001]);
@@ -49,11 +48,30 @@ test("row 3: a live owner with its recorded start time is left alone", async (t)
     listProcesses: () => [{ pid: 4001, cmd: cmdFor(profile, "chrome.exe") }],
     kill,
     isAlive: (pid) => pid === ownerPid,
-    queryStart: (pid) => (pid === ownerPid ? 1_000_000 : null),
+    queryStarts: async () => new Map([[ownerPid, 1_000_000]]),
   });
   assert.deepEqual(kill.calls, []);
   assert.deepEqual(result.killed, []);
   assert.ok(existsSync(profile), "a held old profile is not swept");
+});
+
+test("row 3: a clock step that moves the recorded start forward keeps a live owner alive", async (t) => {
+  const dir = tempRoot(t);
+  const profile = profileFolder(dir, "clock-step");
+  // Recorded 60 s later than the OS says: a clock step, not a reused PID.
+  writeOwnerFile(profile, { pid: 9001, startMs: 1_060_000 });
+  aged(profile); // force the pre-scan to consult the lister
+  const kill = recorder();
+  const result = await reapOrphans({
+    tmpDir: dir,
+    listProcesses: () => [{ pid: 4001, cmd: cmdFor(profile, "chrome.exe") }],
+    kill,
+    isAlive: () => true,
+    queryStarts: async () => new Map([[9001, 1_000_000]]),
+    queryStart: async () => 1_000_000,
+  });
+  assert.deepEqual(kill.calls, []);
+  assert.deepEqual(result.killed, []);
 });
 
 test("row 3: a reused PID is stopped even though its owner looks alive", async (t) => {
@@ -67,7 +85,6 @@ test("row 3: a reused PID is stopped even though its owner looks alive", async (
     kill,
     isAlive: (pid) => pid === 9001,
     queryStarts: async () => new Map([[9001, 1_005_000]]), // 5 s apart
-    queryStart: (pid) => (pid === 9001 ? 1_005_000 : null),
   });
   assert.deepEqual(kill.calls[0].pids, [4001]);
 });
@@ -83,7 +100,7 @@ test("row 3: an unreadable start time is left alone, never killed on a guess", a
     listProcesses: () => [{ pid: 4001, cmd: cmdFor(profile) }],
     kill,
     isAlive: () => true,
-    queryStart: () => null,
+    queryStarts: async () => new Map([[9001, null]]),
   });
   assert.deepEqual(kill.calls, []);
 });
@@ -101,7 +118,7 @@ test("row 3: an ownerless browser is stopped only past the grace", async (t) => 
     ],
     kill,
     isAlive: () => false,
-    queryStart: (pid) => (pid === 4001 ? Date.now() - OLD : Date.now() - 60_000),
+    queryStarts: async (pids) => new Map(pids.map((pid) => [pid, pid === 4001 ? Date.now() - OLD : Date.now() - 60_000])),
   });
   assert.deepEqual(kill.calls[0].pids, [4001]);
 });
@@ -116,7 +133,7 @@ test("row 3: an unparseable owner reads as absent and follows the grace", async 
     listProcesses: () => [{ pid: 4001, cmd: cmdFor(profile, "brave.exe") }],
     kill,
     isAlive: () => true,
-    queryStart: (pid) => (pid === 4001 ? Date.now() - OLD : null),
+    queryStarts: async () => new Map([[4001, Date.now() - OLD]]),
   });
   assert.deepEqual(kill.calls[0].pids, [4001]);
 });
@@ -134,7 +151,6 @@ test("row 3: a renderer child is never the PID that is stopped", async (t) => {
     ],
     kill,
     isAlive: () => false,
-    queryStart: () => null,
   });
   assert.deepEqual(kill.calls[0].pids, [4001]);
 });
@@ -157,7 +173,6 @@ test("row 4: a profile outside tmpDir is never touched, whatever its name", asyn
     ],
     kill,
     isAlive: () => false,
-    queryStart: (pid) => (pid >= 5000 ? Date.now() - OLD : null),
   });
   assert.deepEqual(kill.calls, []);
 });
@@ -206,7 +221,7 @@ test("row 5: a listing that failed or cannot be parsed skips the sweep", async (
   const dir = tempRoot(t);
   const held = profileFolder(dir, "held-on-failure");
   aged(held);
-  const base = { tmpDir: dir, kill: recorder(), isAlive: () => false, queryStart: () => null };
+  const base = { tmpDir: dir, kill: recorder(), isAlive: () => false };
   for (const listProcesses of [() => { throw new Error("no process lister"); }, () => "not a list"]) {
     const result = await reapOrphans({ ...base, listProcesses });
     assert.equal(result.skipped, "listing-failed");
@@ -224,7 +239,6 @@ test("row 5: a browser that survived the stop keeps its profile from the sweep",
     listProcesses: () => [{ pid: 4001, cmd: cmdFor(profile) }],
     kill: () => ({ killed: [], failed: [4001] }),
     isAlive: () => false,
-    queryStart: () => null,
   });
   assert.deepEqual(result.killed, []);
   assert.deepEqual(result.failed, [4001]);
@@ -295,9 +309,64 @@ test("row 9: one stale folder opens the gate to the lister", async (t) => {
     listProcesses: () => { listed += 1; return []; },
     kill: recorder(),
     isAlive: () => true,
-    queryStart: () => 1_000,
+    queryStarts: async () => new Map([[9001, 1_000]]),
   });
   assert.equal(listed, 1);
+});
+
+// --- row 3: the verdict pass's own seam ---------------------------------------
+
+test("row 3: the reap path needs no start query for our own owner", async (t) => {
+  const dir = tempRoot(t);
+  const own = profileFolder(dir, "self");
+  writeOwnerFile(own, { pid: process.pid, startMs: ownerStartMs() });
+  // A dead owner opens the pre-scan gate without touching our own profile's verdict.
+  writeOwnerFile(profileFolder(dir, "dead-elsewhere"), { pid: 9001, startMs: 1_000 });
+  const perPid = [];
+  const batched = [];
+  const kill = recorder();
+  await reapOrphans({
+    tmpDir: dir,
+    listProcesses: () => [{ pid: 4001, cmd: cmdFor(own) }],
+    kill,
+    isAlive: (pid) => pid === process.pid,
+    queryStart: async (pid) => { perPid.push(pid); return ownerStartMs(); },
+    queryStarts: async (pids) => {
+      batched.push(...pids);
+      return new Map(pids.map((pid) => [pid, 1_000]));
+    },
+  });
+  assert.deepEqual(perPid, [], "no start is resolved one PID at a time");
+  assert.deepEqual(batched, [], "our own start time is already known");
+  assert.deepEqual(kill.calls, []);
+});
+
+test("row 3: the verdict pass resolves every candidate's start in one query", async (t) => {
+  const dir = tempRoot(t);
+  const ownerPids = [9201, 9202, 9203];
+  const processes = [];
+  ownerPids.forEach((pid, i) => {
+    const profile = profileFolder(dir, `live-${i}`);
+    writeOwnerFile(profile, { pid, startMs: 1_000 });
+    processes.push({ pid: 4100 + i, cmd: cmdFor(profile) });
+  });
+  // The ownerless folder opens the pre-scan gate without a query of its own.
+  processes.push({ pid: 4200, cmd: cmdFor(profileFolder(dir, "ownerless")) });
+  const queries = [];
+  const kill = recorder();
+  await reapOrphans({
+    tmpDir: dir,
+    listProcesses: () => processes,
+    kill,
+    isAlive: () => true,
+    queryStarts: async (pids) => {
+      queries.push([...pids].sort((a, b) => a - b));
+      return new Map(pids.map((pid) => [pid, ownerPids.includes(pid) ? 1_000 : Date.now() - OLD]));
+    },
+  });
+  assert.equal(queries.length, 1, "one query, not one spawn per candidate");
+  assert.deepEqual(queries[0], [...ownerPids, 4200].sort((a, b) => a - b));
+  assert.deepEqual(kill.calls[0].pids, [4200]);
 });
 
 // --- owner file helpers -------------------------------------------------------

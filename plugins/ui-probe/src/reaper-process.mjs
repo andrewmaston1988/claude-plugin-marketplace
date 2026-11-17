@@ -29,7 +29,7 @@ export function pidAlive(pid, { _kill = process.kill } = {}) {
 
 // --- process listing ----------------------------------------------------------
 
-async function runPowerShell(script, { _execFile = execFileAsync, timeoutMs = REAP_BUDGET_MS } = {}) {
+export async function runPowerShell(script, { _execFile = execFileAsync, timeoutMs = REAP_BUDGET_MS } = {}) {
   const args = ["-NoProfile", "-NonInteractive", "-Command", script];
   const options = { encoding: "utf8", windowsHide: true, timeout: timeoutMs, maxBuffer: MAX_BUFFER };
   let last;
@@ -85,16 +85,21 @@ export async function listProcessesWindows({ _execFile = execFileAsync, timeoutM
 function parsePsProcesses(stdout) {
   const processes = [];
   let headerSeen = false;
+  let sawLine = false;
   for (const line of String(stdout ?? "").split(/\r?\n/)) {
     if (!line.trim()) continue;
+    sawLine = true;
     if (!headerSeen && /^\s*PID\b/i.test(line)) {
       headerSeen = true;
       continue;
     }
     const match = /^\s*(\d+)\s+(.+)$/.exec(line);
-    if (!match) throw new Error("could not parse the process listing");
+    // One unreadable row — an argv wrapped onto a second line — must not disable the reaper
+    // on that host; the Windows sibling already tolerates the same class of row.
+    if (!match) continue;
     processes.push({ pid: Number(match[1]), cmd: match[2] });
   }
+  if (sawLine && processes.length === 0) throw new Error("could not parse the process listing");
   return processes;
 }
 
@@ -199,11 +204,21 @@ function parseIds(text) {
 
 // One invocation, and it reads the survivors back: Stop-Process exits 0 even for a process it
 // could not stop, so the exit code alone would report kills that never happened.
+const SURVIVOR_READ_BACK =
+  `$alive = @(); for ($i = 0; $i -lt ${KILL_SETTLE_TRIES}; $i++) { ` +
+  // Where-Object passes through the PID itself when the probe succeeds, so `$alive` holds integers.
+  "$alive = @($ids | Where-Object { Get-Process -Id $_ -ErrorAction SilentlyContinue }); " +
+  `if ($alive.Count -eq 0) { break }; Start-Sleep -Milliseconds ${KILL_SETTLE_MS} }; $alive -join ','`;
+
 function stopScript(ids) {
   return `$ids = @(${ids.join(",")}); Stop-Process -Id $ids -Force -ErrorAction SilentlyContinue; ` +
-    `$alive = @(); for ($i = 0; $i -lt ${KILL_SETTLE_TRIES}; $i++) { ` +
-    "$alive = @($ids | Where-Object { Get-Process -Id $_ -ErrorAction SilentlyContinue } | ForEach-Object { $_.Id }); " +
-    `if ($alive.Count -eq 0) { break }; Start-Sleep -Milliseconds ${KILL_SETTLE_MS} }; $alive -join ','`;
+    SURVIVOR_READ_BACK;
+}
+
+/** The generated read-back on its own, so a row can run the real script against a live PID
+ *  rather than a fake stdout the real script could never emit. */
+export function survivorScript(ids) {
+  return `$ids = @(${ids.join(",")}); ${SURVIVOR_READ_BACK}`;
 }
 
 /** One batched stop per platform: N orphans must not cost N process launches. Only PIDs the
