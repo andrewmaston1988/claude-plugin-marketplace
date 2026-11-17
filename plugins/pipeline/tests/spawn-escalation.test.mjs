@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { connectPath, close, projectAdd, rowAdd, rowGet } from "../src/db/index.mjs";
 import { spawnSession, tierFromModel, nextEscalationStep, nextEscalationStepPinned, effortFromNotes, proxyEnvFor } from "../src/orchestrator/spawn.mjs";
+import { PIPELINE_DEFAULTS } from "../src/config-defaults.mjs";
 
 const PROJECT = "testproject";
 
@@ -454,17 +455,58 @@ test("escalation: persists d_effort to DB (effort-only escalation, d_model stays
     });
 
     const row = rowGet(db, PROJECT, feature);
-    // No model= in notes — modelFromNotes resolves from config default, not pinned
+    // No model= in notes — modelFromNotes resolves from the injected default, not pinned
     row.notes_extra = "type=dev";
     row.d_effort = "medium";
 
     const logFn = createMockLog();
-    spawnSession(PROJECT, row, sessionFile, projectRoot, { db, dryRun: true, logFn, _publishNotification: noopNotify });
+    spawnSession(PROJECT, row, sessionFile, projectRoot, {
+      db, dryRun: true, logFn, _publishNotification: noopNotify, _cfg: PIPELINE_DEFAULTS,
+    });
 
     const updated = rowGet(db, PROJECT, feature);
     // Effort-only escalation (Haiku medium → high, no tier change) must NOT write d_model
     equal(updated.d_model, null, "d_model must not be pinned by effort-only escalation");
     equal(updated.d_effort, "high", "d_effort should be updated to high");
+  } finally { teardown(tmp, db); }
+});
+
+test("escalation: injected _cfg tier_efforts ladder wins over the on-disk config (guard)", () => {
+  const { tmp, db, projectRoot } = setup();
+  try {
+    const feature = "test-feat-cfg-ladder";
+    const planFile = join(projectRoot, "plan.md");
+    const sessionFile = join(projectRoot, "session.md");
+    writeFileSync(planFile, "# Plan\n", "utf8");
+    writeFileSync(sessionFile, "# Session\n", "utf8");
+
+    rowAdd(db, PROJECT, {
+      feature,
+      planFile,
+      stage: "queued",
+      reviewRetries: 1,
+    });
+
+    const row = rowGet(db, PROJECT, feature);
+    row.notes_extra = "type=dev model=minimax-m3:cloud";
+    row.d_effort = "medium";
+
+    // Non-default opus ladder: medium +2 lands on max. The shipped ladder lands
+    // on xhigh, so a re-read of the on-disk config changes the answer.
+    const cfg = {
+      ...PIPELINE_DEFAULTS,
+      tier_efforts: { ...PIPELINE_DEFAULTS.tier_efforts, opus: ["low", "medium", "high", "max"] },
+    };
+
+    const logFn = createMockLog();
+    spawnSession(PROJECT, row, sessionFile, projectRoot, {
+      db, dryRun: true, logFn, _publishNotification: noopNotify, _cfg: cfg,
+    });
+
+    ok(logFn.hasMessage("pinned/medium→pinned/max"), "custom ladder medium+2 = max");
+    ok(logFn.hasMessage("effort+2"), "Should report effort+2 action");
+    const updated = rowGet(db, PROJECT, feature);
+    equal(updated.d_effort, "max", "d_effort follows the injected ladder (the shipped ladder gives xhigh)");
   } finally { teardown(tmp, db); }
 });
 

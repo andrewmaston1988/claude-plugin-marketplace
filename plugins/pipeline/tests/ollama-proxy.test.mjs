@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { modelFromNotes, proxyEnvFor } from "../src/orchestrator/spawn.mjs";
 import { loadPipelineConfig } from "../src/pipeline-config.mjs";
+import { PIPELINE_DEFAULTS } from "../src/config-defaults.mjs";
 
 test("modelFromNotes: regex accepts colon (Ollama-style tag)", () => {
   const m = modelFromNotes("model=gemma4:31b-cloud", "p", "f", "dev", null);
@@ -41,9 +42,10 @@ test("proxyEnvFor: claude-* models return empty (no proxy, additive contract)", 
 });
 
 test("proxyEnvFor: non-claude models return proxy env vars with default URL", () => {
-  deepStrictEqual(proxyEnvFor("gemma4:31b-cloud"), {
-    ANTHROPIC_BASE_URL: "http://localhost:18081",
-    ANTHROPIC_API_KEY:  "dummy-local-key",
+  // Defaults are asserted through an injected snapshot — never the operator's live config.
+  deepStrictEqual(proxyEnvFor("gemma4:31b-cloud", PIPELINE_DEFAULTS), {
+    ANTHROPIC_BASE_URL: PIPELINE_DEFAULTS.proxy.url,
+    ANTHROPIC_API_KEY:  PIPELINE_DEFAULTS.proxy.auth_token,
     ANTHROPIC_MODEL:    "gemma4:31b-cloud",
   });
 });
@@ -60,11 +62,19 @@ test("proxyEnvFor: MiniMax-M3 routes through proxy with default URL", () => {
   // Mirrors the gemma case — proves the proxy is model-agnostic. The proxy's
   // server.py model-validation (only remaps haiku/sonnet/opus/fable/claude-*)
   // passes other names through verbatim to OPENAI_BASE_URL.
-  deepStrictEqual(proxyEnvFor("MiniMax-M3"), {
-    ANTHROPIC_BASE_URL: "http://localhost:18081",
-    ANTHROPIC_API_KEY:  "dummy-local-key",
+  deepStrictEqual(proxyEnvFor("MiniMax-M3", PIPELINE_DEFAULTS), {
+    ANTHROPIC_BASE_URL: PIPELINE_DEFAULTS.proxy.url,
+    ANTHROPIC_API_KEY:  PIPELINE_DEFAULTS.proxy.auth_token,
     ANTHROPIC_MODEL:    "MiniMax-M3",
   });
+});
+
+test("proxyEnvFor: injected cfg wins over the on-disk config (guard)", () => {
+  // Fails if proxyEnvFor ever ignores its cfg argument and re-reads the file.
+  const cfg = { proxy: { url: "http://example.invalid:1", auth_token: "x" } };
+  const env = proxyEnvFor("MiniMax-M3", cfg);
+  equal(env.ANTHROPIC_BASE_URL, "http://example.invalid:1");
+  equal(env.ANTHROPIC_API_KEY,  "x");
 });
 
 test("proxyEnvFor: gemma and MiniMax return structurally identical env blocks (model-agnostic)", () => {
