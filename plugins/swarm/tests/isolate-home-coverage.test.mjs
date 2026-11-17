@@ -1,9 +1,9 @@
 import "./helpers/isolate-home.mjs";
 import { test } from "node:test";
 import { equal, ok } from "node:assert/strict";
-import { readdirSync, readFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
-import { homedir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { dirname, join, relative, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -127,4 +127,25 @@ test("a test process runs against one throwaway home and a git config it owns", 
     "Swarm Test",
     "the config must carry the fixed test identity so fixture commits succeed",
   );
+});
+
+// The helper's config is a global file precisely so a repo-local core.hooksPath
+// still wins. Routed through GIT_CONFIG_COUNT it would shadow the repo's own.
+test("a repo-local core.hooksPath still runs its hook", () => {
+  const repo = mkdtempSync(join(tmpdir(), "swarm-hook-repo-"));
+  const hooks = mkdtempSync(join(tmpdir(), "swarm-hook-dir-"));
+  const marker = join(hooks, "fired").replaceAll("\\", "/");
+  try {
+    spawnSync("git", ["init", "-q", "-b", "main"], { cwd: repo });
+    writeFileSync(join(hooks, "pre-commit"),
+      `#!/bin/sh\nnode -e "require('fs').writeFileSync(process.argv[1], 'x')" '${marker}'\n`,
+      { mode: 0o755 });
+    spawnSync("git", ["config", "core.hooksPath", hooks], { cwd: repo });
+    const commit = spawnSync("git", ["commit", "-q", "--allow-empty", "-m", "x"], { cwd: repo, encoding: "utf8" });
+    equal(commit.status, 0, `the commit must succeed: ${commit.stderr}`);
+    ok(existsSync(join(hooks, "fired")), "a repo-local core.hooksPath must run its pre-commit hook");
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+    rmSync(hooks, { recursive: true, force: true });
+  }
 });
