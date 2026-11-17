@@ -57,13 +57,19 @@ export async function cmdRun(rest, { parseArgsFlag, resolveManifestRef, usageHea
   if (barrierDir) {
     writeFileSync(join(barrierDir, `${process.pid}.ready`), "ready\n");
     const release = join(barrierDir, "release");
-    while (!existsSync(release)) await new Promise((resolve) => setTimeout(resolve, 10));
+    const deadline = Date.now() + 60_000;
+    while (!existsSync(release)) {
+      if (Date.now() > deadline) {
+        throw new Error(`engine barrier timed out after 60000 ms waiting for ${release} (SWARM_TEST_ENGINE_BARRIER_DIR=${barrierDir})`);
+      }
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
   }
   // The claim owns everything expensive that follows: the estimate's corpus walk, the
   // preflights and runPlan's startup all sit inside it, and the heartbeat is written at
   // the very end of that startup — exactly the window a second `swarm run` used to slip
-  // into. Nothing awaited separates the checks above from here, so no race can land in
-  // between them.
+  // into. The test-only barrier above is the one await between the checks and the claim;
+  // without SWARM_TEST_ENGINE_BARRIER_DIR there is none, so no race can land there.
   const claimed = claimEngine(plan.resultsDir, { heartbeatMs: Math.max(50, (cfg.heartbeatSecs ?? 15) * 1000) });
   if (!claimed.ok) {
     err(`swarm: ${lockRefusal(plan.resultsDir, claimed.pid, "re-running")}`);

@@ -74,6 +74,7 @@ export function runCliAsync(args, { cwd, env = {}, quotaPreflight = false, confi
   return new Promise((resolve) => {
     const child = spawn(process.execPath, [CLI, ...args], {
       cwd,
+      timeout: CLI_TIMEOUT_MS,
       windowsHide: true,
       env: runEnv(childEnv),
     });
@@ -88,15 +89,10 @@ export function runCliAsync(args, { cwd, env = {}, quotaPreflight = false, confi
   });
 }
 
-// The same call with no spawn: `main` runs here, its sink captured. Returns the
-// shape runCli returns. ~0.9 s per spawn is what this exists to remove.
-//
-// One at a time: the sink, cwd and env it swaps are process-wide, so overlapping
-// calls would cross-contaminate. `resetForTests` after every call keeps the
-// module memos from leaking into the next one.
+// One at a time: the sink, cwd and env it swaps are process-wide.
 let inProcessQueue = Promise.resolve();
 
-const RESET_MODULES = [
+export const RESET_MODULES = [
   "../../src/rate-card.mjs",
   "../../src/taken.mjs",
   "../../src/serve/logos.mjs",
@@ -134,39 +130,45 @@ function capture() {
   return buf;
 }
 
-async function callInProcess(args, { cwd, env, quotaPreflight, config }) {
+async function callInProcess(args, { cwd, env, quotaPreflight, config, timeoutMs = CLI_TIMEOUT_MS }) {
+  // `serve` arms process.exit (cmd-serve.mjs exitSoon); in-process it would kill the runner.
+  if (args[0] === "serve") throw new Error("runCliInProcess refuses `serve`: it arms process.exit and would kill the test runner — spawn it with runCli");
   const { configDir, childEnv } = configOverlay(env, quotaPreflight, config);
   const out = capture();
   const err = capture();
   const restoreEnv = applyEnv(runEnv(childEnv));
   const cwdBefore = process.cwd();
-  try {
-    if (cwd) process.chdir(cwd);
-    const { main } = await import("../../scripts/swarm.mjs");
-    let timer;
-    try {
-      const status = await Promise.race([
-        main(args, { stdout: out.sink, stderr: err.sink }),
-        new Promise((_, reject) => {
-          timer = setTimeout(() => reject(new Error(`runCliInProcess timed out after ${CLI_TIMEOUT_MS} ms: ${args.join(" ")}`)), CLI_TIMEOUT_MS);
-        }),
-      ]);
-      return { status, stdout: out.text, stderr: err.text };
-    } finally {
-      clearTimeout(timer);
-    }
-  } finally {
+  const restoreAll = async () => {
     process.chdir(cwdBefore);
     restoreEnv();
     if (configDir) rmSync(configDir, { recursive: true, force: true });
     await resetModuleCaches();
+  };
+  try {
+    if (cwd) process.chdir(cwd);
+    const { main } = await import("../../scripts/swarm.mjs");
+    let timer;
+    const running = main(args, { stdout: out.sink, stderr: err.sink });
+    // An abandoned main keeps swapping the process-wide sink, cwd and env, so cleanup
+    // and the next queued call wait for it; the timeout bounds the caller only.
+    const settled = running.then(restoreAll, restoreAll);
+    const promise = Promise.race([
+      running.then((status) => ({ status, stdout: out.text, stderr: err.text })),
+      new Promise((_, reject) => {
+        timer = setTimeout(() => reject(new Error(`runCliInProcess timed out after ${timeoutMs} ms: ${args.join(" ")}`)), timeoutMs);
+      }),
+    ]).finally(() => clearTimeout(timer));
+    return { promise, settled };
+  } catch (e) {
+    await restoreAll();
+    throw e;
   }
 }
 
 export function runCliInProcess(args, opts = {}) {
-  const run = inProcessQueue.then(() => callInProcess(args, opts));
-  inProcessQueue = run.then(() => {}, () => {});
-  return run;
+  const call = inProcessQueue.then(() => callInProcess(args, opts));
+  inProcessQueue = call.then(({ settled }) => settled, () => {});
+  return call.then(({ promise }) => promise);
 }
 
 // The dispatch gate refuses `run` on a manifest whose exact bytes were never

@@ -2,13 +2,13 @@
 // state behind, and the bin still behaves exactly as before.
 import "./helpers/isolate-home.mjs";
 import { test } from "node:test";
-import { equal, deepEqual } from "node:assert/strict";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { equal, deepEqual, ok, rejects } from "node:assert/strict";
+import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { runCli, runCliInProcess, runValidated } from "./helpers/cli.mjs";
+import { runCli, runCliInProcess, runValidated, RESET_MODULES } from "./helpers/cli.mjs";
 import { currentSink } from "../src/ui.mjs";
 import { writeRosterEntry } from "../src/roster.mjs";
 import { tmp, gateHome } from "./helpers/cli-fixture.mjs";
@@ -81,6 +81,69 @@ test("C2: the sink, cwd and env are restored after a call — including one that
   } finally {
     rmSync(w.dir, { recursive: true, force: true });
   }
+});
+
+// The bound rejects the caller; the abandoned `main` still holds the sink and it is
+// `main`'s finally that restores it, so the queue must not start anything on top of it.
+test("C2: a timed-out call holds the queue until the abandoned main settles, then the sink is the original", async () => {
+  const w = world();
+  const before = currentSink();
+  const cwdBefore = process.cwd();
+  const releaseFile = join(w.dir, "leaf.release");
+  try {
+    const env = { ...w.env, SWARM_SHIM_WAIT_FILE: releaseFile, SWARM_SHIM_WAIT_MS: "5000" };
+    const v = runCli(["validate", w.manifest], { cwd: w.dir, env });
+    equal(v.status, 0, v.stderr);
+
+    const hung = runCliInProcess(["run", w.manifest], { cwd: w.dir, env, timeoutMs: 200 });
+    await hung.then(
+      () => { throw new Error("a hung run must time out"); },
+      (e) => ok(/timed out after 200 ms/.test(e.message), e.message),
+    );
+
+    // The abandoned engine is live. A queued call must wait rather than swap the sink under it.
+    const queued = runCliInProcess(["status", join(w.dir, "out")], { cwd: w.dir, env: w.env });
+    const early = await Promise.race([
+      queued.then(() => "settled", () => "settled"),
+      new Promise((resolve) => setTimeout(() => resolve("waiting"), 500)),
+    ]);
+    equal(early, "waiting", "the queue started a call while the abandoned engine still held the sink");
+
+    writeFileSync(releaseFile, "release\n");
+    await queued;
+    equal(currentSink(), before, "the timed-out engine restored the original sink");
+    equal(process.cwd(), cwdBefore, "cwd restored after the abandoned engine settled");
+  } finally {
+    writeFileSync(releaseFile, "release\n");
+    rmSync(w.dir, { recursive: true, force: true });
+  }
+});
+
+// `serve` arms process.exit (cmd-serve.mjs exitSoon) and would take the test runner
+// with it 150 ms later, so the helper must refuse it before `main` can run.
+test("C2: runCliInProcess refuses `serve` — it arms process.exit", async () => {
+  const dir = tmp();
+  try {
+    const home = gateHome(join(dir, "home"), { dashboard: { enabled: false, port: 0, tray: false } });
+    const before = currentSink();
+    await rejects(runCliInProcess(["serve"], { cwd: dir, env: { SWARM_HOME: home } }), /serve.*process\.exit/);
+    equal(currentSink(), before, "a refused call leaves the sink alone");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// RESET_MODULES is hand-maintained; a module memo keyed into it but never listed
+// leaks into the next in-process call, so pin the list to what src/ exports.
+test("C2: every src module exporting resetForTests is listed in RESET_MODULES", () => {
+  const srcDir = fileURLToPath(new URL("../src/", import.meta.url));
+  const found = readdirSync(srcDir, { recursive: true })
+    .map((p) => String(p).split(/[\\/]/).join("/"))
+    .filter((p) => p.endsWith(".mjs"))
+    .filter((p) => /export\s+(?:async\s+)?function\s+resetForTests\b/.test(readFileSync(join(srcDir, p), "utf8")))
+    .map((p) => `../../src/${p}`)
+    .sort();
+  deepEqual(found, [...RESET_MODULES].sort());
 });
 
 test("C2: a run row's scheduler and snapshot output is captured, never printed", async () => {
