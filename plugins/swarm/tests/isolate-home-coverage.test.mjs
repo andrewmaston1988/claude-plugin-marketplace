@@ -1,9 +1,9 @@
 import "./helpers/isolate-home.mjs";
 import { test } from "node:test";
 import { equal, ok } from "node:assert/strict";
-import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
-import { homedir, userInfo } from "node:os";
+import { homedir } from "node:os";
 import { dirname, join, relative, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -43,16 +43,6 @@ function firstStatement(text) {
       const end = text.indexOf(";", i);
       return end === -1 ? text.slice(i) : text.slice(i, end + 1);
     }
-  }
-}
-
-// os.userInfo() reports the passwd / OS account home, not $HOME, so it still
-// names the operator's real home after this helper has moved HOME.
-function originalHome() {
-  try {
-    return userInfo().homedir;
-  } catch {
-    return null;
   }
 }
 
@@ -104,7 +94,7 @@ test("no test writes, renames or removes under the home it runs in", () => {
   );
 });
 
-test("a test process runs against one throwaway home, with git's global config carried across", () => {
+test("a test process runs against one throwaway home and a git config it owns", () => {
   ok(process.env.SWARM_HOME, "the helper must set SWARM_HOME");
   equal(
     homedir(),
@@ -112,13 +102,29 @@ test("a test process runs against one throwaway home, with git's global config c
     "os.homedir() must be the throwaway SWARM_HOME; anything else reads or writes the operator's real home",
   );
 
-  const home = originalHome();
-  const realGlobal = home && join(home, ".gitconfig");
-  if (!realGlobal || !existsSync(realGlobal)) return;
+  const config = process.env.GIT_CONFIG_GLOBAL;
+  ok(config, "the helper must point GIT_CONFIG_GLOBAL at its own config");
+  equal(
+    dirname(config),
+    process.env.SWARM_HOME,
+    "the git config must live in the throwaway home, never the operator's profile",
+  );
 
+  // A CLI child (and a node --test worker) reads the env, not this module's state.
+  const child = spawnSync(process.execPath, ["-e", "process.stdout.write(process.env.GIT_CONFIG_GLOBAL || '')"], {
+    encoding: "utf8",
+  });
+  equal(child.stdout, config, "a child a test spawns must see the same config");
+
+  const hooks = spawnSync("git", ["config", "--global", "--get", "core.hooksPath"], { encoding: "utf8" });
+  equal(
+    hooks.status,
+    1,
+    `a test must not reach the operator's global hooks; core.hooksPath resolved to ${hooks.stdout.trim()}`,
+  );
   equal(
     git(["config", "--global", "--get", "user.name"]),
-    git(["config", "--file", realGlobal, "--get", "user.name"]),
-    "moving HOME hides git's global config; the helper must carry it across so commits still get an identity",
+    "Swarm Test",
+    "the config must carry the fixed test identity so fixture commits succeed",
   );
 });

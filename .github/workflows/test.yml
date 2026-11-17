@@ -86,11 +86,6 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
-      # worktree tests shell out to git and commit — CI has no default identity
-      - name: Configure git identity
-        run: |
-          git config --global user.email "ci@example.com"
-          git config --global user.name "CI"
       # Read-only, not just hashed: a test that overwrites a real file and writes
       # it back leaves a snapshot unchanged, but it cannot restore a file it was
       # denied permission to write. The config is valid so a leak fails here
