@@ -53,13 +53,13 @@ Runs execute sequentially with explicit test-file arguments and stream output. E
 
 In diff mode, a run with nothing selected is skipped. A whole-suite run (`--suite`, `--all`) whose globs match no file fails and names the glob. Either way the runner never launches a bare `node --test`.
 
-## The plugin-dev distro
+## The ubuntu distro
 
 Create the dedicated Ubuntu distro from Windows PowerShell:
 
 ```powershell
-wsl.exe --install -d Ubuntu-26.04 --name plugin-dev --no-launch
-wsl.exe -d plugin-dev -u root
+wsl.exe --install -d Ubuntu-26.04 --name ubuntu --no-launch
+wsl.exe -d ubuntu -u root
 ```
 
 Inside that root shell:
@@ -74,7 +74,7 @@ exit
 From PowerShell, open a shell as ubuntu:
 
 ```powershell
-wsl.exe -d plugin-dev -u ubuntu
+wsl.exe -d ubuntu -u ubuntu
 ```
 
 Inside that shell:
@@ -88,11 +88,11 @@ exit
 The password for ubuntu and sudo is `ubuntu`. Chrome stable supplies ui-probe's browser tests. Back in PowerShell, terminate the distro so `/etc/wsl.conf` takes effect:
 
 ```powershell
-wsl.exe --terminate plugin-dev
+wsl.exe --terminate ubuntu
 node scripts/test.mjs --wsl
 ```
 
-`docker-desktop` may stay the default distro. Every distro-targeted command names `-d plugin-dev` (or `--name plugin-dev` when creating it).
+`docker-desktop` may stay the default distro. Every distro-targeted command names `-d ubuntu` (or `--name ubuntu` when creating it).
 
 ## WSL mirror
 

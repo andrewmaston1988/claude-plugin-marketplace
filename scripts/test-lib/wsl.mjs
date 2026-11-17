@@ -1,4 +1,4 @@
-// WSL mode: mirror the working tree onto plugin-dev's ext4 disk, then run the
+// WSL mode: mirror the working tree onto ubuntu's ext4 disk, then run the
 // suite there. Linux-only failures surface before the PR instead of in CI.
 
 // The mirror is a git clone of the repository's COMMON dir (`--git-common-dir`,
@@ -12,11 +12,11 @@
 
 // Exit codes: the suite's own code, or 2 when WSL mode could not run at all.
 
-export const DISTRO = "plugin-dev";
+export const DISTRO = "ubuntu";
 
 export const SETUP_POINTER = `[wsl] the WSL distro "${DISTRO}" is not installed.
 
-  Set it up first -- TESTING.md, section "The plugin-dev distro", has the
+  Set it up first -- TESTING.md, section "The ubuntu distro", has the
   commands (Ubuntu 26.04 with node, git, rsync and Google Chrome). Then check:
 
       wsl.exe -l -q
