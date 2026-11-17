@@ -4,6 +4,7 @@
 // `resolveManifestRef`, `usageHeadroom`) stays in swarm.mjs, shared with `validate` and
 // `models`, so it is injected at the dispatch site rather than duplicated here.
 import { join } from "node:path";
+import { existsSync, writeFileSync } from "node:fs";
 import { getConfig, swarmHome, enginePath } from "./config.mjs";
 import { costOfFor } from "./run-cost.mjs";
 import { loadManifest } from "./manifest.mjs";
@@ -51,6 +52,12 @@ export async function cmdRun(rest, { parseArgsFlag, resolveManifestRef, usageHea
   if (refusal) {
     err(refusal);
     return 1;
+  }
+  const barrierDir = process.env.SWARM_TEST_ENGINE_BARRIER_DIR;
+  if (barrierDir) {
+    writeFileSync(join(barrierDir, `${process.pid}.ready`), "ready\n");
+    const release = join(barrierDir, "release");
+    while (!existsSync(release)) await new Promise((resolve) => setTimeout(resolve, 10));
   }
   // The claim owns everything expensive that follows: the estimate's corpus walk, the
   // preflights and runPlan's startup all sit inside it, and the heartbeat is written at
