@@ -4,6 +4,7 @@
 //   - HOME-relative shorthands (~/  $HOME/  ${HOME}/) → external
 //   - Absolute path that normalizePlanPath couldn't reduce → external
 //   - Relative in-project paths → not external (regression guard)
+import "../../../tests/helpers/isolate-home.mjs";
 import { test } from "node:test";
 import { ok, equal } from "node:assert/strict";
 import { isExternalPath } from "./plan-files.mjs";

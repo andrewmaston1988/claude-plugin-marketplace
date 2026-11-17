@@ -8,6 +8,7 @@
 // intentional marketplace manifest content and is excluded.
 // `tests/parity-fixtures/` snapshots capture pre-sanitisation state (e.g. the
 // dated model ID `-20251001`) for parity-runner correctness and are excluded.
+import "./helpers/isolate-home.mjs";
 import { test } from "node:test";
 import { readFileSync, readdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";

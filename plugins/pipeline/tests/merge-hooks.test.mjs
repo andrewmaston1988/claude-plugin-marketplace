@@ -4,6 +4,7 @@
 // no-op, a configured hook script receives the correct env vars.
 // Also covers resolveHookFirstToken (used by merge.mjs:hooks.on_merge) so a
 // regression that bypassed ~/ and {config_dir} expansion would fail here.
+import "./helpers/isolate-home.mjs";
 import { test } from "node:test";
 import { ok, equal } from "node:assert/strict";
 import { mkdtempSync, writeFileSync, rmSync, readFileSync } from "node:fs";

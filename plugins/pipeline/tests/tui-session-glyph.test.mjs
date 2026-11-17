@@ -1,4 +1,5 @@
 // Test: _sessionGlyph color and spinner logic for live sessions between tasks.
+import "./helpers/isolate-home.mjs";
 import { test } from "node:test";
 import { equal, deepEqual, ok } from "node:assert/strict";
 

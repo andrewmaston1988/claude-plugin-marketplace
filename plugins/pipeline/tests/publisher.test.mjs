@@ -2,6 +2,7 @@
 //
 // Covers: schema validity, drop-dir resolution, hook spawn shape, dryRun
 // behavior, missing-input error paths.
+import "./helpers/isolate-home.mjs";
 import { test } from "node:test";
 import { equal, match, ok, deepEqual } from "node:assert/strict";
 import { mkdtempSync, mkdirSync, writeFileSync, readdirSync, readFileSync, existsSync, rmSync } from "node:fs";

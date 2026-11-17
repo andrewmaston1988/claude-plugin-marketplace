@@ -4,6 +4,7 @@
 //   1. exit code 0
 //   2. no "activeProcs" ReferenceError in stderr
 //   3. "DRY-RUN" appears in the log (proves spawnMerge was reached)
+import "./helpers/isolate-home.mjs";
 import { test } from "node:test";
 import { ok, strictEqual } from "node:assert/strict";
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync, readFileSync, existsSync } from "node:fs";

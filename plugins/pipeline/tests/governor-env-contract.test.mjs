@@ -1,5 +1,6 @@
 // Asserts that the governor-session.md template only references $VAR names
 // that governor.mjs's spawn env actually sets (the "spawn contract").
+import "./helpers/isolate-home.mjs";
 import { test } from "node:test";
 import { ok, strictEqual } from "node:assert/strict";
 import { readFileSync, existsSync } from "node:fs";

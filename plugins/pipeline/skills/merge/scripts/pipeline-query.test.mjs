@@ -4,6 +4,7 @@
 // times (Steps 1.5 / 2.4 / 2.5). The old idiom swallowed every failure into an
 // empty string, so a malformed row and an absent field were indistinguishable
 // from a legitimately blank value. These tests pin the distinction.
+import "../../../tests/helpers/isolate-home.mjs";
 import { test } from "node:test";
 import { equal } from "node:assert/strict";
 import { rowField } from "./pipeline-query.mjs";

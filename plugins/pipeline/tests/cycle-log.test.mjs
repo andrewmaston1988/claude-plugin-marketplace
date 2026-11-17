@@ -1,4 +1,5 @@
 // cycle_log schema + appendCycleLog/loadCycleLog round-trip.
+import "./helpers/isolate-home.mjs";
 import { test } from "node:test";
 import { equal, ok, deepEqual, throws } from "node:assert/strict";
 import { mkdtempSync, mkdirSync, rmSync } from "node:fs";

@@ -1,3 +1,4 @@
+import "./helpers/isolate-home.mjs";
 import { test } from "node:test";
 import { equal, ok, deepEqual } from "node:assert/strict";
 import { resolve } from "node:path";

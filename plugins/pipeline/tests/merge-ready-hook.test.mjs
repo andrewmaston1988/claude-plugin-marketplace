@@ -3,6 +3,7 @@
 // - projectRoot passed to hook via PIPELINE_PROJECT_ROOT env var signature
 // - stdio captured to log file instead of ignored
 
+import "./helpers/isolate-home.mjs";
 import { test } from "node:test";
 import { ok, equal } from "node:assert/strict";
 

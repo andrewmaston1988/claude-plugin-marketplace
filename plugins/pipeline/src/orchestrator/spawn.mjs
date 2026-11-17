@@ -69,7 +69,7 @@ export function sessionTypeFromNotes(notes) {
   return m ? m[1] : "dev";
 }
 
-export function modelFromNotes(notes, project, feature, stype, logFn, row) {
+export function modelFromNotes(notes, project, feature, stype, logFn, row, cfg) {
   const m = String(notes).match(/\bmodel=([\w.:-]+)\b/);
   if (m) return m[1];
   // Fall back to the row's typed model columns (set via --d-model / --rvw-model at queue time)
@@ -77,7 +77,7 @@ export function modelFromNotes(notes, project, feature, stype, logFn, row) {
     const col = stype === "review" ? row.rvw_model : row.d_model;
     if (col && col !== "—") return col;
   }
-  const cfg = loadPipelineConfig();
+  if (!cfg) cfg = loadPipelineConfig();
   const defaultModel = stype === "review"
     ? cfg.models.review_default
     : cfg.models.dev_default;
@@ -286,13 +286,14 @@ export function isProtectedBranch(branch, targetBranch, defaultBranch) {
 
 // Spawn a Claude session for one queued pipeline row. Takes the unified DB,
 // project name, registered project root, and pipeline row.
-export function spawnSession(project, row, sessionFile, projectRoot, { db, dryRun, logFn, stageSessionType, _publishNotification = publishNotification }) {
+export function spawnSession(project, row, sessionFile, projectRoot, { db, dryRun, logFn, stageSessionType, _cfg, _publishNotification = publishNotification }) {
+  const cfg      = _cfg ?? loadPipelineConfig();
   const feature  = row.feature;
   const notes    = row.notes_extra || "";
   // Prefer stage-mapped type; fall back to notes-based lookup for queued rows
   // and backward compatibility with legacy rows that carry type= hints.
   const stype    = stageSessionType || sessionTypeFromNotes(notes);
-  let model      = modelFromNotes(notes, project, feature, stype, logFn, row);
+  let model      = modelFromNotes(notes, project, feature, stype, logFn, row, cfg);
   let effort     = effortFromNotes(notes, stype, row);
   const budget   = budgetFromNotes(notes);
   const newStage = STAGE[stype] || "dev";
@@ -302,7 +303,6 @@ export function spawnSession(project, row, sessionFile, projectRoot, { db, dryRu
   // Non-Anthropic (proxy-routed) models are auto-pinned: walk the opus-shaped
   // effort ladder and never change the model.
   if (stype === "dev" && (row.review_retries || 0) >= 1) {
-    const cfg = loadPipelineConfig();
     const tiers = cfg.tiers || PIPELINE_DEFAULTS.tiers;
     const tierEfforts = cfg.tier_efforts || PIPELINE_DEFAULTS.tier_efforts;
     const currTier = tierFromModel(model);
@@ -473,7 +473,7 @@ export function spawnSession(project, row, sessionFile, projectRoot, { db, dryRu
         return null;
       }
 
-      const wtPath = featureWorktreePath({ project, projectRoot, feature: planStem });
+      const wtPath = featureWorktreePath({ project, projectRoot, feature: planStem, _config: cfg });
       // base_branch is the checkout point for a fresh feature worktree —
       // chaining sets it to a prerequisite's autonomous branch so the
       // dependent sees that code before it merges. Falls back to the merge
@@ -525,7 +525,7 @@ export function spawnSession(project, row, sessionFile, projectRoot, { db, dryRu
 
   const claudePath = findClaude();
   const prompt = `export CORRELATION_ID='${correlationId}'; Read '${sessionFile}' in full and execute the session.`;
-  const proxyEnv = proxyEnvFor(model);
+  const proxyEnv = proxyEnvFor(model, cfg);
   const isProxyModel = Object.keys(proxyEnv).length > 0;
 
   const args = [

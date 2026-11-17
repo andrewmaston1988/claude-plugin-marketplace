@@ -1,4 +1,5 @@
 // Tests for makeLogger dedup and rotateLogs helpers (orchestrator-log-dedup plan).
+import "./helpers/isolate-home.mjs";
 import { test } from "node:test";
 import { equal, ok } from "node:assert/strict";
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, statSync } from "node:fs";

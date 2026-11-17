@@ -1,4 +1,5 @@
 // Interactive session classification tests
+import "./helpers/isolate-home.mjs";
 import { test } from "node:test";
 import { equal, ok, deepEqual } from "node:assert/strict";
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";

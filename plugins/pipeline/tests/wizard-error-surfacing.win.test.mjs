@@ -3,6 +3,7 @@
 //
 // Its own file so the diff-aware Windows run always exercises it, not only when
 // something in wizard-error-surfacing.test.mjs's closure changed.
+import "./helpers/isolate-home.mjs";
 import { test } from "node:test";
 import { match } from "node:assert/strict";
 import {

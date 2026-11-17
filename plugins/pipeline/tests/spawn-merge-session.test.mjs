@@ -11,6 +11,7 @@
 // On Windows we put a fake `claude.cmd` on PATH so `where claude` resolves to
 // it. On POSIX a shell-script stub on PATH serves the same role.
 
+import "./helpers/isolate-home.mjs";
 import { test } from "node:test";
 import { strictEqual, ok } from "node:assert/strict";
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";

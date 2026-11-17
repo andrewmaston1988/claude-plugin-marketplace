@@ -5,6 +5,7 @@
 //   (a) review_verdict=needs_work AND retries<budget → advance to review
 //   (b) no review_verdict (initial dev) → park at manual
 
+import "./helpers/isolate-home.mjs";
 import { test } from "node:test";
 import { strictEqual, ok, match } from "node:assert/strict";
 import { mkdtempSync, writeFileSync, rmSync } from "node:fs";

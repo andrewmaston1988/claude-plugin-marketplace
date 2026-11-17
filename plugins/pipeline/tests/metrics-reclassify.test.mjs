@@ -1,6 +1,7 @@
 // Tests for the reclassify port — verifies that pipeline.db.metric_sessions
 // command_type values are re-classified by current logic (port of
 // cache_metrics.py::reclassify_historical).
+import "./helpers/isolate-home.mjs";
 import { test } from "node:test";
 import { equal, ok } from "node:assert/strict";
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";

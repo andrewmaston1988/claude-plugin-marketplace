@@ -4,6 +4,7 @@
 // MUST run first: overriding process.stdout.write mid-suite swallows the
 // subsequent test's "test:pass" reporter event on Windows and silently
 // drops it from the TAP output.
+import "./helpers/isolate-home.mjs";
 import { test } from "node:test";
 import { equal, deepEqual, ok, match } from "node:assert/strict";
 import {

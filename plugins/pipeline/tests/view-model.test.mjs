@@ -2,6 +2,7 @@
 // and web renderers consume. These tests exist to make the progress-lookup
 // regression class (web showing 0/0 while TUI shows N/M) structurally
 // impossible: the lookup lives in ONE module and the contract is pinned here.
+import "./helpers/isolate-home.mjs";
 import { test } from "node:test";
 import { equal, deepEqual, ok } from "node:assert/strict";
 

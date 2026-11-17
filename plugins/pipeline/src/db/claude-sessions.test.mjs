@@ -1,3 +1,4 @@
+import "../../tests/helpers/isolate-home.mjs";
 import { test } from "node:test";
 import { strict as assert } from "node:assert";
 import { tmpdir } from "node:os";

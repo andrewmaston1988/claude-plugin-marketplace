@@ -1,4 +1,5 @@
 // Verify detached+unref child processes survive parent exit (Windows job-object fix).
+import "./helpers/isolate-home.mjs";
 import { test } from "node:test";
 import { ok, strictEqual } from "node:assert/strict";
 import { spawnSync } from "node:child_process";
