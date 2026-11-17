@@ -1,22 +1,19 @@
-// 500-line growth ratchet: a file over the bar may not grow.
+// 500-line bar: a change may not leave a file over it.
 //
-//     over the bar  AND  grew  ->  block
+//     already over the bar  AND  grew          ->  block
+//     at or under the bar   ->  over the bar   ->  block
+//     brand-new file over the bar              ->  block
 //
-// Nothing else. A file under the bar is not this script's business, and
-// shrinking is always allowed. Two consequences are deliberate:
+// Shrinking is always allowed. One consequence is deliberate:
 //
 //   * An oversized file can still be EDITED -- bugfixes do not require a
 //     refactor first. Only enlargement is blocked. A ratchet that blocks all
 //     work on day one is a ratchet that gets uninstalled.
-//   * A file may cross the bar in a single commit (500 -> 501 passes, because
-//     it was not over the bar when the commit started) and is locked from the
-//     next commit onward. Blocking the crossing would stop someone adding
-//     three lines to a 500-line file, which generates override noise for no
-//     benefit.
 //
-// A brand-new file over the bar is a separate violation: it has no baseline to
-// grandfather, so the growth test alone would let any new file through at any
-// size.
+// Crossing the bar is a violation on the same footing as a new file over it.
+// The file was legal when the change started, but the bar is a per-file limit,
+// not a growth allowance: an unbounded crossing is how a file drifts from 499
+// to 874 in one change.
 //
 // The baseline comes from Git, never from a checked-in table of sizes. A
 // file's allowance is simply what it was at the last commit, so there is no
@@ -29,7 +26,7 @@
 //
 // Exit codes:
 //     0: no violations
-//     1: at least one file over the bar grew, or a new file is over the bar
+//     1: at least one file ends over the bar -- grown there, crossed it, or new
 //     2: the input could not be read (git failed, or a listed blob is missing)
 
 import { spawnSync } from "node:child_process";
@@ -92,7 +89,8 @@ export function lineCount(text) {
 
 /** The rule, pure over `[path, oldLines, newLines]`.
  *
- *  A new file has `oldLines = 0`; a deleted file has `newLines = 0`. */
+ *  A new file has `oldLines = 0`; a deleted file has `newLines = 0`. A file at
+ *  or under the bar that ends over it has crossed, and fails. */
 export function violations(rows, bar = BAR) {
   const out = [];
   for (const [path, oldLines, newLines] of rows) {
@@ -108,6 +106,10 @@ export function violations(rows, bar = BAR) {
     }
     if (oldLines > bar && newLines > oldLines) {
       out.push(`${path}: ${oldLines} -> ${newLines} lines, over the ${bar}-line bar.`);
+      continue;
+    }
+    if (oldLines > 0 && oldLines <= bar && newLines > bar) {
+      out.push(`${path}: ${oldLines} -> ${newLines} lines, crosses the ${bar}-line bar -- split it.`);
     }
   }
   return out;
@@ -276,7 +278,7 @@ export function main(argv = process.argv.slice(2), cwd = process.cwd()) {
     return failClosed(err.message);
   }
   if (found.length === 0) return 0;
-  process.stderr.write("[file-size] a file over the bar may not grow:\n\n");
+  process.stderr.write("[file-size] a file may not grow past the bar:\n\n");
   for (const message of found) process.stderr.write(`  ${message}\n`);
   process.stderr.write(HOW_TO_SPLIT);
   return 1;

@@ -8,11 +8,8 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join, dirname } from "node:path";
-import { fileURLToPath } from "node:url";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 
 import {
   BAR,
@@ -23,44 +20,7 @@ import {
   readBlob,
   violations,
 } from "./check-file-size.mjs";
-
-const HERE = dirname(fileURLToPath(import.meta.url));
-const ROOT = join(HERE, "..");
-const CHECKER = join(HERE, "check-file-size.mjs");
-
-// --- Fixture plumbing ------------------------------------------------------
-
-function git(cwd, ...args) {
-  const r = spawnSync("git", args, { cwd, encoding: "utf8" });
-  assert.equal(r.status, 0, `git ${args.join(" ")} failed: ${r.stderr}`);
-  return r.stdout;
-}
-
-function makeRepo(t) {
-  const dir = mkdtempSync(join(tmpdir(), "ratchet-"));
-  t.after(() => rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }));
-  git(dir, "init", "-q");
-  git(dir, "config", "user.email", "ratchet@example.com");
-  git(dir, "config", "user.name", "ratchet");
-  git(dir, "config", "core.autocrlf", "false"); // stable bytes on Windows and Linux
-  git(dir, "config", "commit.gpgsign", "false");
-  return dir;
-}
-
-function writeLines(cwd, rel, n) {
-  const p = join(cwd, rel);
-  mkdirSync(dirname(p), { recursive: true });
-  writeFileSync(p, "x = 1\n".repeat(n), "utf8");
-}
-
-function commitAll(cwd, message) {
-  git(cwd, "add", "-A");
-  git(cwd, "commit", "-qm", message);
-}
-
-function runChecker(cwd, ...args) {
-  return spawnSync(process.execPath, [CHECKER, ...args], { cwd, encoding: "utf8" });
-}
+import { ROOT, commitAll, git, makeRepo, runChecker, writeLines } from "./check-file-size-fixture.mjs";
 
 // --- The core rule: a file over the bar may not grow ------------------------
 
@@ -83,14 +43,29 @@ test("a file under the bar may grow freely", () => {
   assert.deepEqual(violations([["plugins/swarm/src/tiny.mjs", 100, 499]]), []);
 });
 
-// --- The boundary: `> bar`, not `>= bar` ------------------------------------
+// --- The boundary: crossing the bar is itself a violation ------------------
 
-test("exactly at the bar may cross it once", () => {
-  assert.deepEqual(
-    violations([["plugins/swarm/src/edge.mjs", BAR, BAR + 1]]),
-    [],
-    "a 500-line file was under the bar when the commit started, so growing it is permitted",
-  );
+test("a file at or under the bar that ends over it is blocked", () => {
+  for (const [oldLines, newLines] of [
+    [499, 874],
+    [500, 501],
+    [480, 900],
+  ]) {
+    const found = violations([["a.mjs", oldLines, newLines]]);
+    assert.equal(found.length, 1, `${oldLines} -> ${newLines}: ${found}`);
+    assert.match(found[0], /a\.mjs/);
+    assert.match(found[0], new RegExp(`${oldLines} -> ${newLines}`));
+  }
+});
+
+test("a file that ends at or under the bar passes", () => {
+  for (const [oldLines, newLines] of [
+    [499, 500],
+    [100, 499],
+    [500, 500],
+  ]) {
+    assert.deepEqual(violations([["a.mjs", oldLines, newLines]]), [], `${oldLines} -> ${newLines}`);
+  }
 });
 
 test("one line over the bar may not grow", () => {
