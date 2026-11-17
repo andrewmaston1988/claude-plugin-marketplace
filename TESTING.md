@@ -30,12 +30,12 @@ node scripts/test.mjs --wsl
 - `--list`: print `<suite> <file> <why>` without installing or running tests. Reasons are `changed: <path>`, `fallback: <path>`, `windows`, or `suite` for whole-suite selection.
 - `--reporter=agent|default`: override the output mode, which is otherwise detected; see Output.
 - `--fast`: skip files this machine measured over 30 s, whose bytes are unchanged and whose measurement is under 7 days old. It names what it skipped, and with nothing recorded it runs everything and says so. A run it empties reports `skipped` (ok), not a failure. Refused with `--wsl`, which is always the full regression.
-- `--if-selected`: requires `--suite`. Runs that suite whole when the diff selects any of its files for a reason other than `windows`; otherwise prints `[test] <name>: not selected by this diff` and exits 0. A selection error exits 2 rather than skipping.
+- `--if-selected`: requires `--suite`. Runs that suite whole when the diff selects any of its files for a reason other than `windows`; otherwise prints `[test] <name>: not selected by this diff` and exits 0. A suite whose globs match no file fails instead, because "unselected" would be a permanent green. A selection error exits 2 rather than skipping.
 - `--orphans`: print every test file no suite runs, and exit 1 when there are any. Runs no tests.
 - `--wsl`: sync the mirror and run `node scripts/test.mjs --all` there. Combining it with `--list`, `--suite`, `--all`, `--against`, `--reporter`, `--fast` or `--orphans` exits 2 naming the conflicting flag, because that run is always the whole regression.
 - `--help` or `-h`: print usage.
 
-Exit 0 means success, including an empty diff selection or a run `--fast` emptied. Exit 1 means a test run failed or timed out, a whole-suite run matched no file, or `--orphans` found one. Exit 2 means a request or prerequisite failed, such as an unknown suite, unresolved diff base, or unavailable WSL distro. WSL returns the remote runner's exit code once it starts.
+Exit 0 means success, including an empty diff selection or a run `--fast` emptied. Exit 1 means a test run failed or timed out, a whole-suite or `--if-selected` run matched no file, or `--orphans` found one. Exit 2 means a request or prerequisite failed, such as an unknown suite, unresolved diff base, or unavailable WSL distro. WSL returns the remote runner's exit code once it starts.
 
 ## Output
 

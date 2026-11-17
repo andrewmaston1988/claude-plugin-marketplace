@@ -1,7 +1,6 @@
 // Coverage and diff selection: a file belongs to a suite when its globs expand
-// to it, and a changed path is owned by the suite whose plugin or home
-// directory holds it. `--all`, `--suite` and a diff all name files through
-// `expandRun`.
+// to it, and a changed path is owned by the suite whose plugin or home dir holds
+// it. `--all`, `--suite` and a diff all name files through `expandRun`.
 
 import * as nodeFs from "node:fs";
 import { join, posix } from "node:path";
