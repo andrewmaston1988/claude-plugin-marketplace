@@ -8,16 +8,10 @@ import { mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync } from "node:
 import { join, delimiter } from "node:path";
 import { tmpdir } from "node:os";
 import { spawnSync } from "node:child_process";
-import { main, banner, collectSignals, resolveTargetBranch } from "./run-merge.mjs";
+import { main, resolveTargetBranch } from "./run-merge.mjs";
 
-// ── Scenario 2 — plansDir resolution and the unresolvable-template PAUSE ──────
-// Drives main() over a throwaway git repo. The production failure this reproduces: a
-// {codeRoot} template resolved to a path with the token intact and the driver printed the
-// spawn command with that path attached to --plans-dir.
-//
-// Fixture precondition, load-bearing: the repo must NOT contain a plans/ directory. The
-// existence fallback substitutes <projectDir>/plans whenever the configured dir is missing,
-// which would swallow the RED and make these pass against unfixed code.
+// Fixture precondition, load-bearing: the repo must NOT contain a plans/ directory, or the
+// <projectDir>/plans fallback swallows the RED.
 
 function tmpRepo(branch = "autonomous/feat-x") {
   const dir = mkdtempSync(join(tmpdir(), "run-merge-")).replace(/\\/g, "/");
@@ -34,8 +28,6 @@ function tmpRepo(branch = "autonomous/feat-x") {
   // resolveTargetBranch falls back to `git config init.defaultBranch`, which reads system
   // config — "master" on this machine. Pin it so the target branch is one the fixture has.
   g("config", "init.defaultBranch", "main");
-  // A global core.hooksPath would run the operator's real hooks in this throwaway repo and
-  // fail the seed commit — leaving no HEAD, so `git branch` silently makes no branch.
   writeFileSync(join(dir, "seed.txt"), "seed\n");
   g("add", "-A");
   g("commit", "-qm", "seed");
@@ -289,9 +281,6 @@ test("main: a plan already moved to complete/ still supplies the target", async 
   }
 });
 
-// Reported as a missing SOURCE branch today, because collectSignals probes
-// `merge-base --is-ancestor <target> <branch>` and an unknown revision just exits 128.
-// The operator never typed the branch that is wrong.
 test("main: an unknown target is refused naming the target and the tier it came from", async () => {
   const dir = tmpRepo();
   try {

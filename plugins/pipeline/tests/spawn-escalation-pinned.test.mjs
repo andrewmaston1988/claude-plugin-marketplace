@@ -201,7 +201,7 @@ test("escalation: pinned — does NOT escalate when review_retries = 0", () => {
       planFile,
       stage: "queued",
       reviewRetries: 0,
-      d_effort: "medium",
+      dEffort: "medium",
     });
 
     const row = rowGet(db, PROJECT, feature);

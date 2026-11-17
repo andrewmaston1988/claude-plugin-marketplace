@@ -17,6 +17,13 @@ test("PIPELINE_DEFAULTS has web.host", () => {
   equal(PIPELINE_DEFAULTS.web.host, "127.0.0.1");
 });
 
+// The proxy literals are pinned here once, so a wrong shipped default fails a test
+// rather than moving every assertion that reads PIPELINE_DEFAULTS with it.
+test("PIPELINE_DEFAULTS proxy values are the shipped literals", () => {
+  equal(PIPELINE_DEFAULTS.proxy.url, "http://localhost:18081");
+  equal(PIPELINE_DEFAULTS.proxy.auth_token, "dummy-local-key");
+});
+
 test("loadPipelineConfig: web.port default present when no config file", () => {
   const cfg = loadPipelineConfig(join(tmpdir(), "pipeline-cfg-missing-xyz", "config.json"));
   equal(cfg.web.port, 8765);

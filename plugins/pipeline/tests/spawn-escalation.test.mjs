@@ -111,7 +111,7 @@ test("escalation: does NOT escalate when review_retries = 0", () => {
       planFile,
       stage: "queued",
       reviewRetries: 0,
-      d_effort: "medium",
+      dEffort: "medium",
     });
 
     const row = rowGet(db, PROJECT, feature);
@@ -138,7 +138,7 @@ test("escalation: ESCALATES when review_retries >= 1 (Haiku medium → high, eff
       planFile,
       stage: "queued",
       reviewRetries: 1,
-      d_effort: "medium",
+      dEffort: "medium",
     });
 
     const row = rowGet(db, PROJECT, feature);
