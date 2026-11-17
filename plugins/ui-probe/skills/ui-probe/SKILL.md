@@ -142,8 +142,10 @@ A `failed` step may carry a failure type when the target itself was the problem:
   centre, usually a modal or a sticky bar — not that the target is off screen. Close it, or pick another
   target.
 - `write_blocked` — the target submits a non-GET form and the guard refused it. That is the guard working.
-- `focus_failed` — a `type` target would not take focus, so the characters would land nowhere. Give it a
-  `tabindex`, or focus it with a `click` first and type with no `target`.
+- `focus_failed` — a `type` target would not take focus, or a `type` with no `target` found nothing editable
+  focused (the page's `body`, or anything that is not an `input`, `textarea` or contenteditable). The characters
+  would land nowhere, so the step fails rather than passing. Give the target a `tabindex`, or focus it with a
+  `click` first and type with no `target`.
 - `insert_failed` — the browser refused `Input.insertText`, usually because the page went away mid-step.
 
 Exit codes, which tell you what to do next:
@@ -305,8 +307,9 @@ steps:
 
 `type` sends one `Input.insertText` per character, so a page that narrows or debounces per keypress sees each
 character's own `input` event; `gapMs` spaces them and defaults to 0. `target` focuses the element first,
-failing `not_found`, `ambiguous_target` or `focus_failed`; omit it to type into whatever already holds focus.
-The step reports the field's value as `measured`.
+failing `not_found`, `ambiguous_target` or `focus_failed`; omit it to type into whatever already holds focus,
+which must be an `input`, `textarea` or contenteditable or the step fails `focus_failed`.
+The step reports what it typed into as `measured` — the field's `value`, or a contenteditable's `textContent`.
 
 ### A page with no browser at all
 

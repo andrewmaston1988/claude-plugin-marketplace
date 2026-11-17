@@ -81,6 +81,7 @@ const PAGES = {
     <input id="field" class="field">
     <p id="count">0</p>
     <div id="plain">not focusable</div>
+    <div id="editable" contenteditable="true"></div>
     <input class="pair"><input class="pair">
     <script>
       const field = document.getElementById("field");

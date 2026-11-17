@@ -16,9 +16,15 @@ const FOCUS_JS = (selector) => `(() => {
   return document.activeElement === el;
 })()`;
 
-const VALUE_JS = `(() => {
+// The focused element, what it holds, and whether it can take text at all. An input or textarea
+// measures `value`; a contenteditable measures its `textContent`. Anything else (body included) is
+// not editable, so typing there would fire no input event and pass silently.
+const ACTIVE_JS = `(() => {
   const el = document.activeElement;
-  return el && typeof el.value === "string" ? el.value : null;
+  if (!el) return { editable: false, value: null };
+  const field = el.tagName === "INPUT" || el.tagName === "TEXTAREA";
+  if (!field && el.isContentEditable !== true) return { editable: false, value: null };
+  return { editable: true, value: field ? String(el.value) : String(el.textContent) };
 })()`;
 
 export async function pressKey(args, state) {
@@ -47,6 +53,12 @@ export async function typeText(args, state) {
     if (!(await evaluate(state.cdp, FOCUS_JS(args.target)))) {
       throw new StepFailure("failed", "focus_failed", `${args.target} did not take focus`);
     }
+  } else {
+    // The runner marks any op that returns as passed, so focus on body must fail here.
+    const active = await evaluate(state.cdp, ACTIVE_JS);
+    if (!active || !active.editable) {
+      throw new StepFailure("failed", "focus_failed", "no editable element holds focus");
+    }
   }
   const gapMs = args.gapMs ?? 0;
   for (const [index, char] of Array.from(args.text).entries()) {
@@ -57,5 +69,6 @@ export async function typeText(args, state) {
       throw new StepFailure("failed", "insert_failed", error.message);
     }
   }
-  return { measured: await evaluate(state.cdp, VALUE_JS) };
+  const active = await evaluate(state.cdp, ACTIVE_JS);
+  return { measured: active ? active.value : null };
 }

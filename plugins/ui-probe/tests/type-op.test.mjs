@@ -6,6 +6,7 @@ import assert from "node:assert/strict";
 
 import { startFixtureServer } from "./fixtures/server.mjs";
 import { findBrowser, launch } from "../src/browser.mjs";
+import { evaluate } from "../src/cdp.mjs";
 import { run } from "../src/runner.mjs";
 import { OPS, validate } from "../src/ir.mjs";
 import { stubCdp } from "./tv-support.mjs";
@@ -103,12 +104,26 @@ test("row 6: with no target, type types into the element the page focused", { sk
   assert.equal(result.steps[2].measured, "hi");
 });
 
+test("row 10: no target and nothing editable focused fails focus_failed and fires no input event", { skip: SKIP }, async () => {
+  const result = await runOn(page("/type.html", { type: { text: "abc" } }), { requireAssertion: false });
+  assert.equal(result.steps[1].failure, "focus_failed", JSON.stringify(result.steps));
+
+  const fired = await evaluate(client, "document.getElementById('count').textContent");
+  assert.equal(fired, "0", "the page counted an input event with nothing editable focused");
+});
+
+test("row 11: typing into a contenteditable measures its textContent", { skip: SKIP }, async () => {
+  const result = await runOn(page("/type.html", { type: { target: "#editable", text: "hi" } }), { requireAssertion: false });
+  assert.equal(result.outcome, "passed", JSON.stringify(result.steps));
+  assert.equal(result.steps[1].measured, "hi", JSON.stringify(result.steps));
+});
+
 test("row 7: gapMs spaces the gaps between characters, so three characters wait twice", async () => {
   const slept = [];
   const cdp = stubCdp({
     replies: [
       { match: (expression) => expression.includes("el.focus()"), value: true },
-      { match: (expression) => expression.includes("activeElement"), value: "abc" },
+      { match: (expression) => expression.includes("isContentEditable"), value: { editable: true, value: "abc" } },
     ],
     onSend: (method) => {
       if (method === "DOM.getDocument") return { root: { nodeId: 1 } };
