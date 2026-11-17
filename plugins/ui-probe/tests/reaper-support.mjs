@@ -22,8 +22,12 @@ export function aged(path, ms = OLD) {
   utimesSync(path, seconds, seconds);
 }
 
+// The launcher passes one argv element, and node quotes the whole argument only when it
+// contains a space — the shape every ownership row must be written against.
 export function cmdFor(profile, exe = "msedge.exe") {
-  return `"C:\\Browsers\\${exe}" --headless=new --remote-debugging-port=0 --user-data-dir="${profile}"`;
+  const arg = `--user-data-dir=${profile}`;
+  const quoted = /\s/.test(profile) ? `"${arg}"` : arg;
+  return `"C:\\Browsers\\${exe}" --headless=new --remote-debugging-port=0 ${quoted}`;
 }
 
 export function recorder() {

@@ -4,14 +4,18 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { spawn } from "node:child_process";
+import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import {
   PROFILE_PREFIX,
   killBrowserForProfile,
   killPids,
+  listProcesses,
   listProcessesPosix,
   listProcessesWindows,
+  profileFromCommandLine,
   queryProcessStart,
   reapOrphans,
   writeOwnerFile,
@@ -183,6 +187,45 @@ test("the owner-liveness query reads the OS start time or returns unknown", asyn
   assert.equal(await queryProcessStart(1, { platform: "win32", _execFile: async () => ({ stdout: "" }) }), null);
   const never = async () => { throw new Error("must not run"); };
   assert.equal(await queryProcessStart(0, { platform: "linux", _execFile: never }), null);
+});
+
+// --- the parser against a real spawn ------------------------------------------
+
+async function listingFor(pid, deadlineMs = 20000) {
+  const started = Date.now();
+  for (;;) {
+    const entry = (await listProcesses()).find((row) => row.pid === pid);
+    if (entry) return entry;
+    if (Date.now() - started >= deadlineMs) assert.fail(`pid ${pid} never appeared in the process listing`);
+    await new Promise((done) => setTimeout(done, 200));
+  }
+}
+
+test("profileFromCommandLine round-trips an argument the OS captured from a real spawn", { timeout: 60000 }, async (t) => {
+  // Node quotes the whole argument only when it contains a space, so the fixture needs a
+  // space in the path — the shape the ownership verdicts otherwise never see.
+  const root = mkdtempSync(join(tmpdir(), "ui-probe fixture "));
+  const profile = join(root, `${PROFILE_PREFIX}fixture`);
+  mkdirSync(profile);
+  // `--` keeps the fixture argument out of node's own option parsing; the OS still records it.
+  const child = spawn(
+    process.execPath,
+    ["-e", "setInterval(() => {}, 1000)", "--", `--user-data-dir=${profile}`],
+    { stdio: "ignore" },
+  );
+  const exited = new Promise((done) => child.once("exit", done));
+  t.after(async () => {
+    child.kill();
+    await exited;
+    rmSync(root, { recursive: true, force: true });
+  });
+  assert.match(profile, /\s/, "the fixture path contains a space");
+
+  const entry = await listingFor(child.pid);
+  if (process.platform === "win32") {
+    assert.ok(entry.cmd.includes(`"--user-data-dir=${profile}"`), `the whole argument is quoted: ${entry.cmd}`);
+  }
+  assert.equal(profileFromCommandLine(entry.cmd), profile);
 });
 
 // --- the error-path killer ----------------------------------------------------

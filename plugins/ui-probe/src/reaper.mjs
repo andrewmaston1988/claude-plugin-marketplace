@@ -30,7 +30,11 @@ const KILL_SETTLE_MS = 100;
 
 const DEFAULT_FS = { readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync };
 const BROWSER_NAME = /\b(?:msedge|chrome|chromium|brave)(?:\.exe)?\b/i;
-const USER_DATA_DIR = /(?:^|[\s"])--user-data-dir=(?:"([^"]*)"|'([^']*)'|(\S+))/;
+// Node quotes the whole argument when its value has a space ("--user-data-dir=C:\Bob Smith\…"),
+// quotes only the value when a launcher does, and leaves it bare otherwise; `ps` joins argv
+// with spaces, so there the value runs to the next flag.
+const USER_DATA_DIR =
+  /(?:^|\s)"--user-data-dir=([^"]*)"|(?:^|\s)--user-data-dir=(?:"([^"]*)"|'([^']*)'|(.*?)(?=\s--|$))/;
 
 // --- owner file ---------------------------------------------------------------
 
@@ -79,7 +83,7 @@ export function pidAlive(pid, { _kill = process.kill } = {}) {
 export function profileFromCommandLine(commandLine) {
   const match = USER_DATA_DIR.exec(String(commandLine ?? ""));
   if (!match) return null;
-  return match[1] ?? match[2] ?? match[3] ?? null;
+  return match[1] ?? match[2] ?? match[3] ?? match[4] ?? null;
 }
 
 function foldPath(path, platform) {
