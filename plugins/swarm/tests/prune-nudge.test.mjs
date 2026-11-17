@@ -12,7 +12,7 @@ import { fileURLToPath } from "node:url";
 import { projectRunsHoldingWorktrees, decidePruneNudge, formatMineStatus, writePruneMarker, pruneMarkerPath } from "../src/prune-nudge.mjs";
 import { realRepoToplevel } from "../src/manifest-leaf-guard.mjs";
 import { runsKeyFor, enginePath } from "../src/config.mjs";
-import { runCli } from "./helpers/cli.mjs";
+import { runCliInProcess } from "./helpers/cli.mjs";
 
 const SESSION = "sess-A";
 const OTHER = "sess-B";
@@ -115,7 +115,7 @@ test("the block reason is exactly one line: this session's worktree count, (and 
   equal(decidePruneNudge({ mine: [{ dir: "A", kept: 1 }], config: { swarm: { pruneNudge: false } } }).block, false);
 });
 
-test("the hook binary writes prune-nudged into the run it named, is silent on its next firing, and status --mine still names it", () => {
+test("the hook binary writes prune-nudged into the run it named, is silent on its next firing, and status --mine still names it", async () => {
   const f = fixture();
   try {
     const dir = f.run("holding", { kept: [f.tree("tree")], launcher: SESSION });
@@ -128,7 +128,7 @@ test("the hook binary writes prune-nudged into the run it named, is silent on it
     equal(spawnHook(payload, f.home).stdout, "");
     // ...while the listing the line points at still names the run, with its prune
     // command, for as long as its trees remain. The marker gates the hook's line only.
-    const r = runCli(["status", "--mine"], { cwd: f.repo, env: { SWARM_HOME: f.home, CODEX_SESSION_ID: SESSION, CLAUDE_CODE_SESSION_ID: SESSION } });
+    const r = await runCliInProcess(["status", "--mine"], { cwd: f.repo, env: { SWARM_HOME: f.home, CODEX_SESSION_ID: SESSION, CLAUDE_CODE_SESSION_ID: SESSION } });
     equal(r.status, 0, r.stderr);
     equal(r.stdout, [
       "swarm status --mine: 1 finished run this session dispatched holds 1 kept worktree.",
@@ -169,14 +169,14 @@ test("no session id in the payload makes the hook silent", () => {
   } finally { f.cleanup(); }
 });
 
-test("swarm status --mine lists only this session's finished runs holding trees, each with its prune command", () => {
+test("swarm status --mine lists only this session's finished runs holding trees, each with its prune command", async () => {
   const f = fixture();
   try {
     const tree = f.tree("tree");
     const a = f.run("alpha", { kept: [tree, tree], launcher: SESSION });
     const b = f.run("beta", { kept: [tree], launcher: SESSION });
     const theirs = f.run("theirs", { kept: [tree], launcher: OTHER });
-    const r = runCli(["status", "--mine"], { cwd: f.repo, env: { SWARM_HOME: f.home, CODEX_SESSION_ID: SESSION, CLAUDE_CODE_SESSION_ID: SESSION } });
+    const r = await runCliInProcess(["status", "--mine"], { cwd: f.repo, env: { SWARM_HOME: f.home, CODEX_SESSION_ID: SESSION, CLAUDE_CODE_SESSION_ID: SESSION } });
     equal(r.status, 0, r.stderr);
     equal(r.stdout, [
       "swarm status --mine: 2 finished runs this session dispatched hold 3 kept worktrees.",
@@ -190,27 +190,27 @@ test("swarm status --mine lists only this session's finished runs holding trees,
   } finally { f.cleanup(); }
 });
 
-test("swarm status --mine outside a session exits 1 and lists nothing", () => {
+test("swarm status --mine outside a session exits 1 and lists nothing", async () => {
   const f = fixture();
   try {
     f.run("holding", { kept: [f.tree("tree")], launcher: SESSION });
     // Both emptied, not omitted: runCli spreads process.env, and the suite may itself
     // be running inside a session whose id would leak into the child.
-    const r = runCli(["status", "--mine"], { cwd: f.repo, env: { SWARM_HOME: f.home, CODEX_SESSION_ID: "", CLAUDE_CODE_SESSION_ID: "" } });
+    const r = await runCliInProcess(["status", "--mine"], { cwd: f.repo, env: { SWARM_HOME: f.home, CODEX_SESSION_ID: "", CLAUDE_CODE_SESSION_ID: "" } });
     equal(r.status, 1);
     equal(r.stdout, "");
     ok(r.stderr.includes("CODEX_SESSION_ID"), r.stderr);
   } finally { f.cleanup(); }
 });
 
-test("swarm status --mine outside a git repo names the cwd and exits 1", () => {
+test("swarm status --mine outside a git repo names the cwd and exits 1", async () => {
   const f = fixture();
   const outside = mkdtempSync(join(tmpdir(), "prune-nudge-outside-"));
   try {
     // A run exists, but no repo to file it under: without an error this would read as
     // an all-clear rather than as "asked from the wrong place".
     f.run("holding", { kept: [f.tree("tree")], launcher: SESSION });
-    const r = runCli(["status", "--mine"], { cwd: outside, env: { SWARM_HOME: f.home, CODEX_SESSION_ID: SESSION, CLAUDE_CODE_SESSION_ID: SESSION } });
+    const r = await runCliInProcess(["status", "--mine"], { cwd: outside, env: { SWARM_HOME: f.home, CODEX_SESSION_ID: SESSION, CLAUDE_CODE_SESSION_ID: SESSION } });
     equal(r.status, 1);
     equal(r.stdout, "");
     ok(r.stderr.includes(outside), r.stderr);
@@ -220,11 +220,11 @@ test("swarm status --mine outside a git repo names the cwd and exits 1", () => {
   }
 });
 
-test("swarm status --mine names no run once the session has nothing left holding trees", () => {
+test("swarm status --mine names no run once the session has nothing left holding trees", async () => {
   const f = fixture();
   try {
     f.run("cleaned", { kept: [join(f.home, "gone")], launcher: SESSION });
-    const r = runCli(["status", "--mine"], { cwd: f.repo, env: { SWARM_HOME: f.home, CODEX_SESSION_ID: SESSION, CLAUDE_CODE_SESSION_ID: SESSION } });
+    const r = await runCliInProcess(["status", "--mine"], { cwd: f.repo, env: { SWARM_HOME: f.home, CODEX_SESSION_ID: SESSION, CLAUDE_CODE_SESSION_ID: SESSION } });
     equal(r.status, 0, r.stderr);
     equal(r.stdout, "swarm status --mine: no finished run this session dispatched is holding kept worktrees.\n");
   } finally { f.cleanup(); }

@@ -7,7 +7,7 @@ import { equal, ok, deepEqual } from "node:assert/strict";
 import { mkdtempSync, rmSync, writeFileSync, readFileSync, existsSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { runCli } from "./helpers/cli.mjs";
+import { runCliInProcess } from "./helpers/cli.mjs";
 import { commitAll, gitOut, tmp } from "./helpers/cli-fixture.mjs";
 import { prepareIsolation, treeDirFor, WORKTREE_ADD_TIMEOUT_MS } from "../src/worktree.mjs";
 import { initPruneRepo, writeFinishedRun, pruneFixture, addDetachedTree, writeKilledRun, dropSnapPrune } from "./helpers/prune-fixture.mjs";
@@ -15,7 +15,7 @@ import { initPruneRepo, writeFinishedRun, pruneFixture, addDetachedTree, writeKi
 const cliCfg = (dir) => ({ worktreeBranchPrefix: "swarm/", treeRoot: join(dir, "home", "worktrees") });
 const cliTree = (dir, resultsDir, name) => treeDirFor(resultsDir, name, cliCfg(dir));
 
-test("prune --dry-run: a finished run with a kept worktree prints the table and removes nothing", () => {
+test("prune --dry-run: a finished run with a kept worktree prints the table and removes nothing", async () => {
   const repo = initPruneRepo();
   const dir = tmp();
   try {
@@ -28,7 +28,7 @@ test("prune --dry-run: a finished run with a kept worktree prints the table and 
 
     writeFinishedRun(resultsDir, [{ name: "impl", branch: "swarm/impl", path: wt.path }]);
 
-    const r = runCli(["prune", resultsDir, "--dry-run"], { cwd: dir, env: { SWARM_HOME: join(dir, "home") } });
+    const r = await runCliInProcess(["prune", resultsDir, "--dry-run"], { cwd: dir, env: { SWARM_HOME: join(dir, "home") } });
     equal(r.status, 0, r.stdout + r.stderr);
     ok(r.stdout.includes(wt.path), r.stdout);
     ok(r.stdout.includes("swarm/impl"), r.stdout);
@@ -43,7 +43,7 @@ test("prune --dry-run: a finished run with a kept worktree prints the table and 
   }
 });
 
-test("prune: removes the worktree and branch, prints freed, leaves the run record untouched", () => {
+test("prune: removes the worktree and branch, prints freed, leaves the run record untouched", async () => {
   const repo = initPruneRepo();
   const dir = tmp();
   try {
@@ -58,7 +58,7 @@ test("prune: removes the worktree and branch, prints freed, leaves the run recor
     const runLog = readFileSync(join(resultsDir, "run.log"), "utf8");
     const summary = readFileSync(join(resultsDir, "summary.json"), "utf8");
 
-    const r = runCli(["prune", resultsDir], { cwd: dir, env: { SWARM_HOME: join(dir, "home") } });
+    const r = await runCliInProcess(["prune", resultsDir], { cwd: dir, env: { SWARM_HOME: join(dir, "home") } });
     equal(r.status, 0, r.stdout + r.stderr);
     ok(/freed [\d.]+ GB across 1 worktree/.test(r.stdout), r.stdout);
 
@@ -74,7 +74,7 @@ test("prune: removes the worktree and branch, prints freed, leaves the run recor
   }
 });
 
-test("prune --dry-run: a kept worktree whose path is already gone from disk is not a prune row — nothing to prune", () => {
+test("prune --dry-run: a kept worktree whose path is already gone from disk is not a prune row — nothing to prune", async () => {
   const repo = initPruneRepo();
   const dir = tmp();
   try {
@@ -83,7 +83,7 @@ test("prune --dry-run: a kept worktree whose path is already gone from disk is n
     writeFileSync(join(resultsDir, "manifest.json"), JSON.stringify({ resultsDir, cwd: repo, tasks: [] }));
     writeFinishedRun(resultsDir, [{ name: "impl", branch: "swarm/impl", path: cliTree(dir, resultsDir, "gone") }]);
 
-    const r = runCli(["prune", resultsDir, "--dry-run"], { cwd: dir, env: { SWARM_HOME: join(dir, "home") } });
+    const r = await runCliInProcess(["prune", resultsDir, "--dry-run"], { cwd: dir, env: { SWARM_HOME: join(dir, "home") } });
     equal(r.status, 0, r.stdout + r.stderr);
     ok(/has no kept worktrees or branches — nothing to prune/.test(r.stdout), r.stdout);
   } finally {
@@ -92,7 +92,7 @@ test("prune --dry-run: a kept worktree whose path is already gone from disk is n
   }
 });
 
-test("prune: a real prune rewrites worktreesKept to drop the pruned entry; a second prune finds nothing", () => {
+test("prune: a real prune rewrites worktreesKept to drop the pruned entry; a second prune finds nothing", async () => {
   const repo = initPruneRepo();
   const dir = tmp();
   try {
@@ -106,13 +106,13 @@ test("prune: a real prune rewrites worktreesKept to drop the pruned entry; a sec
 
     writeFinishedRun(resultsDir, [{ name: "impl", branch: "swarm/impl", path: wt.path }]);
 
-    const r = runCli(["prune", resultsDir], { cwd: dir, env: { SWARM_HOME: join(dir, "home") } });
+    const r = await runCliInProcess(["prune", resultsDir], { cwd: dir, env: { SWARM_HOME: join(dir, "home") } });
     equal(r.status, 0, r.stdout + r.stderr);
 
     const summary = JSON.parse(readFileSync(join(resultsDir, "summary.json"), "utf8"));
     deepEqual(summary.worktreesKept, []);
 
-    const r2 = runCli(["prune", resultsDir, "--dry-run"], { cwd: dir, env: { SWARM_HOME: join(dir, "home") } });
+    const r2 = await runCliInProcess(["prune", resultsDir, "--dry-run"], { cwd: dir, env: { SWARM_HOME: join(dir, "home") } });
     equal(r2.status, 0, r2.stdout + r2.stderr);
     ok(/has no kept worktrees or branches — nothing to prune/.test(r2.stdout), r2.stdout);
   } finally {
@@ -121,7 +121,7 @@ test("prune: a real prune rewrites worktreesKept to drop the pruned entry; a sec
   }
 });
 
-test("prune --dry-run: summary.json is left byte-identical", () => {
+test("prune --dry-run: summary.json is left byte-identical", async () => {
   const repo = initPruneRepo();
   const dir = tmp();
   try {
@@ -135,7 +135,7 @@ test("prune --dry-run: summary.json is left byte-identical", () => {
     writeFinishedRun(resultsDir, [{ name: "impl", branch: "swarm/impl", path: wt.path }]);
     const before = readFileSync(join(resultsDir, "summary.json"), "utf8");
 
-    const r = runCli(["prune", resultsDir, "--dry-run"], { cwd: dir, env: { SWARM_HOME: join(dir, "home") } });
+    const r = await runCliInProcess(["prune", resultsDir, "--dry-run"], { cwd: dir, env: { SWARM_HOME: join(dir, "home") } });
     equal(r.status, 0, r.stdout + r.stderr);
     equal(readFileSync(join(resultsDir, "summary.json"), "utf8"), before, "dry-run must never write summary.json");
   } finally {
@@ -145,12 +145,12 @@ test("prune --dry-run: summary.json is left byte-identical", () => {
   }
 });
 
-test("prune: the flag may come first, and a dir with no run.log is an error, not a live run", () => {
+test("prune: the flag may come first, and a dir with no run.log is an error, not a live run", async () => {
   const dir = mkdtempSync(join(tmpdir(), "swarm-prune-args-"));
   try {
     mkdirSync(join(dir, "home"), { recursive: true });
     const missing = join(dir, "home", "runs", "C--proj", "does-not-exist");
-    const r = runCli(["prune", "--dry-run", missing], { cwd: dir, env: { SWARM_HOME: join(dir, "home") } });
+    const r = await runCliInProcess(["prune", "--dry-run", missing], { cwd: dir, env: { SWARM_HOME: join(dir, "home") } });
     equal(r.status, 1, r.stdout + r.stderr);
     ok(/no run at/.test(r.stderr), r.stderr);
     ok(!/live/.test(r.stderr), r.stderr);
@@ -161,7 +161,7 @@ test("prune: the flag may come first, and a dir with no run.log is an error, not
   }
 });
 
-test("prune: refuses a live run (fresh heartbeat, no summary) — exit 1, nothing removed", () => {
+test("prune: refuses a live run (fresh heartbeat, no summary) — exit 1, nothing removed", async () => {
   const repo = initPruneRepo();
   const dir = tmp();
   try {
@@ -171,7 +171,7 @@ test("prune: refuses a live run (fresh heartbeat, no summary) — exit 1, nothin
     writeFileSync(join(resultsDir, "run.log"), JSON.stringify({ ts: new Date().toISOString(), event: "run-start", tasks: [{ id: "impl", provider: "claude", model: "claude-haiku-4-5-20251001" }] }) + "\n");
     writeFileSync(join(resultsDir, "heartbeat"), `${new Date().toISOString()} 1234\n`);
 
-    const r = runCli(["prune", resultsDir], { cwd: dir, env: { SWARM_HOME: join(dir, "home") } });
+    const r = await runCliInProcess(["prune", resultsDir], { cwd: dir, env: { SWARM_HOME: join(dir, "home") } });
     equal(r.status, 1, r.stdout + r.stderr);
     ok(r.stderr.includes("live — swarm stop it first"), r.stderr);
 
@@ -184,7 +184,7 @@ test("prune: refuses a live run (fresh heartbeat, no summary) — exit 1, nothin
   }
 });
 
-test("prune --dry-run: a dead-engine-stopped run with no kept worktree still finds an orphan via manifest.json's cwd", () => {
+test("prune --dry-run: a dead-engine-stopped run with no kept worktree still finds an orphan via manifest.json's cwd", async () => {
   const repo = initPruneRepo();
   const dir = tmp();
   try {
@@ -198,7 +198,7 @@ test("prune --dry-run: a dead-engine-stopped run with no kept worktree still fin
 
     writeFinishedRun(resultsDir, false);
 
-    const r = runCli(["prune", resultsDir, "--dry-run"], { cwd: dir, env: { SWARM_HOME: join(dir, "home") } });
+    const r = await runCliInProcess(["prune", resultsDir, "--dry-run"], { cwd: dir, env: { SWARM_HOME: join(dir, "home") } });
     equal(r.status, 0, r.stdout + r.stderr);
     ok(r.stdout.includes(wt.path), r.stdout);
     ok(r.stdout.includes("swarm/impl"), r.stdout);
@@ -212,7 +212,7 @@ test("prune --dry-run: a dead-engine-stopped run with no kept worktree still fin
 
 // --- prune over a run's leftover worktrees ---
 
-test("prune: a run that ended normally still has its leftover tree removed — the sweep goes before the nothing-to-prune exit", () => {
+test("prune: a run that ended normally still has its leftover tree removed — the sweep goes before the nothing-to-prune exit", async () => {
   const f = pruneFixture();
   try {
     // A run that finished with nothing kept, yet left a tree registered under its
@@ -222,11 +222,11 @@ test("prune: a run that ended normally still has its leftover tree removed — t
     addDetachedTree(f);
     ok(existsSync(f.tree));
     const env = { SWARM_HOME: join(f.dir, "home") };
-    const dry = runCli(["prune", f.resultsDir, "--dry-run"], { cwd: f.dir, env });
+    const dry = await runCliInProcess(["prune", f.resultsDir, "--dry-run"], { cwd: f.dir, env });
     equal(dry.status, 0, dry.stdout + dry.stderr);
     ok(dry.stdout.includes(f.tree), dry.stdout);
     ok(existsSync(f.tree), "dry-run keeps the tree");
-    const r = runCli(["prune", f.resultsDir], { cwd: f.dir, env });
+    const r = await runCliInProcess(["prune", f.resultsDir], { cwd: f.dir, env });
     equal(r.status, 0, r.stdout + r.stderr);
     ok(!existsSync(f.tree), "tree removed");
     ok(!gitOut(["worktree", "list", "--porcelain"], f.repo).includes("impl"), "tree deregistered");
@@ -235,7 +235,7 @@ test("prune: a run that ended normally still has its leftover tree removed — t
   }
 });
 
-test("prune: unlanded commit and dirty tree are preserved until explicit discard", () => {
+test("prune: unlanded commit and dirty tree are preserved until explicit discard", async () => {
   const f = pruneFixture();
   try {
     const wt = prepareIsolation({ id: "impl", originalCwd: f.repo, cwd: f.repo }, cliCfg(f.dir), f.resultsDir, { addTimeoutMs: WORKTREE_ADD_TIMEOUT_MS, base: gitOut(["rev-parse", "HEAD"], f.repo) });
@@ -244,13 +244,13 @@ test("prune: unlanded commit and dirty tree are preserved until explicit discard
     writeFileSync(join(wt.path, "new.txt"), "dirty\n");
     writeFinishedRun(f.resultsDir, [{ branch: wt.branch, path: wt.path }]);
     const env = { SWARM_HOME: join(f.dir, "home") };
-    const refused = runCli(["prune", f.resultsDir], { cwd: f.dir, env });
+    const refused = await runCliInProcess(["prune", f.resultsDir], { cwd: f.dir, env });
     ok(existsSync(wt.path), "blocked worktree must survive refusal");
     ok(gitOut(["branch", "--list", wt.branch], f.repo), "blocked branch must survive refusal");
     equal(refused.status, 1, refused.stdout + refused.stderr);
     ok(refused.stderr.includes(wt.path) && refused.stderr.includes("--discard-unlanded"), refused.stderr);
     ok(!/freed/.test(refused.stdout), `a refused prune must not report freed space: ${refused.stdout}`);
-    const discarded = runCli(["prune", f.resultsDir, "--discard-unlanded"], { cwd: f.dir, env });
+    const discarded = await runCliInProcess(["prune", f.resultsDir, "--discard-unlanded"], { cwd: f.dir, env });
     equal(discarded.status, 0, discarded.stdout + discarded.stderr);
     ok(!existsSync(wt.path), "explicit discard removes the worktree");
     ok(!gitOut(["branch", "--list", wt.branch], f.repo), "explicit discard removes the branch");
@@ -259,7 +259,7 @@ test("prune: unlanded commit and dirty tree are preserved until explicit discard
   }
 });
 
-test("prune: a squash-landed branch measures landed and is pruned", () => {
+test("prune: a squash-landed branch measures landed and is pruned", async () => {
   const f = pruneFixture();
   try {
     const wt = prepareIsolation({ id: "impl", originalCwd: f.repo, cwd: f.repo }, cliCfg(f.dir), f.resultsDir, { addTimeoutMs: WORKTREE_ADD_TIMEOUT_MS, base: gitOut(["rev-parse", "HEAD"], f.repo) });
@@ -271,7 +271,7 @@ test("prune: a squash-landed branch measures landed and is pruned", () => {
     spawnSync("git", ["merge", "--squash", "-q", wt.branch], { cwd: f.repo, windowsHide: true });
     commitAll(f.repo, "squash-land");
     writeFinishedRun(f.resultsDir, [{ branch: wt.branch, path: wt.path }]);
-    const r = runCli(["prune", f.resultsDir], { cwd: f.dir, env: { SWARM_HOME: join(f.dir, "home") } });
+    const r = await runCliInProcess(["prune", f.resultsDir], { cwd: f.dir, env: { SWARM_HOME: join(f.dir, "home") } });
     equal(r.status, 0, r.stdout + r.stderr);
     ok(!existsSync(wt.path), "a squash-landed worktree is pruned");
     ok(!gitOut(["branch", "--list", wt.branch], f.repo), "a squash-landed branch is deleted");
@@ -280,7 +280,7 @@ test("prune: a squash-landed branch measures landed and is pruned", () => {
   }
 });
 
-test("prune: an unlanded-only row on a clean tree is refused, and the worktree and branch both survive", () => {
+test("prune: an unlanded-only row on a clean tree is refused, and the worktree and branch both survive", async () => {
   const f = pruneFixture();
   try {
     const wt = prepareIsolation({ id: "impl", originalCwd: f.repo, cwd: f.repo }, cliCfg(f.dir), f.resultsDir, { addTimeoutMs: WORKTREE_ADD_TIMEOUT_MS, base: gitOut(["rev-parse", "HEAD"], f.repo) });
@@ -288,12 +288,12 @@ test("prune: an unlanded-only row on a clean tree is refused, and the worktree a
     commitAll(wt.path, "unlanded work"); // committed — the tree itself is clean
     writeFinishedRun(f.resultsDir, [{ branch: wt.branch, path: wt.path }]);
     const env = { SWARM_HOME: join(f.dir, "home") };
-    const r = runCli(["prune", f.resultsDir], { cwd: f.dir, env });
+    const r = await runCliInProcess(["prune", f.resultsDir], { cwd: f.dir, env });
     ok(existsSync(wt.path), "unlanded-only worktree must survive refusal");
     ok(gitOut(["branch", "--list", wt.branch], f.repo), "unlanded-only branch must survive refusal");
     equal(r.status, 1, r.stdout + r.stderr);
     ok(r.stderr.includes(wt.path) && r.stderr.includes("--discard-unlanded"), r.stderr);
-    const dry = runCli(["prune", f.resultsDir, "--dry-run"], { cwd: f.dir, env });
+    const dry = await runCliInProcess(["prune", f.resultsDir, "--dry-run"], { cwd: f.dir, env });
     equal(dry.status, 0, dry.stdout + dry.stderr);
     ok(dry.stdout.includes("1 unlanded"), dry.stdout);
     ok(!/uncommitted/.test(dry.stdout), `a clean tree must show no uncommitted count: ${dry.stdout}`);
@@ -303,7 +303,7 @@ test("prune: an unlanded-only row on a clean tree is refused, and the worktree a
   }
 });
 
-test("prune: a dirty-only row on a landed branch is refused, and the uncommitted file survives", () => {
+test("prune: a dirty-only row on a landed branch is refused, and the uncommitted file survives", async () => {
   const f = pruneFixture();
   try {
     const wt = prepareIsolation({ id: "impl", originalCwd: f.repo, cwd: f.repo }, cliCfg(f.dir), f.resultsDir, { addTimeoutMs: WORKTREE_ADD_TIMEOUT_MS, base: gitOut(["rev-parse", "HEAD"], f.repo) });
@@ -312,7 +312,7 @@ test("prune: a dirty-only row on a landed branch is refused, and the uncommitted
     spawnSync("git", ["merge", "-q", wt.branch], { cwd: f.repo, windowsHide: true });
     writeFileSync(join(wt.path, "scratch.txt"), "uncommitted\n"); // untracked
     writeFinishedRun(f.resultsDir, [{ branch: wt.branch, path: wt.path }]);
-    const r = runCli(["prune", f.resultsDir], { cwd: f.dir, env: { SWARM_HOME: join(f.dir, "home") } });
+    const r = await runCliInProcess(["prune", f.resultsDir], { cwd: f.dir, env: { SWARM_HOME: join(f.dir, "home") } });
     ok(existsSync(join(wt.path, "scratch.txt")), "the uncommitted file must survive refusal");
     ok(gitOut(["branch", "--list", wt.branch], f.repo), "landed branch must survive a dirty-tree refusal");
     equal(r.status, 1, r.stdout + r.stderr);
@@ -322,14 +322,14 @@ test("prune: a dirty-only row on a landed branch is refused, and the uncommitted
   }
 });
 
-test("prune: a killed run's leftover tree (no summary.json) is removed without a branch delete, and no summary is invented", () => {
+test("prune: a killed run's leftover tree (no summary.json) is removed without a branch delete, and no summary is invented", async () => {
   const f = pruneFixture();
   try {
     addDetachedTree(f);
     ok(existsSync(f.tree));
     writeKilledRun(f);
     const branchesBefore = gitOut(["branch", "--list"], f.repo);
-    const r = runCli(["prune", f.resultsDir], { cwd: f.dir, env: { SWARM_HOME: join(f.dir, "home") } });
+    const r = await runCliInProcess(["prune", f.resultsDir], { cwd: f.dir, env: { SWARM_HOME: join(f.dir, "home") } });
     equal(r.status, 0, r.stdout + r.stderr);
     ok(r.stdout.includes("(detached)") && !/snapshot/.test(r.stdout), r.stdout);
     ok(!existsSync(f.tree), "tree removed");
@@ -340,7 +340,7 @@ test("prune: a killed run's leftover tree (no summary.json) is removed without a
   }
 });
 
-test("prune: a detached tree holding its own commit is refused, and the commit survives", () => {
+test("prune: a detached tree holding its own commit is refused, and the commit survives", async () => {
   const f = pruneFixture();
   try {
     // A branchless tree is not automatically empty: an agent that kept working in a
@@ -353,14 +353,14 @@ test("prune: a detached tree holding its own commit is refused, and the commit s
     writeKilledRun(f);
 
     const env = { SWARM_HOME: join(f.dir, "home") };
-    const refused = runCli(["prune", f.resultsDir], { cwd: f.dir, env });
+    const refused = await runCliInProcess(["prune", f.resultsDir], { cwd: f.dir, env });
     equal(refused.status, 1, refused.stdout + refused.stderr);
     ok(refused.stderr.includes(f.tree) && refused.stderr.includes("--discard-unlanded"), refused.stderr);
     ok(!/freed/.test(refused.stdout), `a refused prune must not report freed space: ${refused.stdout}`);
     ok(existsSync(f.tree), "the detached tree must survive the refusal");
     equal(gitOut(["rev-parse", "HEAD"], f.tree), head, "the detached tree's own commit must survive");
 
-    const discarded = runCli(["prune", f.resultsDir, "--discard-unlanded"], { cwd: f.dir, env });
+    const discarded = await runCliInProcess(["prune", f.resultsDir, "--discard-unlanded"], { cwd: f.dir, env });
     equal(discarded.status, 0, discarded.stdout + discarded.stderr);
     ok(!existsSync(f.tree), "an explicit discard still destroys the detached tree");
   } finally {
@@ -368,7 +368,7 @@ test("prune: a detached tree holding its own commit is refused, and the commit s
   }
 });
 
-test("prune: a second repo's leftover tree is removed too, not just the first repo's", () => {
+test("prune: a second repo's leftover tree is removed too, not just the first repo's", async () => {
   const f = pruneFixture();
   const repo2 = initPruneRepo();
   try {
@@ -387,7 +387,7 @@ test("prune: a second repo's leftover tree is removed too, not just the first re
       ], totalTokens: null,
     }));
     ok(existsSync(f.tree) && existsSync(tree2));
-    const r = runCli(["prune", f.resultsDir], { cwd: f.dir, env: { SWARM_HOME: join(f.dir, "home") } });
+    const r = await runCliInProcess(["prune", f.resultsDir], { cwd: f.dir, env: { SWARM_HOME: join(f.dir, "home") } });
     equal(r.status, 0, r.stdout + r.stderr);
     ok(!existsSync(f.tree), "first tree removed");
     ok(!existsSync(tree2), "second repo's tree removed");
@@ -398,7 +398,7 @@ test("prune: a second repo's leftover tree is removed too, not just the first re
   }
 });
 
-test("row 10: prune from the porting worktree frees a cherry-picked run; from the main checkout it refuses", () => {
+test("row 10: prune from the porting worktree frees a cherry-picked run; from the main checkout it refuses", async () => {
   const f = pruneFixture();
   const portTree = join(f.dir, "porting");
   try {
@@ -421,12 +421,12 @@ test("row 10: prune from the porting worktree frees a cherry-picked run; from th
     writeFinishedRun(f.resultsDir, [{ branch: wt.branch, path: wt.path }]);
     const env = { SWARM_HOME: join(f.dir, "home") };
 
-    const refused = runCli(["prune", f.resultsDir], { cwd: f.repo, env });
+    const refused = await runCliInProcess(["prune", f.resultsDir], { cwd: f.repo, env });
     equal(refused.status, 1, refused.stdout + refused.stderr);
     ok(refused.stderr.includes("1 unlanded"), `the main checkout's HEAD does not hold the cherry-pick: ${refused.stderr}`);
     ok(existsSync(wt.path), "the refusal keeps the tree");
 
-    const freed = runCli(["prune", f.resultsDir], { cwd: portTree, env });
+    const freed = await runCliInProcess(["prune", f.resultsDir], { cwd: portTree, env });
     equal(freed.status, 0, freed.stdout + freed.stderr);
     ok(!existsSync(wt.path), "the ported run's tree is pruned");
     ok(!gitOut(["branch", "--list", wt.branch], f.repo), "the ported run's branch is deleted");
@@ -436,7 +436,7 @@ test("row 10: prune from the porting worktree frees a cherry-picked run; from th
   }
 });
 
-test("row 17: prune from inside a leaf worktree still refuses the leaf's unlanded branch", () => {
+test("row 17: prune from inside a leaf worktree still refuses the leaf's unlanded branch", async () => {
   const f = pruneFixture();
   try {
     const wt = prepareIsolation({ id: "impl", originalCwd: f.repo, cwd: f.repo }, cliCfg(f.dir), f.resultsDir, { addTimeoutMs: WORKTREE_ADD_TIMEOUT_MS, base: gitOut(["rev-parse", "HEAD"], f.repo) });
@@ -446,7 +446,7 @@ test("row 17: prune from inside a leaf worktree still refuses the leaf's unlande
 
     // The leaf's own HEAD must never be a base: it would absorb the very branch
     // the prune is about to destroy.
-    const r = runCli(["prune", f.resultsDir], { cwd: wt.path, env: { SWARM_HOME: join(f.dir, "home") } });
+    const r = await runCliInProcess(["prune", f.resultsDir], { cwd: wt.path, env: { SWARM_HOME: join(f.dir, "home") } });
     equal(r.status, 1, r.stdout + r.stderr);
     ok(r.stderr.includes("1 unlanded"), r.stderr);
     ok(existsSync(wt.path), "the leaf tree survives the refusal");
@@ -456,7 +456,7 @@ test("row 17: prune from inside a leaf worktree still refuses the leaf's unlande
   }
 });
 
-test("prune: a killed run with leftover trees in two repos removes both, and invents no summary", () => {
+test("prune: a killed run with leftover trees in two repos removes both, and invents no summary", async () => {
   const f = pruneFixture();
   const repo2 = initPruneRepo();
   try {
@@ -470,7 +470,7 @@ test("prune: a killed run with leftover trees in two repos removes both, and inv
       JSON.stringify({ resultsDir: f.resultsDir, cwd: f.repo, tasks: [{ id: "two", cwd: repo2 }] }));
     writeKilledRun(f);
     ok(existsSync(f.tree) && existsSync(tree2));
-    const r = runCli(["prune", f.resultsDir], { cwd: f.dir, env: { SWARM_HOME: join(f.dir, "home") } });
+    const r = await runCliInProcess(["prune", f.resultsDir], { cwd: f.dir, env: { SWARM_HOME: join(f.dir, "home") } });
     equal(r.status, 0, r.stdout + r.stderr);
     ok(!existsSync(f.tree), "first tree removed");
     ok(!existsSync(tree2), "second tree removed");

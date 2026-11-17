@@ -11,7 +11,7 @@ import { runPlan } from "../src/scheduler.mjs";
 import { readRun, readRunLog } from "../src/runlog.mjs";
 import { readResult } from "../src/results.mjs";
 import { CFG, tmp, task, plan, fakeSpawnFactory, makeIo, sentPrompt } from "./helpers/scheduler-fixtures.mjs";
-import { runCli, runValidated } from "./helpers/cli.mjs";
+import { runCliInProcess, runValidated } from "./helpers/cli.mjs";
 import { writeFileSync } from "node:fs";
 import { tmp as gitTmp } from "./helpers/cli-fixture.mjs";
 
@@ -35,7 +35,7 @@ async function withRun(tasks, respond, { cfg = CFG, planOver = {} } = {}, fn) {
   }
 }
 
-test("numTurns reaches the summary row, the run.log task-done event and readRun's row", () =>
+test("numTurns reaches the summary row, the run.log task-done event and readRun's row", async () =>
   withRun([task("a")], () => ({ output: turnsStream("done", "s-1", 5) }), {}, ({ p, r }) => {
     equal(r.summary.tasks.find((t) => t.id === "a").numTurns, 5, "summary row");
     const events = readFileSync(join(p.resultsDir, "run.log"), "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l));
@@ -43,7 +43,7 @@ test("numTurns reaches the summary row, the run.log task-done event and readRun'
     equal(readRun(p.resultsDir).tasks.find((t) => t.id === "a").numTurns, 5, "readRun row");
   }));
 
-test("a leaf that reports no turn count leaves every reader's numTurns absent", () =>
+test("a leaf that reports no turn count leaves every reader's numTurns absent", async () =>
   withRun([task("a")], () => ({ output: JSON.stringify({ type: "result", subtype: "success", is_error: false, result: "x", usage: { input_tokens: 1, output_tokens: 1 } }) + "\n" }), {}, ({ p, r }) => {
     ok(!("numTurns" in r.summary.tasks.find((t) => t.id === "a")));
     equal(readRun(p.resultsDir).tasks.find((t) => t.id === "a").numTurns, undefined);
@@ -61,28 +61,28 @@ test("re-asks sum their turns with the first attempt's, so each is counted as a 
   });
 });
 
-test("the live roster prices from the turns and tokens the engine holds, beside the work tokens", () =>
+test("the live roster prices from the turns and tokens the engine holds, beside the work tokens", async () =>
   withRun([task("a")], () => ({ output: turnsStream("done", "s-1", 5, { input_tokens: 1_000_000, output_tokens: 100_000 }) }), { cfg: { ...CFG, display: { money: true } } }, ({ io }) => {
     const last = plain(io.snapshots[io.snapshots.length - 1]);
     ok(/tokens · ≈\$[\d.]+ api-eq/.test(last), last);
   }));
 
-test("the live roster prints no dollar sign by default", () =>
+test("the live roster prints no dollar sign by default", async () =>
   withRun([task("a")], () => ({ output: turnsStream("done", "s-1", 5, { input_tokens: 1_000_000, output_tokens: 100_000 }) }), {}, ({ io }) => {
     ok(io.snapshots.length > 0);
     ok(!io.snapshots.some((s) => s.includes("$")));
   }));
 
-test("swarm ask: the ask entry carries its own turns, and the summary row sums them with the original leaf's", () => {
+test("swarm ask: the ask entry carries its own turns, and the summary row sums them with the original leaf's", async () => {
   const dir = gitTmp();
   try {
     const manifest = join(dir, "plan.json");
     writeFileSync(manifest, JSON.stringify({ resultsDir: "out", tasks: [{ id: "t1", prompt: "x", provider: "claude", model: "claude-haiku-4-5-20251001" }] }));
     const env = { SWARM_HOME: join(dir, "home"), SWARM_SHIM_STREAM: "1", SWARM_SHIM_OUTPUT: "because X" };
-    equal(runValidated(["run", manifest], { cwd: dir, env }).status, 0);
+    equal((await runValidated(["run", manifest], { cwd: dir, env, inProcess: true })).status, 0);
     const before = JSON.parse(readFileSync(join(dir, "out", "summary.json"), "utf8")).tasks[0];
     equal(before.numTurns, 1, "the shim reports one turn");
-    equal(runCli(["ask", join(dir, "out"), "t1", "why?"], { cwd: dir, env }).status, 0);
+    equal((await runCliInProcess(["ask", join(dir, "out"), "t1", "why?"], { cwd: dir, env })).status, 0);
     const res = JSON.parse(readFileSync(join(dir, "out", "results", "t1.json"), "utf8"));
     equal(res.asks[res.asks.length - 1].numTurns, 1, "the ask entry");
     const after = JSON.parse(readFileSync(join(dir, "out", "summary.json"), "utf8")).tasks[0];
@@ -102,7 +102,7 @@ test("a rate-limited attempt's turns count toward the leaf's requests", () => {
     });
 });
 
-test("a cache-replayed leaf keeps its recorded turns on the summary row", () =>
+test("a cache-replayed leaf keeps its recorded turns on the summary row", async () =>
   withRun([task("a")], () => ({ output: turnsStream("done", "s-1", 4) }), {}, async ({ p }) => {
     const spawn = fakeSpawnFactory(() => ({ output: "should not run" }));
     const again = await runPlan(p, CFG, makeIo(spawn));

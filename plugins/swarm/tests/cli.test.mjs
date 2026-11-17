@@ -5,7 +5,7 @@ import { mkdtempSync, rmSync, writeFileSync, readFileSync, existsSync, readdirSy
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { createServer } from "node:http";
-import { runCli, runCliAsync, runValidated, CLI } from "./helpers/cli.mjs";
+import { runCli, runCliAsync, runCliInProcess, runValidated, CLI } from "./helpers/cli.mjs";
 import { gateConfig, gateHome, gitOut, tmp } from "./helpers/cli-fixture.mjs";
 import { initPruneRepo, pruneFixture, addDetachedTree, dropSnapPrune } from "./helpers/prune-fixture.mjs";
 import { decide as hookDecide } from "../hooks/ultraswarm.mjs";
@@ -15,7 +15,7 @@ import { withoutLeafNotices } from "../src/leaf-notices.mjs";
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-test("validate: bad manifest exits 1 with readable errors", () => {
+test("validate: bad manifest exits 1 with readable errors", async () => {
   const dir = tmp();
   try {
     const home = join(dir, "home");
@@ -31,7 +31,7 @@ test("validate: bad manifest exits 1 with readable errors", () => {
         { id: "b", prompt: "{{result:ghost}}", provider: "claude", model: "claude-haiku-4-5-20251001" },
       ],
     }));
-    const r = runCli(["validate", p], { cwd: dir, env: { SWARM_HOME: home } });
+    const r = await runCliInProcess(["validate", p], { cwd: dir, env: { SWARM_HOME: home } });
     equal(r.status, 1);
     ok(r.stderr.includes("duplicate id"), r.stderr);
     ok(r.stderr.includes("effort 'max'"), r.stderr);
@@ -41,7 +41,7 @@ test("validate: bad manifest exits 1 with readable errors", () => {
   }
 });
 
-test("validate: good manifest exits 0 and reports task count", () => {
+test("validate: good manifest exits 0 and reports task count", async () => {
   const dir = tmp();
   try {
     const p = join(dir, "good.json");
@@ -49,7 +49,7 @@ test("validate: good manifest exits 0 and reports task count", () => {
       tasks: [{ id: "a", prompt: "x", provider: "claude", model: "claude-haiku-4-5-20251001" }],
       digest: { provider: "claude", model: "claude-haiku-4-5-20251001" },
     }));
-    const r = runCli(["validate", p], { cwd: dir, env: { SWARM_HOME: join(dir, "home") } });
+    const r = await runCliInProcess(["validate", p], { cwd: dir, env: { SWARM_HOME: join(dir, "home") } });
     equal(r.status, 0, r.stderr);
     ok(r.stdout.includes("manifest OK: 1 task(s) + digest"), r.stdout);
   } finally {
@@ -114,30 +114,30 @@ const assertBaselineOutput = (r, label) => {
   ok(!r.stdout.includes("seats:"), label);
 };
 
-test("validate: grading.enabled false means no seats block, even with a full store (row 7a)", () => {
+test("validate: grading.enabled false means no seats block, even with a full store (row 7a)", async () => {
   const w = seatsWorld({ enabled: false });
   try {
-    assertBaselineOutput(runCli(["validate", w.manifest], { cwd: w.dir, env: { SWARM_HOME: w.home } }), "gate off");
+    assertBaselineOutput(await runCliInProcess(["validate", w.manifest], { cwd: w.dir, env: { SWARM_HOME: w.home } }), "gate off");
   } finally {
     rmSync(w.dir, { recursive: true, force: true });
   }
 });
 
-test("validate: grading on but an empty store stays silent, file or no file (row 7b)", () => {
+test("validate: grading on but an empty store stays silent, file or no file (row 7b)", async () => {
   for (const store of ["empty", "none"]) {
     const w = seatsWorld({ enabled: true, store });
     try {
-      assertBaselineOutput(runCli(["validate", w.manifest], { cwd: w.dir, env: { SWARM_HOME: w.home } }), `store=${store}`);
+      assertBaselineOutput(await runCliInProcess(["validate", w.manifest], { cwd: w.dir, env: { SWARM_HOME: w.home } }), `store=${store}`);
     } finally {
       rmSync(w.dir, { recursive: true, force: true });
     }
   }
 });
 
-test("validate: the seats block sits between the existing lines and never disturbs them; a bad manifest still fails (row 8)", () => {
+test("validate: the seats block sits between the existing lines and never disturbs them; a bad manifest still fails (row 8)", async () => {
   const w = seatsWorld({ enabled: true, corpus: true });
   try {
-    const r = runCli(["validate", w.manifest], { cwd: w.dir, env: { SWARM_HOME: w.home } });
+    const r = await runCliInProcess(["validate", w.manifest], { cwd: w.dir, env: { SWARM_HOME: w.home } });
     equal(r.status, 0, r.stderr);
     ok(r.stdout.includes("manifest OK: 2 task(s) + digest"), r.stdout);
     ok(r.stdout.includes("estimated ~"), r.stdout);
@@ -163,7 +163,7 @@ test("validate: the seats block sits between the existing lines and never distur
         { id: "a", prompt: "y", provider: "claude", model: "claude-haiku-4-5-20251001" },
       ],
     }));
-    const b = runCli(["validate", bad], { cwd: w.dir, env: { SWARM_HOME: w.home } });
+    const b = await runCliInProcess(["validate", bad], { cwd: w.dir, env: { SWARM_HOME: w.home } });
     equal(b.status, 1);
     ok(b.stderr.includes("duplicate id"), b.stderr);
     ok(!b.stdout.includes("seats:"), b.stdout);
@@ -202,7 +202,7 @@ test("validate: the store is read once for the block, and not at all while silen
   }
 });
 
-test("run: 3-task fan-out + digest end-to-end via the claude shim", () => {
+test("run: 3-task fan-out + digest end-to-end via the claude shim", async () => {
   const dir = tmp();
   try {
     const home = join(dir, "home");
@@ -222,7 +222,7 @@ test("run: 3-task fan-out + digest end-to-end via the claude shim", () => {
       ],
       digest: { provider: "claude", model: "claude-haiku-4-5-20251001", instructions: "focus on X" },
     }));
-    const r = runValidated(["run", manifest], {
+    const r = await runValidated(["run", manifest], { inProcess: true,
       cwd: dir,
       quotaPreflight: false,
       env: { SWARM_HOME: home, SWARM_SHIM_LOG: shimLog, SWARM_SHIM_OUTPUT: "leaf-output-text" },
@@ -277,7 +277,7 @@ test("run: 3-task fan-out + digest end-to-end via the claude shim", () => {
   }
 });
 
-test("run: failing leaf -> exit 1, FAILED report + resume offer; resume skips ok", () => {
+test("run: failing leaf -> exit 1, FAILED report + resume offer; resume skips ok", async () => {
   const dir = tmp();
   try {
     const manifest = join(dir, "plan.json");
@@ -289,7 +289,7 @@ test("run: failing leaf -> exit 1, FAILED report + resume offer; resume skips ok
       ],
     }));
     const env = { SWARM_HOME: join(dir, "home"), SWARM_SHIM_EXIT: "1", SWARM_SHIM_OUTPUT: "boom" };
-    const r1 = runValidated(["run", manifest], { cwd: dir, env, quotaPreflight: false });
+    const r1 = await runValidated(["run", manifest], { inProcess: true, cwd: dir, env, quotaPreflight: false });
     equal(r1.status, 1);
     ok(/✗ {2}a\s+claude-haiku-4-5-20251001.*\[failed\]/.test(r1.stdout), r1.stdout);
     ok(/⊘ {2}b\s+claude-haiku-4-5-20251001.*\[blocked\]/.test(r1.stdout), r1.stdout);
@@ -300,13 +300,13 @@ test("run: failing leaf -> exit 1, FAILED report + resume offer; resume skips ok
 
     // resume: shim healthy now — both re-execute (nothing was ok), run passes
     const shimLog = join(dir, "shim2.log");
-    const r2 = runValidated(["run", manifest], { cwd: dir, quotaPreflight: false, env: { SWARM_HOME: join(dir, "home"), SWARM_SHIM_LOG: shimLog } });
+    const r2 = await runValidated(["run", manifest], { inProcess: true, cwd: dir, quotaPreflight: false, env: { SWARM_HOME: join(dir, "home"), SWARM_SHIM_LOG: shimLog } });
     equal(r2.status, 0, r2.stdout + r2.stderr);
     equal(readFileSync(shimLog, "utf8").trim().split("\n").length, 2);
 
     // third run: everything ok already — all skipped, no dispatches
     const shimLog3 = join(dir, "shim3.log");
-    const r3 = runValidated(["run", manifest], { cwd: dir, quotaPreflight: false, env: { SWARM_HOME: join(dir, "home"), SWARM_SHIM_LOG: shimLog3 } });
+    const r3 = await runValidated(["run", manifest], { inProcess: true, cwd: dir, quotaPreflight: false, env: { SWARM_HOME: join(dir, "home"), SWARM_SHIM_LOG: shimLog3 } });
     equal(r3.status, 0);
     ok(!existsSync(shimLog3), "no shim calls expected on fully-resumed run");
     ok(r3.stdout.includes("[skipped]"), r3.stdout);
@@ -315,7 +315,7 @@ test("run: failing leaf -> exit 1, FAILED report + resume offer; resume skips ok
   }
 });
 
-test("run: quota-blocked leaf -> re-run-after names the reset in the reader's own clock", () => {
+test("run: quota-blocked leaf -> re-run-after names the reset in the reader's own clock", async () => {
   const dir = tmp();
   try {
     const manifest = join(dir, "plan.json");
@@ -329,7 +329,7 @@ test("run: quota-blocked leaf -> re-run-after names the reset in the reader's ow
       SWARM_SHIM_OUTPUT: "usage limit reached|1789200000",
       TZ: "Europe/London",
     };
-    const r = runValidated(["run", manifest], { cwd: dir, env, quotaPreflight: false });
+    const r = await runValidated(["run", manifest], { inProcess: true, cwd: dir, env, quotaPreflight: false });
     equal(r.status, 1);
     ok(r.stdout.includes("quota: 1 leaf(s) blocked by Anthropic usage limits"), r.stdout);
     ok(r.stdout.includes("re-run after Sat 12 Sep, 09:00"), r.stdout);
@@ -338,7 +338,7 @@ test("run: quota-blocked leaf -> re-run-after names the reset in the reader's ow
   }
 });
 
-test("stop: refuses on a finished run, naming the state", () => {
+test("stop: refuses on a finished run, naming the state", async () => {
   const dir = tmp();
   try {
     const manifest = join(dir, "plan.json");
@@ -347,11 +347,11 @@ test("stop: refuses on a finished run, naming the state", () => {
       tasks: [{ id: "a", prompt: "x", provider: "claude", model: "claude-haiku-4-5-20251001" }],
     }));
     const env = { SWARM_HOME: join(dir, "home"), SWARM_SHIM_OUTPUT: "done" };
-    const r1 = runValidated(["run", manifest], { cwd: dir, quotaPreflight: false, env });
+    const r1 = await runValidated(["run", manifest], { inProcess: true, cwd: dir, quotaPreflight: false, env });
     equal(r1.status, 0, r1.stderr);
     const resultsDir = join(dir, "out");
 
-    const r2 = runCli(["stop", resultsDir], { cwd: dir, env: { SWARM_HOME: env.SWARM_HOME } });
+    const r2 = await runCliInProcess(["stop", resultsDir], { cwd: dir, env: { SWARM_HOME: env.SWARM_HOME } });
     equal(r2.status, 1, r2.stdout + r2.stderr);
     ok(r2.stderr.includes("nothing to stop"), r2.stderr);
     ok(r2.stderr.includes("finished"), r2.stderr);
@@ -361,7 +361,7 @@ test("stop: refuses on a finished run, naming the state", () => {
   }
 });
 
-test("run: refuses a results dir whose engine is alive (fresh heartbeat, no summary) — exit 1, claude never invoked", () => {
+test("run: refuses a results dir whose engine is alive (fresh heartbeat, no summary) — exit 1, claude never invoked", async () => {
   const dir = tmp();
   try {
     const manifest = join(dir, "plan.json");
@@ -376,7 +376,7 @@ test("run: refuses a results dir whose engine is alive (fresh heartbeat, no summ
     writeFileSync(join(resultsDir, "heartbeat"), `${new Date().toISOString()} 4321\n`);
 
     const shimLog = join(dir, "shim.log");
-    const r = runValidated(["run", manifest], { cwd: dir, env: { SWARM_HOME: join(dir, "home"), SWARM_SHIM_LOG: shimLog } });
+    const r = await runValidated(["run", manifest], { inProcess: true, cwd: dir, env: { SWARM_HOME: join(dir, "home"), SWARM_SHIM_LOG: shimLog } });
     equal(r.status, 1, r.stdout + r.stderr);
     ok(r.stderr.includes(resultsDir), r.stderr);
     ok(r.stderr.includes("4321"), r.stderr);
@@ -388,7 +388,7 @@ test("run: refuses a results dir whose engine is alive (fresh heartbeat, no summ
   }
 });
 
-test("run --force: also refuses a live engine — force is not a bypass", () => {
+test("run --force: also refuses a live engine — force is not a bypass", async () => {
   const dir = tmp();
   try {
     const manifest = join(dir, "plan.json");
@@ -403,7 +403,7 @@ test("run --force: also refuses a live engine — force is not a bypass", () => 
     writeFileSync(join(resultsDir, "heartbeat"), `${new Date().toISOString()} 4321\n`);
 
     const shimLog = join(dir, "shim.log");
-    const r = runValidated(["run", manifest, "--force"], { cwd: dir, env: { SWARM_HOME: join(dir, "home"), SWARM_SHIM_LOG: shimLog } });
+    const r = await runValidated(["run", manifest, "--force"], { inProcess: true, cwd: dir, env: { SWARM_HOME: join(dir, "home"), SWARM_SHIM_LOG: shimLog } });
     equal(r.status, 1, r.stdout + r.stderr);
     ok(r.stderr.includes("swarm stop"), r.stderr);
     ok(!existsSync(shimLog), "claude shim must never be invoked against a live engine, even with --force");
@@ -413,7 +413,7 @@ test("run --force: also refuses a live engine — force is not a bypass", () => 
   }
 });
 
-test("run: a stale heartbeat (dead engine) is not mistaken for live — resume proceeds", () => {
+test("run: a stale heartbeat (dead engine) is not mistaken for live — resume proceeds", async () => {
   const dir = tmp();
   try {
     const manifest = join(dir, "plan.json");
@@ -430,7 +430,7 @@ test("run: a stale heartbeat (dead engine) is not mistaken for live — resume p
     utimesSync(hbPath, anHourAgo, anHourAgo);
 
     const shimLog = join(dir, "shim.log");
-    const r = runValidated(["run", manifest], { cwd: dir, quotaPreflight: false, env: { SWARM_HOME: join(dir, "home"), SWARM_SHIM_LOG: shimLog, SWARM_SHIM_OUTPUT: "done" } });
+    const r = await runValidated(["run", manifest], { inProcess: true, cwd: dir, quotaPreflight: false, env: { SWARM_HOME: join(dir, "home"), SWARM_SHIM_LOG: shimLog, SWARM_SHIM_OUTPUT: "done" } });
     equal(r.status, 0, r.stdout + r.stderr);
     ok(existsSync(shimLog), "a dead engine's results dir must still resume and dispatch");
   } finally {
@@ -438,7 +438,7 @@ test("run: a stale heartbeat (dead engine) is not mistaken for live — resume p
   }
 });
 
-test("run: a fresh results dir (no heartbeat ever written) is not mistaken for live", () => {
+test("run: a fresh results dir (no heartbeat ever written) is not mistaken for live", async () => {
   const dir = tmp();
   try {
     const manifest = join(dir, "plan.json");
@@ -447,7 +447,7 @@ test("run: a fresh results dir (no heartbeat ever written) is not mistaken for l
       tasks: [{ id: "a", prompt: "x", provider: "claude", model: "claude-haiku-4-5-20251001" }],
     }));
     const shimLog = join(dir, "shim.log");
-    const r = runValidated(["run", manifest], { cwd: dir, env: { SWARM_HOME: join(dir, "home"), SWARM_SHIM_LOG: shimLog, SWARM_SHIM_OUTPUT: "done" } });
+    const r = await runValidated(["run", manifest], { inProcess: true, cwd: dir, env: { SWARM_HOME: join(dir, "home"), SWARM_SHIM_LOG: shimLog, SWARM_SHIM_OUTPUT: "done" } });
     equal(r.status, 0, r.stdout + r.stderr);
     ok(existsSync(shimLog), "a never-run results dir must dispatch normally");
   } finally {
@@ -455,7 +455,7 @@ test("run: a fresh results dir (no heartbeat ever written) is not mistaken for l
   }
 });
 
-test("C1: ask refuses a results dir whose engine is alive — exit 1, claude never invoked", () => {
+test("C1: ask refuses a results dir whose engine is alive — exit 1, claude never invoked", async () => {
   const dir = tmp();
   try {
     const resultsDir = join(dir, "out");
@@ -471,7 +471,7 @@ test("C1: ask refuses a results dir whose engine is alive — exit 1, claude nev
     writeFileSync(join(resultsDir, "heartbeat"), `${new Date().toISOString()} 4321\n`);
 
     const shimLog = join(dir, "shim.log");
-    const r = runCli(["ask", resultsDir, "t1", "why?"], { cwd: dir, env: { SWARM_HOME: join(dir, "home"), SWARM_SHIM_LOG: shimLog } });
+    const r = await runCliInProcess(["ask", resultsDir, "t1", "why?"], { cwd: dir, env: { SWARM_HOME: join(dir, "home"), SWARM_SHIM_LOG: shimLog } });
     equal(r.status, 1, r.stdout + r.stderr);
     ok(r.stderr.includes(resultsDir), r.stderr);
     ok(r.stderr.includes("4321"), r.stderr);
@@ -483,7 +483,7 @@ test("C1: ask refuses a results dir whose engine is alive — exit 1, claude nev
   }
 });
 
-test("stop: dead engine (stale heartbeat, no summary) — records run-stop and marks non-terminal leaves failed:stopped, touching no process", () => {
+test("stop: dead engine (stale heartbeat, no summary) — records run-stop and marks non-terminal leaves failed:stopped, touching no process", async () => {
   const dir = tmp();
   try {
     const home = gateHome(join(dir, "home"), { heartbeatSecs: 0.1 });
@@ -495,7 +495,7 @@ test("stop: dead engine (stale heartbeat, no summary) — records run-stop and m
     ];
     writeFileSync(join(resultsDir, "run.log"), lines.join("\n") + "\n");
 
-    const r = runCli(["stop", resultsDir], { cwd: dir, env: { SWARM_HOME: home } });
+    const r = await runCliInProcess(["stop", resultsDir], { cwd: dir, env: { SWARM_HOME: home } });
     equal(r.status, 0, r.stdout + r.stderr);
     ok(r.stdout.includes("failed:stopped"), r.stdout);
 
@@ -561,7 +561,7 @@ test("stop: live engine via the claude shim writes the stop file, run exits 1, r
   }
 });
 
-test("stop: dead engine discovers a real orphaned worktree via manifest cwd, records it, and prints the prune hint", () => {
+test("stop: dead engine discovers a real orphaned worktree via manifest cwd, records it, and prints the prune hint", async () => {
   const repo = initPruneRepo();
   const dir = tmp();
   const home = gateHome(join(dir, "home"), { heartbeatSecs: 0.1, treeRoot: join(dir, "external-tree-root") });
@@ -577,7 +577,7 @@ test("stop: dead engine discovers a real orphaned worktree via manifest cwd, rec
     ];
     writeFileSync(join(resultsDir, "run.log"), lines.join("\n") + "\n");
 
-    const r = runCli(["stop", resultsDir], { cwd: dir, env: { SWARM_HOME: home } });
+    const r = await runCliInProcess(["stop", resultsDir], { cwd: dir, env: { SWARM_HOME: home } });
     equal(r.status, 0, r.stdout + r.stderr);
     ok(r.stdout.includes("failed:stopped"), r.stdout);
     ok(r.stdout.includes(wt.path), r.stdout);
@@ -598,7 +598,7 @@ test("stop: dead engine discovers a real orphaned worktree via manifest cwd, rec
 // A session had to GUESS the resultsDir and published an invented path
 // (".../p5-review-2", which has never existed) as the operator's watch target.
 // The engine knows the answer — it must print it, up front, absolutely.
-test("run: prints the absolute resultsDir and the watch command at dispatch", () => {
+test("run: prints the absolute resultsDir and the watch command at dispatch", async () => {
   const dir = tmp();
   try {
     const manifest = join(dir, "banner.json");
@@ -606,7 +606,7 @@ test("run: prints the absolute resultsDir and the watch command at dispatch", ()
       resultsDir: "out",
       tasks: [{ id: "a", prompt: "x", provider: "claude", model: "claude-haiku-4-5-20251001" }],
     }));
-    const r = runValidated(["run", manifest], {
+    const r = await runValidated(["run", manifest], { inProcess: true,
       cwd: dir,
       env: { SWARM_HOME: join(dir, "home"), SWARM_SHIM_OUTPUT: "done" },
     });
@@ -623,7 +623,7 @@ test("run: prints the absolute resultsDir and the watch command at dispatch", ()
 // loop depends on it. But it printed "finished clean" and a bare digest path, so a
 // session skimming the tail read a no-op as a completed fresh round and announced
 // "Round 3 is running" when nothing was. Keep exit 0; make the no-op impossible to miss.
-test("run: an all-skipped replay still exits 0 but says NOTHING RE-EXECUTED", () => {
+test("run: an all-skipped replay still exits 0 but says NOTHING RE-EXECUTED", async () => {
   const dir = tmp();
   try {
     const manifest = join(dir, "replay.json");
@@ -633,12 +633,12 @@ test("run: an all-skipped replay still exits 0 but says NOTHING RE-EXECUTED", ()
       digest: { provider: "claude", model: "claude-haiku-4-5-20251001" },
     }));
     const env = { SWARM_HOME: join(dir, "home"), SWARM_SHIM_OUTPUT: "first-pass" };
-    const r1 = runValidated(["run", manifest], { cwd: dir, env });
+    const r1 = await runValidated(["run", manifest], { inProcess: true, cwd: dir, env });
     equal(r1.status, 0, r1.stderr);
     ok(!r1.stdout.includes("NOTHING RE-EXECUTED"), "a real run must not claim to be a replay");
 
     // second run: everything is ok on disk already
-    const r2 = runValidated(["run", manifest], { cwd: dir, env });
+    const r2 = await runValidated(["run", manifest], { inProcess: true, cwd: dir, env });
     equal(r2.status, 0, "a cache replay is a SUCCESS — results are valid and resume depends on it");
     ok(r2.stdout.includes("NOTHING RE-EXECUTED"), r2.stdout);
     ok(/previous run|PREVIOUS/i.test(r2.stdout), `the digest must be marked as the previous run's: ${r2.stdout}`);
@@ -650,7 +650,7 @@ test("run: an all-skipped replay still exits 0 but says NOTHING RE-EXECUTED", ()
     ok(r2.stdout.includes("[skipped]"), r2.stdout);
 
     // --force re-executes and says nothing of the kind
-    const r3 = runValidated(["run", manifest, "--force"], { cwd: dir, env });
+    const r3 = await runValidated(["run", manifest, "--force"], { inProcess: true, cwd: dir, env });
     equal(r3.status, 0);
     ok(!r3.stdout.includes("NOTHING RE-EXECUTED"), r3.stdout);
   } finally {
@@ -682,7 +682,7 @@ test("models: stub server + SWARM_HOME config -> names with descriptions, no ali
     const home = gateHome(join(dir, "home"), {
       provider: { url: `http://127.0.0.1:${server.address().port}`, catalogUrl: `http://127.0.0.1:${server.address().port}` },
     });
-    const r = await runCliAsync(["models"], { cwd: dir, env: { SWARM_HOME: home } });
+    const r = await runCliInProcess(["models"], { cwd: dir, env: { SWARM_HOME: home } });
     equal(r.status, 0, r.stderr);
     // ctx from the recommendation, no parameter count from the empty /api/show;
     // the stub 404s /api/generate, so this also pins probe fail-open end to end.
@@ -731,7 +731,7 @@ test("models: size-ordered collapsed roster, hidden-count footer, --all resurfac
     });
     const env = { SWARM_HOME: home };
 
-    const r = await runCliAsync(["models"], { cwd: dir, env });
+    const r = await runCliInProcess(["models"], { cwd: dir, env });
     equal(r.status, 0, r.stderr);
     ok(r.stdout.includes("glm-5.2:cloud — Frontier open model (756B, 1.0M ctx)"), r.stdout);
     ok(!r.stdout.includes("glm-5.1"), `superseded entry must be hidden by default: ${r.stdout}`);
@@ -746,7 +746,7 @@ test("models: size-ordered collapsed roster, hidden-count footer, --all resurfac
     deepEqual(cache.models.map((m) => m.model), ["glm-5.2:cloud", "glm-5.1:cloud"]);
     equal(cache.models[1].supersededBy, "glm-5.2:cloud");
 
-    const r2 = await runCliAsync(["models", "--all"], { cwd: dir, env });
+    const r2 = await runCliInProcess(["models", "--all"], { cwd: dir, env });
     equal(r2.status, 0, r2.stderr);
     ok(r2.stdout.includes("glm-5.1:cloud — Prior gen (355B, 203k ctx) [superseded by glm-5.2:cloud]"), r2.stdout);
     ok(!r2.stdout.includes("hidden"), `--all shows everything, no footer: ${r2.stdout}`);
@@ -779,7 +779,7 @@ test("ollama-usage: P0 an expired cookie prints /!\\ Cookie Expired above the fi
       fetchedAt: Date.now() - 33 * 3_600_000,
       result: { sessionPctUsed: 3, sessionResetsAt: "2026-09-07T14:49:00Z", weeklyPctUsed: 8.1, weeklyResetsAt: "2026-09-12T08:00:00Z" },
     }));
-    const r = await runCliAsync(["ollama-usage"], { cwd: dir, env: { SWARM_HOME: home } });
+    const r = await runCliInProcess(["ollama-usage"], { cwd: dir, env: { SWARM_HOME: home } });
     const out = r.stdout;
     const bannerAt = out.indexOf("/!\\ Cookie Expired");
     const firstPctLine = out.split("\n").find((l) => l.includes("%"));
@@ -811,7 +811,7 @@ test("ollama-usage: C0 a live fetch prints exactly two provider-named lines, not
       provider: { cloud: { ollama: { enabled: true, settingsUrl: `http://127.0.0.1:${server.address().port}/settings` } } },
     });
     writeFileSync(join(home, "ollama-cookie.json"), "tok\n");
-    const r = await runCliAsync(["ollama-usage"], { cwd: dir, env: { SWARM_HOME: home, TZ: "Europe/London" } });
+    const r = await runCliInProcess(["ollama-usage"], { cwd: dir, env: { SWARM_HOME: home, TZ: "Europe/London" } });
     equal(r.status, 0, r.stderr + r.stdout);
     deepEqual(r.stdout.trim().split("\n"), [
       "ollama session: 12% — resets Sun 6 Sep, 05:10",
@@ -861,7 +861,7 @@ test("models: C1 an exhausted meter is named above the :cloud list", async () =>
       },
     });
     writeFileSync(join(home, "ollama-cookie.json"), "tok\n");
-    const r = await runCliAsync(["models"], { cwd: dir, env: { SWARM_HOME: home, TZ: "Europe/London" } });
+    const r = await runCliInProcess(["models"], { cwd: dir, env: { SWARM_HOME: home, TZ: "Europe/London" } });
     equal(r.status, 0, r.stderr);
     ok(r.stdout.includes("exhausted"), r.stdout);
     ok(r.stdout.includes("100%"), r.stdout);
@@ -888,7 +888,7 @@ test("models: C2 false-positive guard — a healthy meter changes nothing", asyn
       },
     });
     writeFileSync(join(home, "ollama-cookie.json"), "tok\n");
-    const r = await runCliAsync(["models"], { cwd: dir, env: { SWARM_HOME: home } });
+    const r = await runCliInProcess(["models"], { cwd: dir, env: { SWARM_HOME: home } });
     equal(r.status, 0, r.stderr);
     ok(r.stdout.includes("glm-5.2:cloud — Frontier open model (size unreported, 1.0M ctx)"), r.stdout);
     ok(!/exhausted|⚠|\/!\\/.test(r.stdout), r.stdout);
@@ -898,7 +898,7 @@ test("models: C2 false-positive guard — a healthy meter changes nothing", asyn
   }
 });
 
-test("run: C3/C4 swarm.always changes nothing — no ceremony, no new flag, bare dispatch exits 0", () => {
+test("run: C3/C4 swarm.always changes nothing — no ceremony, no new flag, bare dispatch exits 0", async () => {
   const dir = tmp();
   try {
     const home = gateHome(join(dir, "home"), { swarm: { always: true } });
@@ -907,7 +907,7 @@ test("run: C3/C4 swarm.always changes nothing — no ceremony, no new flag, bare
       resultsDir: "out",
       tasks: [{ id: "one", prompt: "look", provider: "claude", model: "claude-haiku-4-5-20251001" }],
     }));
-    const r = runValidated(["run", manifest], { cwd: dir, env: { SWARM_HOME: home, SWARM_SHIM_OUTPUT: "x" } });
+    const r = await runValidated(["run", manifest], { inProcess: true, cwd: dir, env: { SWARM_HOME: home, SWARM_SHIM_OUTPUT: "x" } });
     equal(r.status, 0, r.stderr + r.stdout);
     // Exclude path-bearing lines (resultsDir:/watch:/summary:) before matching — an
     // absolute path can contain "gate" (e.g. a worktree named gate-*) without that
@@ -927,20 +927,20 @@ test("standing mode: C5 decide() is null outside swarm.always once a root exists
   ok((await hookDecide({ event: "SessionStart", cwd, config: undefined })).includes("/swarm:swarm setup"));
 });
 
-test("unknown command and missing args exit 1 with usage", () => {
+test("unknown command and missing args exit 1 with usage", async () => {
   const dir = tmp();
   try {
-    const r = runCli(["frobnicate"], { cwd: dir, env: { SWARM_HOME: join(dir, "home") } });
+    const r = await runCliInProcess(["frobnicate"], { cwd: dir, env: { SWARM_HOME: join(dir, "home") } });
     equal(r.status, 1);
     ok(r.stderr.includes("usage:"));
-    const r2 = runValidated(["run"], { cwd: dir, env: { SWARM_HOME: join(dir, "home") } });
+    const r2 = await runValidated(["run"], { inProcess: true, cwd: dir, env: { SWARM_HOME: join(dir, "home") } });
     equal(r2.status, 1);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
 });
 
-test("status: renders the roster with counts, elapsed, tokens from a synthetic run.log", () => {
+test("status: renders the roster with counts, elapsed, tokens from a synthetic run.log", async () => {
   const dir = tmp();
   try {
     const rd = join(dir, "run");
@@ -959,7 +959,7 @@ test("status: renders the roster with counts, elapsed, tokens from a synthetic r
     ];
     writeFileSync(join(rd, "run.log"), lines.map((l) => JSON.stringify(l)).join("\n") + "\n");
     writeFileSync(join(rd, "heartbeat"), "live\n"); // a live engine
-    const r = runCli(["status", rd], { cwd: dir, env: { SWARM_HOME: join(dir, "home") } });
+    const r = await runCliInProcess(["status", rd], { cwd: dir, env: { SWARM_HOME: join(dir, "home") } });
     equal(r.status, 0, r.stderr);
     ok(r.stdout.includes("1 ok · 1 failed · 1 rate-limited · 1 blocked · 1 running · 1 pending"), r.stdout);
     ok(/✓ {2}a\s+claude-haiku-4-5-20251001\s+30s\s+1\.5k/.test(r.stdout), r.stdout);
@@ -971,7 +971,7 @@ test("status: renders the roster with counts, elapsed, tokens from a synthetic r
   }
 });
 
-test("run: stream-json shim -> tokens flow to roster, closing block, and summary", () => {
+test("run: stream-json shim -> tokens flow to roster, closing block, and summary", async () => {
   const dir = tmp();
   try {
     const manifest = join(dir, "tok.json");
@@ -982,7 +982,7 @@ test("run: stream-json shim -> tokens flow to roster, closing block, and summary
         { id: "t2", prompt: "y", provider: "claude", model: "claude-haiku-4-5-20251001" },
       ],
     }));
-    const r = runValidated(["run", manifest], {
+    const r = await runValidated(["run", manifest], { inProcess: true,
       cwd: dir,
       quotaPreflight: false,
       env: { SWARM_HOME: join(dir, "home"), SWARM_SHIM_STREAM: "1", SWARM_SHIM_OUTPUT: "answer text" },
@@ -1004,7 +1004,7 @@ test("run: stream-json shim -> tokens flow to roster, closing block, and summary
 
     // ask: resume t1's captured session with a follow-up
     const shimLog = join(dir, "ask-shim.log");
-    const a = runCli(["ask", join(dir, "out"), "t1", "why?"], {
+    const a = await runCliInProcess(["ask", join(dir, "out"), "t1", "why?"], {
       cwd: dir,
       quotaPreflight: false,
       env: { SWARM_HOME: join(dir, "home"), SWARM_SHIM_STREAM: "1", SWARM_SHIM_OUTPUT: "because X", SWARM_SHIM_LOG: shimLog },
@@ -1020,15 +1020,15 @@ test("run: stream-json shim -> tokens flow to roster, closing block, and summary
   }
 });
 
-test("C3: ask stdout is exactly the answer and the tokens line, no roster frames", () => {
+test("C3: ask stdout is exactly the answer and the tokens line, no roster frames", async () => {
   const dir = tmp();
   try {
     const manifest = join(dir, "plan.json");
     writeFileSync(manifest, JSON.stringify({ resultsDir: "out", tasks: [{ id: "t1", prompt: "x", provider: "claude", model: "claude-haiku-4-5-20251001" }] }));
-    const r0 = runValidated(["run", manifest], { cwd: dir, env: { SWARM_HOME: join(dir, "home"), SWARM_SHIM_STREAM: "1", SWARM_SHIM_OUTPUT: "first" } });
+    const r0 = await runValidated(["run", manifest], { inProcess: true, cwd: dir, env: { SWARM_HOME: join(dir, "home"), SWARM_SHIM_STREAM: "1", SWARM_SHIM_OUTPUT: "first" } });
     equal(r0.status, 0, r0.stdout + r0.stderr);
 
-    const a = runCli(["ask", join(dir, "out"), "t1", "why?"], {
+    const a = await runCliInProcess(["ask", join(dir, "out"), "t1", "why?"], {
       cwd: dir,
       env: { SWARM_HOME: join(dir, "home"), SWARM_SHIM_STREAM: "1", SWARM_SHIM_OUTPUT: "because X" },
     });
@@ -1044,15 +1044,15 @@ test("C3: ask stdout is exactly the answer and the tokens line, no roster frames
   }
 });
 
-test("C3: a failed ask exits non-zero, leaves the leaf ok, records the failure", () => {
+test("C3: a failed ask exits non-zero, leaves the leaf ok, records the failure", async () => {
   const dir = tmp();
   try {
     const manifest = join(dir, "plan.json");
     writeFileSync(manifest, JSON.stringify({ resultsDir: "out", tasks: [{ id: "t1", prompt: "x", provider: "claude", model: "claude-haiku-4-5-20251001" }] }));
-    const r0 = runValidated(["run", manifest], { cwd: dir, env: { SWARM_HOME: join(dir, "home"), SWARM_SHIM_STREAM: "1", SWARM_SHIM_OUTPUT: "first" } });
+    const r0 = await runValidated(["run", manifest], { inProcess: true, cwd: dir, env: { SWARM_HOME: join(dir, "home"), SWARM_SHIM_STREAM: "1", SWARM_SHIM_OUTPUT: "first" } });
     equal(r0.status, 0, r0.stdout + r0.stderr);
 
-    const a = runCli(["ask", join(dir, "out"), "t1", "why?"], {
+    const a = await runCliInProcess(["ask", join(dir, "out"), "t1", "why?"], {
       cwd: dir,
       env: { SWARM_HOME: join(dir, "home"), SWARM_SHIM_EXIT: "1", SWARM_SHIM_OUTPUT: "No conversation found with session ID shim-session" },
     });
@@ -1065,7 +1065,7 @@ test("C3: a failed ask exits non-zero, leaves the leaf ok, records the failure",
   }
 });
 
-test("run: forEach expands end-to-end via the shim; validate previews worst-case leaves; truncation is loud", () => {
+test("run: forEach expands end-to-end via the shim; validate previews worst-case leaves; truncation is loud", async () => {
   const dir = tmp();
   try {
     const manifest = join(dir, "fan.json");
@@ -1080,12 +1080,12 @@ test("run: forEach expands end-to-end via the shim; validate previews worst-case
       ],
     }));
 
-    const v = runCli(["validate", manifest], { cwd: dir, env: { SWARM_HOME: join(dir, "home") } });
+    const v = await runCliInProcess(["validate", manifest], { cwd: dir, env: { SWARM_HOME: join(dir, "home") } });
     equal(v.status, 0, v.stderr);
     ok(v.stdout.includes("worst case: up to 2 leaves"), v.stdout);
     ok(v.stdout.includes("fix ≤ 1"), v.stdout);
 
-    const r = runValidated(["run", manifest], {
+    const r = await runValidated(["run", manifest], { inProcess: true,
       cwd: dir,
       env: { SWARM_HOME: join(dir, "home"), SWARM_SHIM_OUTPUT: '{"sites":[{"f":"a"},{"f":"b"}]}' },
     });
@@ -1106,10 +1106,10 @@ test("run: forEach expands end-to-end via the shim; validate previews worst-case
   }
 });
 
-test("status: missing run.log reports cleanly", () => {
+test("status: missing run.log reports cleanly", async () => {
   const dir = tmp();
   try {
-    const r = runCli(["status", join(dir, "nope")], { cwd: dir, env: { SWARM_HOME: join(dir, "home") } });
+    const r = await runCliInProcess(["status", join(dir, "nope")], { cwd: dir, env: { SWARM_HOME: join(dir, "home") } });
     equal(r.status, 0);
     ok(r.stdout.includes("no run.log"), r.stdout);
   } finally {
@@ -1117,12 +1117,12 @@ test("status: missing run.log reports cleanly", () => {
   }
 });
 
-test("run: default resultsDir lands under <home>/runs/<encoded-repo-toplevel>/<stem>-1 with .gitignore", () => {
+test("run: default resultsDir lands under <home>/runs/<encoded-repo-toplevel>/<stem>-1 with .gitignore", async () => {
   const dir = tmp();
   try {
     const manifest = join(dir, "myplan.json");
     writeFileSync(manifest, JSON.stringify({ tasks: [{ id: "a", prompt: "x", provider: "claude", model: "claude-haiku-4-5-20251001" }] }));
-    const r = runValidated(["run", manifest], { cwd: dir, env: { SWARM_HOME: join(dir, "home") } });
+    const r = await runValidated(["run", manifest], { inProcess: true, cwd: dir, env: { SWARM_HOME: join(dir, "home") } });
     equal(r.status, 0, r.stderr);
     const rd = join(dir, "home", "runs", gitOut(["rev-parse", "--show-toplevel"], dir).replace(/[\\/:]/g, "-"), "myplan-1");
     ok(existsSync(join(rd, "summary.json")), readdirSync(dir).join(","));
@@ -1132,7 +1132,7 @@ test("run: default resultsDir lands under <home>/runs/<encoded-repo-toplevel>/<s
   }
 });
 
-test("validate: mustRead tasks are announced, gated on mustRead not returns", () => {
+test("validate: mustRead tasks are announced, gated on mustRead not returns", async () => {
   const dir = tmp();
   try {
     const p = join(dir, "mr.json");
@@ -1144,7 +1144,7 @@ test("validate: mustRead tasks are announced, gated on mustRead not returns", ()
         { id: "plain", prompt: "z", provider: "claude", model: "claude-haiku-4-5-20251001" },
       ],
     }));
-    const v = runCli(["validate", p], { cwd: dir, env: { SWARM_HOME: join(dir, "home") } });
+    const v = await runCliInProcess(["validate", p], { cwd: dir, env: { SWARM_HOME: join(dir, "home") } });
     equal(v.status, 0, v.stderr);
     const line = v.stdout.split("\n").find((l) => l.includes("must-read enforced"));
     ok(line, v.stdout);
@@ -1157,7 +1157,7 @@ test("validate: mustRead tasks are announced, gated on mustRead not returns", ()
   }
 });
 
-test("validate: returns schemas join the approval preview; malformed ones exit 1", () => {
+test("validate: returns schemas join the approval preview; malformed ones exit 1", async () => {
   const dir = tmp();
   try {
     const p = join(dir, "ret.json");
@@ -1167,7 +1167,7 @@ test("validate: returns schemas join the approval preview; malformed ones exit 1
         { id: "sum", prompt: "y {{result:scan}}", provider: "claude", model: "claude-haiku-4-5-20251001", after: ["scan"] },
       ],
     }));
-    const v = runCli(["validate", p], { cwd: dir, env: { SWARM_HOME: join(dir, "home") } });
+    const v = await runCliInProcess(["validate", p], { cwd: dir, env: { SWARM_HOME: join(dir, "home") } });
     equal(v.status, 0, v.stderr);
     ok(v.stdout.includes("returns validated: scan"), v.stdout);
     ok(v.stdout.includes("up to 3 corrective re-asks"), v.stdout);
@@ -1176,7 +1176,7 @@ test("validate: returns schemas join the approval preview; malformed ones exit 1
     writeFileSync(bad, JSON.stringify({
       tasks: [{ id: "a", prompt: "x", provider: "claude", model: "claude-haiku-4-5-20251001", returns: { type: "list" } }],
     }));
-    const b = runCli(["validate", bad], { cwd: dir, env: { SWARM_HOME: join(dir, "home") } });
+    const b = await runCliInProcess(["validate", bad], { cwd: dir, env: { SWARM_HOME: join(dir, "home") } });
     equal(b.status, 1);
     ok(b.stderr.includes("type 'list' is not supported"), b.stderr);
   } finally {
@@ -1184,7 +1184,7 @@ test("validate: returns schemas join the approval preview; malformed ones exit 1
   }
 });
 
-test("validate: estimate line from a seeded corpus; cold start says none", () => {
+test("validate: estimate line from a seeded corpus; cold start says none", async () => {
   const dir = tmp();
   try {
     const home = join(dir, "home");
@@ -1204,11 +1204,11 @@ test("validate: estimate line from a seeded corpus; cold start says none", () =>
         { id: "y", prompt: "b", provider: "claude", model: "claude-haiku-4-5-20251001" },
       ],
     }));
-    const v = runCli(["validate", p], { cwd: dir, env: { SWARM_HOME: home } });
+    const v = await runCliInProcess(["validate", p], { cwd: dir, env: { SWARM_HOME: home } });
     equal(v.status, 0, v.stderr);
     ok(v.stdout.includes("estimated ~4k tokens"), v.stdout); // median 2000 × 2 leaves
 
-    const cold = runCli(["validate", p], { cwd: dir, env: { SWARM_HOME: gateHome(join(dir, "empty-home")) } });
+    const cold = await runCliInProcess(["validate", p], { cwd: dir, env: { SWARM_HOME: gateHome(join(dir, "empty-home")) } });
     equal(cold.status, 0, cold.stderr);
     ok(cold.stdout.includes("estimate: none (no run history yet)"), cold.stdout);
   } finally {
@@ -1216,7 +1216,7 @@ test("validate: estimate line from a seeded corpus; cold start says none", () =>
   }
 });
 
-test("run: closing tokens line compares actual vs estimate; projection warn reaches stdout", () => {
+test("run: closing tokens line compares actual vs estimate; projection warn reaches stdout", async () => {
   const dir = tmp();
   try {
     const home = join(dir, "home");
@@ -1236,7 +1236,7 @@ test("run: closing tokens line compares actual vs estimate; projection warn reac
         { id: "y", prompt: "b", provider: "claude", model: "claude-haiku-4-5-20251001" },
       ],
     }));
-    const r = runValidated(["run", p], {
+    const r = await runValidated(["run", p], { inProcess: true,
       cwd: dir,
       env: { SWARM_HOME: home, SWARM_CONFIG: cfgPath, SWARM_SHIM_STREAM: "1" },
     });
@@ -1249,7 +1249,7 @@ test("run: closing tokens line compares actual vs estimate; projection warn reac
   }
 });
 
-test("validate: composed leaves multiply into the worst case; child errors exit 1 prefixed", () => {
+test("validate: composed leaves multiply into the worst case; child errors exit 1 prefixed", async () => {
   const dir = tmp();
   try {
     writeFileSync(join(dir, "child.json"), JSON.stringify({
@@ -1265,7 +1265,7 @@ test("validate: composed leaves multiply into the worst case; child errors exit 
         { id: "audit", manifest: "child.json", after: ["seed"], forEach: { from: "seed", path: "", maxItems: 3 } },
       ],
     }));
-    const v = runCli(["validate", p], { cwd: dir, env: { SWARM_HOME: join(dir, "home") } });
+    const v = await runCliInProcess(["validate", p], { cwd: dir, env: { SWARM_HOME: join(dir, "home") } });
     equal(v.status, 0, v.stderr);
     ok(v.stdout.includes("up to 7 leaves"), v.stdout);               // 1 + 3×2
     ok(v.stdout.includes("audit ≤ 3 × 2 child leaves"), v.stdout);   // composition detail
@@ -1273,7 +1273,7 @@ test("validate: composed leaves multiply into the worst case; child errors exit 
     writeFileSync(join(dir, "bad-child.json"), JSON.stringify({ tasks: [{ id: "scan", provider: "claude", model: "claude-haiku-4-5-20251001" }] }));
     const bad = join(dir, "bad-parent.json");
     writeFileSync(bad, JSON.stringify({ tasks: [{ id: "audit", manifest: "bad-child.json" }] }));
-    const b = runCli(["validate", bad], { cwd: dir, env: { SWARM_HOME: join(dir, "home") } });
+    const b = await runCliInProcess(["validate", bad], { cwd: dir, env: { SWARM_HOME: join(dir, "home") } });
     equal(b.status, 1);
     ok(b.stderr.includes("task 'audit' -> child 'scan'"), b.stderr);
   } finally {
@@ -1283,7 +1283,7 @@ test("validate: composed leaves multiply into the worst case; child errors exit 
 
 // ── W1: named manifests + args ────────────────────────────────────────────────
 
-test("validate: registry name resolves and announces the lookup; --resolved prints the substituted manifest", () => {
+test("validate: registry name resolves and announces the lookup; --resolved prints the substituted manifest", async () => {
   const dir = tmp();
   try {
     const home = join(dir, "home");
@@ -1292,7 +1292,7 @@ test("validate: registry name resolves and announces the lookup; --resolved prin
     writeFileSync(saved, JSON.stringify({
       tasks: [{ id: "a", prompt: "say {{args.word}}", provider: "claude", model: "claude-haiku-4-5-20251001" }],
     }));
-    const r = runCli(["validate", "w1-smoke", "--args", '{"word":"hello"}', "--resolved"], {
+    const r = await runCliInProcess(["validate", "w1-smoke", "--args", '{"word":"hello"}', "--resolved"], {
       cwd: dir, env: { SWARM_HOME: home },
     });
     equal(r.status, 0, `stderr: ${r.stderr}\nstdout: ${r.stdout}`);
@@ -1307,12 +1307,12 @@ test("validate: registry name resolves and announces the lookup; --resolved prin
   }
 });
 
-test("validate: path invocation prints no resolved line (byte-compatible with today)", () => {
+test("validate: path invocation prints no resolved line (byte-compatible with today)", async () => {
   const dir = tmp();
   try {
     const p = join(dir, "plain.json");
     writeFileSync(p, JSON.stringify({ tasks: [{ id: "a", prompt: "x", provider: "claude", model: "claude-haiku-4-5-20251001" }] }));
-    const r = runCli(["validate", p], { cwd: dir, env: { SWARM_HOME: join(dir, "home") } });
+    const r = await runCliInProcess(["validate", p], { cwd: dir, env: { SWARM_HOME: join(dir, "home") } });
     equal(r.status, 0, r.stderr);
     ok(!r.stdout.includes("resolved:"), r.stdout);
   } finally {
@@ -1320,13 +1320,13 @@ test("validate: path invocation prints no resolved line (byte-compatible with to
   }
 });
 
-test("--args must be a JSON object — teaching error with example", () => {
+test("--args must be a JSON object — teaching error with example", async () => {
   const dir = tmp();
   try {
     const p = join(dir, "plain.json");
     writeFileSync(p, JSON.stringify({ tasks: [{ id: "a", prompt: "x", provider: "claude", model: "claude-haiku-4-5-20251001" }] }));
     for (const bad of ["notjson", "[1]", '"str"']) {
-      const r = runCli(["validate", p, "--args", bad], { cwd: dir, env: { SWARM_HOME: join(dir, "home") } });
+      const r = await runCliInProcess(["validate", p, "--args", bad], { cwd: dir, env: { SWARM_HOME: join(dir, "home") } });
       equal(r.status, 1, `--args ${bad} should fail`);
       ok(r.stderr.includes('{"base":"master"}'), r.stderr);
     }
@@ -1335,7 +1335,7 @@ test("--args must be a JSON object — teaching error with example", () => {
   }
 });
 
-test("list: both scopes shown with names + scopes; collisions loud; exit 0", () => {
+test("list: both scopes shown with names + scopes; collisions loud; exit 0", async () => {
   const dir = tmp();
   try {
     const home = join(dir, "home");
@@ -1346,7 +1346,7 @@ test("list: both scopes shown with names + scopes; collisions loud; exit 0", () 
     writeFileSync(join(home, "manifests", "glob-b.json"), body);
     writeFileSync(join(dir, ".swarm", "manifests", "dup.json"), body);
     writeFileSync(join(home, "manifests", "dup.json"), body);
-    const r = runCli(["list"], { cwd: dir, env: { SWARM_HOME: home } });
+    const r = await runCliInProcess(["list"], { cwd: dir, env: { SWARM_HOME: home } });
     equal(r.status, 0, r.stderr);
     ok(r.stdout.includes("local-a"), r.stdout);
     ok(r.stdout.includes("glob-b"), r.stdout);
@@ -1358,7 +1358,7 @@ test("list: both scopes shown with names + scopes; collisions loud; exit 0", () 
   }
 });
 
-test("run: named manifest end-to-end — args substituted into the dispatched leaf prompt", () => {
+test("run: named manifest end-to-end — args substituted into the dispatched leaf prompt", async () => {
   const dir = tmp();
   try {
     const home = join(dir, "home");
@@ -1368,7 +1368,7 @@ test("run: named manifest end-to-end — args substituted into the dispatched le
       tasks: [{ id: "a", prompt: "say {{args.word}}", provider: "claude", model: "claude-haiku-4-5-20251001" }],
     }));
     const shimLog = join(dir, "w1-shim.log");
-    const r = runValidated(["run", "w1-run", "--args", '{"word":"hello"}'], {
+    const r = await runValidated(["run", "w1-run", "--args", '{"word":"hello"}'], { inProcess: true,
       cwd: dir, quotaPreflight: false, env: { SWARM_HOME: home, SWARM_SHIM_LOG: shimLog },
     });
     equal(r.status, 0, `stderr: ${r.stderr}\nstdout: ${r.stdout}`);
@@ -1380,14 +1380,14 @@ test("run: named manifest end-to-end — args substituted into the dispatched le
   }
 });
 
-test("report: writes report.html beside report.md and prints the path", () => {
+test("report: writes report.html beside report.md and prints the path", async () => {
   const dir = tmp();
   try {
     const resultsDir = join(dir, "run");
     mkdirSync(resultsDir, { recursive: true });
     writeFileSync(join(resultsDir, "report.md"),
       "# Findings — the subject\n\n## PROVEN / OPEN ledger\n\n**PROVEN**\n\n- **PROVEN** fact one — foo.gd:1\n\n**OPEN**\n\n- **OPEN** claim two\n");
-    const r = runCli(["report", resultsDir], { cwd: dir, env: { SWARM_HOME: join(dir, "home") } });
+    const r = await runCliInProcess(["report", resultsDir], { cwd: dir, env: { SWARM_HOME: join(dir, "home") } });
     equal(r.status, 0, `stderr: ${r.stderr}\nstdout: ${r.stdout}`);
     const htmlPath = join(resultsDir, "report.html");
     ok(existsSync(htmlPath), "report.html written");
@@ -1401,12 +1401,12 @@ test("report: writes report.html beside report.md and prints the path", () => {
   }
 });
 
-test("report: missing report.md exits 1 with a readable error", () => {
+test("report: missing report.md exits 1 with a readable error", async () => {
   const dir = tmp();
   try {
     const resultsDir = join(dir, "run");
     mkdirSync(resultsDir, { recursive: true });
-    const r = runCli(["report", resultsDir], { cwd: dir, env: { SWARM_HOME: join(dir, "home") } });
+    const r = await runCliInProcess(["report", resultsDir], { cwd: dir, env: { SWARM_HOME: join(dir, "home") } });
     equal(r.status, 1);
     ok(r.stderr.toLowerCase().includes("report.md"), r.stderr);
   } finally {
@@ -1421,7 +1421,7 @@ test("serve: dashboard.enabled=false refuses to start (foreground and --daemon),
     mkdirSync(home, { recursive: true });
     writeFileSync(join(home, "config.json"), gateConfig({ dashboard: { enabled: false, port: 0, tray: false } }));
     for (const args of [["serve"], ["serve", "--daemon"]]) {
-      const r = runCli(args, { cwd: dir, env: { SWARM_HOME: home } });
+      const r = runCli(args, { cwd: dir, env: { SWARM_HOME: home } }); // spawned: `serve` arms process.exit
       equal(r.status, 0, r.stderr);
       ok(/dashboard: disabled/.test(r.stdout), r.stdout);
       ok(r.stdout.includes("dashboard.enabled"), r.stdout);
@@ -1432,13 +1432,13 @@ test("serve: dashboard.enabled=false refuses to start (foreground and --daemon),
   }
 });
 
-test("config init: writes every shipped key into ~/.swarm/config.json, keeps set values, reports added keys", () => {
+test("config init: writes every shipped key into ~/.swarm/config.json, keeps set values, reports added keys", async () => {
   const dir = tmp();
   try {
     // Its own HOME, not tmp()'s pre-gated one: this row asserts what init does to a
     // config file that does not exist yet ("created"), so the file must not exist.
     const home = join(dir, "cfg-home");
-    let r = runCli(["config", "init"], { cwd: dir, env: { SWARM_HOME: home, SWARM_CONFIG: join(home, "config.json") } });
+    let r = await runCliInProcess(["config", "init"], { cwd: dir, env: { SWARM_HOME: home, SWARM_CONFIG: join(home, "config.json") } });
     equal(r.status, 0, r.stderr);
     ok(r.stdout.includes(join(home, "config.json")), r.stdout);
     ok(/created/.test(r.stdout), r.stdout);
@@ -1447,20 +1447,20 @@ test("config init: writes every shipped key into ~/.swarm/config.json, keeps set
     on.providers.ollama.allowedRoots = ["C:/code"];
     delete on.dashboard.port;
     writeFileSync(join(home, "config.json"), JSON.stringify(on));
-    r = runCli(["config", "init"], { cwd: dir, env: { SWARM_HOME: home, SWARM_CONFIG: join(home, "config.json") } });
+    r = await runCliInProcess(["config", "init"], { cwd: dir, env: { SWARM_HOME: home, SWARM_CONFIG: join(home, "config.json") } });
     equal(r.status, 0, r.stderr);
     ok(/added 1 key.*dashboard.port/.test(r.stdout), r.stdout);
     const after = JSON.parse(readFileSync(join(home, "config.json"), "utf8"));
     deepEqual(after.providers.ollama.allowedRoots, ["C:/code"]);
     equal(after.dashboard.port, 7331);
-    r = runCli(["config"], { cwd: dir, env: { SWARM_HOME: home, SWARM_CONFIG: join(home, "config.json") } });
+    r = await runCliInProcess(["config"], { cwd: dir, env: { SWARM_HOME: home, SWARM_CONFIG: join(home, "config.json") } });
     equal(r.status, 1, "bare config is not a verb");
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
 });
 
-test("run: the closing block asks for grading only when grading.enabled is true", () => {
+test("run: the closing block asks for grading only when grading.enabled is true", async () => {
   for (const enabled of [false, true]) {
     const dir = tmp();
     try {
@@ -1473,7 +1473,7 @@ test("run: the closing block asks for grading only when grading.enabled is true"
         goal: "grading gate",
         tasks: [{ id: "one", prompt: "look", provider: "claude", model: "claude-haiku-4-5-20251001" }],
       }));
-      const r = runValidated(["run", manifest], { cwd: dir, quotaPreflight: false, env: { SWARM_HOME: home, SWARM_SHIM_OUTPUT: "x" } });
+      const r = await runValidated(["run", manifest], { inProcess: true, cwd: dir, quotaPreflight: false, env: { SWARM_HOME: home, SWARM_SHIM_OUTPUT: "x" } });
       equal(r.status, 0, r.stderr);
       equal(/awaiting grading/.test(r.stdout), enabled, `enabled=${enabled}\n${r.stdout}`);
     } finally {
@@ -1484,7 +1484,7 @@ test("run: the closing block asks for grading only when grading.enabled is true"
 
 // digest.md is the one file a dispatching session reads, so the grading ask must
 // reach it — once, only while grading is on and the run has no store rows.
-test("run: digest.md carries exactly one grade footer while the run is ungraded, and none once graded or with grading off", () => {
+test("run: digest.md carries exactly one grade footer while the run is ungraded, and none once graded or with grading off", async () => {
   const footers = (d) => (readFileSync(join(d, "out", "digest.md"), "utf8").match(/awaiting grading/g) || []).length;
   const setup = (enabled) => {
     const dir = tmp();
@@ -1497,30 +1497,30 @@ test("run: digest.md carries exactly one grade footer while the run is ungraded,
       tasks: [{ id: "one", prompt: "look", provider: "claude", model: "claude-haiku-4-5-20251001" }, { id: "two", prompt: "look", provider: "claude", model: "claude-haiku-4-5-20251001" }],
       digest: { provider: "claude", model: "claude-haiku-4-5-20251001", instructions: "" },
     }));
-    const run = () => runValidated(["run", manifest], { cwd: dir, quotaPreflight: false, env: { SWARM_HOME: home, SWARM_SHIM_OUTPUT: "x" } });
+    const run = async () => runValidated(["run", manifest], { inProcess: true, cwd: dir, quotaPreflight: false, env: { SWARM_HOME: home, SWARM_SHIM_OUTPUT: "x" } });
     return { dir, home, run };
   };
   const on = setup(true);
   try {
-    equal(on.run().status, 0);
+    equal((await on.run()).status, 0);
     equal(footers(on.dir), 1, "ungraded: one footer");
-    const replay = on.run();
+    const replay = await on.run();
     equal(replay.status, 0);
     equal(footers(on.dir), 1, "a cached replay rewrites, never doubles");
     // backslashes: the store's rows are canonicalised, not string-matched
     writeFileSync(join(on.home, "model-scores.jsonl"), JSON.stringify({ resultsDir: join(on.dir, "out").replaceAll("/", "\\"), leaf: "one" }) + "\n");
-    const graded = on.run();
+    const graded = await on.run();
     equal(footers(on.dir), 0, "graded: the replay's digest carries no footer");
     ok(!/awaiting grading/.test(graded.stdout), `graded: the closing block stays silent\n${graded.stdout}`);
   } finally { rmSync(on.dir, { recursive: true, force: true }); }
   const off = setup(false);
   try {
-    equal(off.run().status, 0);
+    equal((await off.run()).status, 0);
     equal(footers(off.dir), 0, "grading off: no footer");
   } finally { rmSync(off.dir, { recursive: true, force: true }); }
 });
 
-test("A5: grade --waive needs a non-empty reason; writes the waiver file; store rows unchanged", () => {
+test("A5: grade --waive needs a non-empty reason; writes the waiver file; store rows unchanged", async () => {
   const dir = tmp();
   try {
     const home = join(dir, "home");
@@ -1531,12 +1531,12 @@ test("A5: grade --waive needs a non-empty reason; writes the waiver file; store 
     writeFileSync(join(home, "model-scores.jsonl"), JSON.stringify({ resultsDir, leaf: "other" }) + "\n");
     const before = readFileSync(join(home, "model-scores.jsonl"), "utf8");
 
-    const noReason = runCli(["grade", "--waive", resultsDir], { cwd: dir, env: { SWARM_HOME: home } });
+    const noReason = await runCliInProcess(["grade", "--waive", resultsDir], { cwd: dir, env: { SWARM_HOME: home } });
     equal(noReason.status, 1, noReason.stdout + noReason.stderr);
     match(noReason.stderr, /--reason/);
     ok(!existsSync(join(resultsDir, "grade-waiver.json")), "no waiver written without a reason");
 
-    const r = runCli(["grade", "--waive", resultsDir, "--reason", "smoke"], { cwd: dir, env: { SWARM_HOME: home } });
+    const r = await runCliInProcess(["grade", "--waive", resultsDir, "--reason", "smoke"], { cwd: dir, env: { SWARM_HOME: home } });
     equal(r.status, 0, r.stderr);
     const waiverFile = join(resultsDir, "grade-waiver.json");
     ok(existsSync(waiverFile), r.stdout);
@@ -1551,11 +1551,11 @@ test("A5: grade --waive needs a non-empty reason; writes the waiver file; store 
   }
 });
 
-test("statusline install: writes the self-resolving shim into ~/.swarm and prints the settings.json line; the shim runs the installed plugin's bar", () => {
+test("statusline install: writes the self-resolving shim into ~/.swarm and prints the settings.json line; the shim runs the installed plugin's bar", async () => {
   const dir = tmp();
   try {
     const home = join(dir, "home");
-    const r = runCli(["statusline", "install"], { cwd: dir, env: { SWARM_HOME: home } });
+    const r = await runCliInProcess(["statusline", "install"], { cwd: dir, env: { SWARM_HOME: home } });
     equal(r.status, 0, r.stderr);
     const shim = join(home, "statusline.mjs");
     ok(existsSync(shim), "shim written");
@@ -1633,7 +1633,7 @@ test("serve restart: a live daemon on the current version is killed and replaced
   }
 });
 
-test("stop: dead engine records no kept-worktree row for a branchless tree", () => {
+test("stop: dead engine records no kept-worktree row for a branchless tree", async () => {
   const f = pruneFixture();
   try {
     const home = join(f.dir, "home");
@@ -1645,7 +1645,7 @@ test("stop: dead engine records no kept-worktree row for a branchless tree", () 
       line({ event: "run-start", tasks: [{ id: "impl", provider: "claude", model: "claude-haiku-4-5-20251001" }] }),
       line({ id: "impl", state: "running" }),
     ].join("\n") + "\n");
-    const r = runCli(["stop", f.resultsDir], { cwd: f.dir, env: { SWARM_HOME: home } });
+    const r = await runCliInProcess(["stop", f.resultsDir], { cwd: f.dir, env: { SWARM_HOME: home } });
     equal(r.status, 0, r.stdout + r.stderr);
     const summary = JSON.parse(readFileSync(join(f.resultsDir, "summary.json"), "utf8"));
     deepEqual(summary.worktreesKept, []);

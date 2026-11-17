@@ -14,7 +14,7 @@ import { readResult } from "../src/results.mjs";
 import { effectivePlanDoc, ValidationError } from "../src/manifest.mjs";
 import { loadManifest } from "./helpers/repo-io.mjs";
 import { fakeSpawnFactory, makeIo, promptOf } from "./helpers/fake-io.mjs";
-import { runCli } from "./helpers/cli.mjs";
+import { runCliInProcess } from "./helpers/cli.mjs";
 
 function tmp() {
   return mkdtempSync(join(tmpdir(), "swarm-cite-"));
@@ -498,7 +498,7 @@ test("manifest: effectivePlanDoc round-trips verifyCitations false", () => {
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
-test("validate CLI: announces mechanical citation verification; opt-out omits the task", () => {
+test("validate CLI: announces mechanical citation verification; opt-out omits the task", async () => {
   const dir = tmp();
   spawnSync("git", ["init", "-q"], { cwd: dir, windowsHide: true });
   try {
@@ -515,7 +515,7 @@ test("validate CLI: announces mechanical citation verification; opt-out omits th
     mkdirSync(home, { recursive: true });
     writeFileSync(join(home, "config.json"),
       JSON.stringify({ providers: { claude: { enabled: true, allowedRoots: [dir] } } }));
-    const r = runCli(["validate", p], { cwd: dir, env: { SWARM_HOME: home } });
+    const r = await runCliInProcess(["validate", p], { cwd: dir, env: { SWARM_HOME: home } });
     equal(r.status, 0, r.stderr);
     const line = r.stdout.split("\n").find((l) => l.includes("citations verified mechanically"));
     ok(line, r.stdout);

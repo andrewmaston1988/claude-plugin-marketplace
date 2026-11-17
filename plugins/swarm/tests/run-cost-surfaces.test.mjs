@@ -7,7 +7,7 @@ import { test } from "node:test";
 import { equal, ok, match } from "node:assert/strict";
 import { rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { runCli, runValidated } from "./helpers/cli.mjs";
+import { runCliInProcess, runValidated } from "./helpers/cli.mjs";
 import { tmp, gateHome } from "./helpers/cli-fixture.mjs";
 import { mixedCostHome, PROJECT, NAME, DEFAULT_TEXT, MONEY_TEXT } from "./helpers/mixed-cost-run.mjs";
 import { withServer, cfg as dashCfg } from "./helpers/serve-fixture.mjs";
@@ -21,19 +21,19 @@ const withHome = async (opts, fn) => {
   const h = mixedCostHome(opts);
   try { return await fn(h); } finally { rmSync(h.home, { recursive: true, force: true }); }
 };
-const statusOf = (h) => plain(runCli(["status", h.dir], { cwd: h.home, env: { SWARM_HOME: h.home } }).stdout);
+const statusOf = async (h) => plain((await runCliInProcess(["status", h.dir], { cwd: h.home, env: { SWARM_HOME: h.home } })).stdout);
 const serverCfg = (money) => ({ ...dashCfg(), ...(money && { display: { money: true } }) });
 
 // ── the CLI ─────────────────────────────────────────────────────────────────────
 
-test("status footer: the meter share beside the work tokens, and no dollar sign by default", () => withHome({}, (h) => {
-  const out = statusOf(h);
+test("status footer: the meter share beside the work tokens, and no dollar sign by default", () => withHome({}, async (h) => {
+  const out = await statusOf(h);
   ok(out.includes(`tokens · ${DEFAULT_TEXT}`), out);
   ok(!out.includes("$"), out);
 }));
 
-test("status footer: with display.money the api-equivalent estimate leads the meter share", () => withHome({ money: true }, (h) => {
-  const out = statusOf(h);
+test("status footer: with display.money the api-equivalent estimate leads the meter share", () => withHome({ money: true }, async (h) => {
+  const out = await statusOf(h);
   ok(out.includes(`tokens · ${MONEY_TEXT}`), out);
 }));
 
@@ -47,7 +47,7 @@ test("the closing tokens: line carries the cost text, and nothing when there is 
   equal(plain(formatClosing(base)), bare, "an absent costText reads as an empty one");
 });
 
-function shimRun(extraConfig) {
+async function shimRun(extraConfig) {
   const dir = tmp();
   try {
     const manifest = join(dir, "plan.json");
@@ -55,9 +55,9 @@ function shimRun(extraConfig) {
     const home = join(dir, "home");
     const env = { SWARM_HOME: home, SWARM_SHIM_STREAM: "1", SWARM_SHIM_OUTPUT: "because X" };
     if (extraConfig) gateHome(home, extraConfig);
-    const run = runValidated(["run", manifest], { cwd: dir, env });
+    const run = await runValidated(["run", manifest], { cwd: dir, env, inProcess: true });
     equal(run.status, 0, run.stdout + run.stderr);
-    const ask = runCli(["ask", join(dir, "out"), "t1", "why?"], { cwd: dir, env });
+    const ask = await runCliInProcess(["ask", join(dir, "out"), "t1", "why?"], { cwd: dir, env });
     equal(ask.status, 0, ask.stdout + ask.stderr);
     return { run: plain(run.stdout), ask: plain(ask.stdout) };
   } finally {
@@ -65,28 +65,28 @@ function shimRun(extraConfig) {
   }
 }
 
-test("run closing line and swarm ask: no dollar sign anywhere by default", () => {
-  const { run, ask } = shimRun(null);
+test("run closing line and swarm ask: no dollar sign anywhere by default", async () => {
+  const { run, ask } = await shimRun(null);
   ok(run.includes("tokens:") && ask.includes("tokens:"));
   ok(!run.includes("$") && !ask.includes("$"), `${run}\n${ask}`);
 });
 
-test("run closing line and swarm ask: display.money prints the estimate, labelled api-eq", () => {
-  const { run, ask } = shimRun({ display: { money: true } });
+test("run closing line and swarm ask: display.money prints the estimate, labelled api-eq", async () => {
+  const { run, ask } = await shimRun({ display: { money: true } });
   match(run, /tokens: .*≈\$[\d.]+ api-eq/);
   match(ask, /tokens: .*≈\$[\d.]+ api-eq/);
 });
 
 // ── the estate and the routes ───────────────────────────────────────────────────
 
-test("estate row: carries each unit priced separately, so the server only formats", () => withHome({}, (h) => {
+test("estate row: carries each unit priced separately, so the server only formats", () => withHome({}, async (h) => {
   const row = buildSnapshot(h.home, new Map(), { now: NOW }).rows.find((r) => r.name === NAME);
   ok(Math.abs(row.cost.usd - 0.67) < 1e-9, JSON.stringify(row.cost));
   equal(row.cost.usdKind, "api-equivalent");
   ok(Math.abs(row.cost.weekPct - 3.2) < 1e-9, JSON.stringify(row.cost));
 }));
 
-test("estate row: an unmeasured meter leaves the share blank while the dollars stay", () => withHome({}, (h) => {
+test("estate row: an unmeasured meter leaves the share blank while the dollars stay", () => withHome({}, async (h) => {
   rmSync(join(h.home, "usage-history.jsonl"));
   const row = buildSnapshot(h.home, new Map(), { now: NOW }).rows.find((r) => r.name === NAME);
   ok(row.cost.usd > 0 && row.cost.weekPct === undefined, JSON.stringify(row.cost));

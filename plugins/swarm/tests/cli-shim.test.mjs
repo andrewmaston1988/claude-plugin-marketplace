@@ -11,7 +11,7 @@ import { join, basename } from "node:path";
 import { tmpdir } from "node:os";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { runCli } from "./helpers/cli.mjs";
+import { runCliInProcess } from "./helpers/cli.mjs";
 import { bashWrapper, cmdWrapper, installPlan } from "../src/cli-shim.mjs";
 
 const BIN_ENTRY = fileURLToPath(new URL("../bin/swarm.mjs", import.meta.url));
@@ -60,10 +60,10 @@ const runInstalledShims = (bashShim, cmdShim, env) => {
 };
 
 // Real `swarm install` into a fake home; returns the three installed paths.
-function installInto(dir) {
+async function installInto(dir) {
   const home = join(dir, "home");
   mkdirSync(home);
-  const r = runCli(["install"], { cwd: dir, env: fakeHomeEnv(home) });
+  const r = await runCliInProcess(["install"], { cwd: dir, env: fakeHomeEnv(home) });
   assert.equal(r.status, 0, `install failed: ${r.stderr}`);
   const userBin = join(home, ".local", "bin");
   return { home, userBin, resolver: join(userBin, "swarm-resolver.mjs"), bashShim: join(userBin, "swarm"), cmdShim: join(userBin, "swarm.cmd"), result: r };
@@ -86,10 +86,10 @@ test("row 1 (text): bash wrapper is LF + shebang; .cmd is CRLF + @echo off; both
     "both paths quoted, resolver's first argument is bin/swarm.mjs");
 });
 
-test("row 5 (end-to-end): `swarm install` leaves three working files; the resolver copy is byte-identical; each wrapper runs a fixture install", () => {
+test("row 5 (end-to-end): `swarm install` leaves three working files; the resolver copy is byte-identical; each wrapper runs a fixture install", async () => {
   const dir = tmp();
   try {
-    const { resolver, bashShim, cmdShim, result } = installInto(dir);
+    const { resolver, bashShim, cmdShim, result } = await installInto(dir);
     assert.ok(existsSync(resolver) && existsSync(bashShim), "resolver and bash wrapper written");
     assert.equal(existsSync(cmdShim), process.platform === "win32", ".cmd is written on win32 and nowhere else");
     assert.ok(readFileSync(resolver).equals(readFileSync(RESOLVER_SRC)),
@@ -108,13 +108,13 @@ test("row 5 (end-to-end): `swarm install` leaves three working files; the resolv
   }
 });
 
-test("row 5 (idempotence): a second install over the same dir leaves exactly the same three entries, same bytes, nothing appended", () => {
+test("row 5 (idempotence): a second install over the same dir leaves exactly the same three entries, same bytes, nothing appended", async () => {
   const dir = tmp();
   try {
-    const { userBin, resolver, bashShim, cmdShim } = installInto(dir);
+    const { userBin, resolver, bashShim, cmdShim } = await installInto(dir);
     const snapshot = (d) => readdirSync(d).sort().map((f) => [f, readFileSync(join(d, f))]);
     const before = snapshot(userBin);
-    const second = runCli(["install"], { cwd: dir, env: fakeHomeEnv(join(dir, "home")) });
+    const second = await runCliInProcess(["install"], { cwd: dir, env: fakeHomeEnv(join(dir, "home")) });
     assert.equal(second.status, 0, second.stderr);
     assert.deepEqual(snapshot(userBin), before, "re-running install must overwrite, never append or duplicate");
     // Count against what installPlan actually plans for this platform, not a
@@ -156,10 +156,10 @@ test("row 6: the real bin/swarm.mjs — not a fixture stand-in — dispatches th
   }
 });
 
-test("row 3: absent / unparseable / entryless registry → readable diagnostic naming the fix, exit 1", () => {
+test("row 3: absent / unparseable / entryless registry → readable diagnostic naming the fix, exit 1", async () => {
   const dir = tmp();
   try {
-    const { bashShim, cmdShim } = installInto(dir);
+    const { bashShim, cmdShim } = await installInto(dir);
     const absent = join(dir, "absent.json");
     const bad = join(dir, "bad.json");
     writeFileSync(bad, "{ truncated");
@@ -177,10 +177,10 @@ test("row 3: absent / unparseable / entryless registry → readable diagnostic n
   }
 });
 
-test("row 7: an engine killed by signal exits the wrapper non-zero — never 0", () => {
+test("row 7: an engine killed by signal exits the wrapper non-zero — never 0", async () => {
   const dir = tmp();
   try {
-    const { bashShim, cmdShim } = installInto(dir);
+    const { bashShim, cmdShim } = await installInto(dir);
     // Fixture engine that traps nothing and kills itself.
     const install = join(dir, "install");
     mkdirSync(join(install, "bin"), { recursive: true });
@@ -196,10 +196,10 @@ test("row 7: an engine killed by signal exits the wrapper non-zero — never 0",
   }
 });
 
-test("row 8: statusline mode still exits 0 on failure after the D5 change", () => {
+test("row 8: statusline mode still exits 0 on failure after the D5 change", async () => {
   const dir = tmp();
   try {
-    const { resolver } = installInto(dir);
+    const { resolver } = await installInto(dir);
     // (a) the plan's scenario: no swarm entry → the resolver's own fail() path,
     // blank line + exit 0. D5 must not leak into it.
     const empty = writeRegistry(join(dir, "empty.json"), []);

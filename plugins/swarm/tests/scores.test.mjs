@@ -8,7 +8,7 @@ import {
 } from "../src/scores.mjs";
 import { transcriptModels, backfillRealmodel } from "../src/scores-backfill.mjs";
 import { ASPECTS, OUTCOMES } from "../src/aspects.mjs";
-import { runCli } from "./helpers/cli.mjs";
+import { runCliInProcess } from "./helpers/cli.mjs";
 
 function tmp() {
   return mkdtempSync(join(tmpdir(), "swarm-scores-"));
@@ -195,7 +195,7 @@ test("appendRows: an empty batch is an error, not a silent no-op", () => {
   throws(() => appendRows([], join(tmpdir(), "never-written.jsonl")), /no rows to append/);
 });
 
-test("readRows: a torn tail line is skipped rather than aborting the query", () => {
+test("readRows: a torn tail line is skipped rather than aborting the query", async () => {
   const dir = tmp();
   try {
     const p = join(dir, "model-scores.jsonl");
@@ -707,7 +707,7 @@ test("backfillRealmodel: a transcript naming two models is ambiguous and also dr
   match(out.dropped[0].reason, /2 models/);
 });
 
-test("backfillRealmodel: rows that are not aliased pass through byte-for-byte", () => {
+test("backfillRealmodel: rows that are not aliased pass through byte-for-byte", async () => {
   const full = row({ model: "claude-sonnet-5", resultsDir: "C:/runs/a-1", leaf: "full" });
   const cloud = row({ model: "glm-5.2:cloud", resultsDir: "C:/runs/a-1", leaf: "cloud" });
   const store = `${lines([full, cloud])}{"torn":`;
@@ -725,7 +725,7 @@ test("backfillRealmodel: a store with no alias rows is a no-op — the second ru
   equal(out.changed, 0);
 });
 
-test("scores backfill-realmodel: the backup holds the pre-rewrite store, written before the rewrite", () => {
+test("scores backfill-realmodel: the backup holds the pre-rewrite store, written before the rewrite", async () => {
   const dir = tmp();
   try {
     const home = join(dir, "home");
@@ -737,7 +737,7 @@ test("scores backfill-realmodel: the backup holds the pre-rewrite store, written
     mkdirSync(home, { recursive: true });
     writeFileSync(store, before);
 
-    const r = runCli(["scores", "backfill-realmodel"], { cwd: dir, env: { SWARM_HOME: home } });
+    const r = await runCliInProcess(["scores", "backfill-realmodel"], { cwd: dir, env: { SWARM_HOME: home } });
     equal(r.status, 0, r.stderr);
     const baks = readdirSync(home).filter((f) => f.startsWith("model-scores.jsonl.bak-"));
     equal(baks.length, 1, `exactly one backup, got ${baks.join(", ")}`);
@@ -749,7 +749,7 @@ test("scores backfill-realmodel: the backup holds the pre-rewrite store, written
   }
 });
 
-test("scores backfill-realmodel --dry-run: prints the mapping and writes nothing at all", () => {
+test("scores backfill-realmodel --dry-run: prints the mapping and writes nothing at all", async () => {
   const dir = tmp();
   try {
     const home = join(dir, "home");
@@ -761,7 +761,7 @@ test("scores backfill-realmodel --dry-run: prints the mapping and writes nothing
     mkdirSync(home, { recursive: true });
     writeFileSync(store, before);
 
-    const r = runCli(["scores", "backfill-realmodel", "--dry-run"], { cwd: dir, env: { SWARM_HOME: home } });
+    const r = await runCliInProcess(["scores", "backfill-realmodel", "--dry-run"], { cwd: dir, env: { SWARM_HOME: home } });
     equal(r.status, 0, r.stderr);
     match(r.stdout, /haiku -> claude-haiku-4-5-20251001 \(1\)/);
     equal(readFileSync(store, "utf8"), before, "the store must be byte-identical after a dry run");
@@ -771,7 +771,7 @@ test("scores backfill-realmodel --dry-run: prints the mapping and writes nothing
   }
 });
 
-test("scores backfill-realmodel: a second run has nothing to do and writes no second backup", () => {
+test("scores backfill-realmodel: a second run has nothing to do and writes no second backup", async () => {
   const dir = tmp();
   try {
     const home = join(dir, "home");
@@ -782,9 +782,9 @@ test("scores backfill-realmodel: a second run has nothing to do and writes no se
     mkdirSync(home, { recursive: true });
     writeFileSync(store, lines([row({ model: "sonnet", resultsDir: run, leaf: "citations" })]));
 
-    equal(runCli(["scores", "backfill-realmodel"], { cwd: dir, env: { SWARM_HOME: home } }).status, 0);
+    equal((await runCliInProcess(["scores", "backfill-realmodel"], { cwd: dir, env: { SWARM_HOME: home } })).status, 0);
     const once = readFileSync(store, "utf8");
-    const r = runCli(["scores", "backfill-realmodel"], { cwd: dir, env: { SWARM_HOME: home } });
+    const r = await runCliInProcess(["scores", "backfill-realmodel"], { cwd: dir, env: { SWARM_HOME: home } });
     equal(r.status, 0, r.stderr);
     equal(readFileSync(store, "utf8"), once);
     equal(readdirSync(home).filter((f) => f.startsWith("model-scores.jsonl.bak-")).length, 1, "the no-op run adds no backup");

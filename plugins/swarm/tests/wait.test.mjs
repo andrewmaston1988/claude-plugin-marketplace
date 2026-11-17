@@ -4,7 +4,7 @@ import { equal, ok } from "node:assert/strict";
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { runCli } from "./helpers/cli.mjs";
+import { runCliInProcess } from "./helpers/cli.mjs";
 import { EXIT_CLEAN, EXIT_DEAD, EXIT_FAILED, EXIT_TIMEOUT, settledCode, waitForRun } from "../src/wait.mjs";
 
 const NOW = Date.parse("2026-09-05T01:10:00Z");
@@ -49,7 +49,7 @@ test("swarm wait blocks across polls until the run settles", async () => {
   equal(s.slept[0], 5000, "polls every few seconds");
 });
 
-test("swarm wait exits 0 when every leaf is ok or skipped", async () => {
+test("swarm wait exits 0 when every leaf is ok or skipped", () => {
   equal(settledCode(runOf({ states: { a: "ok", b: "skipped" } })), EXIT_CLEAN, "ok and skipped are both clean");
 });
 
@@ -115,11 +115,11 @@ function finishedRun(dir, { states = { a: "ok" } } = {}) {
   return dir;
 }
 
-test("swarm wait CLI prints the roster and exits 0 for a clean run", () => {
+test("swarm wait CLI prints the roster and exits 0 for a clean run", async () => {
   const dir = mkdtempSync(join(tmpdir(), "swarm-wait-"));
   try {
     const run = finishedRun(join(dir, "run-1"));
-    const r = runCli(["wait", run], { cwd: dir, env: { SWARM_HOME: join(dir, "home") } });
+    const r = await runCliInProcess(["wait", run], { cwd: dir, env: { SWARM_HOME: join(dir, "home") } });
     equal(r.status, 0, r.stderr);
     ok(r.stdout.includes("swarm ·"), `the final roster is printed (got ${JSON.stringify(r.stdout)})`);
   } finally {
@@ -127,17 +127,17 @@ test("swarm wait CLI prints the roster and exits 0 for a clean run", () => {
   }
 });
 
-test("swarm wait CLI exits 1 on a failed leaf and on a missing run.log", () => {
+test("swarm wait CLI exits 1 on a failed leaf and on a missing run.log", async () => {
   const dir = mkdtempSync(join(tmpdir(), "swarm-wait-"));
   try {
     const bad = finishedRun(join(dir, "run-2"), { states: { a: "ok", b: "failed" } });
-    const failed = runCli(["wait", bad], { cwd: dir, env: { SWARM_HOME: join(dir, "home") } });
+    const failed = await runCliInProcess(["wait", bad], { cwd: dir, env: { SWARM_HOME: join(dir, "home") } });
     equal(failed.status, 1, "a failed leaf exits 1");
     // Not just the code: the subcommand must have READ the run and printed its
     // roster, or an unknown-command USAGE error would satisfy the exit code too.
     ok(failed.stdout.includes("swarm ·"), `a failed run still prints its roster (got ${JSON.stringify(failed.stdout)})`);
     mkdirSync(join(dir, "empty"));
-    const missing = runCli(["wait", join(dir, "empty")], { cwd: dir, env: { SWARM_HOME: join(dir, "home") } });
+    const missing = await runCliInProcess(["wait", join(dir, "empty")], { cwd: dir, env: { SWARM_HOME: join(dir, "home") } });
     equal(missing.status, 1, "a missing run.log exits 1");
     ok(missing.stderr.includes("run.log"), `the error names the missing file (got ${JSON.stringify(missing.stderr)})`);
   } finally {

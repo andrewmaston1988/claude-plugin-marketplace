@@ -15,7 +15,7 @@ import { mkdtempSync, rmSync, mkdirSync, writeFileSync, readFileSync } from "nod
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { spawnSync } from "node:child_process";
-import { runCli } from "./helpers/cli.mjs";
+import { runCliInProcess } from "./helpers/cli.mjs";
 
 const KEY = "swarm@andrewmaston1988-claude-plugins";
 const tmp = () => mkdtempSync(join(tmpdir(), "swarm-shabump-"));
@@ -41,14 +41,14 @@ const runInstalledShim = (userBin, env) => process.platform === "win32"
   ? runCmdShim(join(userBin, "swarm.cmd"), env)
   : runBashShim(join(userBin, "swarm"), env);
 
-test("row 2: the identical installed wrapper reaches a NEW engine after a sha bump — no re-install, no re-copy", () => {
+test("row 2: the identical installed wrapper reaches a NEW engine after a sha bump — no re-install, no re-copy", async () => {
   const dir = tmp();
   try {
     const oldInstall = fixtureInstall(join(dir, "old"), "engine-OLD");
     const newInstall = fixtureInstall(join(dir, "new"), "engine-NEW");
     const home = join(dir, "home");
     mkdirSync(home);
-    const r = runCli(["install"], { cwd: dir, env: fakeHomeEnv(home) });
+    const r = await runCliInProcess(["install"], { cwd: dir, env: fakeHomeEnv(home) });
     assert.equal(r.status, 0, r.stderr);
     const userBin = join(home, ".local", "bin");
     const bashShim = join(userBin, "swarm");
@@ -84,14 +84,14 @@ test("row 2: the identical installed wrapper reaches a NEW engine after a sha bu
   }
 });
 
-test("row 2 (scope tie-break): a user-scope entry beats a newer non-user entry", () => {
+test("row 2 (scope tie-break): a user-scope entry beats a newer non-user entry", async () => {
   const dir = tmp();
   try {
     const userInstall = fixtureInstall(join(dir, "user-scoped"), "engine-USER");
     const projectInstall = fixtureInstall(join(dir, "project-scoped"), "engine-PROJECT");
     const home = join(dir, "home");
     mkdirSync(home);
-    const r = runCli(["install"], { cwd: dir, env: fakeHomeEnv(home) });
+    const r = await runCliInProcess(["install"], { cwd: dir, env: fakeHomeEnv(home) });
     assert.equal(r.status, 0, r.stderr);
     const bashShim = join(home, ".local", "bin", "swarm");
     // the project entry is NEWER — the resolver's stated preference (user scope

@@ -112,12 +112,12 @@ test("no swarm skill links the retired model-selection reference", () => {
 });
 
 test("perf legend seats from the frontier, never by quality divided by cost", () => {
-  const legend = source("scripts/swarm.mjs").match(/const LEGEND = "([^"]+)";/)?.[1] || "";
+  const legend = source("scripts/cmd-perf.mjs").match(/const LEGEND = "([^"]+)";/)?.[1] || "";
   ok(legend.includes("seat from the frontier, never by quality÷cost"), `legend lacks the seating rule: ${legend}`);
 });
 
 test("perf legend calls an em dash unmeasured, not free", () => {
-  const legend = source("scripts/swarm.mjs").match(/const LEGEND = "([^"]+)";/)?.[1] || "";
+  const legend = source("scripts/cmd-perf.mjs").match(/const LEGEND = "([^"]+)";/)?.[1] || "";
   ok(legend.includes("— unmeasured, not free"), `legend mislabels unmeasured cost: ${legend}`);
   ok(source("scripts/swarm.mjs").includes("(swarm cost) · — unmeasured, not free\"));"), "the swarm models footer reads the dash the same way");
 });

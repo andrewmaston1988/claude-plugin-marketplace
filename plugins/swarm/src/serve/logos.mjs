@@ -3,6 +3,11 @@ import { fileURLToPath } from "node:url";
 
 let cached;
 
+// The memo is per process; an in-process CLI call re-reads rather than inheriting.
+export function resetForTests() {
+  cached = undefined;
+}
+
 export function logosScript() {
   if (cached !== undefined) return cached;
   const marks = Object.fromEntries(["claude", "codex", "ollama"].map((name) => [

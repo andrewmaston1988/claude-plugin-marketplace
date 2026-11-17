@@ -6,7 +6,7 @@ import { writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { plan, execute, formatPrune, blockers } from "../src/prune.mjs";
 import { prepareIsolation, runScopeKey, WORKTREE_ADD_TIMEOUT_MS } from "../src/worktree.mjs";
-import { runCli } from "./helpers/cli.mjs";
+import { runCliInProcess } from "./helpers/cli.mjs";
 import { commitAll, gitOut } from "./helpers/cli-fixture.mjs";
 import { dropSnapPrune, pruneFixture, writeFinishedRun } from "./helpers/prune-fixture.mjs";
 
@@ -151,7 +151,9 @@ test("plan measures unlanded commits and dirty porcelain; blockers include unkno
   // and the row measures Infinity.
   const git = (args, cwd) => {
     calls.push({ args, cwd });
-    if (args[0] === "version") return { status: 0, stdout: "git version 2.39.0", stderr: "" };
+    // 2.38 answers the single `--write-tree` call below; 2.39 would take the batch
+    // path, whose NUL-framed stdin protocol this fake does not speak.
+    if (args[0] === "version") return { status: 0, stdout: "git version 2.38.0", stderr: "" };
     if (args[0] === "for-each-ref") return { status: 0, stdout: "", stderr: "" };
     if (args[0] === "symbolic-ref") {
       return args[1] === "-q" ? { status: 0, stdout: "refs/heads/main", stderr: "" } : { status: 1, stdout: "", stderr: "" };
@@ -254,7 +256,7 @@ test("row 20: a deadline already passed measures no row and stops the plan", () 
   equal(calls.filter((name) => name === "for-each-ref").length, 0, "a passed deadline measures no row");
 });
 
-test("row 15: the CLI measures through a custom worktreeBranchPrefix, so a sibling agents/ branch is not a landing place", () => {
+test("row 15: the CLI measures through a custom worktreeBranchPrefix, so a sibling agents/ branch is not a landing place", async () => {
   const f = pruneFixture();
   const cfg = { worktreeBranchPrefix: "agents/", treeRoot: join(f.dir, "home", "worktrees") };
   let wt;
@@ -268,7 +270,7 @@ test("row 15: the CLI measures through a custom worktreeBranchPrefix, so a sibli
     spawnSync("git", ["branch", "agents/sibling", wt.branch], { cwd: f.repo, windowsHide: true });
     writeFinishedRun(f.resultsDir, [{ branch: wt.branch, path: wt.path }]);
 
-    const r = runCli(["prune", f.resultsDir, "--dry-run"], {
+    const r = await runCliInProcess(["prune", f.resultsDir, "--dry-run"], {
       cwd: f.dir,
       env: { SWARM_HOME: join(f.dir, "home") },
       config: cfg,

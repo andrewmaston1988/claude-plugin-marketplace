@@ -7,7 +7,7 @@ import { equal, ok } from "node:assert/strict";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { runCli } from "./helpers/cli.mjs";
+import { runCliInProcess } from "./helpers/cli.mjs";
 import { tmp } from "./helpers/cli-fixture.mjs";
 import { loadManifest } from "./helpers/repo-io.mjs";
 import { CFG } from "./helpers/manifest-fixtures.mjs";
@@ -30,13 +30,13 @@ function world(tasks, extra = {}, name = "m.json") {
 }
 
 const leaf = (over = {}) => ({ id: "lane", prompt: "do it", provider: "claude", model: CLAUDE, ...over });
-const cli = (w, args, cwd = w.dir) => runCli(args, { cwd, env: w.env, config: ALL_PROVIDERS });
+const cli = (w, args, cwd = w.dir) => runCliInProcess(args, { cwd, env: w.env, config: ALL_PROVIDERS });
 const cleanup = (w) => rmSync(w.dir, { recursive: true, force: true });
 
-test("row 13: the verifier incident shape is refused, naming the edit tools and the shared tree", () => {
+test("row 13: the verifier incident shape is refused, naming the edit tools and the shared tree", async () => {
   const w = world([leaf({ id: "verify-a", role: "verifier", allowedTools: "Read,Edit,Write,Bash", workspace: "feat" })]);
   try {
-    const r = cli(w, ["validate", w.path]);
+    const r = await cli(w, ["validate", w.path]);
     equal(r.status, 1, r.stdout + r.stderr);
     ok(!r.stdout.includes("manifest OK"), `a refusal is never approved above it:\n${r.stdout}`);
     ok(r.stderr.includes("manifest validation failed:"), r.stderr);
@@ -48,10 +48,10 @@ test("row 13: the verifier incident shape is refused, naming the edit tools and 
   }
 });
 
-test("row 13: role on an agentless node is refused, not approved by --resolved", () => {
+test("row 13: role on an agentless node is refused, not approved by --resolved", async () => {
   const w = world([leaf({ id: "a" }), { id: "agg", compute: "1 + 1", role: "verifier" }]);
   try {
-    const r = cli(w, ["validate", w.path, "--resolved"]);
+    const r = await cli(w, ["validate", w.path, "--resolved"]);
     equal(r.status, 1, r.stdout + r.stderr);
     ok(r.stderr.includes("compute tasks are agentless") && r.stderr.includes("role"), r.stderr);
     ok(!r.stdout.includes("resolved manifest:"), `nothing is approved:\n${r.stdout}`);
@@ -60,12 +60,12 @@ test("row 13: role on an agentless node is refused, not approved by --resolved",
   }
 });
 
-test("row 13: a 3 KB prompt in \"model\" is refused, and the 3 KB is not echoed back", () => {
+test("row 13: a 3 KB prompt in \"model\" is refused, and the 3 KB is not echoed back", async () => {
   const prompt = Array.from({ length: 60 }, (_, i) => `step ${i}: read the file and report on it`).join(" ");
   ok(prompt.length > 2000, `fixture is the incident's size: ${prompt.length}`);
   const w = world([leaf({ model: prompt })]);
   try {
-    const r = cli(w, ["validate", w.path]);
+    const r = await cli(w, ["validate", w.path]);
     equal(r.status, 1, r.stdout + r.stderr);
     ok(r.stderr.includes("not a model id"), r.stderr);
     ok(r.stderr.includes('prompt text belongs in "prompt"'), `the fix rides the message: ${r.stderr}`);
@@ -76,10 +76,10 @@ test("row 13: a 3 KB prompt in \"model\" is refused, and the 3 KB is not echoed 
   }
 });
 
-test("row 13: a Codex seat on an Ollama-tagged model is refused", () => {
+test("row 13: a Codex seat on an Ollama-tagged model is refused", async () => {
   const w = world([leaf({ provider: "codex", model: "deepseek-v4.1-flash:1017-cloud" })]);
   try {
-    const r = cli(w, ["validate", w.path]);
+    const r = await cli(w, ["validate", w.path]);
     equal(r.status, 1, r.stdout + r.stderr);
     ok(r.stderr.includes("Ollama tag"), r.stderr);
     ok(r.stderr.includes('provider "codex" takes a Codex model id'), r.stderr);
@@ -98,11 +98,11 @@ function finishedRun(dir) {
   writeFileSync(join(dir, "out", "summary.json"), JSON.stringify({ finished: "2026-11-15T10:05:00.000Z" }));
 }
 
-test("row 13: an edited manifest over a finished run exits 0 and prints the resume warning", () => {
+test("row 13: an edited manifest over a finished run exits 0 and prints the resume warning", async () => {
   const w = world([leaf({ id: "a" })], { resultsDir: "out" });
   try {
     finishedRun(w.dir);
-    const r = cli(w, ["validate", w.path]);
+    const r = await cli(w, ["validate", w.path]);
     equal(r.status, 0, r.stdout + r.stderr);
     ok(r.stdout.includes("manifest OK"), r.stdout);
     const line = r.stdout.split("\n").find((l) => l.startsWith("warning:") && l.includes("holds an earlier run"));
@@ -114,13 +114,13 @@ test("row 13: an edited manifest over a finished run exits 0 and prints the resu
   }
 });
 
-test("row 13: `swarm run` loads the same manifest and says nothing about a resume", () => {
+test("row 13: `swarm run` loads the same manifest and says nothing about a resume", async () => {
   // A second manifest over the same finished run: `run` has never validated these
   // bytes, so it refuses — after the load that would have printed the warning.
   const w = world([leaf({ id: "a" })], { resultsDir: "out" }, "other.json");
   try {
     finishedRun(w.dir);
-    const r = cli(w, ["run", w.path]);
+    const r = await cli(w, ["run", w.path]);
     equal(r.status, 1, r.stdout + r.stderr);
     ok(r.stderr.includes("has not been validated as written"), `the load happened: ${r.stderr}`);
     ok(!`${r.stdout}${r.stderr}`.includes("holds an earlier run"), "the preview is validate's alone");
@@ -133,12 +133,12 @@ test("row 13: `swarm run` loads the same manifest and says nothing about a resum
   }
 });
 
-test("row 4: a `verify-` leaf with Edit and no role is warned through validate, not refused", () => {
+test("row 4: a `verify-` leaf with Edit and no role is warned through validate, not refused", async () => {
   // The incident's author never sets the field: the warning must reach validate's
   // own channel, not just the helper's return value.
   const w = world([leaf({ id: "verify-x", allowedTools: "Read,Edit,Bash" })]);
   try {
-    const r = cli(w, ["validate", w.path]);
+    const r = await cli(w, ["validate", w.path]);
     equal(r.status, 0, r.stdout + r.stderr);
     ok(r.stdout.includes("manifest OK"), r.stdout);
     const line = r.stdout.split("\n").find((l) => l.startsWith("warning:") && l.includes("looks like a verifier"));
@@ -150,13 +150,13 @@ test("row 4: a `verify-` leaf with Edit and no role is warned through validate, 
   }
 });
 
-test("row 13: an Ollama model missing from a non-empty banked roster warns and still passes", () => {
+test("row 13: an Ollama model missing from a non-empty banked roster warns and still passes", async () => {
   const w = world([leaf({ provider: "ollama", model: "typo-model" })]);
   try {
     writeRosterEntry("ollama", {
       hydratedAt: Date.now(), source: null, models: [{ provider: "ollama", model: "real-model" }],
     }, { SWARM_HOME: w.env.SWARM_HOME });
-    const r = cli(w, ["validate", w.path]);
+    const r = await cli(w, ["validate", w.path]);
     equal(r.status, 0, r.stdout + r.stderr);
     ok(r.stdout.includes("manifest OK"), r.stdout);
     const line = r.stdout.split("\n").find((l) => l.startsWith("warning:") && l.includes("swarm models"));

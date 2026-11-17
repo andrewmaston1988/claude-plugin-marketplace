@@ -33,26 +33,34 @@ function configOverlay(env, quotaPreflight, config) {
   return { configDir, childEnv };
 }
 
+const CLI_TIMEOUT_MS = 60000;
+
+// The env a CLI call runs under, spawned or in-process — one definition, so the
+// two paths cannot drift apart.
+function runEnv(childEnv) {
+  return {
+    ...process.env,
+    PATH: SHIMS + delimiter + process.env.PATH,
+    Path: SHIMS + delimiter + (process.env.Path || process.env.PATH),
+    // Pin the append-only stdout contract: the suite may itself be running
+    // inside a repainting harness, whose CLAUDECODE would otherwise leak in.
+    SWARM_REPAINT: "0",
+    // The child reads ~/.claude for Claude's model catalog; an unpinned home would
+    // read the developer's real machine and pass only where that dir is absent.
+    ...(childEnv.SWARM_HOME ? { HOME: childEnv.SWARM_HOME, USERPROFILE: childEnv.SWARM_HOME } : {}),
+    ...childEnv,
+  };
+}
+
 export function runCli(args, { cwd, env = {}, quotaPreflight = false, config = {} } = {}) {
   const { configDir, childEnv } = configOverlay(env, quotaPreflight, config);
   try {
     return spawnSync(process.execPath, [CLI, ...args], {
       cwd,
       encoding: "utf8",
-      timeout: 60000,
+      timeout: CLI_TIMEOUT_MS,
       windowsHide: true,
-      env: {
-        ...process.env,
-        PATH: SHIMS + delimiter + process.env.PATH,
-        Path: SHIMS + delimiter + (process.env.Path || process.env.PATH),
-        // Pin the append-only stdout contract: the suite may itself be running
-        // inside a repainting harness, whose CLAUDECODE would otherwise leak in.
-        SWARM_REPAINT: "0",
-        // The child reads ~/.claude for Claude's model catalog; an unpinned home would
-        // read the developer's real machine and pass only where that dir is absent.
-        ...(childEnv.SWARM_HOME ? { HOME: childEnv.SWARM_HOME, USERPROFILE: childEnv.SWARM_HOME } : {}),
-        ...childEnv,
-      },
+      env: runEnv(childEnv),
     });
   } finally {
     if (configDir) rmSync(configDir, { recursive: true, force: true });
@@ -66,17 +74,9 @@ export function runCliAsync(args, { cwd, env = {}, quotaPreflight = false, confi
   return new Promise((resolve) => {
     const child = spawn(process.execPath, [CLI, ...args], {
       cwd,
+      timeout: CLI_TIMEOUT_MS,
       windowsHide: true,
-      env: {
-        ...process.env,
-        PATH: SHIMS + delimiter + process.env.PATH,
-        Path: SHIMS + delimiter + (process.env.Path || process.env.PATH),
-        SWARM_REPAINT: "0",
-        // The child reads ~/.claude for Claude's model catalog; an unpinned home would
-        // read the developer's real machine and pass only where that dir is absent.
-        ...(childEnv.SWARM_HOME ? { HOME: childEnv.SWARM_HOME, USERPROFILE: childEnv.SWARM_HOME } : {}),
-        ...childEnv,
-      },
+      env: runEnv(childEnv),
     });
     let stdout = "";
     let stderr = "";
@@ -89,15 +89,103 @@ export function runCliAsync(args, { cwd, env = {}, quotaPreflight = false, confi
   });
 }
 
+// One at a time: the sink, cwd and env it swaps are process-wide.
+let inProcessQueue = Promise.resolve();
+
+export const RESET_MODULES = [
+  "../../src/rate-card.mjs",
+  "../../src/taken.mjs",
+  "../../src/serve/logos.mjs",
+  "../../src/scheduler/loop-stall.mjs",
+];
+
+async function resetModuleCaches() {
+  for (const spec of RESET_MODULES) (await import(spec)).resetForTests();
+}
+
+const MISSING = Symbol("missing");
+
+// The env the call swapped in, and the restore. Only touched keys are restored,
+// so a caller's own env survives untouched.
+function applyEnv(target) {
+  const changed = [];
+  for (const [key, value] of Object.entries(target)) {
+    if (process.env[key] === value) continue;
+    changed.push([key, Object.hasOwn(process.env, key) ? process.env[key] : MISSING]);
+    process.env[key] = value;
+  }
+  return () => {
+    for (const [key, prev] of changed) {
+      if (prev === MISSING) delete process.env[key];
+      else process.env[key] = prev;
+    }
+  };
+}
+
+function capture() {
+  const buf = { text: "" };
+  // isTTY left undefined: a captured sink is a pipe, which is what a spawned
+  // call's stdout is too — so colour and repaint resolve identically.
+  buf.sink = { write: (s) => { buf.text += s; return true; } };
+  return buf;
+}
+
+async function callInProcess(args, { cwd, env, quotaPreflight, config, timeoutMs = CLI_TIMEOUT_MS }) {
+  // `serve` arms process.exit (cmd-serve.mjs exitSoon); in-process it would kill the runner.
+  if (args[0] === "serve") throw new Error("runCliInProcess refuses `serve`: it arms process.exit and would kill the test runner — spawn it with runCli");
+  const { configDir, childEnv } = configOverlay(env, quotaPreflight, config);
+  const out = capture();
+  const err = capture();
+  const restoreEnv = applyEnv(runEnv(childEnv));
+  const cwdBefore = process.cwd();
+  const restoreAll = async () => {
+    process.chdir(cwdBefore);
+    restoreEnv();
+    if (configDir) rmSync(configDir, { recursive: true, force: true });
+    await resetModuleCaches();
+  };
+  try {
+    if (cwd) process.chdir(cwd);
+    const { main } = await import("../../scripts/swarm.mjs");
+    let timer;
+    const running = main(args, { stdout: out.sink, stderr: err.sink });
+    // An abandoned main keeps swapping the process-wide sink, cwd and env, so cleanup
+    // and the next queued call wait for it; the timeout bounds the caller only.
+    const settled = running.then(restoreAll, restoreAll);
+    const promise = Promise.race([
+      running.then((status) => ({ status, stdout: out.text, stderr: err.text })),
+      new Promise((_, reject) => {
+        timer = setTimeout(() => reject(new Error(`runCliInProcess timed out after ${timeoutMs} ms: ${args.join(" ")}`)), timeoutMs);
+      }),
+    ]).finally(() => clearTimeout(timer));
+    return { promise, settled };
+  } catch (e) {
+    await restoreAll();
+    throw e;
+  }
+}
+
+export function runCliInProcess(args, opts = {}) {
+  const call = inProcessQueue.then(() => callInProcess(args, opts));
+  inProcessQueue = call.then(({ settled }) => settled, () => {});
+  return call.then(({ promise }) => promise);
+}
+
 // The dispatch gate refuses `run` on a manifest whose exact bytes were never
 // validated, so every run-path row validates first — same ref, same --args. A
 // refusal here is a broken fixture, not the row's subject: throw rather than let
 // the row assert against the gate's own message.
 export function runValidated(args, opts = {}) {
+  const call = opts.inProcess ? runCliInProcess : opts.async ? runCliAsync : runCli;
+  const proceed = (v, ref) => {
+    if (v.status !== 0) throw new Error(`runValidated: validate refused ${ref} (${v.status}):\n${v.stdout}${v.stderr}`);
+    return call(args, opts);
+  };
   const ref = args[1];
-  if (!ref || ref.startsWith("--")) return opts.async ? runCliAsync(args, opts) : runCli(args, opts);
+  if (!ref || ref.startsWith("--")) return call(args, opts);
   const i = args.indexOf("--args");
-  const v = runCli(["validate", ref, ...(i < 0 ? [] : ["--args", args[i + 1]])], opts);
-  if (v.status !== 0) throw new Error(`runValidated: validate refused ${ref} (${v.status}):\n${v.stdout}${v.stderr}`);
-  return opts.async ? runCliAsync(args, opts) : runCli(args, opts);
+  const refArgs = ["validate", ref, ...(i < 0 ? [] : ["--args", args[i + 1]])];
+  const v = call(refArgs, opts);
+  // Async runners can only be sequenced through the promise; a spawn is already done.
+  return opts.inProcess || opts.async ? v.then((r) => proceed(r, ref)) : proceed(v, ref);
 }

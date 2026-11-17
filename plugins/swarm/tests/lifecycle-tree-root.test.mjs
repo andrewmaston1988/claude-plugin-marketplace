@@ -13,7 +13,7 @@ import { prepareIsolation, treeDirFor, WORKTREE_ADD_TIMEOUT_MS } from "../src/wo
 import { swarmHome, runsKeyFor } from "../src/config.mjs";
 import { listRuns, readRun } from "../src/runlog.mjs";
 import { buildSnapshot } from "../src/serve/estate.mjs";
-import { runCli } from "./helpers/cli.mjs";
+import { runCliInProcess } from "./helpers/cli.mjs";
 import { gitOut } from "./helpers/cli-fixture.mjs";
 import { initRepo, cleanup, commitAll, dropWorktree, CFG, ADD } from "./helpers/worktree-fixtures.mjs";
 
@@ -149,7 +149,7 @@ test("the nudge stays silent for a live run holding a scratch-dir tree", () => {
   }
 });
 
-test("prune (CLI) removes an unrecorded new-layout run's tree and branch", () => {
+test("prune (CLI) removes an unrecorded new-layout run's tree and branch", async () => {
   const repo = initRepo();
   const dir = runDir("cli-prune-scratch");
   let wt;
@@ -158,7 +158,7 @@ test("prune (CLI) removes an unrecorded new-layout run's tree and branch", () =>
     finishRun(dir, { kept: [] , summary: {} });
     writeFileSync(join(dir, "manifest.json"), JSON.stringify({ resultsDir: dir, cwd: repo, tasks: [] }));
 
-    const r = runCli(["prune", dir], { cwd: repo });
+    const r = await runCliInProcess(["prune", dir], { cwd: repo });
     equal(r.status, 0, r.stdout + r.stderr);
     ok(r.stdout.includes(wt.path), `prune must name the tree it removed: ${r.stdout}`);
     ok(existsSync(wt.path) === false, "the tree under treeRoot must be gone");
@@ -170,7 +170,7 @@ test("prune (CLI) removes an unrecorded new-layout run's tree and branch", () =>
   }
 });
 
-test("prune (CLI) removes a recorded tree's record and empty treeRoot parents", () => {
+test("prune (CLI) removes a recorded tree's record and empty treeRoot parents", async () => {
   const repo = initRepo();
   const name = "cli-prune-recorded";
   // Its own project key: the shipped default root is shared with the rows above,
@@ -190,7 +190,7 @@ test("prune (CLI) removes a recorded tree's record and empty treeRoot parents", 
 
     const record = join(dir, "trees", "impl.json");
     ok(existsSync(record), "prepareIsolation wrote the tree record");
-    const r = runCli(["prune", dir], { cwd: repo, env: { SWARM_HOME: swarmHome() } });
+    const r = await runCliInProcess(["prune", dir], { cwd: repo, env: { SWARM_HOME: swarmHome() } });
     equal(r.status, 0, r.stdout + r.stderr);
     ok(r.stdout.includes(wt.path), `prune must name the tree it removed: ${r.stdout}`);
     deepEqual([
@@ -206,7 +206,7 @@ test("prune (CLI) removes a recorded tree's record and empty treeRoot parents", 
   }
 });
 
-test("swarm stop on a dead engine records the scratch-dir tree and prints its prune hint", () => {
+test("swarm stop on a dead engine records the scratch-dir tree and prints its prune hint", async () => {
   const repo = initRepo();
   const dir = runDir("cli-stop-scratch");
   let wt;
@@ -226,7 +226,7 @@ test("swarm stop on a dead engine records the scratch-dir tree and prints its pr
     utimesSync(runLog, stale, stale);
     utimesSync(heartbeat, stale, stale);
 
-    const r = runCli(["stop", dir], { cwd: repo });
+    const r = await runCliInProcess(["stop", dir], { cwd: repo });
     equal(r.status, 0, r.stdout + r.stderr);
     ok(r.stdout.includes(wt.path), `the dead-engine record must name the tree: ${r.stdout}`);
     ok(r.stdout.includes("prune when done"), r.stdout);

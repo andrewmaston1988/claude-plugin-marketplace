@@ -4,7 +4,7 @@ import { deepEqual, equal, ok } from "node:assert/strict";
 import { mkdtempSync, rmSync, writeFileSync, readFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { runCli } from "./helpers/cli.mjs";
+import { runCliInProcess } from "./helpers/cli.mjs";
 import { ASPECTS } from "../src/aspects.mjs";
 import { OUTCOME_CHOICES, buildSkeleton, noteFor, outcomeFor, tldrLine } from "../src/grade-init.mjs";
 
@@ -110,11 +110,11 @@ test("buildSkeleton pre-fills outcome and note per leaf, and never a grade", () 
   }
 });
 
-test("grade --init writes pre-filled rows and still refuses to be appended unfilled", () => {
+test("grade --init writes pre-filled rows and still refuses to be appended unfilled", async () => {
   const dir = tmp();
   try {
     const run = fakeRun(dir);
-    const r = runCli(["grade", "--init", run], { cwd: dir, env: { SWARM_HOME: join(dir, "home") } });
+    const r = await runCliInProcess(["grade", "--init", run], { cwd: dir, env: { SWARM_HOME: join(dir, "home") } });
     equal(r.status, 0, r.stderr);
     const batch = JSON.parse(readFileSync(join(run, "grades.json"), "utf8"));
     deepEqual(batch.rows.map((row) => row.leaf).sort(), ["broke", "clean", "silent", "slow"], "only leaves from this run's manifest get grade rows");
@@ -126,7 +126,7 @@ test("grade --init writes pre-filled rows and still refuses to be appended unfil
     equal(by.silent.outcome, PLACEHOLDER, "a silent leaf keeps the placeholder");
     equal(by.silent.note, "", "a silent leaf has no claim to quote");
     // the skeleton is still a form, not a grade
-    const unfilled = runCli(["grade", "--file", join(run, "grades.json")], { cwd: dir, env: { SWARM_HOME: join(dir, "home") } });
+    const unfilled = await runCliInProcess(["grade", "--file", join(run, "grades.json")], { cwd: dir, env: { SWARM_HOME: join(dir, "home") } });
     ok(unfilled.status !== 0, "an untouched skeleton must not append to the store");
   } finally {
     rmSync(dir, { recursive: true, force: true });

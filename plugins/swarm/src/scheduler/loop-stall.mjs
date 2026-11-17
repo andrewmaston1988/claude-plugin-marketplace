@@ -11,6 +11,7 @@ const MIN_STALL_MS = 100;
 let totalMs = 0;
 let lastTickMs = 0;
 let started = false;
+let interval;
 
 function tick() {
   const now = Date.now();
@@ -24,8 +25,18 @@ function start() {
   if (started) return;
   started = true;
   lastTickMs = Date.now();
-  const interval = setInterval(tick, TICK_MS);
+  interval = setInterval(tick, TICK_MS);
   if (interval.unref) interval.unref();
+}
+
+// Stalls accrue per process; an in-process CLI call must not inherit the previous
+// one's total, and the armed timer has to go with it or a second would start.
+export function resetForTests() {
+  if (interval) clearInterval(interval);
+  interval = undefined;
+  totalMs = 0;
+  lastTickMs = 0;
+  started = false;
 }
 
 // Every stall so far, plus the one still in progress at the moment of the call: the

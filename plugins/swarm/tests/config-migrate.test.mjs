@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { initConfig, loadConfig, setConfigValue } from "../src/config.mjs";
-import { runCli } from "./helpers/cli.mjs";
+import { runCliInProcess } from "./helpers/cli.mjs";
 
 function tmp() {
   return mkdtempSync(join(tmpdir(), "swarm-cfgmig-"));
@@ -269,14 +269,14 @@ test("initConfig backs up the pre-migration file, and does not churn a backup wi
 
 // --- the CLI surface: the rewrite is silent on disk unless it says what it did ---
 
-test("config init prints the mapping it applied and where the previous file went", () => {
+test("config init prints the mapping it applied and where the previous file went", async () => {
   const dir = tmp();
   try {
     const home = join(dir, "home");
     mkdirSync(home, { recursive: true });
     const p = join(home, "config.json");
     writeFileSync(p, JSON.stringify({ provider: { url: "http://legacy" }, codex: { enabled: true } }));
-    const r = runCli(["config", "init"], { cwd: dir, env: { SWARM_HOME: home, SWARM_CONFIG: p } });
+    const r = await runCliInProcess(["config", "init"], { cwd: dir, env: { SWARM_HOME: home, SWARM_CONFIG: p } });
     equal(r.status, 0, r.stderr);
     ok(/"provider"\s+-> "providers\.ollama"/.test(r.stdout), r.stdout);
     ok(/"codex"\s+-> "providers\.codex"/.test(r.stdout), r.stdout);
@@ -331,7 +331,7 @@ test("setConfigValue writes a valid value, keeps every other line, and the next 
   }
 });
 
-test("config init exits non-zero and says nothing was written when the migration is refused", () => {
+test("config init exits non-zero and says nothing was written when the migration is refused", async () => {
   const dir = tmp();
   try {
     const home = join(dir, "home");
@@ -339,7 +339,7 @@ test("config init exits non-zero and says nothing was written when the migration
     const p = join(home, "config.json");
     const before = JSON.stringify({ provider: { enabled: "yes" } });
     writeFileSync(p, before);
-    const r = runCli(["config", "init"], { cwd: dir, env: { SWARM_HOME: home, SWARM_CONFIG: p } });
+    const r = await runCliInProcess(["config", "init"], { cwd: dir, env: { SWARM_HOME: home, SWARM_CONFIG: p } });
     ok(r.status !== 0, `a refused migration must not report success:\n${r.stdout}`);
     ok(r.stderr.includes("cannot migrate") && r.stderr.includes("Nothing was written"), r.stderr);
     equal(read(p), before);

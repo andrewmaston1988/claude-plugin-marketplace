@@ -4,6 +4,7 @@
 const TIMEOUT = 60000;
 const TOUCHING_SCAN_CAP = 20;
 const MERGE_TREE_MIN_VERSION = [2, 38];
+const MERGE_TREE_BATCH_VERSION = [2, 39];
 
 export function gitOf(gitRunner, args, repo, opts = {}) {
   return gitRunner(args, repo, { timeout: TIMEOUT, ...opts });
@@ -134,8 +135,8 @@ function readMergeTreeSupport(repo, gitRunner) {
   const m = /(\d+)\.(\d+)/.exec(r.stdout);
   if (!m) throw new Error(`git version unreadable: ${r.stdout}`);
   const [major, minor] = [Number(m[1]), Number(m[2])];
-  return major > MERGE_TREE_MIN_VERSION[0]
-    || (major === MERGE_TREE_MIN_VERSION[0] && minor >= MERGE_TREE_MIN_VERSION[1]);
+  const atLeast = ([needMajor, needMinor]) => major > needMajor || (major === needMajor && minor >= needMinor);
+  return { writeTree: atLeast(MERGE_TREE_MIN_VERSION), batch: atLeast(MERGE_TREE_BATCH_VERSION) };
 }
 
 // A clean merge of `branch` into `commit` that reproduces `commit`'s tree: the
@@ -151,6 +152,46 @@ export function absorbedAt(commit, branch, repo, gitRunner) {
   return !!written && written === tree.stdout.split(/\r?\n/)[0]?.trim();
 }
 
+function* batchRows(output) {
+  const fields = output.split("\0");
+  let i = 0;
+  const take = () => {
+    if (i >= fields.length - 1) throw new Error("truncated merge-tree batch output");
+    return fields[i++];
+  };
+  while (i < fields.length - 1) {
+    const status = take();
+    const tree = take();
+    if (!/^[01]$/.test(status) || !/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/i.test(tree)) {
+      throw new Error("malformed merge-tree batch row");
+    }
+    if (status === "0") {
+      while (take() !== "") {}
+      while (take() !== "") {}
+    } else if (take() !== "") {
+      throw new Error("malformed clean merge-tree row");
+    }
+    yield { clean: status === "1", tree };
+  }
+}
+
+function absorbedBatch(commits, branch, repo, gitRunner, files) {
+  const treesResult = gitOf(gitRunner, ["rev-parse", ...commits.map((commit) => `${commit}^{tree}`)], repo);
+  if (treesResult.status !== 0) fail("rev-parse merge-tree batch", treesResult);
+  const trees = lines(treesResult.stdout);
+  if (trees.length !== commits.length) throw new Error("truncated rev-parse merge-tree batch");
+  const input = commits.map((commit) => `${commit} ${branch}`).join("\n") + "\n";
+  const merged = gitOf(gitRunner, ["merge-tree", "--write-tree", "--stdin", "-z"], repo, { input });
+  const rows = batchRows(merged.stdout);
+  for (let i = 0; i < commits.length; i++) {
+    const row = rows.next();
+    if (row.done) throw new Error("truncated merge-tree batch output");
+    if (row.value.clean && row.value.tree === trees[i]) return !files.length || !hasMergeDriver(files, repo, gitRunner);
+  }
+  if (!rows.next().done) throw new Error("extra merge-tree batch rows");
+  if (merged.status !== 0) fail("merge-tree batch", merged);
+  return false;
+}
 // merge-tree honours `.gitattributes` merge drivers, so a `merge=ours` path
 // silently takes the base's side. Any touched path carrying one makes tree
 // equality worthless as evidence.
@@ -194,7 +235,8 @@ function touchingCommits(fork, base, files, repo, gitRunner) {
 // touched the branch's files, newest first — the squash itself, once later
 // commits have moved the same files on.
 export function absorbed(base, branch, repo, gitRunner) {
-  if (!supportsMergeTree(repo, gitRunner)) return false;
+  const support = supportsMergeTree(repo, gitRunner);
+  if (!support.writeTree) return false;
   const mb = gitOf(gitRunner, ["merge-base", base, branch], repo);
   if (mb.status === 1) return false;
   if (mb.status !== 0) fail(`merge-base ${base} ${branch}`, mb);
@@ -202,6 +244,10 @@ export function absorbed(base, branch, repo, gitRunner) {
   if (diff.status !== 0) fail(`diff ${mb.stdout} ${branch}`, diff);
   const files = lines(diff.stdout);
 
+  if (support.batch) {
+    const touching = files.length ? touchingCommits(mb.stdout, base, files, repo, gitRunner) : [];
+    return absorbedBatch([base, ...touching], branch, repo, gitRunner, files);
+  }
   if (absorbedByTree(base, branch, repo, gitRunner, files)) return true;
   if (!files.length) return false;
   const touching = touchingCommits(mb.stdout, base, files, repo, gitRunner);

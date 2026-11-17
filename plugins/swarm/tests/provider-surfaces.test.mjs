@@ -16,7 +16,7 @@ import { runPlan } from "../src/scheduler.mjs";
 import { makeIo, fakeSpawnFactory } from "./helpers/fake-io.mjs";
 import { readCachedUsage } from "../src/usage.mjs";
 import { cmdModels, cmdUsage, readProviderUsage } from "../scripts/swarm.mjs";
-import { runCli } from "./helpers/cli.mjs";
+import { runCliInProcess } from "./helpers/cli.mjs";
 import { readRunLog } from "../src/runlog.mjs";
 import { readResult, readSummary } from "../src/results.mjs";
 import { buildSnapshot } from "../src/serve/estate.mjs";
@@ -124,7 +124,7 @@ test("a fourth provider crosses discovery, usage, manifest, scheduler, persisten
     }), 0);
     ok(usageLines.some((line) => line.includes("fixture weekly")), usageLines.join("\n"));
 
-    const init = runCli(["grade", "--init", plan.resultsDir], { cwd: root, env });
+    const init = await runCliInProcess(["grade", "--init", plan.resultsDir], { cwd: root, env });
     equal(init.status, 0, init.stderr);
     const gradesPath = join(plan.resultsDir, "grades.json");
     const grades = JSON.parse(readFileSync(gradesPath, "utf8"));
@@ -135,7 +135,7 @@ test("a fourth provider crosses discovery, usage, manifest, scheduler, persisten
       row.grades = Object.fromEntries(Object.keys(row.grades).map((key) => [key, 8]));
     }
     writeFileSync(gradesPath, JSON.stringify(grades, null, 2) + "\n");
-    const landed = runCli(["grade", "--file", gradesPath], { cwd: root, env });
+    const landed = await runCliInProcess(["grade", "--file", gradesPath], { cwd: root, env });
     equal(landed.status, 0, landed.stderr);
     const scoreRows = readFileSync(join(home, "model-scores.jsonl"), "utf8")
       .trim().split("\n").map((line) => JSON.parse(line));
