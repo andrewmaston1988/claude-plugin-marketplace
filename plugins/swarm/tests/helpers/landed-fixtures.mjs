@@ -29,6 +29,9 @@ export function importTouchingCommits(repo, { path, count }) {
       + `M 100644 inline ${path}\ndata ${Buffer.byteLength(body)}\n${body}`;
   }
   run(["fast-import", "--quiet", "--done"], repo, `${stream}done\n`);
+  // fast-import moves the branch, not the index or worktree: without this a later
+  // `git add .` stages the pre-import content back over the imported history.
+  run(["read-tree", "-u", "--reset", "HEAD"], repo);
 }
 
 // Long enough that a few hundred of these names push the joined path list past
