@@ -222,8 +222,7 @@ test("run: 3-task fan-out + digest end-to-end via the claude shim", async () => 
       ],
       digest: { provider: "claude", model: "claude-haiku-4-5-20251001", instructions: "focus on X" },
     }));
-    const r = await runValidated(["run", manifest], {
-      inProcess: true,
+    const r = await runValidated(["run", manifest], { inProcess: true,
       cwd: dir,
       quotaPreflight: false,
       env: { SWARM_HOME: home, SWARM_SHIM_LOG: shimLog, SWARM_SHIM_OUTPUT: "leaf-output-text" },
@@ -607,8 +606,7 @@ test("run: prints the absolute resultsDir and the watch command at dispatch", as
       resultsDir: "out",
       tasks: [{ id: "a", prompt: "x", provider: "claude", model: "claude-haiku-4-5-20251001" }],
     }));
-    const r = await runValidated(["run", manifest], {
-      inProcess: true,
+    const r = await runValidated(["run", manifest], { inProcess: true,
       cwd: dir,
       env: { SWARM_HOME: join(dir, "home"), SWARM_SHIM_OUTPUT: "done" },
     });
@@ -984,8 +982,7 @@ test("run: stream-json shim -> tokens flow to roster, closing block, and summary
         { id: "t2", prompt: "y", provider: "claude", model: "claude-haiku-4-5-20251001" },
       ],
     }));
-    const r = await runValidated(["run", manifest], {
-      inProcess: true,
+    const r = await runValidated(["run", manifest], { inProcess: true,
       cwd: dir,
       quotaPreflight: false,
       env: { SWARM_HOME: join(dir, "home"), SWARM_SHIM_STREAM: "1", SWARM_SHIM_OUTPUT: "answer text" },
@@ -1088,8 +1085,7 @@ test("run: forEach expands end-to-end via the shim; validate previews worst-case
     ok(v.stdout.includes("worst case: up to 2 leaves"), v.stdout);
     ok(v.stdout.includes("fix ≤ 1"), v.stdout);
 
-    const r = await runValidated(["run", manifest], {
-      inProcess: true,
+    const r = await runValidated(["run", manifest], { inProcess: true,
       cwd: dir,
       env: { SWARM_HOME: join(dir, "home"), SWARM_SHIM_OUTPUT: '{"sites":[{"f":"a"},{"f":"b"}]}' },
     });
@@ -1240,8 +1236,7 @@ test("run: closing tokens line compares actual vs estimate; projection warn reac
         { id: "y", prompt: "b", provider: "claude", model: "claude-haiku-4-5-20251001" },
       ],
     }));
-    const r = await runValidated(["run", p], {
-      inProcess: true,
+    const r = await runValidated(["run", p], { inProcess: true,
       cwd: dir,
       env: { SWARM_HOME: home, SWARM_CONFIG: cfgPath, SWARM_SHIM_STREAM: "1" },
     });
@@ -1373,8 +1368,7 @@ test("run: named manifest end-to-end — args substituted into the dispatched le
       tasks: [{ id: "a", prompt: "say {{args.word}}", provider: "claude", model: "claude-haiku-4-5-20251001" }],
     }));
     const shimLog = join(dir, "w1-shim.log");
-    const r = await runValidated(["run", "w1-run", "--args", '{"word":"hello"}'], {
-      inProcess: true,
+    const r = await runValidated(["run", "w1-run", "--args", '{"word":"hello"}'], { inProcess: true,
       cwd: dir, quotaPreflight: false, env: { SWARM_HOME: home, SWARM_SHIM_LOG: shimLog },
     });
     equal(r.status, 0, `stderr: ${r.stderr}\nstdout: ${r.stdout}`);
