@@ -9,6 +9,10 @@ const DEFAULT_CLIENT_INFO = {
   version: "0.1.0",
 };
 
+// Bounded so a child that keeps failing writes cannot grow the diagnostic array
+// without limit.
+const LATE_ERROR_CAP = 5;
+
 function asError(value, fallback = "Codex app-server request failed") {
   if (value instanceof Error) return value;
   if (typeof value === "string") return new Error(value);
@@ -112,10 +116,11 @@ export function createCodexAppServerClient({
   }
 
   function closeWith(error = null) {
-    // A real cause arriving after close is still the only explanation for why.
-    // An uncoded second close (the ordinary idempotent call) records nothing.
+    // The rejected promise has already settled, so a cause arriving after close is
+    // kept in diagnostics rather than attached to it. An uncoded second close (the
+    // ordinary idempotent call) records nothing.
     if (closed) {
-      if (error?.code && lateErrors.length < 5) {
+      if (error?.code && lateErrors.length < LATE_ERROR_CAP) {
         lateErrors.push({ code: error.code, message: error.message });
       }
       return;

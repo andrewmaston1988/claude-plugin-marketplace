@@ -112,8 +112,10 @@ test("both in-flight requests reject with the stdin error across a stall", async
   try {
     const first = client.request("account/usage/read");
     const second = client.request("account/rateLimits/read");
-    stall(40);
+    // Queued before the stall so the failure is already ahead of the expired deadline
+    // in the queue; queued after, the order depends on the phase the runner started in.
     setImmediate(held.failHeldWrite);
+    stall(40);
     const errors = await Promise.all([
       first.catch((error) => error),
       second.catch((error) => error),
@@ -185,17 +187,22 @@ test("a write that never calls back still times out", async () => {
   }
 });
 
+// Hundreds of ms past the deadline, not the 20 the first version left: a 40 ms
+// busy-wait can be preempted by a scheduler jitter of that size, and a resume inside
+// the window lets the stdin EPIPE win the race this test exists to order.
+const LATE_STDIN_ERROR_MS = 300;
+
 test("a stdin error after close is recorded and a plain double close records nothing", async () => {
   const client = createCodexAppServerClient({
     timeoutMs: 30,
-    spawnImpl: () => childWithLateStdinError(60),
+    spawnImpl: () => childWithLateStdinError(LATE_STDIN_ERROR_MS),
   });
   try {
     const request = client.request("account/usage/read");
     stall(40);
     const error = await request.catch((caught) => caught);
     equal(error.code, "ETIMEDOUT");
-    await new Promise((resolve) => setTimeout(resolve, 40));
+    await new Promise((resolve) => setTimeout(resolve, LATE_STDIN_ERROR_MS));
     equal(client.diagnostics.lateErrors.length, 1);
     equal(client.diagnostics.lateErrors[0].code, "EPIPE");
   } finally {
