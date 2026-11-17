@@ -231,19 +231,6 @@ export function mutexConflict({ existingSubject, requested }) {
   return existingSubject !== requested;
 }
 
-// Machine-readable lines the SKILL.md tells Claude to mirror into the harness task
-// list. The progress record is the source of truth; the session list is a projection.
-export function taskLines(kind, steps, { index, status } = {}) {
-  if (kind === "create") {
-    return steps.map((s) => `[TASK_CREATE] merge: ${s}`).join("\n") + "\n";
-  }
-  if (kind === "update") return `[TASK_UPDATE] ${index} ${status}\n`;
-  if (kind === "delete") {
-    return steps.map((_s, i) => `[TASK_DELETE] ${i}`).join("\n") + "\n";
-  }
-  return "";
-}
-
 // Read the world for each guarded step.
 export function observeWorld(projectDir, branches, targetBranch, plansDir, project) {
   // Two probes, in the order the orchestrator uses: `ancestor` is fast but blind to

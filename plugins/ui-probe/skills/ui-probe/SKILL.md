@@ -142,6 +142,11 @@ A `failed` step may carry a failure type when the target itself was the problem:
   centre, usually a modal or a sticky bar — not that the target is off screen. Close it, or pick another
   target.
 - `write_blocked` — the target submits a non-GET form and the guard refused it. That is the guard working.
+- `focus_failed` — a `type` target would not take focus, or a `type` with no `target` found nothing editable
+  focused (the page's `body`, or anything that is not an `input`, `textarea` or contenteditable). The characters
+  would land nowhere, so the step fails rather than passing. Give the target a `tabindex`, or focus it with a
+  `click` first and type with no `target`.
+- `insert_failed` — the browser refused `Input.insertText`, usually because the page went away mid-step.
 
 Exit codes, which tell you what to do next:
 
@@ -288,6 +293,23 @@ matches, carrying that frame's index and time into the result. A window that nev
 `frame.index: -1` and `frame.frames` — the number of frames sampled, not a time. Without it the assertion
 polls until `timeoutMs` (default 5000) — use `timeoutMs: 0` for a single deliberate sample. A `display` flip
 has no animation to query; the frames are the only instrument that sees it.
+
+### Typing into a field
+
+```yaml
+id: search-narrows
+backend: browser
+steps:
+  - open: { url: "/media" }
+  - type: { target: "#search", text: "dune" }
+  - expect_text: { target: "#results-count", equals: "3" }
+```
+
+`type` sends one `Input.insertText` per character, so a page that narrows or debounces per keypress sees each
+character's own `input` event; `gapMs` spaces them and defaults to 0. `target` focuses the element first,
+failing `not_found`, `ambiguous_target` or `focus_failed`; omit it to type into whatever already holds focus,
+which must be an `input`, `textarea` or contenteditable or the step fails `focus_failed`.
+The step reports what it typed into as `measured` — the field's `value`, or a contenteditable's `textContent`.
 
 ### A page with no browser at all
 
