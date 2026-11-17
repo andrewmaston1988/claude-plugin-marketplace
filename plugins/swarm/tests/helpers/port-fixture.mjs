@@ -1,8 +1,16 @@
 // A real repo with a finished run's leaf worktree (swarm/<run>/<id>) and a separate
 // porting worktree on a named branch — the shape the port nudge exists for.
+//
+// A fixture is a repo + worktrees + run records, which costs seconds to build. One
+// template per shape is built per process and every call copies it: a copy needs the
+// two path-keyed names renamed, the files that embed the home path rewritten, and each
+// copied worktree rebound with `git worktree repair`.
 import { spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import {
+  cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync,
+  rmSync, statSync, utimesSync, writeFileSync,
+} from "node:fs";
+import { basename, join, relative } from "node:path";
 import { tmpdir } from "node:os";
 import { realRepoToplevel } from "../../src/manifest-leaf-guard.mjs";
 import { runsKeyFor } from "../../src/config.mjs";
@@ -33,13 +41,30 @@ export function publishDefault(repo, { branch = "main", remote = "origin" } = {}
   must(["symbolic-ref", `refs/remotes/${remote}/HEAD`, `refs/remotes/${remote}/${branch}`], repo);
 }
 
-export function portFixture() {
-  const home = mkdtempSync(join(tmpdir(), "port-nudge-"));
-  const repo = join(home, "repo");
-  mkdirSync(repo, { recursive: true });
-  must(["init", "-q", "-b", "main"], repo);
-  writeCommit(repo, "a.txt", "base\n", "init");
-  const toplevel = realRepoToplevel(repo) || repo;
+// Templates live under SWARM_HOME: isolate-home.mjs removes it at process exit, so nothing
+// outlives the run.
+function templateRoot() {
+  const root = join(process.env.SWARM_HOME || tmpdir(), "swarm-fixture-templates");
+  mkdirSync(root, { recursive: true });
+  return root;
+}
+
+const readdirSafe = (dir) => { try { return readdirSync(dir); } catch { return []; } };
+
+function jsonFiles(dir, out = []) {
+  let entries;
+  try { entries = readdirSync(dir, { withFileTypes: true }); } catch { return out; }
+  for (const e of entries) {
+    const p = join(dir, e.name);
+    if (e.isDirectory()) jsonFiles(p, out);
+    else if (e.name.endsWith(".json")) out.push(p);
+  }
+  return out;
+}
+
+// The fixture API over one home. Everything path-shaped derives from `home`/`repo`, so a
+// copy is a new home handed to this same builder.
+function makeFixture(home, repo, toplevel = realRepoToplevel(repo) || repo) {
   const runsRoot = join(home, "runs", runsKeyFor(toplevel));
   const cfg = { worktreeBranchPrefix: "swarm/", treeRoot: join(home, "worktrees") };
   const spawn = spawnSync;
@@ -117,10 +142,109 @@ export function portFixture() {
   };
 }
 
+// Every form the home path takes on disk: raw, git's forward-slash rendering, and the
+// JSON-escaped one the three record files hold.
+function pathForms(from, to) {
+  return [
+    [from, to],
+    [from.replaceAll("\\", "/"), to.replaceAll("\\", "/")],
+    [JSON.stringify(from).slice(1, -1), JSON.stringify(to).slice(1, -1)],
+  ];
+}
+
+// The five kinds of file a build writes the home prefix into: each linked worktree's
+// `.git`, its admin `gitdir`, and the run's manifest, summary and per-tree records.
+// The rest of `.git` holds relative pointers or content, and `run.log` a session id.
+function pathEmbeddedFiles(home, repo, runsRoot) {
+  const files = [];
+  const adminDir = join(repo, ".git", "worktrees");
+  for (const name of readdirSafe(adminDir)) {
+    for (const file of [join(home, name, ".git"), join(adminDir, name, "gitdir")]) {
+      if (existsSync(file)) files.push(file);
+    }
+  }
+  return jsonFiles(runsRoot, files);
+}
+
+function rewritePaths(file, oldHome, newHome, oldKey, newKey) {
+  const before = statSync(file);
+  const text = readFileSync(file, "utf8");
+  let next = text;
+  for (const [from, to] of pathForms(oldHome, newHome)) next = next.split(from).join(to);
+  if (oldKey !== newKey) next = next.split(oldKey).join(newKey);
+  if (next === text) return;
+  // Windows refuses to truncate the hidden `.git` file git writes, so the copy is replaced
+  // rather than opened for write.
+  rmSync(file);
+  writeFileSync(file, next);
+  // runLiveness trusts summary.json only while its mtime is not older than run.log's.
+  utimesSync(file, before.atime, before.mtime);
+}
+
+// The runs dir and the taken log are keyed by the repo toplevel, so a copy needs both
+// renamed or its records are invisible to the copy's own key.
+function renameKeyed(home, oldKey, newKey) {
+  if (oldKey === newKey) return;
+  const runsDir = join(home, "runs");
+  if (existsSync(join(runsDir, oldKey))) renameSync(join(runsDir, oldKey), join(runsDir, newKey));
+  const takenDir = join(home, "taken");
+  for (const name of readdirSafe(takenDir)) {
+    if (!name.startsWith(`${oldKey}.jsonl`)) continue;
+    renameSync(join(takenDir, name), join(takenDir, `${newKey}${name.slice(oldKey.length)}`));
+  }
+}
+
+function repairWorktrees(home, repo) {
+  // The admin dir's basename IS the linked worktree's dirname. The main worktree's path
+  // derives from cwd, and passing it fails — only the linked ones need repair.
+  for (const name of readdirSafe(join(repo, ".git", "worktrees"))) {
+    must(["worktree", "repair", join(home, name)], repo);
+  }
+}
+
+function copyHome(template, { root = tmpdir(), prefix = "port-nudge-" } = {}) {
+  mkdirSync(root, { recursive: true });
+  const home = mkdtempSync(join(root, prefix));
+  cpSync(template.home, home, { recursive: true, preserveTimestamps: true });
+  const repo = join(home, "repo");
+  const toplevel = realRepoToplevel(repo) || repo;
+  const oldKey = basename(template.runsRoot);
+  const newKey = runsKeyFor(toplevel);
+  renameKeyed(home, oldKey, newKey);
+  for (const file of pathEmbeddedFiles(home, repo, join(home, "runs", newKey))) {
+    rewritePaths(file, template.home, home, oldKey, newKey);
+  }
+  repairWorktrees(home, repo);
+  return { home, repo, toplevel };
+}
+
+let portBase = null;
+
+function buildPortBase() {
+  const home = mkdtempSync(join(templateRoot(), "base-"));
+  const repo = join(home, "repo");
+  mkdirSync(repo, { recursive: true });
+  must(["init", "-q", "-b", "main"], repo);
+  writeCommit(repo, "a.txt", "base\n", "init");
+  return makeFixture(home, repo);
+}
+
+const portTemplate = () => (portBase ??= buildPortBase());
+
+export function portFixture() {
+  const copy = copyHome(portTemplate());
+  return makeFixture(copy.home, copy.repo, copy.toplevel);
+}
+
+// The cached template itself, for the row that proves a copy equals it. Its cleanup is a
+// no-op: removing it would strand every later copy in the process.
+export const portFixtureTemplate = () => ({ ...portTemplate(), cleanup: () => {} });
+
 // The shape a superseded port leaves: nothing on the default branch holds the lane's
 // commits or their patch, so every content check reads unlanded.
-export function takenFixture({ run = "run-1", id = "implement-rating", branch = "feat", launcher = null } = {}) {
-  const f = portFixture();
+function buildTaken({ run = "run-1", id = "implement-rating", branch = "feat", launcher = null } = {}) {
+  const copy = copyHome(portTemplate(), { root: templateRoot(), prefix: "taken-" });
+  const f = makeFixture(copy.home, copy.repo, copy.toplevel);
   const { repo, home } = f;
   const body = (over = {}) => Array.from({ length: 15 }, (_, i) => over[i + 1] ?? `line${String(i + 1).padStart(2, "0")}`).join("\n") + "\n";
 
@@ -160,4 +284,37 @@ export function takenFixture({ run = "run-1", id = "implement-rating", branch = 
   const lane = { id, branch: laneBranch, path: lanePath, commits: [one, two], tip: two };
   const runDir = f.run(run, { launcher, leaves: [lane] });
   return { ...f, runName: run, runDir, lane, branch, port, picks: [pickOne, pickTwo], review, portTip, squash };
+}
+
+const takenTemplates = new Map();
+
+function takenTemplate(opts = {}) {
+  const key = JSON.stringify(opts);
+  let template = takenTemplates.get(key);
+  if (!template) {
+    template = buildTaken(opts);
+    takenTemplates.set(key, template);
+  }
+  return template;
+}
+
+export const takenFixtureTemplate = (opts) => ({ ...takenTemplate(opts), cleanup: () => {} });
+
+export function takenFixture(opts) {
+  const template = takenTemplate(opts);
+  const copy = copyHome(template);
+  const api = makeFixture(copy.home, copy.repo, copy.toplevel);
+  const at = (path) => join(api.home, relative(template.home, path));
+  return {
+    ...api,
+    runName: template.runName,
+    branch: template.branch,
+    runDir: join(api.runsRoot, template.runName),
+    lane: { ...template.lane, path: at(template.lane.path) },
+    port: at(template.port),
+    picks: template.picks,
+    review: template.review,
+    portTip: template.portTip,
+    squash: template.squash,
+  };
 }
