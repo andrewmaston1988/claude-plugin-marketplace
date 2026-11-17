@@ -1,9 +1,6 @@
-// Tests for `--fast`'s skip rule (`scripts/test-lib/fast.mjs`).
-//
-// The failures that matter are a file skipped for the wrong reason -- edited
-// since it was measured, measured a month ago, never actually slow -- so each
-// row breaks one leg of the rule and expects the file back in the run. Hashes
-// are computed here from the file bytes, never by the module under test.
+// Tests for `--fast`'s skip rule (`scripts/test-lib/fast.mjs`): each row breaks
+// one leg -- edited bytes, stale measurement, never slow -- and expects the file
+// back in the run. Hashes are computed here, never by the module under test.
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -13,8 +10,6 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 
 import {
-  MAX_AGE_MS,
-  SLOW_FILE_MS,
   mergeTimings,
   readTimings,
   recordTimings,
@@ -73,8 +68,8 @@ test("a measurement at or over seven days old runs the file again", (t) => {
   const file = "plugins/swarm/tests/slow.test.mjs";
   write(repo, file, "slow\n");
 
-  const fresh = { [file]: entry(repo, file, { at: NOW - MAX_AGE_MS + 1 }) };
-  const boundary = { [file]: entry(repo, file, { at: NOW - MAX_AGE_MS }) };
+  const fresh = { [file]: entry(repo, file, { at: NOW - (7 * 24 * 60 * 60 * 1000) + 1 }) };
+  const boundary = { [file]: entry(repo, file, { at: NOW - 7 * 24 * 60 * 60 * 1000 }) };
   const stale = { [file]: entry(repo, file, { at: NOW - 8 * DAY }) };
 
   assert.equal(skip(fresh, repo).length, 1);
@@ -87,11 +82,11 @@ test("the slow bar is strict: 30.0 s runs, 30.001 s skips", (t) => {
   const file = "plugins/swarm/tests/slow.test.mjs";
   write(repo, file, "slow\n");
 
-  const atBar = { [file]: entry(repo, file, { ms: SLOW_FILE_MS }) };
-  const overBar = { [file]: entry(repo, file, { ms: SLOW_FILE_MS + 1 }) };
+  const atBar = { [file]: entry(repo, file, { ms: 30_000 }) };
+  const overBar = { [file]: entry(repo, file, { ms: 30_001 }) };
 
   assert.deepEqual(skip(atBar, repo), []);
-  assert.deepEqual(skip(overBar, repo), [{ file, ms: SLOW_FILE_MS + 1 }]);
+  assert.deepEqual(skip(overBar, repo), [{ file, ms: 30_001 }]);
 });
 
 test("two suites' files with the same basename keep separate timings", (t) => {

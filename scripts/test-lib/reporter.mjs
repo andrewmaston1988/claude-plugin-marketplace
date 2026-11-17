@@ -1,20 +1,13 @@
 // The node --test reporter that makes a run's silence meaningful.
 //
-// Node relays test:start / test:pass / test:summary in FILE order, so a default
-// reporter prints nothing while a slow file runs. test:dequeue and the
-// file-level test:complete are live, so a file's line is printed there and a
-// heartbeat covers the rest.
-//
-// Wired by scripts/test.mjs through --test-reporter. Env contract:
-//   TEST_RUN_LABEL    name prefix of the log, timings and in-flight records
-//   TEST_REPO_ROOT    display paths and timings keys are relative to it
-//   TEST_RESULTS_DIR  directory for the log, timings and in-flight records
-//   TEST_REPORTER     `agent` or `default`, overriding agent detection
+// Node relays per-test events in FILE order, so only the file-level complete is
+// live: the line prints there, and a heartbeat covers everything else.
 
-import { createHash } from "node:crypto";
 import * as nodeFs from "node:fs";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+
+import { recordTimings } from "./fast.mjs";
 
 export const HEARTBEAT_MS = 60_000;
 export const SLOW_TEST_MS = 1_000;
@@ -198,6 +191,8 @@ function isFileLevel(data, cwd) {
  *  clock instead of waiting a real minute. */
 export function createReporter({ now = Date.now, sleep = abortableSleep, env = process.env, fs = nodeFs } = {}) {
   const mode = resolveMode(env);
+  // TEST_RUN_LABEL names the log, timings and in-flight records; TEST_RESULTS_DIR
+  // holds them; TEST_REPO_ROOT is what their paths are relative to.
   const label = env.TEST_RUN_LABEL || "test";
   const cwd = process.cwd();
   const repoRoot = env.TEST_REPO_ROOT || "";
@@ -224,6 +219,7 @@ export function createReporter({ now = Date.now, sleep = abortableSleep, env = p
     const failures = new Map();     // repo-relative path -> leaf failures
     const stderr = new Map();       // repo-relative path -> last lines
     const failedFiles = [];         // completion order
+    const measured = [];            // { file, ms } of passing files, written once at exit
     const slow = [];
     let totals = null;
 
@@ -241,25 +237,6 @@ export function createReporter({ now = Date.now, sleep = abortableSleep, env = p
     function fileRecord(key) {
       if (!files.has(key)) files.set(key, { passed: true, ms: 0, error: null, tests: [] });
       return files.get(key);
-    }
-
-    function recordTiming(key, abs, ms) {
-      let sha256;
-      try {
-        sha256 = createHash("sha256").update(fs.readFileSync(abs)).digest("hex");
-      } catch {
-        return; // unreadable now means unverifiable later: better no entry
-      }
-      const path = join(resultsDir, "timings.json");
-      let timings = {};
-      try {
-        const parsed = JSON.parse(String(fs.readFileSync(path, "utf8")));
-        if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) timings = parsed;
-      } catch {
-        timings = {}; // missing or corrupt: start a fresh record rather than throw
-      }
-      timings[key] = { ms, sha256, at: now() };
-      writeAtomic(path, `${JSON.stringify(timings, null, 2)}\n`);
     }
 
     function failureBlock(key) {
@@ -358,7 +335,7 @@ export function createReporter({ now = Date.now, sleep = abortableSleep, env = p
           writeInFlight();
           // Failing files are not measured: --fast must never skip a file that
           // is currently failing.
-          if (passed) recordTiming(key, absPath(file, cwd), ms);
+          if (passed) measured.push({ file: key, ms });
           else failedFiles.push(key);
           return mode === "default" || !passed ? `${passed ? "✓" : "✗"} ${key}  ${seconds(ms)}\n` : null;
         }
@@ -436,6 +413,7 @@ export function createReporter({ now = Date.now, sleep = abortableSleep, env = p
         if (out) yield out;
         pending = iterator.next();
       }
+      recordTimings({ resultsDir, repoRoot, entries: measured, now, _fs: fs });
       writeAtomic(join(resultsDir, `${label}.log`), logText());
       running.clear();
       writeInFlight();

@@ -1,14 +1,12 @@
-// Tests for the test reporter (`scripts/test-lib/reporter.mjs`).
-//
-// Every event stream below is synthetic, in the order Node v24.15.0 was probed
-// emitting it: file-level test:dequeue/test:complete live and out of order,
-// per-test detail relayed in FILE order afterwards. Clock, sleep and env are
-// injected, so a 60 s heartbeat never costs a real minute.
+// Tests for the reporter (`scripts/test-lib/reporter.mjs`): synthetic event
+// streams in Node's probed order, where only the file-level complete is live.
+// Clock, sleep and fs are injected, so a 60 s heartbeat costs no real time.
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { getEventListeners } from "node:events";
+import * as nodeFs from "node:fs";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -388,10 +386,13 @@ test("a file that crashes at load still prints, with its stderr as the failure e
 });
 
 test("a file row named by a cwd-relative path is recognised as the file", async (t) => {
-  const root = process.cwd();
-  const file = join(root, "scripts", "relative-name.test.mjs");
+  const repoRoot = process.cwd();
+  const file = "scripts/relative-name.test.mjs";
   const out = await drain(
-    createReporter({ env: { ...envFor(root), TEST_RESULTS_DIR: makeRoot(t) }, sleep: neverSleep }),
+    createReporter({
+      env: { TEST_RUN_LABEL: "unit", TEST_REPO_ROOT: repoRoot, TEST_RESULTS_DIR: makeRoot(t) },
+      sleep: neverSleep,
+    }),
     events([dequeue(file), complete(file, { ms: 900 })]),
   );
   assert.match(out, /^✓ scripts\/relative-name\.test\.mjs {2}0\.9s$/m);
@@ -434,4 +435,30 @@ test("timings are keyed by the repo-relative path with the file's content hash",
   );
   const timings = JSON.parse(readFileSync(join(root, "test-results", "timings.json"), "utf8"));
   assert.deepEqual(timings["tests/landed.test.mjs"], { ms: 45000, sha256, at: 42 });
+});
+
+test("the timing cache is written once per run, through fast.recordTimings", async (t) => {
+  const root = makeRoot(t);
+  const a = join(root, "tests", "a.test.mjs");
+  const b = join(root, "tests", "b.test.mjs");
+  mkdirSync(dirname(a), { recursive: true });
+  writeFileSync(a, "// a\n", "utf8");
+  writeFileSync(b, "// b\n", "utf8");
+  let writes = 0;
+  const fs = {
+    ...nodeFs,
+    renameSync: (from, to) => {
+      if (String(to).endsWith("timings.json")) writes += 1;
+      return nodeFs.renameSync(from, to);
+    },
+  };
+
+  await drain(
+    createReporter({ env: envFor(root), sleep: neverSleep, now: () => 7, fs }),
+    events([dequeue(a), complete(a, { ms: 1200 }), dequeue(b), complete(b, { ms: 3400 })]),
+  );
+
+  const timings = JSON.parse(readFileSync(join(root, "test-results", "timings.json"), "utf8"));
+  assert.deepEqual(Object.keys(timings).sort(), ["tests/a.test.mjs", "tests/b.test.mjs"]);
+  assert.equal(writes, 1, "each finished file rewrote the whole timing cache");
 });

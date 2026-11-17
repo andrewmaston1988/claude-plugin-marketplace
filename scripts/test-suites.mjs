@@ -57,6 +57,7 @@ export const SUITES = [
     name: "ui-probe",
     runs: [
       {
+        label: "browser",
         cwd: ".",
         globs: ["plugins/ui-probe/tests/*.test.mjs"],
         env: { UI_PROBE_REQUIRE_BROWSER: "1" },
@@ -66,6 +67,7 @@ export const SUITES = [
         // The bakeoff protocol smoke test is offline: every egress point is a
         // fake injected at call time, so it needs neither a browser nor the
         // plugin's env.
+        label: "bakeoff",
         cwd: ".",
         globs: ["bakeoff/ui-probe/protocols/tests/*.test.mjs"],
         timeoutMs: TEN_MIN,

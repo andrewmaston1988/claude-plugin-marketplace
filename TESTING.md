@@ -43,11 +43,13 @@ A file prints its line the moment it finishes: `✓ tests/a.test.mjs  12.3s`, or
 
 At the end the run prints each failing test with its error and a code frame, the 10 slowest tests over 1000 ms, and the totals. The full per-test record of every run always goes to `test-results/<label>.log`, whose path the runner prints. `test-results/` is ignored by git.
 
+The reporter is `scripts/test-lib/reporter.mjs`, passed as `--test-reporter` by the runner, and reads four variables: `TEST_RUN_LABEL` (the `<label>` in every file name it writes), `TEST_REPO_ROOT` (what display paths and timings keys are relative to), `TEST_RESULTS_DIR` (where the log, timings and in-flight records go), and `TEST_REPORTER` (`agent` or `default`, overriding detection).
+
 A run killed at its timeout names the files it still had in flight, read from `test-results/<label>.<pid>.inflight.json` — the record of what the killed child could not report itself.
 
 ### Agent mode
 
-Run by an agent, output follows Vitest's `agent` reporter: failures and their errors only, with no per-file lines, slowest list or totals. It switches on when an agent's variable is set — `CLAUDECODE`, `AI_AGENT`, or the variables `std-env` recognises. `--reporter=agent` or `--reporter=default` overrides the detection. Two things stay in every mode, including agent mode: the heartbeat, because a silent run is the problem this exists to solve, and the runner's one `[test] <label>: PASS|FAIL` line, which is the exit evidence. The log file holds the full tree.
+Run by an agent, output follows Vitest's `agent` reporter: failures and their errors only, with no per-file lines beyond the failing files, no slowest list and no totals. It switches on when an agent's variable is set — `CLAUDECODE`, `AI_AGENT`, or the variables `std-env` recognises. `--reporter=agent` or `--reporter=default` overrides the detection. Two things stay in every mode, including agent mode: the heartbeat, because a silent run is the problem this exists to solve, and the runner's one `[test] <label>: PASS|FAIL` line, which is the exit evidence. The log file holds the full tree.
 
 ## Orphan tests
 
@@ -59,7 +61,7 @@ The changed set combines the branch diff, staged and unstaged changes against HE
 
 Selection follows relative imports, re-exports, literal dynamic imports, literal `new URL(..., import.meta.url)` paths (including directory contents), and file-name string literals within the same plugin. A changed file reachable from a test selects that test.
 
-These changes select the plugin's whole suite: `package.json`, `package-lock.json`, `.env.test`, files under `.claude-plugin` or `.codex-plugin`, `hooks/hooks.json`, and non-Markdown plugin files reached by no test. Changes under `scripts/` or `.github/` select the `repo` suite. Root metadata fallback files also select `repo`.
+These changes select the plugin's whole suite: `package.json`, `package-lock.json`, `.env.test`, files under `.claude-plugin` or `.codex-plugin`, `hooks/hooks.json`, and non-Markdown plugin files reached by no test. Changes under `scripts/` or `.github/` select the `repo` suite, except a change to the runner itself — `scripts/test.mjs`, `scripts/test-lib/**`, `scripts/test-suites.mjs`, or the workflow — which selects every suite. A change under any other directory a suite's runs live in, such as `bakeoff/ui-probe/protocols/` for ui-probe, selects that suite whole. Root metadata fallback files also select `repo`.
 
 Unreached Markdown selects no tests. Runtime-built paths without a file-name literal can escape the graph; use `--all` when coverage is uncertain. The selector adds `*.win.test.mjs` files on every platform; those tests must skip themselves where unsupported.
 
@@ -69,7 +71,7 @@ The source of truth for suite membership, globs, working directories, environmen
 
 Available suites: `checkpoint`, `slack-bridge`, `claude-peers`, `swarm`, `ui-probe`, `pipeline`, `agent-investigation`, `discipline`, and `repo`.
 
-Pipeline has core, parity, and script runs. Core and parity load `.env.test`. Pipeline's `npm ci` is hash-gated by `package-lock.json` and `node_modules/.test-install-hash`; it runs when the record differs or is absent. A missing lockfile skips installation. ui-probe sets `UI_PROBE_REQUIRE_BROWSER=1` and needs Chrome available.
+Pipeline has core, parity, and script runs. Core and parity load `.env.test`. Pipeline's `npm ci` is hash-gated by `package-lock.json` and `node_modules/.test-install-hash`; it runs when the record differs or is absent. A missing lockfile skips installation. ui-probe has `browser` and `bakeoff` runs, so `test-results/ui-probe[browser].log` and `test-results/ui-probe[bakeoff].log` never overwrite each other; the browser run sets `UI_PROBE_REQUIRE_BROWSER=1` and needs Chrome available.
 
 Runs execute sequentially with explicit test-file arguments and stream output. Each prints a result and duration. Swarm has a 20-minute test-process timeout; other runs have 10 minutes. Timeout handling kills the process tree on Windows or process group on Linux. Installation happens before that timer.
 

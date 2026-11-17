@@ -1,9 +1,7 @@
-// Which test files a run covers, and which of them a changed set selects.
-//
-// Two questions live here because they share one answer: a file belongs to a
-// suite when the suite's globs expand to it, and a file is selected when a
-// changed path is reachable from it. `--all`, `--suite` and a diff all end up
-// naming files, and every one of them goes through `expandRun`.
+// Coverage and diff selection: a file belongs to a suite when its globs expand
+// to it, and a changed path is owned by the suite whose plugin or home
+// directory holds it. `--all`, `--suite` and a diff all name files through
+// `expandRun`.
 
 import * as nodeFs from "node:fs";
 import { join, posix } from "node:path";
@@ -130,6 +128,27 @@ export function suitePlugins(suite) {
   return out;
 }
 
+/** The directories outside `plugins/` a suite's runs live in: the glob's static
+ *  prefix with its trailing `tests` dropped, so a `bakeoff/.../tests` run owns
+ *  its protocol directory. Plugin globs keep the import-closure rule. */
+export function suiteHomeDirs(suite) {
+  const out = new Set();
+  for (const run of suite.runs) {
+    for (const glob of run.globs) {
+      const parts = posix
+        .join(runCwdRel(run) || ".", staticPrefix(glob))
+        .replace(/^\.\/?/, "")
+        .split("/")
+        .filter(Boolean);
+      if (parts[parts.length - 1] === "tests") parts.pop();
+      if (parts.length === 0) continue;
+      if (parts[0] === "plugins" || parts[0] === "scripts" || parts[0] === ".github") continue;
+      out.add(parts.join("/"));
+    }
+  }
+  return out;
+}
+
 /** The directory a suite's graph may look inside. A plugin suite cannot see a
  *  sibling plugin: two files of the same basename in different plugins must
  *  never be confused for each other. */
@@ -196,6 +215,13 @@ export function select({
       byPlugin.get(plugin).push(suite);
     }
   }
+  const byHome = new Map();
+  for (const suite of suites) {
+    for (const dir of suiteHomeDirs(suite)) {
+      if (!byHome.has(dir)) byHome.set(dir, []);
+      byHome.get(dir).push(suite);
+    }
+  }
   const repoSuite = suites.find((suite) => suite.name === REPO_SUITE) || null;
 
   let attributed = 0;
@@ -203,6 +229,10 @@ export function select({
     let selected = false;
     const plugin = /^plugins\/([^/]+)\//.exec(path)?.[1] || null;
     const covering = plugin ? byPlugin.get(plugin) || [] : [];
+    const owners = [];
+    for (const [dir, owned] of byHome) {
+      if (path === dir || path.startsWith(`${dir}/`)) owners.push(...owned);
+    }
 
     if (isRunnerPath(path)) {
       for (const suite of suites) addWhole(suite, `fallback: ${path}`);
@@ -232,6 +262,13 @@ export function select({
           for (const suite of covering) addWhole(suite, `fallback: ${path}`);
           selected = true;
         }
+      }
+    } else if (owners.length > 0) {
+      // Outside plugins/ there is no import graph, so a change under a suite's
+      // own home runs that suite whole, as an unreached plugin file does.
+      if (!path.endsWith(".md")) {
+        for (const suite of owners) addWhole(suite, `fallback: ${path}`);
+        selected = true;
       }
     } else if (repoSuite && isFallbackPath(path)) {
       addWhole(repoSuite, `fallback: ${path}`);

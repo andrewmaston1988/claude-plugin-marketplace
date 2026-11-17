@@ -74,6 +74,13 @@ function capture() {
   return { lines, errors, log: (line) => lines.push(line), err: (line) => errors.push(line) };
 }
 
+test("no two runs of a suite share a label, so neither log overwrites the other", () => {
+  for (const suite of SUITES) {
+    const labels = suite.runs.map((run) => `${suite.name}${run.label ? `[${run.label}]` : ""}`);
+    assert.equal(new Set(labels).size, labels.length, `${suite.name}: ${labels.join(", ")}`);
+  }
+});
+
 test("every registry suite is run by CI through the runner", () => {
   const yml = readFileSync(WORKFLOW, "utf8");
   for (const suite of SUITES) {
@@ -303,6 +310,25 @@ test("lockfiles and plugin manifests run the whole suite", (t) => {
     assert.equal(entries.length, all, `${path} should run the whole suite`);
     assert.ok(entries.every((entry) => entry.why === `fallback: ${path}`), path);
   }
+});
+
+test("a change under a suite's own home, outside plugins/, selects that suite whole", (t) => {
+  const repo = makeRepo(t);
+  write(repo, "bakeoff/ui-probe/protocols/protocol.mjs");
+  write(repo, "bakeoff/ui-probe/protocols/tests/smoke.test.mjs");
+  write(repo, FIX_GLOB.replace("*.test.mjs", "transitive.test.mjs"));
+  const suites = [findSuite("ui-probe"), suiteOf("fix", [FIX_GLOB])];
+  const path = "bakeoff/ui-probe/protocols/x.mjs";
+
+  const { entries, docsOnly } = select({ suites, changed: [path], repoRoot: repo });
+  const chosen = entries.filter((entry) => entry.suite === "ui-probe");
+  assert.ok(
+    chosen.some((entry) => entry.file === "bakeoff/ui-probe/protocols/tests/smoke.test.mjs"),
+    JSON.stringify(entries),
+  );
+  assert.ok(chosen.every((entry) => entry.why === `fallback: ${path}`), JSON.stringify(entries));
+  assert.deepEqual(entries.filter((entry) => entry.suite === "fix"), [], "a bakeoff change selected a plugin");
+  assert.equal(docsOnly, false);
 });
 
 test("a change under scripts/ runs the repo suite, not a plugin's", (t) => {
@@ -535,6 +561,28 @@ test("A4: a missing or corrupt in-flight record leaves the plain timeout reason"
   assert.match(lines.join("\n"), /: TIMEOUT -- no exit within 20ms in /);
 });
 
+test("a run cleared a stale log before a timeout, so the log line is not printed", async (t) => {
+  const repo = graphFixture(t);
+  const suite = suiteOf("slow", [FIX_GLOB]);
+  suite.runs[0].timeoutMs = 20;
+  const dir = join(repo, "test-results");
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, "slow.log"), "the previous run\n", "utf8");
+
+  const lines = [];
+  const code = await main(["--suite", "slow"], {
+    cwd: repo,
+    _suites: [suite],
+    _spawn: stubSpawn({ never: true, pid: 777 }).spawn,
+    _killTree: () => {},
+    _log: (line) => lines.push(line),
+    _err: () => {},
+  });
+
+  assert.equal(code, 1);
+  assert.ok(!lines.join("\n").includes("log:"), `a killed run pointed at the last run's log:\n${lines.join("\n")}`);
+});
+
 // --- --fast ----------------------------------------------------------------
 
 test("A7: --fast runs everything with no timings, then skips a measured-slow file", async (t) => {
@@ -735,6 +783,24 @@ test("A9: a changed *.win.test.mjs selects its suite", async (t) => {
   const { code, spawn } = await ifSelectedRun(repo, suites, "fix");
   assert.equal(code, 0);
   assert.ok(spawn.calls.length > 0, "a changed win test did not select its suite");
+});
+
+test("A9: --if-selected on a suite whose globs match nothing exits 1, not 'not selected'", async (t) => {
+  const repo = graphFixture(t);
+  commitAll(repo, "fixture");
+  const spawn = stubSpawn();
+  const out = capture();
+  const code = await main(["--suite", "empty", "--if-selected", "--against", "HEAD"], {
+    cwd: repo,
+    _suites: [suiteOf("empty", ["nowhere/*.test.mjs"])],
+    _spawn: spawn.spawn,
+    _log: out.log,
+    _err: out.err,
+  });
+
+  assert.equal(code, 1, out.lines.join("\n"));
+  assert.match(out.lines.join("\n"), /no file matched nowhere\/\*\.test\.mjs/);
+  assert.equal(spawn.calls.length, 0, "an empty suite spawned node --test bare");
 });
 
 test("A9: --if-selected with an unresolvable base exits 2 and runs nothing", async (t) => {

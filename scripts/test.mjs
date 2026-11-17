@@ -110,6 +110,12 @@ export function inFlightFiles(path, { now = Date.now, _fs = nodeFs } = {}) {
 async function runOne({ suite, run, files, repoRoot, resultsDir, reporter, _spawn, _spawnSync, _platform, _killTree, _fs, _log, _now }) {
   const cwdAbs = join(repoRoot, run.cwd);
   const label = `${suite.name}${run.label ? `[${run.label}]` : ""}`;
+  const logPath = join(resultsDir, `${label}.log`);
+  try {
+    _fs.unlinkSync(logPath); // a killed run must not be pointed at the last run's log
+  } catch {
+    // Nothing to clear.
+  }
   const started = _now();
   const reporterEnv = {
     TEST_RUN_LABEL: label,
@@ -382,7 +388,7 @@ export async function main(argv = process.argv.slice(2), options = {}) {
 
   let entries;
   let selected = null;
-  const whole = Boolean(all || suiteName) && !ifSelected;
+  let whole = Boolean(all || suiteName) && !ifSelected;
   if (whole) {
     entries = wholeEntries(chosen, { repoRoot });
   } else {
@@ -401,11 +407,19 @@ export async function main(argv = process.argv.slice(2), options = {}) {
       // A `windows` entry is added to every diff, so it is not evidence that
       // this diff touches the suite. CI then runs the suite whole: the import
       // graph chooses which suites, never which files.
-      if (entries.every((entry) => entry.why === "windows")) {
+      const touched = entries.filter((entry) => entry.why !== "windows");
+      const suiteFiles = wholeEntries(chosen, { repoRoot });
+      if (touched.length > 0) {
+        entries = suiteFiles;
+      } else if (suiteFiles.length > 0) {
         _log(`[test] ${suiteName}: not selected by this diff`);
         return 0;
+      } else {
+        // The suite's globs match nothing, so "unselected" would be a permanent
+        // green. Leave the expansion empty and let the no-files failure report it.
+        entries = [];
+        whole = true;
       }
-      entries = wholeEntries(chosen, { repoRoot });
     } else {
       if (result.docsOnly) {
         _err(`[test] docs-only: ${changed.length} changed file(s) select no test; nothing to run for them`);
