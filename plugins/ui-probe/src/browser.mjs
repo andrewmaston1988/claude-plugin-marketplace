@@ -63,20 +63,30 @@ export function findBrowser({
   throw new Error("no Chromium browser found — install Edge, Chrome or Brave, or set \"browser\" in .ui-probe.json");
 }
 
-async function devtoolsPort(profile, child, { _fs, _sleep }) {
+async function devtoolsPort(profile, child, { _fs, _sleep, _now = Date.now }) {
   const file = join(profile, "DevToolsActivePort");
-  const started = Date.now();
+  const started = _now();
+  let lastReadError;
+  const failure = (message) => {
+    const detail = lastReadError?.code || lastReadError?.message;
+    return new Error(detail ? `${message} (last read: ${detail})` : message);
+  };
   for (let i = 0; i < PORT_POLLS; i++) {
     if (_fs.existsSync(file)) {
-      const port = Number(_fs.readFileSync(file, "utf8").split("\n")[0]);
-      if (port) return port;
+      try {
+        const lines = _fs.readFileSync(file, "utf8").split(/\r?\n/);
+        const port = Number(lines[0]);
+        if (lines[1] && /^\d+$/.test(lines[0]) && port >= 1 && port <= 65535) return port;
+      } catch (error) {
+        lastReadError = error;
+      }
     }
-    if (child.exitCode != null && Date.now() - started > LAUNCHER_GRACE_MS) {
-      throw new Error(`browser exited early (code ${child.exitCode})`);
+    if (child.exitCode != null && _now() - started > LAUNCHER_GRACE_MS) {
+      throw failure(`browser exited early (code ${child.exitCode})`);
     }
     await _sleep(PORT_POLL_MS);
   }
-  throw new Error("browser never wrote DevToolsActivePort");
+  throw failure("browser never wrote DevToolsActivePort");
 }
 
 /** Best-effort reap. A lister that throws or overruns is the next launch's problem, not this
@@ -147,6 +157,7 @@ export async function launch({
   _spawnSync = spawnSync,
   _WebSocket = WebSocket,
   _sleep = sleep,
+  _now = Date.now,
   _reap = reapOrphans,
   _kill = killBrowserForProfile,
   _writeOwner = writeOwnerFile,
@@ -178,7 +189,7 @@ export async function launch({
     args.push("about:blank");
 
     const child = _spawn(exe, args, { stdio: "ignore" });
-    const port = await devtoolsPort(profile, child, { _fs, _sleep });
+    const port = await devtoolsPort(profile, child, { _fs, _sleep, _now });
     const versionUrl = `http://127.0.0.1:${port}/json/version`;
     const version = await (await _fetch(versionUrl)).json();
     browserWs = await connect(version.webSocketDebuggerUrl, { _WebSocket, timeoutMs: CLOSE_CALL_TIMEOUT_MS });
