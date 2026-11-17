@@ -1,4 +1,4 @@
-// Tests for the 500-line growth ratchet (`scripts/check-file-size.mjs`).
+// Tests for the 500-line bar (`scripts/check-file-size.mjs`).
 //
 // `violations()` is pure over `[path, oldLines, newLines]`, so the rule is
 // testable without git trees. The tests below it run the real CLI against real
@@ -8,11 +8,8 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join, dirname } from "node:path";
-import { fileURLToPath } from "node:url";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 
 import {
   BAR,
@@ -23,44 +20,7 @@ import {
   readBlob,
   violations,
 } from "./check-file-size.mjs";
-
-const HERE = dirname(fileURLToPath(import.meta.url));
-const ROOT = join(HERE, "..");
-const CHECKER = join(HERE, "check-file-size.mjs");
-
-// --- Fixture plumbing ------------------------------------------------------
-
-function git(cwd, ...args) {
-  const r = spawnSync("git", args, { cwd, encoding: "utf8" });
-  assert.equal(r.status, 0, `git ${args.join(" ")} failed: ${r.stderr}`);
-  return r.stdout;
-}
-
-function makeRepo(t) {
-  const dir = mkdtempSync(join(tmpdir(), "ratchet-"));
-  t.after(() => rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }));
-  git(dir, "init", "-q");
-  git(dir, "config", "user.email", "ratchet@example.com");
-  git(dir, "config", "user.name", "ratchet");
-  git(dir, "config", "core.autocrlf", "false"); // stable bytes on Windows and Linux
-  git(dir, "config", "commit.gpgsign", "false");
-  return dir;
-}
-
-function writeLines(cwd, rel, n) {
-  const p = join(cwd, rel);
-  mkdirSync(dirname(p), { recursive: true });
-  writeFileSync(p, "x = 1\n".repeat(n), "utf8");
-}
-
-function commitAll(cwd, message) {
-  git(cwd, "add", "-A");
-  git(cwd, "commit", "-qm", message);
-}
-
-function runChecker(cwd, ...args) {
-  return spawnSync(process.execPath, [CHECKER, ...args], { cwd, encoding: "utf8" });
-}
+import { ROOT, commitAll, git, makeRepo, runChecker, writeLines } from "./check-file-size-fixture.mjs";
 
 // --- The core rule: a file over the bar may not grow ------------------------
 
@@ -79,18 +39,33 @@ test("a grandfathered file edited to the same size is allowed", () => {
   assert.deepEqual(violations([["plugins/swarm/src/scheduler.mjs", 1615, 1615]]), []);
 });
 
-test("a file under the bar may grow freely", () => {
+test("a file under the bar may grow while it stays under it", () => {
   assert.deepEqual(violations([["plugins/swarm/src/tiny.mjs", 100, 499]]), []);
 });
 
-// --- The boundary: `> bar`, not `>= bar` ------------------------------------
+// --- The boundary: crossing the bar is itself a violation ------------------
 
-test("exactly at the bar may cross it once", () => {
-  assert.deepEqual(
-    violations([["plugins/swarm/src/edge.mjs", BAR, BAR + 1]]),
-    [],
-    "a 500-line file was under the bar when the commit started, so growing it is permitted",
-  );
+test("a file at or under the bar that ends over it is blocked", () => {
+  for (const [oldLines, newLines] of [
+    [499, 874],
+    [500, 501],
+    [480, 900],
+  ]) {
+    const found = violations([["a.mjs", oldLines, newLines]]);
+    assert.equal(found.length, 1, `${oldLines} -> ${newLines}: ${found}`);
+    assert.match(found[0], /a\.mjs/);
+    assert.match(found[0], new RegExp(`${oldLines} -> ${newLines}`));
+  }
+});
+
+test("a file that ends at or under the bar passes", () => {
+  for (const [oldLines, newLines] of [
+    [499, 500],
+    [100, 499],
+    [500, 500],
+  ]) {
+    assert.deepEqual(violations([["a.mjs", oldLines, newLines]]), [], `${oldLines} -> ${newLines}`);
+  }
 });
 
 test("one line over the bar may not grow", () => {
@@ -107,7 +82,7 @@ test("a newly created file one line over the bar is blocked", () => {
   const found = violations([["plugins/swarm/src/new.mjs", 0, BAR + 1]]);
   assert.equal(found.length, 1, found);
   assert.match(found[0], /new\.mjs/);
-  assert.match(found[0], new RegExp(String(BAR + 1)));
+  assert.match(found[0], /501/);
 });
 
 test("a newly created file well over the bar is blocked", () => {
@@ -134,7 +109,7 @@ test("every offending file is reported in one run", () => {
 });
 
 test("the message names the bar so the fix is obvious", () => {
-  assert.match(violations([["a.mjs", 600, 601]])[0], new RegExp(String(BAR)));
+  assert.match(violations([["a.mjs", 600, 601]])[0], /500/);
 });
 
 test("a clean change produces no output at all", () => {
@@ -261,7 +236,7 @@ test("growth across a rename is still caught", (t) => {
 
   const r = runChecker(repo);
   assert.equal(r.status, 1, r.stdout + r.stderr);
-  assert.match(r.stderr, new RegExp(`${BAR + 100} -> ${BAR + 101}`));
+  assert.match(r.stderr, /600 -> 601/);
 });
 
 test("a deletion never trips the check", (t) => {
@@ -365,8 +340,8 @@ test("--against compares the base ref with HEAD, not with the working tree", (t)
 
   const r = runChecker(repo, "--against", base);
   assert.equal(r.status, 1, r.stdout + r.stderr);
-  assert.match(r.stderr, new RegExp(`${BAR + 100} -> ${BAR + 200}`));
-  assert.doesNotMatch(r.stderr, new RegExp(String(BAR + 400)));
+  assert.match(r.stderr, /600 -> 700/);
+  assert.doesNotMatch(r.stderr, /900/);
 });
 
 test("--against passes when the committed range is clean", (t) => {
