@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { initConfig, loadConfig, setConfigValue } from "../src/config.mjs";
-import { runCli } from "./helpers/cli.mjs";
+import { runCliInProcess } from "./helpers/cli.mjs";
 
 function tmp() {
   return mkdtempSync(join(tmpdir(), "swarm-cfgmig-"));
@@ -22,7 +22,7 @@ function read(p) {
 
 // --- the decisive row: refuse rather than land a file the next command rejects ---
 
-test("initConfig refuses to migrate a legacy value that would not load, and leaves the file alone", () => {
+test("initConfig refuses to migrate a legacy value that would not load, and leaves the file alone", async () => {
   const dir = tmp();
   try {
     const p = join(dir, "config.json");
@@ -37,7 +37,7 @@ test("initConfig refuses to migrate a legacy value that would not load, and leav
   }
 });
 
-test("a refused legacy migration names the legacy key the operator wrote, and the path it becomes", () => {
+test("a refused legacy migration names the legacy key the operator wrote, and the path it becomes", async () => {
   const dir = tmp();
   try {
     const p = join(dir, "config.json");
@@ -57,7 +57,7 @@ test("a refused legacy migration names the legacy key the operator wrote, and th
   }
 });
 
-test("a bad canonical config is refused as a write, not dressed up as a migration", () => {
+test("a bad canonical config is refused as a write, not dressed up as a migration", async () => {
   const dir = tmp();
   try {
     const p = join(dir, "config.json");
@@ -71,7 +71,7 @@ test("a bad canonical config is refused as a write, not dressed up as a migratio
   }
 });
 
-test("a bad canonical key is refused as a write even when the file also holds a legacy key", () => {
+test("a bad canonical key is refused as a write even when the file also holds a legacy key", async () => {
   const dir = tmp();
   try {
     const p = join(dir, "config.json");
@@ -87,7 +87,7 @@ test("a bad canonical key is refused as a write even when the file also holds a 
   }
 });
 
-test("a canonical leaf the fold never rewrote is refused as a write, not dressed up as a migration", () => {
+test("a canonical leaf the fold never rewrote is refused as a write, not dressed up as a migration", async () => {
   const dir = tmp();
   try {
     const p = join(dir, "config.json");
@@ -108,7 +108,7 @@ test("a canonical leaf the fold never rewrote is refused as a write, not dressed
   }
 });
 
-test("a malformed legacy value is refused with the same framing as a bad canonical one", () => {
+test("a malformed legacy value is refused with the same framing as a bad canonical one", async () => {
   const dir = tmp();
   try {
     const p = join(dir, "config.json");
@@ -128,7 +128,7 @@ test("a malformed legacy value is refused with the same framing as a bad canonic
 
 // --- the placement guard: validation runs AFTER the leaf fill ---
 
-test("initConfig still migrates a sparse legacy object — validation runs after the leaf fill, not before", () => {
+test("initConfig still migrates a sparse legacy object — validation runs after the leaf fill, not before", async () => {
   const dir = tmp();
   try {
     const p = join(dir, "config.json");
@@ -149,7 +149,7 @@ test("initConfig still migrates a sparse legacy object — validation runs after
 
 // --- all five checks, one row each: the extraction must not drop the ordering ---
 
-test("initConfig refuses every value loadConfig refuses — all five checks, one row each", () => {
+test("initConfig refuses every value loadConfig refuses — all five checks, one row each", async () => {
   const dir = tmp();
   try {
     const p = join(dir, "config.json");
@@ -178,7 +178,7 @@ test("initConfig refuses every value loadConfig refuses — all five checks, one
 
 // --- the fold is lossless for UNSHADOWED legacy leaves, and only those ---
 
-test("migration is lossless for legacy leaves canonical does not set, and canonical wins the overlap", () => {
+test("migration is lossless for legacy leaves canonical does not set, and canonical wins the overlap", async () => {
   const dir = tmp();
   try {
     const p = join(dir, "config.json");
@@ -202,7 +202,7 @@ test("migration is lossless for legacy leaves canonical does not set, and canoni
 
 // --- reporting ---
 
-test("initConfig reports migratedKeys and leaves migrated a boolean", () => {
+test("initConfig reports migratedKeys and leaves migrated a boolean", async () => {
   const dir = tmp();
   try {
     const p = join(dir, "config.json");
@@ -220,7 +220,7 @@ test("initConfig reports migratedKeys and leaves migrated a boolean", () => {
   }
 });
 
-test("initConfig reports no migratedKeys for an already-canonical file", () => {
+test("initConfig reports no migratedKeys for an already-canonical file", async () => {
   const dir = tmp();
   try {
     const p = join(dir, "config.json");
@@ -238,7 +238,7 @@ test("initConfig reports no migratedKeys for an already-canonical file", () => {
 
 // --- the backup, with its negative half ---
 
-test("initConfig backs up the pre-migration file, and does not churn a backup without one", () => {
+test("initConfig backs up the pre-migration file, and does not churn a backup without one", async () => {
   const dir = tmp();
   try {
     const p = join(dir, "config.json");
@@ -269,14 +269,14 @@ test("initConfig backs up the pre-migration file, and does not churn a backup wi
 
 // --- the CLI surface: the rewrite is silent on disk unless it says what it did ---
 
-test("config init prints the mapping it applied and where the previous file went", () => {
+test("config init prints the mapping it applied and where the previous file went", async () => {
   const dir = tmp();
   try {
     const home = join(dir, "home");
     mkdirSync(home, { recursive: true });
     const p = join(home, "config.json");
     writeFileSync(p, JSON.stringify({ provider: { url: "http://legacy" }, codex: { enabled: true } }));
-    const r = runCli(["config", "init"], { cwd: dir, env: { SWARM_HOME: home, SWARM_CONFIG: p } });
+    const r = await runCliInProcess(["config", "init"], { cwd: dir, env: { SWARM_HOME: home, SWARM_CONFIG: p } });
     equal(r.status, 0, r.stderr);
     ok(/"provider"\s+-> "providers\.ollama"/.test(r.stdout), r.stdout);
     ok(/"codex"\s+-> "providers\.codex"/.test(r.stdout), r.stdout);
@@ -294,7 +294,7 @@ test("config init prints the mapping it applied and where the previous file went
 
 // --- the single-key writer: the value being SET is what has to pass validation ---
 
-test("setConfigValue refuses a value loadConfig would reject, leaving the file byte-identical", () => {
+test("setConfigValue refuses a value loadConfig would reject, leaving the file byte-identical", async () => {
   const dir = tmp();
   try {
     const p = join(dir, "config.json");
@@ -314,7 +314,7 @@ test("setConfigValue refuses a value loadConfig would reject, leaving the file b
   }
 });
 
-test("setConfigValue writes a valid value, keeps every other line, and the next loadConfig accepts it", () => {
+test("setConfigValue writes a valid value, keeps every other line, and the next loadConfig accepts it", async () => {
   const dir = tmp();
   try {
     const p = join(dir, "config.json");
@@ -331,7 +331,7 @@ test("setConfigValue writes a valid value, keeps every other line, and the next 
   }
 });
 
-test("config init exits non-zero and says nothing was written when the migration is refused", () => {
+test("config init exits non-zero and says nothing was written when the migration is refused", async () => {
   const dir = tmp();
   try {
     const home = join(dir, "home");
@@ -339,7 +339,7 @@ test("config init exits non-zero and says nothing was written when the migration
     const p = join(home, "config.json");
     const before = JSON.stringify({ provider: { enabled: "yes" } });
     writeFileSync(p, before);
-    const r = runCli(["config", "init"], { cwd: dir, env: { SWARM_HOME: home, SWARM_CONFIG: p } });
+    const r = await runCliInProcess(["config", "init"], { cwd: dir, env: { SWARM_HOME: home, SWARM_CONFIG: p } });
     ok(r.status !== 0, `a refused migration must not report success:\n${r.stdout}`);
     ok(r.stderr.includes("cannot migrate") && r.stderr.includes("Nothing was written"), r.stderr);
     equal(read(p), before);

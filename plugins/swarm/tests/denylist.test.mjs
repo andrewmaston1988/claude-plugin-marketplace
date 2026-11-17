@@ -9,7 +9,7 @@ import { matchDenylist, ValidationError } from "../src/manifest.mjs";
 import { readRosterEnvelope } from "../src/roster.mjs";
 import { loadConfig } from "../src/config.mjs";
 import { loadManifest } from "./helpers/repo-io.mjs";
-import { runCliAsync } from "./helpers/cli.mjs";
+import { runCliInProcess } from "./helpers/cli.mjs";
 
 function tmp() {
   return mkdtempSync(join(tmpdir(), "swarm-deny-"));
@@ -193,7 +193,7 @@ test("swarm models: denylist filters at print only — absent from output, prese
       provider: { enabled: true, url: `http://127.0.0.1:${server.address().port}`, catalogUrl: `http://127.0.0.1:${server.address().port}` },
       modelDenylist: ["nemotron"],
     }));
-    const r = await runCliAsync(["models"], { cwd: dir, env: { SWARM_HOME: home } });
+    const r = await runCliInProcess(["models"], { cwd: dir, env: { SWARM_HOME: home } });
     equal(r.status, 0, r.stderr);
     ok(r.stdout.includes("glm-5.2:cloud"), r.stdout);
     ok(!r.stdout.includes("nemotron"), r.stdout);

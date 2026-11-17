@@ -14,7 +14,7 @@ import { runPlan } from "../src/scheduler.mjs";
 import { loadManifest } from "./helpers/repo-io.mjs";
 import { fakeSpawnFactory, makeIo } from "./helpers/fake-io.mjs";
 import { CFG, claudeTask, tmp, writeManifest } from "./helpers/manifest-fixtures.mjs";
-import { runCli } from "./helpers/cli.mjs";
+import { runCliInProcess } from "./helpers/cli.mjs";
 import { tmp as repoDir } from "./helpers/cli-fixture.mjs";
 
 const label = (t) => `task '${t.id}'`;
@@ -88,7 +88,7 @@ test("row 2b: the authored role reaches the resolved preview and the run's own s
     writeFileSync(path, JSON.stringify({ tasks: [
       { id: "verify-x", prompt: "report", provider: "claude", model: "claude-haiku-4-5-20251001", allowedTools: "Read,Grep,Glob,Bash", role: "verifier" },
     ] }));
-    const r = runCli(["validate", path, "--resolved"], { cwd: repo, env: { SWARM_HOME: join(repo, "home") } });
+    const r = await runCliInProcess(["validate", path, "--resolved"], { cwd: repo, env: { SWARM_HOME: join(repo, "home") } });
     equal(r.status, 0, r.stdout + r.stderr);
     const resolved = JSON.parse(r.stdout.slice(r.stdout.indexOf("resolved manifest:") + "resolved manifest:".length));
     equal(resolved.tasks[0].role, "verifier", r.stdout);

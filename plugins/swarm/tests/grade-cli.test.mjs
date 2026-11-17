@@ -4,7 +4,7 @@ import { deepEqual, equal, ok } from "node:assert/strict";
 import { mkdtempSync, rmSync, writeFileSync, readFileSync, existsSync, mkdirSync } from "node:fs";
 import { join, resolve, isAbsolute, basename } from "node:path";
 import { tmpdir } from "node:os";
-import { runCli } from "./helpers/cli.mjs";
+import { runCliInProcess } from "./helpers/cli.mjs";
 import { ASPECTS } from "../src/aspects.mjs";
 import { writeRosterEntry } from "../src/roster.mjs";
 import { formatClosing } from "../src/results.mjs";
@@ -31,11 +31,11 @@ function writeManifest(run, ids) {
   writeFileSync(join(run, "manifest.json"), JSON.stringify({ tasks: ids.map((id) => ({ id, effort: null })) }));
 }
 
-test("grade --init: one row per model leaf, Claude leaves included", () => {
+test("grade --init: one row per model leaf, Claude leaves included", async () => {
   const dir = tmp();
   try {
     const run = fakeRun(dir);
-    const r = runCli(["grade", "--init", run], { cwd: dir, env: { SWARM_HOME: join(dir, "home") } });
+    const r = await runCliInProcess(["grade", "--init", run], { cwd: dir, env: { SWARM_HOME: join(dir, "home") } });
     equal(r.status, 0, r.stderr);
     const batch = JSON.parse(readFileSync(join(run, "grades.json"), "utf8"));
     equal(batch.rows.length, 3);
@@ -52,7 +52,7 @@ test("grade --init: one row per model leaf, Claude leaves included", () => {
   }
 });
 
-test("stored rows keep provider identity though the skeleton names none", () => {
+test("stored rows keep provider identity though the skeleton names none", async () => {
   const dir = tmp();
   try {
     const run = fakeRun(dir);
@@ -66,7 +66,7 @@ test("stored rows keep provider identity though the skeleton names none", () => 
     }));
     writeManifest(run, ["icons", "pack", "verdict", "same-ollama", "same-codex"]);
     const home = join(dir, "home");
-    const init = runCli(["grade", "--init", run], { cwd: dir, env: { SWARM_HOME: home } });
+    const init = await runCliInProcess(["grade", "--init", run], { cwd: dir, env: { SWARM_HOME: home } });
     equal(init.status, 0, init.stderr);
     const batch = JSON.parse(readFileSync(join(run, "grades.json"), "utf8"));
     const same = batch.rows.filter((r) => r.leaf.startsWith("same-"));
@@ -81,7 +81,7 @@ test("stored rows keep provider identity though the skeleton names none", () => 
       })),
     };
     writeFileSync(join(run, "grades-provider.json"), JSON.stringify(filled));
-    const landed = runCli(["grade", "--file", join(run, "grades-provider.json")], { cwd: dir, env: { SWARM_HOME: home } });
+    const landed = await runCliInProcess(["grade", "--file", join(run, "grades-provider.json")], { cwd: dir, env: { SWARM_HOME: home } });
     equal(landed.status, 0, landed.stderr);
     const rows = readFileSync(join(home, "model-scores.jsonl"), "utf8").trim().split("\n").map((line) => JSON.parse(line));
     deepEqual(rows.filter((r) => r.model === "same-model").map((r) => r.provider).sort(), ["codex", "ollama"]);
@@ -90,13 +90,13 @@ test("stored rows keep provider identity though the skeleton names none", () => 
   }
 });
 
-test("grade --init: a run with only agentless nodes says so rather than writing an empty form", () => {
+test("grade --init: a run with only agentless nodes says so rather than writing an empty form", async () => {
   const dir = tmp();
   try {
     const run = join(dir, "agentless-only");
     mkdirSync(join(run, "results"), { recursive: true });
     writeFileSync(join(run, "results", "a.json"), JSON.stringify({ id: "a", ok: true }));
-    const r = runCli(["grade", "--init", run], { cwd: dir, env: { SWARM_HOME: join(dir, "home") } });
+    const r = await runCliInProcess(["grade", "--init", run], { cwd: dir, env: { SWARM_HOME: join(dir, "home") } });
     equal(r.status, 1);
     ok(r.stderr.includes("no gradeable leaves"), r.stderr);
     ok(!existsSync(join(run, "grades.json")));
@@ -105,13 +105,13 @@ test("grade --init: a run with only agentless nodes says so rather than writing 
   }
 });
 
-test("grade --file: an untouched skeleton is refused and nothing is written", () => {
+test("grade --file: an untouched skeleton is refused and nothing is written", async () => {
   const dir = tmp();
   try {
     const run = fakeRun(dir);
     const home = join(dir, "home");
-    runCli(["grade", "--init", run], { cwd: dir, env: { SWARM_HOME: home } });
-    const r = runCli(["grade", "--file", join(run, "grades.json")], { cwd: dir, env: { SWARM_HOME: home } });
+    await runCliInProcess(["grade", "--init", run], { cwd: dir, env: { SWARM_HOME: home } });
+    const r = await runCliInProcess(["grade", "--file", join(run, "grades.json")], { cwd: dir, env: { SWARM_HOME: home } });
     equal(r.status, 1);
     ok(r.stderr.includes("session"), r.stderr);
     ok(!existsSync(join(home, "model-scores.jsonl")), "the store was created from an untouched form");
@@ -120,7 +120,7 @@ test("grade --file: an untouched skeleton is refused and nothing is written", ()
   }
 });
 
-test("grade --file: a leaf with no result on disk fails loudly and writes nothing", () => {
+test("grade --file: a leaf with no result on disk fails loudly and writes nothing", async () => {
   const dir = tmp();
   try {
     const run = fakeRun(dir);
@@ -131,7 +131,7 @@ test("grade --file: a leaf with no result on disk fails loudly and writes nothin
       session: "abc123",
       rows: [{ leaf: "ghost", domain: "godot", outcome: "completed", note: "", grades: { adherence: 8, handoff: 8, truthfulness: 8, depth: 8 } }],
     }));
-    const r = runCli(["grade", "--file", p], { cwd: dir, env: { SWARM_HOME: home } });
+    const r = await runCliInProcess(["grade", "--file", p], { cwd: dir, env: { SWARM_HOME: home } });
     equal(r.status, 1);
     ok(r.stderr.includes("ghost"), r.stderr);
     ok(r.stderr.includes("cannot be fabricated"), r.stderr);
@@ -141,7 +141,7 @@ test("grade --file: a leaf with no result on disk fails loudly and writes nothin
   }
 });
 
-test("grade --file: a filled batch lands, with model and mechanical taken from the result", () => {
+test("grade --file: a filled batch lands, with model and mechanical taken from the result", async () => {
   const dir = tmp();
   try {
     const run = fakeRun(dir);
@@ -157,7 +157,7 @@ test("grade --file: a filled batch lands, with model and mechanical taken from t
         { leaf: "pack", domain: "godot", outcome: "session-died", note: "died on an image read" },
       ],
     }));
-    const r = runCli(["grade", "--file", p], { cwd: dir, env: { SWARM_HOME: home } });
+    const r = await runCliInProcess(["grade", "--file", p], { cwd: dir, env: { SWARM_HOME: home } });
     equal(r.status, 0, r.stderr);
     const rows = readFileSync(join(home, "model-scores.jsonl"), "utf8").trim().split("\n").map((l) => JSON.parse(l));
     equal(rows.length, 2);
@@ -172,7 +172,7 @@ test("grade --file: a filled batch lands, with model and mechanical taken from t
 
 // The declared columns come from the roster the reader serves, envelope and all
 // — a reader still parsing the flat file records null for every provider.
-test("grade --file records declared capabilities from the roster the reader serves", () => {
+test("grade --file records declared capabilities from the roster the reader serves", async () => {
   const dir = tmp();
   try {
     const run = fakeRun(dir);
@@ -191,7 +191,7 @@ test("grade --file records declared capabilities from the roster the reader serv
       session: "abc123",
       rows: [{ leaf: "icons", domain: "godot", outcome: "completed", note: "", grades: { adherence: 9, handoff: 7, truthfulness: 8, depth: 8 } }],
     }));
-    const r = runCli(["grade", "--file", p], { cwd: dir, env: { SWARM_HOME: home } });
+    const r = await runCliInProcess(["grade", "--file", p], { cwd: dir, env: { SWARM_HOME: home } });
     equal(r.status, 0, r.stderr);
     const rows = readFileSync(join(home, "model-scores.jsonl"), "utf8").trim().split("\n").map((l) => JSON.parse(l));
     deepEqual(rows[0].declared, { capabilities: ["tools"], contextLength: 1000000, parameterCount: 756162687872 });
@@ -203,7 +203,7 @@ test("grade --file records declared capabilities from the roster the reader serv
 // The closing block is the only mechanical prompt to grade — a SKILL.md step is
 // trust, and the store only fills if something asks. It must be printed by the
 // engine, last, and carry a runnable command.
-test("formatClosing: a run with :cloud leaves ends by asking for a grade", () => {
+test("formatClosing: a run with :cloud leaves ends by asking for a grade", async () => {
   const out = formatClosing({
     summaryPath: "C:/runs/r1/summary.json",
     gradeable: { count: 5, resultsDir: "C:/runs/r1", cli: "C:/swarm/scripts/swarm.mjs" },
@@ -219,7 +219,7 @@ test("formatClosing: a run with :cloud leaves ends by asking for a grade", () =>
 
 // Since grade-claude-tiers an all-Claude run IS gradeable; the no-ask case
 // is a run with nothing but agentless nodes (count 0).
-test("formatClosing: a run with no gradeable leaves is not asked to grade", () => {
+test("formatClosing: a run with no gradeable leaves is not asked to grade", async () => {
   const out = formatClosing({
     summaryPath: "C:/runs/r1/summary.json",
     gradeable: { count: 0, resultsDir: "C:/runs/r1", cli: "C:/swarm/scripts/swarm.mjs" },
@@ -229,10 +229,10 @@ test("formatClosing: a run with no gradeable leaves is not asked to grade", () =
   ok(!formatClosing({ summaryPath: "C:/runs/r1/summary.json" }).includes("grade"));
 });
 
-test("perf: an empty store prints all eleven aspects at n=0", () => {
+test("perf: an empty store prints all eleven aspects at n=0", async () => {
   const dir = tmp();
   try {
-    const r = runCli(["perf"], { cwd: dir, env: { SWARM_HOME: join(dir, "home") } });
+    const r = await runCliInProcess(["perf"], { cwd: dir, env: { SWARM_HOME: join(dir, "home") } });
     equal(r.status, 0, r.stderr);
     for (const a of ASPECTS) ok(r.stdout.includes(a), `${a} missing from an empty-store table`);
     ok(r.stdout.includes("n=0"), r.stdout);
@@ -241,10 +241,10 @@ test("perf: an empty store prints all eleven aspects at n=0", () => {
   }
 });
 
-test("perf: an unknown aspect fails with the valid list", () => {
+test("perf: an unknown aspect fails with the valid list", async () => {
   const dir = tmp();
   try {
-    const r = runCli(["perf", "--aspect", "godot"], { cwd: dir, env: { SWARM_HOME: join(dir, "home") } });
+    const r = await runCliInProcess(["perf", "--aspect", "godot"], { cwd: dir, env: { SWARM_HOME: join(dir, "home") } });
     equal(r.status, 1);
     ok(r.stderr.includes("unknown aspect"), r.stderr);
     ok(r.stderr.includes("discrimination"), r.stderr);
@@ -260,11 +260,11 @@ test("perf: an unknown aspect fails with the valid list", () => {
 // A relative dir given to --init (the normal case when cwd IS the runs dir)
 // must land absolute in grades.json — canonicalRunKey never resolves against
 // a cwd, so a relative resultsDir can never match a later run-dir walk.
-test("grade --init: a relative dir argument is stored as an absolute resultsDir", () => {
+test("grade --init: a relative dir argument is stored as an absolute resultsDir", async () => {
   const dir = tmp();
   try {
     const run = fakeRun(dir);
-    const r = runCli(["grade", "--init", "run-1"], { cwd: dir, env: { SWARM_HOME: join(dir, "home") } });
+    const r = await runCliInProcess(["grade", "--init", "run-1"], { cwd: dir, env: { SWARM_HOME: join(dir, "home") } });
     equal(r.status, 0, r.stderr);
     const batch = JSON.parse(readFileSync(join(run, "grades.json"), "utf8"));
     ok(isAbsolute(batch.resultsDir), batch.resultsDir);
@@ -279,7 +279,7 @@ test("grade --init: a relative dir argument is stored as an absolute resultsDir"
 // wherever --init ran, not to grades.json's location. grades.json lives inside
 // the results dir, so the dir holding grades.json already IS the results dir;
 // resolving the relative string underneath it would double the path segment.
-test("grade --file: a relative resultsDir is the directory holding grades.json itself, not a child of it", () => {
+test("grade --file: a relative resultsDir is the directory holding grades.json itself, not a child of it", async () => {
   const dir = tmp();
   try {
     const run = fakeRun(dir);
@@ -293,7 +293,7 @@ test("grade --file: a relative resultsDir is the directory holding grades.json i
           grades: { adherence: 8, handoff: 8, truthfulness: 8, depth: 8 } },
       ],
     }));
-    const r = runCli(["grade", "--file", p], { cwd: dir, env: { SWARM_HOME: home } });
+    const r = await runCliInProcess(["grade", "--file", p], { cwd: dir, env: { SWARM_HOME: home } });
     equal(r.status, 0, r.stderr);
     const rows = readFileSync(join(home, "model-scores.jsonl"), "utf8").trim().split("\n").map((l) => JSON.parse(l));
     equal(rows.length, 1);
@@ -304,13 +304,13 @@ test("grade --file: a relative resultsDir is the directory holding grades.json i
   }
 });
 
-test("grade --init: a sentinel-model (compute) result gets no row", () => {
+test("grade --init: a sentinel-model (compute) result gets no row", async () => {
   const dir = tmp();
   try {
     const run = fakeRun(dir);
     writeFileSync(join(run, "results", "dedupe.json"), JSON.stringify({ id: "dedupe", model: "compute", ok: true }));
     writeManifest(run, ["icons", "pack", "verdict", "dedupe"]);
-    const r = runCli(["grade", "--init", run], { cwd: dir, env: { SWARM_HOME: join(dir, "home") } });
+    const r = await runCliInProcess(["grade", "--init", run], { cwd: dir, env: { SWARM_HOME: join(dir, "home") } });
     equal(r.status, 0, r.stderr);
     const batch = JSON.parse(readFileSync(join(run, "grades.json"), "utf8"));
     equal(batch.rows.length, 3);
@@ -320,7 +320,7 @@ test("grade --init: a sentinel-model (compute) result gets no row", () => {
   }
 });
 
-test("grade --file: a corrupt roster does not abort the batch; declared is recorded as null", () => {
+test("grade --file: a corrupt roster does not abort the batch; declared is recorded as null", async () => {
   const dir = tmp();
   try {
     const run = fakeRun(dir);
@@ -337,7 +337,7 @@ test("grade --file: a corrupt roster does not abort the batch; declared is recor
       }],
     };
     writeFileSync(join(run, "grades-corrupt.json"), JSON.stringify(filled));
-    const r = runCli(["grade", "--file", join(run, "grades-corrupt.json")], { cwd: dir, env: { SWARM_HOME: home } });
+    const r = await runCliInProcess(["grade", "--file", join(run, "grades-corrupt.json")], { cwd: dir, env: { SWARM_HOME: home } });
     equal(r.status, 0, r.stderr);
     ok(r.stderr.includes("not in the model roster"), r.stderr);
     const rows = readFileSync(join(home, "model-scores.jsonl"), "utf8").trim().split("\n").map((line) => JSON.parse(line));

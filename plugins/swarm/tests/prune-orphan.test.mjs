@@ -9,12 +9,12 @@ import { equal, ok } from "node:assert/strict";
 import { mkdtempSync, rmSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
-import { runCli } from "./helpers/cli.mjs";
+import { runCliInProcess } from "./helpers/cli.mjs";
 import { treeDirFor } from "../src/worktree.mjs";
 
 const git = (args, cwd) => spawnSync("git", args, { cwd, encoding: "utf8", windowsHide: true });
 
-test("prune finds a run's leaf trees when the manifest's cwd worktree is gone", () => {
+test("prune finds a run's leaf trees when the manifest's cwd worktree is gone", async () => {
   const root = mkdtempSync(join(tmpdir(), "swarm-prune-orphan-"));
   const repo = join(root, "repo");
   mkdirSync(repo);
@@ -34,11 +34,11 @@ test("prune finds a run's leaf trees when the manifest's cwd worktree is gone", 
     writeFileSync(join(resultsDir, "summary.json"), JSON.stringify({ started: new Date().toISOString(), finished: new Date().toISOString(), tasks: [], blocked: [], worktreesKept: [], totalTokens: null }));
     git(["worktree", "remove", "--force", base], repo);
 
-    const dry = runCli(["prune", resultsDir, "--dry-run"], { cwd: root, env: { SWARM_HOME: join(root, "home") } });
+    const dry = await runCliInProcess(["prune", resultsDir, "--dry-run"], { cwd: root, env: { SWARM_HOME: join(root, "home") } });
     equal(dry.status, 0, dry.stdout + dry.stderr);
     ok(dry.stdout.includes("swarm/x/impl"), dry.stdout);
 
-    const real = runCli(["prune", resultsDir], { cwd: root, env: { SWARM_HOME: join(root, "home") } });
+    const real = await runCliInProcess(["prune", resultsDir], { cwd: root, env: { SWARM_HOME: join(root, "home") } });
     equal(real.status, 0, real.stdout + real.stderr);
     ok(!existsSync(leaf), "the leaf tree is removed");
     const registered = git(["worktree", "list"], repo).stdout.split(/\r?\n/).filter((line) => line.startsWith("worktree ")).map((line) => resolve(line.slice("worktree ".length).trim()));
