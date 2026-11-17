@@ -1,19 +1,19 @@
 // Fixtures shared by the prune tests in cli-prune.test.mjs and the two stop/prune
 // sweeps left in cli.test.mjs.
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
+import { rmSync, writeFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
-import { tmpdir } from "node:os";
 import { commitAll, gitOut, tmp } from "./cli-fixture.mjs";
 import { treeDirFor } from "../../src/worktree.mjs";
+import { templateRepo } from "./template-repo.mjs";
 
 // A real tiny repo + a real worktree, used to exercise prune end-to-end.
 export function initPruneRepo() {
-  const repo = mkdtempSync(join(tmpdir(), "swarm-cli-repo-"));
-  spawnSync("git", ["init", "-q", "-b", "master"], { cwd: repo, windowsHide: true });
-  writeFileSync(join(repo, "a.txt"), "hello\n");
-  commitAll(repo, "init");
-  return repo;
+  return templateRepo("prune", (repo) => {
+    spawnSync("git", ["init", "-q", "-b", "master"], { cwd: repo, windowsHide: true });
+    writeFileSync(join(repo, "a.txt"), "hello\n");
+    commitAll(repo, "init");
+  });
 }
 
 // A run record finished BEFORE the summary was written (so run.log's mtime
