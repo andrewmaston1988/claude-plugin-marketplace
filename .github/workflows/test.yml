@@ -156,8 +156,35 @@ jobs:
           cache-dependency-path: plugins/pipeline/package-lock.json
       # The suite's runs carry `install: npm ci`, hash-gated, so CI's own
       # install step is gone rather than duplicated.
+      # Read-only, not just hashed: a test that overwrites a real file and puts
+      # it back leaves a snapshot unchanged, but cannot restore a file it was
+      # denied permission to write. This proves no writes; reads are covered by
+      # the helper-first wiring test and the injected-config rows. Every home
+      # the helper redirects is planted, including the XDG dirs paths.mjs
+      # prefers on Linux.
+      - name: Plant read-only pipeline home sentinels
+        run: |
+          mkdir -p ~/.pipeline ~/.config/pipeline ~/.local/share/pipeline ~/.local/state/pipeline
+          printf '{"proxy":{"url":"http://sentinel.invalid:1","auth_token":"sentinel"}}\n' > ~/.pipeline/config.json
+          cp ~/.pipeline/config.json ~/.config/pipeline/config.json
+          printf '{"status":"sentinel","pid":1}\n' > ~/.pipeline/orchestrator.state.json
+          cp ~/.pipeline/orchestrator.state.json ~/.local/state/pipeline/orchestrator.state.json
+          printf 'keep\n' > ~/.local/share/pipeline/sentinel
+          printf 'keep\n' > ~/.local/state/pipeline/sentinel
+          chmod -R a-w ~/.pipeline ~/.config/pipeline ~/.local/share/pipeline ~/.local/state/pipeline
+          find ~/.pipeline ~/.config/pipeline ~/.local/share/pipeline ~/.local/state/pipeline -printf '%y %m %p\n' | sort > "$RUNNER_TEMP/pipeline-sentinel-listing"
+          find ~/.pipeline ~/.config/pipeline ~/.local/share/pipeline ~/.local/state/pipeline \( -type f -o -type l \) -print0 | sort -z | xargs -0 sha256sum > "$RUNNER_TEMP/pipeline-sentinel-hashes"
       - name: Run tests
         run: node scripts/test.mjs --suite pipeline ${{ github.event_name == 'pull_request' && format('--if-selected --against {0}', github.event.pull_request.base.sha) || '' }}
+      - name: Verify pipeline home sentinels untouched
+        if: always()
+        run: |
+          find ~/.pipeline ~/.config/pipeline ~/.local/share/pipeline ~/.local/state/pipeline -printf '%y %m %p\n' | sort > "$RUNNER_TEMP/after-listing"
+          find ~/.pipeline ~/.config/pipeline ~/.local/share/pipeline ~/.local/state/pipeline \( -type f -o -type l \) -print0 | sort -z | xargs -0 sha256sum > "$RUNNER_TEMP/after-hashes"
+          rc=0
+          diff -u "$RUNNER_TEMP/pipeline-sentinel-listing" "$RUNNER_TEMP/after-listing" || rc=1
+          diff -u "$RUNNER_TEMP/pipeline-sentinel-hashes" "$RUNNER_TEMP/after-hashes" || rc=1
+          exit $rc
 
   agent-investigation:
     name: agent-investigation
