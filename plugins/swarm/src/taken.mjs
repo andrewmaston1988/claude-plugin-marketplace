@@ -20,6 +20,13 @@ export const takenKey = ({ run, repo, branch }) =>
 // generation. Nothing is ever unlinked, so a second hook's rename fails — the live log is
 // already gone — instead of deleting the rotation the first hook just made.
 let generation = 0;
+
+// Per-process state, so an in-process CLI call starts from the same place a
+// fresh child would.
+export function resetForTests() {
+  generation = 0;
+}
+
 function rotateIfFull(logPath, fs) {
   let size;
   try { size = fs.statSync(logPath).size; } catch { return; }

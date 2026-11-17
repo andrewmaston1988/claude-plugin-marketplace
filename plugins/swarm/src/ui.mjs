@@ -6,7 +6,23 @@
 // repaintsInPlace below; SWARM_REPAINT=0 is the switch for a parser that must
 // see no ANSI at all.
 
-const on = () => process.stdout.isTTY && !process.env.NO_COLOR;
+// Every writer resolves through this one sink, so an in-process CLI call can
+// capture the whole output without a writer being threaded through 14 modules.
+// The bin never swaps it; the defaults are the process globals it always used.
+let sink = { stdout: process.stdout, stderr: process.stderr };
+
+export function currentSink() {
+  return sink;
+}
+
+// Returns the restore, so a caller can put the previous sink back in a finally.
+export function setSink(next) {
+  const prev = sink;
+  sink = { stdout: process.stdout, stderr: process.stderr, ...next };
+  return () => { sink = prev; };
+}
+
+const on = () => sink.stdout.isTTY && !process.env.NO_COLOR;
 
 const wrap = (code) => (s) => (on() ? `\x1b[${code}m${s}\x1b[0m` : s);
 
@@ -65,7 +81,7 @@ function windowLines(env) {
 
 // Height the live view can actually show, for callers that must render to fit.
 // Null wherever the roster is never clipped: a TTY scrolls, a plain pipe appends.
-export function liveViewLines({ isTTY = process.stdout.isTTY, env = process.env } = {}) {
+export function liveViewLines({ isTTY = sink.stdout.isTTY, env = process.env } = {}) {
   return !isTTY && repaintsInPlace({ isTTY, env }) ? windowLines(env) : null;
 }
 
@@ -76,8 +92,8 @@ export function liveViewLines({ isTTY = process.stdout.isTTY, env = process.env 
 // between snapshots: an appending view shows only the tail, so every blank
 // costs a row of it.
 export function createSnapshotWriter({
-  write = (s) => process.stdout.write(s),
-  isTTY = process.stdout.isTTY,
+  write = (s) => sink.stdout.write(s),
+  isTTY = sink.stdout.isTTY,
   env = process.env,
 } = {}) {
   const repaint = repaintsInPlace({ isTTY, env });
@@ -99,9 +115,9 @@ export function createSnapshotWriter({
 // Line writers. Here rather than in the CLI entry point so a command split out
 // of it still shares one definition.
 export function out(line) {
-  process.stdout.write(line + "\n");
+  sink.stdout.write(line + "\n");
 }
 
 export function err(line) {
-  process.stderr.write(line + "\n");
+  sink.stderr.write(line + "\n");
 }

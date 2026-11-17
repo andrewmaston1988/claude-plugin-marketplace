@@ -111,6 +111,11 @@ export function readRateCardStore(path = rateCardStorePath()) {
 // rateCards' memo, declared up here because a write has to drop its entry.
 const cache = new Map();
 
+// An in-process CLI call must not serve the previous call's cards.
+export function resetForTests() {
+  cache.clear();
+}
+
 function writeRateCardStore(store, path = rateCardStorePath()) {
   mkdirSync(dirname(path), { recursive: true });
   // Per-writer temp: the daemon and the CLI both bank here, and a shared name

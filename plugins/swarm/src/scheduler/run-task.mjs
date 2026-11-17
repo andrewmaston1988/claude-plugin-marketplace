@@ -9,7 +9,7 @@ import { strictSchema } from "../native-schema.mjs";
 import { resultPath, readResult } from "../results.mjs";
 import { createRunnerParser, emptyTokens } from "../stream.mjs";
 import { createLogLineFilter } from "../log-line-filter.mjs";
-import { createSnapshotWriter, liveViewLines } from "../ui.mjs";
+import { createSnapshotWriter, liveViewLines, out } from "../ui.mjs";
 import { TEMPLATE_RE } from "../coverage.mjs";
 import { matchQuota, DEFAULT_QUOTA_PATTERNS } from "../quota.mjs";
 import { normalizeForCompare } from "../roots.mjs";
@@ -39,7 +39,7 @@ export function makeDefaultIo({ platform = process.platform, spawnSync = nodeSpa
     fetch: (...a) => globalThis.fetch(...a),
     now: () => Date.now(),
     freeMemMb: () => freemem() / 1048576,
-    stdout: (line) => process.stdout.write(line + "\n"),
+    stdout: out,
     snapshot: createSnapshotWriter(),
     maxLines: liveViewLines(),
     env: process.env,
