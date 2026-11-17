@@ -3,7 +3,7 @@
 import { expectCss, expectHidden, expectText, expectVisible, expectWidths } from "./assertions.mjs";
 import { interact } from "./interaction.mjs";
 import { expectJson } from "./json.mjs";
-import { pressKey } from "./keyboard.mjs";
+import { pressKey, typeText } from "./keyboard.mjs";
 import { expectCount, expectProp } from "./state.mjs";
 import { expectWithin } from "./within.mjs";
 
@@ -12,6 +12,7 @@ export const OPS = {
   click: (args, state) => interact("click", args, state),
   tap: (args, state) => interact("tap", args, state),
   key: pressKey,
+  type: typeText,
   expect_visible: expectVisible,
   expect_hidden: expectHidden,
   expect_widths: expectWidths,

@@ -75,6 +75,23 @@ const PAGES = {
       });
     </script>`),
 
+  // Typing: an unfocused input that counts its input events, a div that cannot take focus, and two
+  // inputs sharing a class so one selector matches more than one target.
+  "/type.html": page(`
+    <input id="field" class="field">
+    <p id="count">0</p>
+    <div id="plain">not focusable</div>
+    <input class="pair"><input class="pair">
+    <script>
+      const field = document.getElementById("field");
+      const count = document.getElementById("count");
+      let fired = 0;
+      field.addEventListener("input", () => {
+        fired += 1;
+        count.textContent = String(fired);
+      });
+    </script>`),
+
   "/covered.html": page(`
     <button id="covered">Covered</button>
     <div id="overlay" style="position:fixed;inset:0;background:rgba(0,0,0,.1)"></div>`),
