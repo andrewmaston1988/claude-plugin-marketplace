@@ -17,6 +17,7 @@ import {
   listProcessesWindows,
   profileFromCommandLine,
   queryProcessStart,
+  queryProcessStarts,
   reapOrphans,
   writeOwnerFile,
 } from "../src/reaper.mjs";
@@ -61,7 +62,9 @@ test("row 8: a stop that cannot be verified claims no kills", async () => {
   assert.deepEqual(result.failed, [100, 101]);
 });
 
-test("row 8: the 19-browser reap batches its kill and stays inside the budget", async (t) => {
+// The budget is enforced by launch(), not here; a timing assertion on rows with a fake
+// lister and a recording killer passes whatever the clock does.
+test("row 8: the 19-browser reap batches its kill into one invocation", async (t) => {
   const dir = tempRoot(t);
   const processes = [];
   for (let i = 0; i < 19; i++) {
@@ -70,7 +73,6 @@ test("row 8: the 19-browser reap batches its kill and stays inside the budget", 
     processes.push({ pid: 4000 + i, cmd: cmdFor(profile) });
   }
   const kill = recorder();
-  const started = Date.now();
   const result = await reapOrphans({
     tmpDir: dir,
     listProcesses: () => processes,
@@ -82,8 +84,6 @@ test("row 8: the 19-browser reap batches its kill and stays inside the budget", 
   assert.equal(kill.calls.length, 1);
   assert.equal(kill.calls[0].pids.length, 19);
   assert.equal(result.killed.length, 19);
-  assert.ok(Date.now() - started < 5000);
-  assert.ok(result.elapsedMs < 5000);
 });
 
 test("row 8: elsewhere the kill is one loop over the same PIDs", async () => {
@@ -95,6 +95,25 @@ test("row 8: elsewhere the kill is one loop over the same PIDs", async () => {
   });
   assert.deepEqual(killed, [[21, "SIGKILL"], [22, "SIGKILL"]]);
   assert.deepEqual(result.killed, [21, 22]);
+});
+
+test("row 8: elsewhere a PID killed but not yet reaped settles instead of failing", async () => {
+  // kill(pid, 0) still answers for a process the kernel has not reaped yet.
+  const visibleFor = new Map([[21, 2], [22, 1]]);
+  const result = await killPids([21, 22, 23], {
+    platform: "linux",
+    _kill: () => {},
+    _alive: (pid) => {
+      if (pid === 23) return true;
+      const left = visibleFor.get(pid) ?? 0;
+      if (left <= 0) return false;
+      visibleFor.set(pid, left - 1);
+      return true;
+    },
+    _sleep: async () => {},
+  });
+  assert.deepEqual(result.killed, [21, 22]);
+  assert.deepEqual(result.failed, [23]);
 });
 
 // --- listers and the owner-liveness query -------------------------------------
@@ -187,6 +206,44 @@ test("the owner-liveness query reads the OS start time or returns unknown", asyn
   assert.equal(await queryProcessStart(1, { platform: "win32", _execFile: async () => ({ stdout: "" }) }), null);
   const never = async () => { throw new Error("must not run"); };
   assert.equal(await queryProcessStart(0, { platform: "linux", _execFile: never }), null);
+});
+
+test("the batched start-time query answers every PID from one spawn", async () => {
+  const iso = "2026-11-16T10:00:00.0000000Z";
+  const seen = [];
+  const windows = await queryProcessStarts([11, 12, 12, 0], {
+    platform: "win32",
+    _execFile: async (exe, args) => {
+      seen.push(exe);
+      assert.match(args[3], /ProcessId=11 or ProcessId=12/);
+      return { stdout: JSON.stringify([{ ProcessId: 11, Start: iso }]) };
+    },
+  });
+  assert.deepEqual(seen, ["pwsh"]);
+  assert.equal(windows.get(11), Date.parse(iso));
+  assert.equal(windows.get(12), null, "a PID the OS does not answer for is unknown");
+
+  const posix = await queryProcessStarts([21, 22], {
+    platform: "linux",
+    _execFile: async (exe, args) => {
+      assert.equal(exe, "ps");
+      assert.deepEqual(args, ["-o", "pid=,lstart=", "-p", "21,22"]);
+      return { stdout: "   21 Sun Nov 16 10:00:00 2026\n" };
+    },
+  });
+  assert.equal(posix.get(21), Date.parse("Sun Nov 16 10:00:00 2026"));
+  assert.equal(posix.get(22), null);
+
+  const failed = await queryProcessStarts([31], {
+    platform: "linux",
+    _execFile: async () => { throw new Error("ps failed"); },
+  });
+  assert.equal(failed.get(31), null, "an unreadable answer is unknown, not a start time");
+  const empty = await queryProcessStarts([], {
+    platform: "linux",
+    _execFile: async () => assert.fail("no ids, no spawn"),
+  });
+  assert.equal(empty.size, 0);
 });
 
 // --- the parser against a real spawn ------------------------------------------

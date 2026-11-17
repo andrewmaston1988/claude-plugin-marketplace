@@ -82,7 +82,6 @@ async function devtoolsPort(profile, child, { _fs, _sleep }) {
 /** Best-effort reap. A lister that throws or overruns is the next launch's problem, not this one's. */
 async function reapWithinBudget(_reap, budgetMs) {
   let timer;
-  // A reap that rejects is this launch's best-effort skip, never its failure.
   const reap = Promise.resolve().then(() => _reap()).catch(() => {});
   try {
     await Promise.race([reap, new Promise((resolve) => { timer = setTimeout(resolve, budgetMs); })]);

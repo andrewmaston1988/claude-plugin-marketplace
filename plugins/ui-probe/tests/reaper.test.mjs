@@ -3,7 +3,7 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join, sep } from "node:path";
 import { tmpdir } from "node:os";
 import {
@@ -66,7 +66,8 @@ test("row 3: a reused PID is stopped even though its owner looks alive", async (
     listProcesses: () => [{ pid: 4001, cmd: cmdFor(profile, "chrome.exe") }],
     kill,
     isAlive: (pid) => pid === 9001,
-    queryStart: (pid) => (pid === 9001 ? 1_005_000 : null), // 5 s apart
+    queryStarts: async () => new Map([[9001, 1_005_000]]), // 5 s apart
+    queryStart: (pid) => (pid === 9001 ? 1_005_000 : null),
   });
   assert.deepEqual(kill.calls[0].pids, [4001]);
 });
@@ -161,18 +162,44 @@ test("row 4: a profile outside tmpDir is never touched, whatever its name", asyn
   assert.deepEqual(kill.calls, []);
 });
 
-test("row 5: the sweep removes old unheld profiles and keeps young and held ones", (t) => {
+test("row 5: the sweep removes old unheld profiles and keeps young and held ones", async (t) => {
   const dir = tempRoot(t);
   const old = profileFolder(dir, "old");
   const young = profileFolder(dir, "young");
   const held = profileFolder(dir, "held");
   aged(old);
   aged(held);
-  const result = sweepProfiles({ tmpDir: dir, liveProfiles: [held] });
+  const result = await sweepProfiles({ tmpDir: dir, liveProfiles: [held] });
   assert.deepEqual(result.removed, [old]);
   assert.equal(existsSync(old), false);
   assert.ok(existsSync(young));
   assert.ok(existsSync(held));
+});
+
+test("row 5: the sweep yields, so a launch's budget can bound it", async (t) => {
+  const dir = tempRoot(t);
+  const STALE = 30;
+  const BLOCK_MS = 40;
+  const BUDGET_MS = 500;
+  for (let i = 0; i < STALE; i++) aged(profileFolder(dir, `stale-${i}`));
+  // Each delete blocks the loop; only a yield between folders lets the launch's timer fire.
+  const fs = {
+    readdirSync,
+    statSync,
+    readFileSync,
+    rmSync: (path, options) => {
+      const end = Date.now() + BLOCK_MS;
+      while (Date.now() < end) { /* a delete that holds the loop, like a large folder */ }
+      rmSync(path, options);
+    },
+  };
+  const reap = reapOrphans({ tmpDir: dir, fs, listProcesses: () => [], kill: recorder() });
+  const winner = await Promise.race([
+    reap.then(() => "reap"),
+    new Promise((done) => setTimeout(() => done("budget"), BUDGET_MS)),
+  ]);
+  assert.equal(winner, "budget", "the reap yielded often enough for a launch's timer to fire");
+  await reap;
 });
 
 test("row 5: a listing that failed or cannot be parsed skips the sweep", async (t) => {
@@ -216,12 +243,12 @@ test("row 9: a clean pre-scan never reaches the lister", async (t) => {
     listProcesses: () => { listed += 1; return []; },
     kill: recorder(),
     isAlive: (pid) => pid === 9001,
-    queryStart: () => 1_000,
+    queryStarts: async () => new Map([[9001, 1_000]]),
   };
   assert.equal((await reapOrphans({ ...base, tmpDir: owned })).skipped, "prescan");
   assert.equal((await reapOrphans({ ...base, tmpDir: empty })).skipped, "prescan");
   assert.equal(listed, 0);
-  const prescan = { isAlive: (pid) => pid === 9001, queryStart: () => 1_000 };
+  const prescan = { isAlive: (pid) => pid === 9001, queryStarts: async () => new Map([[9001, 1_000]]) };
   assert.equal((await preScanProfiles({ tmpDir: owned, ...prescan })).reason, "owned");
   assert.equal((await preScanProfiles({ tmpDir: empty, ...prescan })).reason, "clean");
 });
@@ -233,10 +260,28 @@ test("row 9: the caller's own owner file is read locally, with no process spawn"
   let queried = 0;
   const result = await preScanProfiles({
     tmpDir: dir,
-    queryStart: () => { queried += 1; return null; },
+    queryStarts: async () => { queried += 1; return new Map(); },
   });
   assert.equal(result.reason, "owned");
   assert.equal(queried, 0, "our own pid's start time is already known");
+});
+
+test("row 9: every live owner's start time comes from one query", async (t) => {
+  const dir = tempRoot(t);
+  const owners = [9101, 9102, 9103];
+  owners.forEach((pid, i) => writeOwnerFile(profileFolder(dir, `owner-${i}`), { pid, startMs: 5_000 }));
+  const calls = [];
+  const result = await preScanProfiles({
+    tmpDir: dir,
+    isAlive: () => true,
+    queryStarts: async (pids) => {
+      calls.push(pids);
+      return new Map(pids.map((pid) => [pid, 5_000]));
+    },
+  });
+  assert.equal(result.reason, "owned");
+  assert.equal(calls.length, 1, "one query, not one spawn per owner");
+  assert.deepEqual([...calls[0]].sort((a, b) => a - b), owners);
 });
 
 test("row 9: one stale folder opens the gate to the lister", async (t) => {

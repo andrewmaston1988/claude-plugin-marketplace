@@ -6,11 +6,10 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { existsSync, readFileSync, rmSync, mkdtempSync } from "node:fs";
-import { resolve } from "node:path";
 import { pathToFileURL, fileURLToPath } from "node:url";
 
 import { findBrowser, launch } from "../src/browser.mjs";
-import { killBrowserForProfile, listProcesses, profileFromCommandLine, reapOrphans } from "../src/reaper.mjs";
+import { foldPath, killBrowserForProfile, listProcesses, profileFromCommandLine, reapOrphans } from "../src/reaper.mjs";
 
 const REQUIRED = process.env.UI_PROBE_REQUIRE_BROWSER === "1";
 const OVERRIDE = process.env.UI_PROBE_BROWSER || undefined;
@@ -30,18 +29,13 @@ if (!browserPath) console.log(`browser-lifetime: no browser — ${browserProblem
 
 const wait = (ms) => new Promise((done) => setTimeout(done, ms));
 
-const fold = (path) => {
-  const absolute = resolve(String(path)).replace(/\\/g, "/").replace(/\/+$/, "");
-  return process.platform === "win32" ? absolute.toLowerCase() : absolute;
-};
-
 // The real listing: every process holding this exact profile, renderer children included.
 async function holdersOf(profile) {
-  const target = fold(profile);
+  const target = foldPath(profile);
   const processes = await listProcesses();
   return processes.filter((entry) => {
     const found = profileFromCommandLine(entry.cmd);
-    return found != null && fold(found) === target;
+    return found != null && foldPath(found) === target;
   });
 }
 
