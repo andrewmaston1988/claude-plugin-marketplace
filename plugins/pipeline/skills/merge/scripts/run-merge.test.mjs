@@ -19,7 +19,6 @@ import {
   stepDone,
   resumeFrom,
   mutexConflict,
-  taskLines,
   DRIVER_STEPS,
 } from "./run-merge.mjs";
 
@@ -213,19 +212,6 @@ test("mutexConflict: the same subject is a resume, not a conflict", () => {
 
 test("mutexConflict: no existing entry is never a conflict", () => {
   equal(mutexConflict({ existingSubject: null, requested: "autonomous/mine" }), false);
-});
-
-// ── Scenario 10 — [TASK_*] lines ─────────────────────────────────────────────
-
-test("taskLines: one TASK_CREATE per step on init", () => {
-  const out = taskLines("create", DRIVER_STEPS);
-  const created = out.trim().split("\n").filter((l) => l.startsWith("[TASK_CREATE]"));
-  equal(created.length, DRIVER_STEPS.length);
-});
-
-test("taskLines: an update names the index and the status", () => {
-  const out = taskLines("update", DRIVER_STEPS, { index: 2, status: "completed" });
-  match(out, /\[TASK_UPDATE\] 2 completed/);
 });
 
 // Found by I2, not by the unit tests: `merge-base --is-ancestor` is blind to a
