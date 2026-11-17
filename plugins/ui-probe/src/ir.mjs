@@ -10,6 +10,7 @@ export const OPS = {
   tap: { required: ['target'], target: true },
   click: { required: ['target'], target: true },
   key: { required: ['key'], optional: ['repeat', 'gapMs', 'autoRepeat'] },
+  type: { required: ['text'], optional: ['target', 'gapMs'], target: true },
   include: { include: true },
   expect_visible: { required: ['target'], optional: ['timeoutMs'], target: true, assertion: true },
   expect_hidden: { required: ['target'], optional: ['timeoutMs'], target: true, assertion: true },
@@ -36,6 +37,7 @@ const EXAMPLES = {
   expect_css: '{ expect_css: { target: ".tile", property: "display", equals: "flex", over: 400 } }',
   expect_text: '{ expect_text: { target: "h1", equals: "Welcome" } }',
   key: '{ key: { key: "Down", repeat: 2 } }',
+  type: '{ type: { text: "hello", target: "#search" } }',
   include: '{ include: "sign-in.yaml" }',
   expect_within: '{ expect_within: { target: ".tv-card.focused", box: "safe" } }',
   expect_prop: '{ expect_prop: { target: "video", property: "paused", equals: false } }',
@@ -161,6 +163,14 @@ function validateStep(step, index, backend, problems) {
     }
     if ('autoRepeat' in args && typeof args.autoRepeat !== 'boolean') {
       problems.push(problem(`${where}.key.autoRepeat`, 'autoRepeat must be a boolean', 'Set autoRepeat to true to mark the second and later downs as held repeats.', EXAMPLES.key));
+    }
+  }
+  if (op === 'type') {
+    if ('text' in args && (typeof args.text !== 'string' || args.text.length === 0)) {
+      problems.push(problem(`${where}.type.text`, 'text must be a non-empty string', 'Quote the text so YAML reads it as a string: text: "123".', EXAMPLES.type));
+    }
+    if ('gapMs' in args && (!isFiniteNumber(args.gapMs) || args.gapMs < 0)) {
+      problems.push(problem(`${where}.type.gapMs`, 'gapMs must be a non-negative finite number', 'Set the gap between characters in milliseconds.', EXAMPLES.type));
     }
   }
   if (op === 'expect_within' && 'box' in args) {
