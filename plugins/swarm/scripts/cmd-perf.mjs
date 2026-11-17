@@ -6,12 +6,7 @@ import { defaultProviderRegistry } from "../src/default-providers.mjs";
 import { meterCostRows, costSettings } from "../src/cost-settings.mjs";
 import { launchableRoster } from "../src/seat-check.mjs";
 import { dim, out } from "../src/ui.mjs";
-
-// `--name value`, and nothing else: the flag reader every command module shares.
-export function getFlag(name, args) {
-  const i = args.indexOf(`--${name}`);
-  return i < 0 ? undefined : args[i + 1];
-}
+import { getFlag } from "../src/flags.mjs";
 
 export async function cmdPerf(rest) {
   const { readRows, hideDisabledRows, aggregate, overall, dedupe, scoresPath, frontier, PRIOR_WEIGHT } = await import("../src/scores.mjs");

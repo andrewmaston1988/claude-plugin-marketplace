@@ -29,7 +29,8 @@ import { cmdReport } from "./cmd-report.mjs";
 import { cmdCost } from "./cmd-cost.mjs";
 import { cmdScoresRealmodel } from "./cmd-scores.mjs";
 import { cmdGradeInit, cmdGradeFile, cmdGradeWaive } from "./cmd-grade.mjs";
-import { cmdPerf, getFlag } from "./cmd-perf.mjs";
+import { cmdPerf } from "./cmd-perf.mjs";
+import { getFlag } from "../src/flags.mjs";
 import { modelLine, effortsCell } from "../src/model-row.mjs";
 
 const USAGE = `usage: swarm.mjs <command>
