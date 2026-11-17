@@ -8,7 +8,7 @@ import { deepEqual, equal, ok } from "node:assert/strict";
 import { existsSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { runCli } from "./helpers/cli.mjs";
+import { runCliInProcess } from "./helpers/cli.mjs";
 import { gateHome, tmp } from "./helpers/cli-fixture.mjs";
 import { snap, seg } from "./helpers/cost-snapshots.mjs";
 import { writeRosterEntry } from "../src/roster.mjs";
@@ -57,8 +57,8 @@ function world({ tasks, grading = true, seed = true, digest, resultsDir = "out" 
 
 const task = (over = {}) => ({ id: "lane", prompt: "x", provider: "ollama", model: SEAT, ...over });
 const envOf = (w) => ({ SWARM_HOME: w.home, SWARM_SHIM_LOG: join(w.dir, "shim.log"), SWARM_SHIM_OUTPUT: "done" });
-const validate = (w) => runCli(["validate", w.path], { cwd: w.dir, env: envOf(w) });
-const run = (w) => runCli(["run", w.path], { cwd: w.dir, env: envOf(w) });
+const validate = async (w) => runCliInProcess(["validate", w.path], { cwd: w.dir, env: envOf(w) });
+const run = async (w) => runCliInProcess(["run", w.path], { cwd: w.dir, env: envOf(w) });
 const markers = (w) => {
   const dir = join(w.home, "validated");
   return existsSync(dir) ? readdirSync(dir) : [];
@@ -66,10 +66,10 @@ const markers = (w) => {
 const allowanceWarnings = (out) => out.split("\n").filter((l) => l.startsWith("warning:") && l.includes("weekly-allowance"));
 const cleanup = (w) => rmSync(w.dir, { recursive: true, force: true });
 
-test("validate: a dominated seat over the refusal canon fails, names the record and the escape, and writes no marker", () => {
+test("validate: a dominated seat over the refusal canon fails, names the record and the escape, and writes no marker", async () => {
   const w = world();
   try {
-    const r = validate(w);
+    const r = await validate(w);
     equal(r.status, 1, r.stdout + r.stderr);
     ok(!r.stdout.includes("manifest OK"), `the approval line may not print above a refusal:\n${r.stdout}`);
     ok(r.stdout.includes("seats:"), `the block still prints the evidence:\n${r.stdout}`);
@@ -85,10 +85,10 @@ test("validate: a dominated seat over the refusal canon fails, names the record 
   } finally { cleanup(w); }
 });
 
-test("validate: the same seat with a seatReason validates, and the block prints the reason beside it", () => {
+test("validate: the same seat with a seatReason validates, and the block prints the reason beside it", async () => {
   const w = world({ tasks: [task({ seatReason: "cross-family verifier: every non-deepseek ollama model is dominated" })] });
   try {
-    const r = validate(w);
+    const r = await validate(w);
     equal(r.status, 0, r.stderr);
     ok(r.stdout.includes("manifest OK"), r.stdout);
     ok(r.stdout.includes("reason: cross-family verifier"), r.stdout);
@@ -96,10 +96,10 @@ test("validate: the same seat with a seatReason validates, and the block prints 
   } finally { cleanup(w); }
 });
 
-test("validate: a seat is judged per task — the reason covers its own task, and its fallback seat", () => {
+test("validate: a seat is judged per task — the reason covers its own task, and its fallback seat", async () => {
   const both = world({ tasks: [task({ id: "with-reason", seatReason: "cross-family verifier" }), task({ id: "no-reason" })] });
   try {
-    const r = validate(both);
+    const r = await validate(both);
     equal(r.status, 1, r.stdout + r.stderr);
     ok(r.stderr.includes("task 'no-reason'"), r.stderr);
     ok(!r.stderr.includes("task 'with-reason'"), `the reasoned task is not refused:\n${r.stderr}`);
@@ -109,7 +109,7 @@ test("validate: a seat is judged per task — the reason covers its own task, an
   // A fallbackModel is a real seat when quota forces it.
   const fallback = world({ tasks: [task({ id: "lane", model: CHAMP, fallbackModel: SEAT, fallbackProvider: "ollama" })] });
   try {
-    const r = validate(fallback);
+    const r = await validate(fallback);
     equal(r.status, 1, r.stdout + r.stderr);
     ok(r.stderr.includes("task 'lane fallback'"), r.stderr);
   } finally { cleanup(fallback); }
@@ -117,7 +117,7 @@ test("validate: a seat is judged per task — the reason covers its own task, an
   // The digest is a seat too.
   const digest = world({ tasks: [task({ model: CHAMP })], digest: { provider: "ollama", model: SEAT } });
   try {
-    const r = validate(digest);
+    const r = await validate(digest);
     equal(r.status, 1, r.stdout + r.stderr);
     ok(r.stderr.includes("task 'digest'"), r.stderr);
     ok(r.stderr.includes('"seatReason"'), r.stderr);
@@ -128,17 +128,17 @@ test("validate: a seat is judged per task — the reason covers its own task, an
 
   const reasoned = world({ tasks: [task({ model: CHAMP })], digest: { provider: "ollama", model: SEAT, seatReason: "digest voice" } });
   try {
-    const r = validate(reasoned);
+    const r = await validate(reasoned);
     equal(r.status, 0, r.stderr);
     ok(r.stdout.includes("reason: digest voice"), r.stdout);
   } finally { cleanup(reasoned); }
 });
 
-test("validate: grading off, or an empty store, refuses nothing and prints no block", () => {
+test("validate: grading off, or an empty store, refuses nothing and prints no block", async () => {
   for (const opts of [{ grading: false }, { seed: false }]) {
     const w = world(opts);
     try {
-      const r = validate(w);
+      const r = await validate(w);
       equal(r.status, 0, `${JSON.stringify(opts)}: ${r.stderr}`);
       ok(r.stdout.includes("manifest OK"), r.stdout);
       ok(!r.stdout.includes("seats:"), r.stdout);
@@ -146,11 +146,11 @@ test("validate: grading off, or an empty store, refuses nothing and prints no bl
   }
 });
 
-test("run: after a refused validate the same bytes are refused as unvalidated, and nothing launches", () => {
+test("run: after a refused validate the same bytes are refused as unvalidated, and nothing launches", async () => {
   const w = world();
   try {
-    equal(validate(w).status, 1);
-    const r = run(w);
+    equal((await validate(w)).status, 1);
+    const r = await run(w);
     equal(r.status, 1, r.stdout + r.stderr);
     ok(r.stderr.includes(REFUSAL), r.stderr);
     ok(!existsSync(envOf(w).SWARM_SHIM_LOG), "nothing may spawn");
@@ -158,26 +158,26 @@ test("run: after a refused validate the same bytes are refused as unvalidated, a
   } finally { cleanup(w); }
 });
 
-test("validate: a refused re-validate revokes the earlier marker, so run refuses the same bytes", () => {
+test("validate: a refused re-validate revokes the earlier marker, so run refuses the same bytes", async () => {
   const w = world();
   const scores = (n) => [...store(SEAT, 6, n), ...store(CHAMP, 9, REFUSAL_N)].join("\n") + "\n";
   try {
     // n=39 sits in the fair-shot band, so this pass is approved and marks the bytes.
     writeFileSync(join(w.home, "model-scores.jsonl"), scores(REFUSAL_N - 1));
-    equal(validate(w).status, 0);
+    equal((await validate(w)).status, 0);
     equal(markers(w).length, 1);
     // More grades land: the same seat is now over the refusal canon and dominated.
     writeFileSync(join(w.home, "model-scores.jsonl"), scores(REFUSAL_N));
-    const refused = validate(w);
+    const refused = await validate(w);
     equal(refused.status, 1, refused.stdout + refused.stderr);
     deepEqual(markers(w), [], "a refused re-validate revokes the earlier marker");
-    const r = run(w);
+    const r = await run(w);
     equal(r.status, 1, r.stdout + r.stderr);
     ok(r.stderr.includes(REFUSAL), r.stderr);
   } finally { cleanup(w); }
 });
 
-test("seatReason: a number, a blank string or a null digest reason is a validation error naming the field", () => {
+test("seatReason: a number, a blank string or a null digest reason is a validation error naming the field", async () => {
   const cases = [
     { label: "number", body: { tasks: [task({ seatReason: 5 })] } },
     { label: "blank", body: { tasks: [task({ seatReason: "   " })] } },
@@ -186,7 +186,7 @@ test("seatReason: a number, a blank string or a null digest reason is a validati
   for (const { label, body } of cases) {
     const w = world({ tasks: body.tasks, digest: body.digest });
     try {
-      const r = validate(w);
+      const r = await validate(w);
       equal(r.status, 1, `${label}: ${r.stdout}${r.stderr}`);
       ok(r.stderr.includes("seatReason must say why this seat is used"), `${label}: ${r.stderr}`);
       ok(r.stderr.includes(EXAMPLE), `${label}: ${r.stderr}`);
@@ -195,7 +195,7 @@ test("seatReason: a number, a blank string or a null digest reason is a validati
   }
 });
 
-test("seatReason: a child-plan task, a forEach template and the digest all carry it to the seats check", () => {
+test("seatReason: a child-plan task, a forEach template and the digest all carry it to the seats check", async () => {
   const w = world({
     tasks: [
       { id: "src", prompt: "list", provider: "ollama", model: CHAMP },
@@ -214,7 +214,7 @@ test("seatReason: a child-plan task, a forEach template and the digest all carry
     writeFileSync(join(w.dir, "child.json"), JSON.stringify({
       tasks: [{ id: "one", prompt: "audit {{item}}", provider: "ollama", model: SEAT, seatReason: "child leaf" }],
     }));
-    const r = validate(w);
+    const r = await validate(w);
     // Exit 0 is the proof for all three: a refusal is per task, so any one of
     // them dropping its seatReason would refuse the manifest.
     equal(r.status, 0, `${r.stdout}${r.stderr}`);

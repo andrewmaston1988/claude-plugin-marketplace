@@ -6,7 +6,7 @@ import { test } from "node:test";
 import { equal, ok, deepEqual } from "node:assert/strict";
 import { rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { runCli } from "./helpers/cli.mjs";
+import { runCliInProcess } from "./helpers/cli.mjs";
 import { gateHome, tmp } from "./helpers/cli-fixture.mjs";
 import { snap, seg } from "./helpers/cost-snapshots.mjs";
 
@@ -48,8 +48,8 @@ const infraRow = (leaf, model = "glm-5.2:cloud", outcome = "quota") => JSON.stri
 });
 const store = (home, lines) => writeFileSync(join(home, "model-scores.jsonl"), lines.join("\n") + "\n");
 
-const perf = (w, extra = []) => runCli(["perf", "--overall", ...extra], { cwd: w.dir, env: { SWARM_HOME: w.home } });
-const perfAspects = (w) => runCli(["perf"], { cwd: w.dir, env: { SWARM_HOME: w.home } });
+const perf = async (w, extra = []) => runCliInProcess(["perf", "--overall", ...extra], { cwd: w.dir, env: { SWARM_HOME: w.home } });
+const perfAspects = async (w) => runCliInProcess(["perf"], { cwd: w.dir, env: { SWARM_HOME: w.home } });
 const split = (stdout) => {
   const at = stdout.indexOf(HEADING);
   const tableAt = stdout.indexOf("overall  ");
@@ -57,10 +57,10 @@ const split = (stdout) => {
   return { block: at < 0 ? "" : lines.slice(0, lines.indexOf("")).join("\n"), table: stdout.slice(tableAt) };
 };
 
-test("perf --overall: the needs-grades block leads, sorted by the elder's standing, chipped, under the seating instruction", () => {
+test("perf --overall: the needs-grades block leads, sorted by the elder's standing, chipped, under the seating instruction", async () => {
   const w = world();
   try {
-    const r = perf(w);
+    const r = await perf(w);
     equal(r.status, 0, r.stderr);
     const { block } = split(r.stdout);
     ok(block, r.stdout);
@@ -79,12 +79,12 @@ test("perf --overall: the needs-grades block leads, sorted by the elder's standi
 
 // An infra-only model has no cell to hang off, so before this row existed it was
 // simply absent from the ranking — the one place the store is read for seats.
-test("perf --overall: a model whose every row is an infra outcome still gets a row, flagged and tallied", () => {
+test("perf --overall: a model whose every row is an infra outcome still gets a row, flagged and tallied", async () => {
   const dir = tmp();
   try {
     const home = gateHome(join(dir, "home"));
     store(home, [infraRow("q1")]);
-    const r = perf({ dir, home });
+    const r = await perf({ dir, home });
     equal(r.status, 0, r.stderr);
     const line = split(r.stdout).table.split("\n").find((l) => /^\s+glm-5\.2:cloud\s/.test(l));
     ok(line, `the infra-only model is missing from the table:\n${r.stdout}`);
@@ -95,34 +95,34 @@ test("perf --overall: a model whose every row is an infra outcome still gets a r
 
 // The per-aspect view is eleven tables wide: a tally riding every row a model
 // appears in repeats one fact eleven times and buries the row's own outcomes.
-test("perf: the infra tally is printed once under the aspect tables, never on a row", () => {
+test("perf: the infra tally is printed once under the aspect tables, never on a row", async () => {
   const dir = tmp();
   try {
     const home = gateHome(join(dir, "home"));
     store(home, [...rowsFor("glm-5.2:cloud", 2, 8), infraRow("q1"), infraRow("q2")]);
-    const r = perfAspects({ dir, home });
+    const r = await perfAspects({ dir, home });
     equal(r.status, 0, r.stderr);
     ok(r.stdout.includes("infra outcomes (not graded): glm-5.2:cloud 2"), r.stdout);
     equal((r.stdout.match(/infra \d/g) || []).length, 0, `the tally must not ride every aspect row:\n${r.stdout}`);
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
-test("perf: a model whose only rows are infra outcomes is still named exactly once, with its count", () => {
+test("perf: a model whose only rows are infra outcomes is still named exactly once, with its count", async () => {
   const dir = tmp();
   try {
     const home = gateHome(join(dir, "home"));
     store(home, [infraRow("q1")]);
-    const r = perfAspects({ dir, home });
+    const r = await perfAspects({ dir, home });
     equal(r.status, 0, r.stderr);
     equal((r.stdout.match(/glm-5\.2:cloud/g) || []).length, 1, `named once, on the tally line:\n${r.stdout}`);
     ok(r.stdout.includes("infra outcomes (not graded): glm-5.2:cloud 1"), r.stdout);
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
-test("perf --overall: a block model is not also listed in the ranked table; elder rows say what replaced them", () => {
+test("perf --overall: a block model is not also listed in the ranked table; elder rows say what replaced them", async () => {
   const w = world();
   try {
-    const { table } = split(perf(w).stdout);
+    const { table } = split((await perf(w)).stdout);
     ok(!/^\s+glm-5\.2:cloud\s/m.test(table) && !/^\s+solo:cloud\s/m.test(table), table);
     ok(!table.includes("[no grades — outcomes only]"), table);
     ok(/^\s+glm-5\.1:cloud\s.*\[superseded by glm-5\.2:cloud\]/m.test(table), table);
@@ -131,32 +131,32 @@ test("perf --overall: a block model is not also listed in the ranked table; elde
   } finally { rmSync(w.dir, { recursive: true, force: true }); }
 });
 
-test("perf --overall: grading off prints no block and leaves the table as it was", () => {
+test("perf --overall: grading off prints no block and leaves the table as it was", async () => {
   const w = world({ enabled: false });
   try {
-    const r = perf(w);
+    const r = await perf(w);
     equal(r.status, 0, r.stderr);
     ok(!r.stdout.includes(HEADING) && !r.stdout.includes("needs grades"), r.stdout);
     ok(/^\s+glm-5\.2:cloud\s/m.test(r.stdout), "the table still lists every graded model");
   } finally { rmSync(w.dir, { recursive: true, force: true }); }
 });
 
-test("perf --overall: no models cache means no roster to name, so no block", () => {
+test("perf --overall: no models cache means no roster to name, so no block", async () => {
   const w = world({ cache: false });
   try {
-    const r = perf(w);
+    const r = await perf(w);
     equal(r.status, 0, r.stderr);
     ok(!r.stdout.includes(HEADING), r.stdout);
   } finally { rmSync(w.dir, { recursive: true, force: true }); }
 });
 
-test("perf --overall: --domain and --model never relabel a well-graded model as needing grades", () => {
+test("perf --overall: --domain and --model never relabel a well-graded model as needing grades", async () => {
   const w = world();
   try {
-    const plain = split(perf(w).stdout).block;
+    const plain = split((await perf(w)).stdout).block;
     ok(plain.includes("glm-5.2:cloud"), "the unfiltered block exists to compare against");
     for (const extra of [["--domain", "other"], ["--model", "deep:cloud"], ["--domain", "node", "--model", "glm-5.1:cloud"]]) {
-      const r = perf(w, extra);
+      const r = await perf(w, extra);
       equal(r.status, 0, r.stderr);
       equal(split(r.stdout).block, plain, extra.join(" "));
       ok(!split(r.stdout).block.includes("deep:cloud"), extra.join(" "));
@@ -164,10 +164,10 @@ test("perf --overall: --domain and --model never relabel a well-graded model as 
   } finally { rmSync(w.dir, { recursive: true, force: true }); }
 });
 
-test("perf --overall: --model naming a block model still prints that model's row", () => {
+test("perf --overall: --model naming a block model still prints that model's row", async () => {
   const w = world();
   try {
-    const r = perf(w, ["--model", "glm-5.2:cloud"]);
+    const r = await perf(w, ["--model", "glm-5.2:cloud"]);
     equal(r.status, 0, r.stderr);
     ok(/^\s+glm-5\.2:cloud\s/m.test(split(r.stdout).table), split(r.stdout).table);
   } finally { rmSync(w.dir, { recursive: true, force: true }); }
@@ -175,7 +175,7 @@ test("perf --overall: --model naming a block model still prints that model's row
 
 // glm-5.1 (#1, dear) is a frontier elder; kimi-k2 (#2, cheap, within the margin of
 // the top) is the best-value one — so kimi-k3 outranks glm-5.2 despite the elder's rank.
-test("perf --overall: the successor of a best-value elder sorts ahead of a higher-ranked frontier elder's", () => {
+test("perf --overall: the successor of a best-value elder sorts ahead of a higher-ranked frontier elder's", async () => {
   const w = world();
   try {
     writeFileSync(join(w.home, "model-scores.jsonl"), [
@@ -187,7 +187,7 @@ test("perf --overall: the successor of a best-value elder sorts ahead of a highe
     writeFileSync(join(w.home, "usage-history.jsonl"), JSON.stringify(snap(1, [
       seg("glm-5.1", 2000, 60), seg("kimi-k2", 2000, 10), seg("deep", 2000, 5),
     ], 50)) + "\n");
-    const r = perf(w);
+    const r = await perf(w);
     equal(r.status, 0, r.stderr);
     const { block } = split(r.stdout);
     deepEqual([...block.matchAll(/^\s+([a-z0-9.\-]+:cloud)\s/gm)].map((m) => m[1]), ["kimi-k3:cloud", "glm-5.2:cloud", "fresh:cloud", "solo:cloud"], block);
@@ -197,7 +197,7 @@ test("perf --overall: the successor of a best-value elder sorts ahead of a highe
 
 // A column's n is not the model's n: one `search` row against a 25-row record
 // read as a gap seat ("n=1 on search") until the overall n sat beside it.
-test("perf --aspect: a thin column prints the model's overall n beside it", () => {
+test("perf --aspect: a thin column prints the model's overall n beside it", async () => {
   const dir = tmp();
   try {
     const home = gateHome(join(dir, "home"));
@@ -209,7 +209,7 @@ test("perf --aspect: a thin column prints the model's overall n beside it", () =
         note: "", assessedBy: { session: "s1", date: "2026-09-10" },
       }),
     ].join("\n") + "\n");
-    const r = runCli(["perf", "--aspect", "search"], { cwd: dir, env: { SWARM_HOME: home } });
+    const r = await runCliInProcess(["perf", "--aspect", "search"], { cwd: dir, env: { SWARM_HOME: home } });
     equal(r.status, 0, r.stderr);
     const line = r.stdout.split("\n").find((l) => /^\s+glm-5\.2:cloud\s/.test(l));
     ok(line, r.stdout);

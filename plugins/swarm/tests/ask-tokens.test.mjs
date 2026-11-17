@@ -5,18 +5,18 @@ import { test } from "node:test";
 import { equal, ok } from "node:assert/strict";
 import { rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { runCli, runValidated } from "./helpers/cli.mjs";
+import { runCliInProcess, runValidated } from "./helpers/cli.mjs";
 import { tmp } from "./helpers/cli-fixture.mjs";
 
-function askLine(cacheRead, extraEnv = {}) {
+async function askLine(cacheRead, extraEnv = {}) {
   const dir = tmp();
   try {
     const manifest = join(dir, "plan.json");
     writeFileSync(manifest, JSON.stringify({ resultsDir: "out", tasks: [{ id: "t1", prompt: "x", provider: "claude", model: "claude-haiku-4-5-20251001" }] }));
     const env = { SWARM_HOME: join(dir, "home"), SWARM_SHIM_STREAM: "1", SWARM_SHIM_OUTPUT: "because X", ...(cacheRead && { SWARM_SHIM_CACHE_READ: String(cacheRead) }), ...extraEnv };
-    const r0 = runValidated(["run", manifest], { cwd: dir, env });
+    const r0 = await runValidated(["run", manifest], { cwd: dir, env, inProcess: true });
     equal(r0.status, 0, r0.stdout + r0.stderr);
-    const a = runCli(["ask", join(dir, "out"), "t1", "why?"], { cwd: dir, env });
+    const a = await runCliInProcess(["ask", join(dir, "out"), "t1", "why?"], { cwd: dir, env });
     equal(a.status, 0, a.stdout + a.stderr);
     return a.stdout.split("\n").find((l) => l.includes("session "));
   } finally {
@@ -24,21 +24,21 @@ function askLine(cacheRead, extraEnv = {}) {
   }
 }
 
-test("ask: a cache-heavy follow-up headlines its work and names the cache read beside it", () => {
-  const line = askLine(2_000_000);
+test("ask: a cache-heavy follow-up headlines its work and names the cache read beside it", async () => {
+  const line = await askLine(2_000_000);
   ok(line.includes("tokens: 1.5k · cache read 2M · session "), line);
   ok(!line.includes("2M tokens") && !line.includes("2.00M"), line);
 });
 
-test("ask: no cache read, no cache read text", () => {
-  const line = askLine(0);
+test("ask: no cache read, no cache read text", async () => {
+  const line = await askLine(0);
   ok(line.includes("tokens: 1.5k · session "), line);
   ok(!line.includes("cache read"), line);
 });
 
 // formatTokens(0) is "—": an all-cache-read turn must drop the headline, as the run footer does.
-test("ask: a cache-read-only follow-up prints no — headline", () => {
-  const line = askLine(5000, { SWARM_SHIM_NO_WORK: "1" });
+test("ask: a cache-read-only follow-up prints no — headline", async () => {
+  const line = await askLine(5000, { SWARM_SHIM_NO_WORK: "1" });
   ok(line.includes("cache read 5k · session "), line);
   ok(!line.includes("tokens:") && !line.includes("—"), line);
 });

@@ -8,7 +8,7 @@ import {
 } from "../src/scores.mjs";
 import { transcriptModels, backfillRealmodel } from "../src/scores-backfill.mjs";
 import { ASPECTS, OUTCOMES } from "../src/aspects.mjs";
-import { runCli } from "./helpers/cli.mjs";
+import { runCliInProcess } from "./helpers/cli.mjs";
 
 function tmp() {
   return mkdtempSync(join(tmpdir(), "swarm-scores-"));
@@ -36,24 +36,24 @@ function row(over = {}) {
 
 // ── validateRow ───────────────────────────────────────────────────────────────
 
-test("validateRow: a fully-populated row passes", () => {
+test("validateRow: a fully-populated row passes", async () => {
   deepEqual(validateRow(row()), []);
 });
 
-test("validateRow: a row with every capability aspect absent passes", () => {
+test("validateRow: a row with every capability aspect absent passes", async () => {
   deepEqual(validateRow(row({ grades: { adherence: 7, handoff: 7, truthfulness: 7, depth: 7 } })), []);
 });
 
-test("validateRow: an explicit null capability aspect passes — that is the N/A case", () => {
+test("validateRow: an explicit null capability aspect passes — that is the N/A case", async () => {
   deepEqual(validateRow(row({ grades: { adherence: 7, handoff: 7, truthfulness: 7, depth: 7, vision: null } })), []);
 });
 
-test("validateRow: an aspect key outside the closed set is rejected", () => {
+test("validateRow: an aspect key outside the closed set is rejected", async () => {
   const errs = validateRow(row({ grades: { ...row().grades, godot: 8 } }));
   ok(errs.some((e) => e.startsWith("grades.godot")), errs.join(" | "));
 });
 
-test("validateRow: a missing universal aspect is rejected", () => {
+test("validateRow: a missing universal aspect is rejected", async () => {
   const { adherence, ...rest } = row().grades;
   const errs = validateRow(row({ grades: rest }));
   ok(errs.some((e) => e.startsWith("grades.adherence")), errs.join(" | "));
@@ -61,14 +61,14 @@ test("validateRow: a missing universal aspect is rejected", () => {
 
 // The load-bearing case: an untouched `grade --init` skeleton has every grade
 // null, which a presence-only check accepts while shipping an empty row.
-test("validateRow: a universal aspect present but null is rejected", () => {
+test("validateRow: a universal aspect present but null is rejected", async () => {
   const errs = validateRow(row({ grades: { adherence: null, handoff: null, truthfulness: null, depth: null } }));
   for (const a of ["adherence", "handoff", "truthfulness", "depth"]) {
     ok(errs.some((e) => e.startsWith(`grades.${a}`)), `${a} not flagged: ${errs.join(" | ")}`);
   }
 });
 
-test("validateRow: an untouched grade --init skeleton is not appendable", () => {
+test("validateRow: an untouched grade --init skeleton is not appendable", async () => {
   const skeleton = {
     resultsDir: "C:/runs/review-1",
     leaf: "icons",
@@ -91,7 +91,7 @@ for (const bad of [0, 11, 7.5, "8", true]) {
   });
 }
 
-test("validateRow: an unknown outcome is rejected, and does not cascade into grade errors", () => {
+test("validateRow: an unknown outcome is rejected, and does not cascade into grade errors", async () => {
   const errs = validateRow(row({ outcome: "finished" }));
   ok(errs.some((e) => e.startsWith("outcome:")), errs.join(" | "));
   ok(!errs.some((e) => e.startsWith("grades")), `cascade: ${errs.join(" | ")}`);
@@ -107,7 +107,7 @@ for (const outcome of ["completed", "wrong"]) {
 
 // Padding passed the lowercase check while `aggregate` filters on `===`, so a
 // stored " godot " would match no query and never raise anything.
-test("validateRow: a whitespace-padded domain is rejected, not silently stored", () => {
+test("validateRow: a whitespace-padded domain is rejected, not silently stored", async () => {
   const errs = validateRow(row({ domain: " godot " }));
   ok(errs.some((e) => e.startsWith("domain")), errs.join(" | "));
   deepEqual(aggregate([row({ domain: " godot ", note: "x" })], { aspect: "depth", domain: "godot" }).aspects[0].cells, []);
@@ -127,30 +127,30 @@ for (const bad of ["Godot", "", "   ", undefined, "this-repo", "this repo", "rus
 // 2026-08-31): Claude models are now in scope; the junk-string rejection
 // this test also carried lives in that case's not-a-model assertion.
 
-test("validateRow: a grade <= 4 with no note is rejected", () => {
+test("validateRow: a grade <= 4 with no note is rejected", async () => {
   const errs = validateRow(row({ grades: { ...row().grades, depth: 4 } }));
   ok(errs.some((e) => e.startsWith("note:")), errs.join(" | "));
   deepEqual(validateRow(row({ grades: { ...row().grades, depth: 4 }, note: "shallow — restated the prompt" })), []);
 });
 
-test("validateRow: outcome other than completed with no note is rejected", () => {
+test("validateRow: outcome other than completed with no note is rejected", async () => {
   const errs = validateRow(row({ outcome: "wrong" }));
   ok(errs.some((e) => e.startsWith("note:")), errs.join(" | "));
 });
 
-test("validateRow: a row with no resultsDir is rejected — it cannot be deduped", () => {
+test("validateRow: a row with no resultsDir is rejected — it cannot be deduped", async () => {
   const errs = validateRow(row({ resultsDir: undefined }));
   ok(errs.some((e) => e.startsWith("resultsDir:")), errs.join(" | "));
 });
 
-test("validateRow: a row with no assessedBy.session is rejected", () => {
+test("validateRow: a row with no assessedBy.session is rejected", async () => {
   ok(validateRow(row({ assessedBy: {} })).some((e) => e.startsWith("assessedBy.session")));
   ok(validateRow(row({ assessedBy: undefined })).some((e) => e.startsWith("assessedBy.session")));
 });
 
 // ── appendRows ────────────────────────────────────────────────────────────────
 
-test("appendRows: one invalid row in a batch writes nothing and leaves the file byte-identical", () => {
+test("appendRows: one invalid row in a batch writes nothing and leaves the file byte-identical", async () => {
   const dir = tmp();
   try {
     const p = join(dir, "model-scores.jsonl");
@@ -164,7 +164,7 @@ test("appendRows: one invalid row in a batch writes nothing and leaves the file 
   }
 });
 
-test("appendRows: a valid batch appends exactly N lines, each parsing on its own", () => {
+test("appendRows: a valid batch appends exactly N lines, each parsing on its own", async () => {
   const dir = tmp();
   try {
     const p = join(dir, "model-scores.jsonl");
@@ -177,7 +177,7 @@ test("appendRows: a valid batch appends exactly N lines, each parsing on its own
   }
 });
 
-test("appendRows: creates a missing file, and a second append neither truncates nor duplicates", () => {
+test("appendRows: creates a missing file, and a second append neither truncates nor duplicates", async () => {
   const dir = tmp();
   try {
     const p = join(dir, "nested", "model-scores.jsonl");
@@ -191,11 +191,11 @@ test("appendRows: creates a missing file, and a second append neither truncates 
   }
 });
 
-test("appendRows: an empty batch is an error, not a silent no-op", () => {
+test("appendRows: an empty batch is an error, not a silent no-op", async () => {
   throws(() => appendRows([], join(tmpdir(), "never-written.jsonl")), /no rows to append/);
 });
 
-test("readRows: a torn tail line is skipped rather than aborting the query", () => {
+test("readRows: a torn tail line is skipped rather than aborting the query", async () => {
   const dir = tmp();
   try {
     const p = join(dir, "model-scores.jsonl");
@@ -209,13 +209,13 @@ test("readRows: a torn tail line is skipped rather than aborting the query", () 
 
 // ── dedupeKey / re-grading ────────────────────────────────────────────────────
 
-test("dedupeKey: (resultsDir, leaf); distinct leaves and distinct runs are distinct keys", () => {
+test("dedupeKey: (resultsDir, leaf); distinct leaves and distinct runs are distinct keys", async () => {
   equal(dedupeKey(row()), JSON.stringify(["C:/runs/review-1", "icons"]));
   ok(dedupeKey(row({ leaf: "other" })) !== dedupeKey(row()));
   ok(dedupeKey(row({ resultsDir: "C:/runs/review-2" })) !== dedupeKey(row()));
 });
 
-test("re-grading a run replaces its rows: aggregate reports n=1, newest wins", () => {
+test("re-grading a run replaces its rows: aggregate reports n=1, newest wins", async () => {
   const first = row({ grades: { adherence: 3, handoff: 3, truthfulness: 3, depth: 3 }, note: "poor" });
   const second = row({ grades: { adherence: 9, handoff: 9, truthfulness: 9, depth: 9 } });
   const cell = aggregate([first, second], { aspect: "adherence" }).aspects[0].cells[0];
@@ -228,7 +228,7 @@ test("re-grading a run replaces its rows: aggregate reports n=1, newest wins", (
 
 const graded = (over) => row({ note: "x", ...over });
 
-test("aggregate: a null capability grade is not counted in n", () => {
+test("aggregate: a null capability grade is not counted in n", async () => {
   const rows = Array.from({ length: 10 }, (_, i) => graded({
     leaf: `l${i}`,
     grades: { adherence: 8, handoff: 8, truthfulness: 8, depth: 8, vision: null },
@@ -239,13 +239,13 @@ test("aggregate: a null capability grade is not counted in n", () => {
   equal(adherence.n, 10);
 });
 
-test("aggregate: n < 5 is provisional, n >= 5 is not", () => {
+test("aggregate: n < 5 is provisional, n >= 5 is not", async () => {
   const mk = (n) => Array.from({ length: n }, (_, i) => graded({ leaf: `l${i}` }));
   equal(aggregate(mk(4), { aspect: "depth" }).aspects[0].cells[0].provisional, true);
   equal(aggregate(mk(5), { aspect: "depth" }).aspects[0].cells[0].provisional, false);
 });
 
-test("aggregate: a no-output row never touches a mean, and stays visible under outcomes", () => {
+test("aggregate: a no-output row never touches a mean, and stays visible under outcomes", async () => {
   const rows = Array.from({ length: 10 }, (_, i) => graded({
     leaf: `l${i}`, grades: { adherence: 8, handoff: 8, truthfulness: 8, depth: 8 },
   }));
@@ -258,33 +258,33 @@ test("aggregate: a no-output row never touches a mean, and stays visible under o
   equal(cell.outcomes.completed, 10);
 });
 
-test("aggregate: outcomes carry a zero entry for every outcome, so absence is visible", () => {
+test("aggregate: outcomes carry a zero entry for every outcome, so absence is visible", async () => {
   const cell = aggregate([graded()], { aspect: "depth" }).aspects[0].cells[0];
   deepEqual(Object.keys(cell.outcomes), OUTCOMES);
   equal(cell.outcomes["session-died"], 0);
   equal(cell.outcomes["not-capable"], 0);
 });
 
-test("aggregate: the domain filter narrows, and an unmatched domain returns no cells", () => {
+test("aggregate: the domain filter narrows, and an unmatched domain returns no cells", async () => {
   const rows = [graded({ leaf: "a", domain: "godot" }), graded({ leaf: "b", domain: "rust" })];
   equal(aggregate(rows, { aspect: "depth", domain: "godot" }).aspects[0].cells[0].n, 1);
   deepEqual(aggregate(rows, { aspect: "depth", domain: "nosuch" }).aspects[0].cells, []);
 });
 
-test("aggregate: the model filter narrows to one model", () => {
+test("aggregate: the model filter narrows to one model", async () => {
   const rows = [graded({ leaf: "a" }), graded({ leaf: "b", model: "kimi-k2.7-code:cloud" })];
   const cells = aggregate(rows, { aspect: "depth", model: "kimi-k2.7-code:cloud" }).aspects[0].cells;
   equal(cells.length, 1);
   equal(cells[0].model, "kimi-k2.7-code:cloud");
 });
 
-test("aggregate: every aspect gets an entry even with no rows — absence is evidence", () => {
+test("aggregate: every aspect gets an entry even with no rows — absence is evidence", async () => {
   const report = aggregate([]);
   deepEqual(report.aspects.map((a) => a.aspect), ASPECTS);
   for (const a of report.aspects) deepEqual(a.cells, []);
 });
 
-test("aggregate: an unknown aspect throws, naming the valid set", () => {
+test("aggregate: an unknown aspect throws, naming the valid set", async () => {
   throws(() => aggregate([], { aspect: "godot" }), /unknown aspect/);
 });
 
@@ -304,7 +304,7 @@ function lopsided() {
   return rows;
 }
 
-test("shrink: a thin cell is pulled toward the prior, a thick one barely moves", () => {
+test("shrink: a thin cell is pulled toward the prior, a thick one barely moves", async () => {
   equal(shrink(9, 1, 7.5), 7.75);
   equal(shrink(7, 45, 7.5), 7.05);
   equal(shrink(8, 0, 7.5), 7.5);   // no evidence at all → the prior
@@ -315,7 +315,7 @@ test("shrink: a thin cell is pulled toward the prior, a thick one barely moves",
 // The load-bearing fairness property. A row-weighted prior IS the busiest
 // model's mean, so shrinking a rare model toward it drags it toward its most-
 // dispatched rival — the exact usage bias the store exists to remove.
-test("fairPrior: one model one vote — dispatch frequency cannot move the prior", () => {
+test("fairPrior: one model one vote — dispatch frequency cannot move the prior", async () => {
   const cells = [
     { model: "glm", n: 45, mean: 7 },
     { model: "kimi", n: 1, mean: 9 },
@@ -327,12 +327,12 @@ test("fairPrior: one model one vote — dispatch frequency cannot move the prior
   equal(fairPrior([{ model: "glm", n: 500, mean: 7 }, ...cells.slice(1)]), 7.5);
 });
 
-test("fairPrior: null when nothing has been graded", () => {
+test("fairPrior: null when nothing has been graded", async () => {
   equal(fairPrior([]), null);
   equal(fairPrior([{ model: "glm", n: 0, mean: null }]), null);
 });
 
-test("aggregate: a one-sample cell no longer outranks a forty-five-sample cell by two points", () => {
+test("aggregate: a one-sample cell no longer outranks a forty-five-sample cell by two points", async () => {
   const cells = aggregate(lopsided(), { aspect: "adherence" }).aspects[0].cells;
   const kimi = cells.find((c) => c.model === "kimi-k2.7-code:cloud");
   const glm = cells.find((c) => c.model === "glm-5.2:cloud");
@@ -343,19 +343,19 @@ test("aggregate: a one-sample cell no longer outranks a forty-five-sample cell b
   ok(kimi.weighted > glm.weighted, "a rare model was penalised into second place for being rare");
 });
 
-test("aggregate: cells rank on weighted, not raw mean", () => {
+test("aggregate: cells rank on weighted, not raw mean", async () => {
   const { cells } = aggregate(lopsided(), { aspect: "adherence" }).aspects[0];
   const scores = cells.map((c) => c.weighted);
   deepEqual(scores, [...scores].sort((a, b) => b - a));
 });
 
-test("aggregate: the prior is reported so the shrinkage is auditable", () => {
+test("aggregate: the prior is reported so the shrinkage is auditable", async () => {
   const a = aggregate(lopsided(), { aspect: "adherence" }).aspects[0];
   equal(a.prior, fairPrior(a.cells));
   equal(a.prior, (7 + 9 + 6) / 3);
 });
 
-test("aggregate: pure — equal results on repeat, input untouched", () => {
+test("aggregate: pure — equal results on repeat, input untouched", async () => {
   const rows = [graded({ leaf: "a" }), graded({ leaf: "b" })];
   const snapshot = JSON.stringify(rows);
   const first = aggregate(rows, { aspect: "depth" });
@@ -364,7 +364,7 @@ test("aggregate: pure — equal results on repeat, input untouched", () => {
   equal(JSON.stringify(rows), snapshot);
 });
 
-test("scoresPath: derives from SWARM_HOME, never a hardcoded home", () => {
+test("scoresPath: derives from SWARM_HOME, never a hardcoded home", async () => {
   match(scoresPath({ SWARM_HOME: join("C:", "custom") }), /custom[\\/]model-scores\.jsonl$/);
 });
 
@@ -372,7 +372,7 @@ test("scoresPath: derives from SWARM_HOME, never a hardcoded home", () => {
 // Red input: the old validator rejected any non-:cloud model with
 // "out of scope". A baseline row whose model is a Claude tier must pass;
 // a junk model name must still fail (two families, not any string).
-test("validateRow: Claude tiers are accepted, junk models are not", () => {
+test("validateRow: Claude tiers are accepted, junk models are not", async () => {
   for (const model of ["claude-sonnet-5", "claude-haiku-4-5-20251001"]) {
     deepEqual(validateRow(row({ model })), []);
   }
@@ -389,7 +389,7 @@ test("validateRow: Claude tiers are accepted, junk models are not", () => {
 // Red input: overall() must rank models by the mean of their four UNIVERSAL
 // weighted scores — the single-table ranking perf lacked. A capability grade
 // (geometry 2 below) must NOT drag the combined score.
-test("overall: one table, combined = mean of universal weighted, capabilities excluded", () => {
+test("overall: one table, combined = mean of universal weighted, capabilities excluded", async () => {
   const rows = [];
   for (let i = 0; i < 6; i++) {
     rows.push(row({ resultsDir: `C:/runs/a-${i}`, model: "strong:cloud",
@@ -411,7 +411,7 @@ test("overall: one table, combined = mean of universal weighted, capabilities ex
   ok(o.cells[0].combined > 8, "capability grade leaked into the combined score");
 });
 
-test("overall: an outcomes-only model has combined null and sorts last", () => {
+test("overall: an outcomes-only model has combined null and sorts last", async () => {
   const rows = [
     row({ resultsDir: "C:/runs/x-1" }),
     { ...row({ resultsDir: "C:/runs/y-1", model: "dead:cloud", outcome: "failed",
@@ -435,7 +435,7 @@ const frontierLeaves = (model, g, n) =>
     grades: { adherence: g, handoff: g, truthfulness: g, depth: g },
   }));
 
-test("frontier: 5 — the frontier is domination, not a ratio", () => {
+test("frontier: 5 — the frontier is domination, not a ratio", async () => {
   const rows = [
     ...frontierLeaves("a:cloud", 10, 5),
     ...frontierLeaves("d:cloud", 9, 5),
@@ -472,7 +472,7 @@ test("frontier: 5 — the frontier is domination, not a ratio", () => {
 // Test 6 — a Claude tier has quality but no multiplier: the history has never
 // priced it. Absence is not evidence in either direction — not 0 (free, and so
 // dominating everything) and not Infinity (dear, and so dominated by everything).
-test("frontier: 6 — Claude tiers are unmeasured, not dominated", () => {
+test("frontier: 6 — Claude tiers are unmeasured, not dominated", async () => {
   const rows = [
     ...frontierLeaves("sonnet", 9, 5),
     ...frontierLeaves("a:cloud", 8, 5),
@@ -494,7 +494,7 @@ test("frontier: 6 — Claude tiers are unmeasured, not dominated", () => {
   equal(by["b:cloud"].dominatedBy, "a:cloud");
 });
 
-test("frontier: a single measured model is on the frontier", () => {
+test("frontier: a single measured model is on the frontier", async () => {
   const v = frontier(frontierLeaves("solo:cloud", 8, 6), [{ model: "solo:cloud", mult: 1.9 }], { aspect: "depth" });
   equal(v.length, 1);
   ok(v[0].onFrontier);
@@ -505,7 +505,7 @@ test("frontier: a single measured model is on the frontier", () => {
 
 // A measured-but-thin model carries mult: null from multipliers() — it is
 // unmeasured for the frontier too, never free.
-test("frontier: a thin model's null multiplier is unmeasured, not free", () => {
+test("frontier: a thin model's null multiplier is unmeasured, not free", async () => {
   const rows = [...frontierLeaves("a:cloud", 8, 5), ...frontierLeaves("thin:cloud", 9, 5)];
   const v = frontier(rows, [
     { model: "a:cloud", mult: 1.0 },
@@ -518,7 +518,7 @@ test("frontier: a thin model's null multiplier is unmeasured, not free", () => {
   ok(by["a:cloud"].onFrontier);
 });
 
-test("frontier: no measured multipliers at all — the frontier is empty, nothing crashes", () => {
+test("frontier: no measured multipliers at all — the frontier is empty, nothing crashes", async () => {
   const rows = [...frontierLeaves("a:cloud", 8, 5), ...frontierLeaves("b:cloud", 7, 5)];
   for (const costs of [[], null]) {
     const v = frontier(rows, costs, { aspect: "depth" });
@@ -532,7 +532,7 @@ test("frontier: no measured multipliers at all — the frontier is empty, nothin
   }
 });
 
-test("frontier: pure — inputs untouched, equal output on repeat", () => {
+test("frontier: pure — inputs untouched, equal output on repeat", async () => {
   const rows = [
     ...frontierLeaves("a:cloud", 10, 5),
     ...frontierLeaves("b:cloud", 7, 5),
@@ -545,7 +545,7 @@ test("frontier: pure — inputs untouched, equal output on repeat", () => {
   equal(JSON.stringify({ rows, costs }), before, "the inputs were mutated");
 });
 
-test("performance quality collapses same model across providers while cost identity stays qualified", () => {
+test("performance quality collapses same model across providers while cost identity stays qualified", async () => {
   const ollama = row({ provider: "ollama", model: "same-model", grades: { adherence: 8, handoff: 8, truthfulness: 8, depth: 8 } });
   const codex = row({ provider: "codex", model: "same-model", leaf: "codex-leaf", grades: { adherence: 9, handoff: 9, truthfulness: 9, depth: 9 } });
   deepEqual(validateRow(codex), [], "an explicit Codex provider makes a GPT row gradeable");
@@ -567,14 +567,14 @@ test("performance quality collapses same model across providers while cost ident
 // dirs in different spellings; graded-ness must survive the difference or
 // every graded run reads ungraded forever.
 
-test("canonicalRunKey: separator, case and trailing-separator differences fold to one key", () => {
+test("canonicalRunKey: separator, case and trailing-separator differences fold to one key", async () => {
   equal(canonicalRunKey("C:\\Users\\a\\.swarm\\runs\\x-1"), canonicalRunKey("C:/Users/a/.swarm/runs/x-1"));
   equal(canonicalRunKey("C:/Users/a/.SWARM/runs/X-1"), canonicalRunKey("c:/users/a/.swarm/runs/x-1"));
   equal(canonicalRunKey("C:/Users/a/.swarm/runs/x-1/"), canonicalRunKey("C:/Users/a/.swarm/runs/x-1"));
   equal(canonicalRunKey("C:/Users/a/.swarm/runs/x-1//"), canonicalRunKey("C:\\Users\\a\\.swarm\\runs\\x-1\\"));
 });
 
-test("gradedRunKeys: a forward-slash store row is found by a backslash walk path — raw comparison finds none of them", () => {
+test("gradedRunKeys: a forward-slash store row is found by a backslash walk path — raw comparison finds none of them", async () => {
   const storeRow = row({ resultsDir: "C:/Users/a/.swarm/runs/x-1" }); // forward slashes, as 349 of 355 real rows are
   const walkPath = "C:\\Users\\a\\.swarm\\runs\\x-1";                 // what readdirSync + path.join yields on Windows
   // The shipped design's failure, pinned: exact-string membership misses the row.
@@ -582,7 +582,7 @@ test("gradedRunKeys: a forward-slash store row is found by a backslash walk path
   ok(gradedRunKeys([storeRow]).has(canonicalRunKey(walkPath)), "the canonical key must find the forward-slash row");
 });
 
-test("gradedRunKeys: a resultsDir that will not canonicalise is skipped, never matched to something", () => {
+test("gradedRunKeys: a resultsDir that will not canonicalise is skipped, never matched to something", async () => {
   equal(canonicalRunKey("."), null);
   equal(canonicalRunKey(""), null);
   equal(canonicalRunKey(undefined), null);
@@ -593,18 +593,18 @@ test("gradedRunKeys: a resultsDir that will not canonicalise is skipped, never m
 
 // Operator decision 2026-09-12: key graded-ness by <enc>/<name> relative to
 // the runs root, so moving SWARM_HOME or the machine does not orphan grades.
-test("canonicalRunKey: the same run under a runs tree keys the same regardless of the machine/home prefix", () => {
+test("canonicalRunKey: the same run under a runs tree keys the same regardless of the machine/home prefix", async () => {
   const here = canonicalRunKey("C:/Users/andrew/.swarm/runs/C--code-x/local-time-1");
   const there = canonicalRunKey("D:/elsewhere/.swarm/runs/C--code-x/local-time-1");
   equal(here, there);
   equal(here, "c--code-x/local-time-1");
 });
 
-test("canonicalRunKey: a resultsDir outside any runs tree keeps its full normalised path", () => {
+test("canonicalRunKey: a resultsDir outside any runs tree keeps its full normalised path", async () => {
   equal(canonicalRunKey("C:/some/other/place"), "c:/some/other/place");
 });
 
-test("gradedRunKeys: a re-graded (superseded) dir still counts as graded — any row names the dir", () => {
+test("gradedRunKeys: a re-graded (superseded) dir still counts as graded — any row names the dir", async () => {
   const first = row({ resultsDir: "C:/runs/review-1", leaf: "a", grades: { adherence: 3, handoff: 3, truthfulness: 3, depth: 3 }, note: "poor" });
   const second = row({ resultsDir: "C:/runs/review-1", leaf: "a" }); // the re-grade: same (dir, leaf) dedupe key
   const keys = gradedRunKeys([first, second]);
@@ -638,7 +638,7 @@ function transcripts(map) {
   return (resultsDir, leaf) => map[`${resultsDir}|${leaf}`] ?? null;
 }
 
-test("transcriptModels: the assistant events' model, deduped; a transcript naming none yields none", () => {
+test("transcriptModels: the assistant events' model, deduped; a transcript naming none yields none", async () => {
   deepEqual(transcriptModels(streamJson("claude-opus-4-8", "claude-opus-4-8")), ["claude-opus-4-8"]);
   deepEqual(transcriptModels(streamJson("claude-opus-4-8", "claude-opus-5")), ["claude-opus-4-8", "claude-opus-5"]);
   // A non-Claude runner writes a plain log, and a torn tail is not JSON — both
@@ -652,7 +652,7 @@ test("transcriptModels: the assistant events' model, deduped; a transcript namin
   deepEqual(transcriptModels('{"type":"user","message":{"model":"claude-opus-4-8"}}\n'), []);
 });
 
-test("backfillRealmodel: an alias row takes the concrete model its transcript reports", () => {
+test("backfillRealmodel: an alias row takes the concrete model its transcript reports", async () => {
   const alias = row({ model: "opus", resultsDir: "C:/runs/a-1", leaf: "citations" });
   const out = backfillRealmodel(lines([alias]), {
     readTranscript: transcripts({ "C:/runs/a-1|citations": streamJson("claude-opus-4-8") }),
@@ -663,7 +663,7 @@ test("backfillRealmodel: an alias row takes the concrete model its transcript re
   deepEqual(out.dropped, []);
 });
 
-test("backfillRealmodel: one alias resolving to two concrete ids is two mappings, not an error", () => {
+test("backfillRealmodel: one alias resolving to two concrete ids is two mappings, not an error", async () => {
   const old = row({ model: "opus", resultsDir: "C:/runs/old-1", leaf: "x" });
   const fresh = row({ model: "opus", resultsDir: "C:/runs/new-1", leaf: "x" });
   const out = backfillRealmodel(lines([old, fresh]), {
@@ -680,7 +680,7 @@ test("backfillRealmodel: one alias resolving to two concrete ids is two mappings
   deepEqual(out.dropped, [], "one alias, two ids, nothing dropped");
 });
 
-test("backfillRealmodel: a row whose transcript names no model is dropped, never guessed", () => {
+test("backfillRealmodel: a row whose transcript names no model is dropped, never guessed", async () => {
   const named = row({ model: "haiku", resultsDir: "C:/runs/a-1", leaf: "ok" });
   const silent = row({ model: "haiku", resultsDir: "C:/runs/a-1", leaf: "silent" });
   const gone = row({ model: "sonnet", resultsDir: "C:/runs/gone-1", leaf: "x" });
@@ -697,7 +697,7 @@ test("backfillRealmodel: a row whose transcript names no model is dropped, never
   ok(out.dropped.some((d) => d.leaf === "x" && /unreadable/.test(d.reason)), JSON.stringify(out.dropped));
 });
 
-test("backfillRealmodel: a transcript naming two models is ambiguous and also dropped", () => {
+test("backfillRealmodel: a transcript naming two models is ambiguous and also dropped", async () => {
   const two = row({ model: "sonnet", resultsDir: "C:/runs/a-1", leaf: "mixed" });
   const out = backfillRealmodel(lines([two]), {
     readTranscript: transcripts({ "C:/runs/a-1|mixed": streamJson("claude-sonnet-5", "claude-haiku-4-5-20251001") }),
@@ -707,7 +707,7 @@ test("backfillRealmodel: a transcript naming two models is ambiguous and also dr
   match(out.dropped[0].reason, /2 models/);
 });
 
-test("backfillRealmodel: rows that are not aliased pass through byte-for-byte", () => {
+test("backfillRealmodel: rows that are not aliased pass through byte-for-byte", async () => {
   const full = row({ model: "claude-sonnet-5", resultsDir: "C:/runs/a-1", leaf: "full" });
   const cloud = row({ model: "glm-5.2:cloud", resultsDir: "C:/runs/a-1", leaf: "cloud" });
   const store = `${lines([full, cloud])}{"torn":`;
@@ -717,7 +717,7 @@ test("backfillRealmodel: rows that are not aliased pass through byte-for-byte", 
   deepEqual(out.mapping, []);
 });
 
-test("backfillRealmodel: a store with no alias rows is a no-op — the second run finds nothing", () => {
+test("backfillRealmodel: a store with no alias rows is a no-op — the second run finds nothing", async () => {
   const named = row({ model: "claude-opus-5", resultsDir: "C:/runs/a-1", leaf: "x" });
   const store = lines([named]);
   const out = backfillRealmodel(store, { readTranscript: () => { throw new Error("no alias row may be read"); } });
@@ -725,7 +725,7 @@ test("backfillRealmodel: a store with no alias rows is a no-op — the second ru
   equal(out.changed, 0);
 });
 
-test("scores backfill-realmodel: the backup holds the pre-rewrite store, written before the rewrite", () => {
+test("scores backfill-realmodel: the backup holds the pre-rewrite store, written before the rewrite", async () => {
   const dir = tmp();
   try {
     const home = join(dir, "home");
@@ -737,7 +737,7 @@ test("scores backfill-realmodel: the backup holds the pre-rewrite store, written
     mkdirSync(home, { recursive: true });
     writeFileSync(store, before);
 
-    const r = runCli(["scores", "backfill-realmodel"], { cwd: dir, env: { SWARM_HOME: home } });
+    const r = await runCliInProcess(["scores", "backfill-realmodel"], { cwd: dir, env: { SWARM_HOME: home } });
     equal(r.status, 0, r.stderr);
     const baks = readdirSync(home).filter((f) => f.startsWith("model-scores.jsonl.bak-"));
     equal(baks.length, 1, `exactly one backup, got ${baks.join(", ")}`);
@@ -749,7 +749,7 @@ test("scores backfill-realmodel: the backup holds the pre-rewrite store, written
   }
 });
 
-test("scores backfill-realmodel --dry-run: prints the mapping and writes nothing at all", () => {
+test("scores backfill-realmodel --dry-run: prints the mapping and writes nothing at all", async () => {
   const dir = tmp();
   try {
     const home = join(dir, "home");
@@ -761,7 +761,7 @@ test("scores backfill-realmodel --dry-run: prints the mapping and writes nothing
     mkdirSync(home, { recursive: true });
     writeFileSync(store, before);
 
-    const r = runCli(["scores", "backfill-realmodel", "--dry-run"], { cwd: dir, env: { SWARM_HOME: home } });
+    const r = await runCliInProcess(["scores", "backfill-realmodel", "--dry-run"], { cwd: dir, env: { SWARM_HOME: home } });
     equal(r.status, 0, r.stderr);
     match(r.stdout, /haiku -> claude-haiku-4-5-20251001 \(1\)/);
     equal(readFileSync(store, "utf8"), before, "the store must be byte-identical after a dry run");
@@ -771,7 +771,7 @@ test("scores backfill-realmodel --dry-run: prints the mapping and writes nothing
   }
 });
 
-test("scores backfill-realmodel: a second run has nothing to do and writes no second backup", () => {
+test("scores backfill-realmodel: a second run has nothing to do and writes no second backup", async () => {
   const dir = tmp();
   try {
     const home = join(dir, "home");
@@ -782,9 +782,9 @@ test("scores backfill-realmodel: a second run has nothing to do and writes no se
     mkdirSync(home, { recursive: true });
     writeFileSync(store, lines([row({ model: "sonnet", resultsDir: run, leaf: "citations" })]));
 
-    equal(runCli(["scores", "backfill-realmodel"], { cwd: dir, env: { SWARM_HOME: home } }).status, 0);
+    equal((await runCliInProcess(["scores", "backfill-realmodel"], { cwd: dir, env: { SWARM_HOME: home } })).status, 0);
     const once = readFileSync(store, "utf8");
-    const r = runCli(["scores", "backfill-realmodel"], { cwd: dir, env: { SWARM_HOME: home } });
+    const r = await runCliInProcess(["scores", "backfill-realmodel"], { cwd: dir, env: { SWARM_HOME: home } });
     equal(r.status, 0, r.stderr);
     equal(readFileSync(store, "utf8"), once);
     equal(readdirSync(home).filter((f) => f.startsWith("model-scores.jsonl.bak-")).length, 1, "the no-op run adds no backup");
