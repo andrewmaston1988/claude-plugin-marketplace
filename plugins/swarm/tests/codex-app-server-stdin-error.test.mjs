@@ -103,6 +103,12 @@ test("a stdin error queued before the deadline wins over a stalled timeout", asy
   });
 });
 
+// Due after the 30 ms request deadline, so both are timers and Node runs them in
+// deadline order inside one timers phase. An immediate instead lands in whatever loop
+// phase the runner started the body in, and loses to the deadline on the un-deferred
+// source, which leaves the test green on the code it exists to catch.
+const HELD_WRITE_FAILURE_MS = 35;
+
 test("both in-flight requests reject with the stdin error across a stall", async () => {
   let held;
   const client = createCodexAppServerClient({
@@ -112,9 +118,7 @@ test("both in-flight requests reject with the stdin error across a stall", async
   try {
     const first = client.request("account/usage/read");
     const second = client.request("account/rateLimits/read");
-    // Queued before the stall so the failure is already ahead of the expired deadline
-    // in the queue; queued after, the order depends on the phase the runner started in.
-    setImmediate(held.failHeldWrite);
+    setTimeout(held.failHeldWrite, HELD_WRITE_FAILURE_MS);
     stall(40);
     const errors = await Promise.all([
       first.catch((error) => error),
