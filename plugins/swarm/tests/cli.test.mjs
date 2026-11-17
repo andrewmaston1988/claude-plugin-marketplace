@@ -1421,8 +1421,7 @@ test("serve: dashboard.enabled=false refuses to start (foreground and --daemon),
     mkdirSync(home, { recursive: true });
     writeFileSync(join(home, "config.json"), gateConfig({ dashboard: { enabled: false, port: 0, tray: false } }));
     for (const args of [["serve"], ["serve", "--daemon"]]) {
-      // Spawned on purpose: `serve` arms process.exit, which would kill this runner.
-      const r = runCli(args, { cwd: dir, env: { SWARM_HOME: home } });
+      const r = runCli(args, { cwd: dir, env: { SWARM_HOME: home } }); // spawned: `serve` arms process.exit
       equal(r.status, 0, r.stderr);
       ok(/dashboard: disabled/.test(r.stdout), r.stdout);
       ok(r.stdout.includes("dashboard.enabled"), r.stdout);
