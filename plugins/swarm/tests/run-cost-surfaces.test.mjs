@@ -26,13 +26,13 @@ const serverCfg = (money) => ({ ...dashCfg(), ...(money && { display: { money: t
 
 // ── the CLI ─────────────────────────────────────────────────────────────────────
 
-test("status footer: the meter share beside the work tokens, and no dollar sign by default", async () => withHome({}, async (h) => {
+test("status footer: the meter share beside the work tokens, and no dollar sign by default", () => withHome({}, async (h) => {
   const out = await statusOf(h);
   ok(out.includes(`tokens · ${DEFAULT_TEXT}`), out);
   ok(!out.includes("$"), out);
 }));
 
-test("status footer: with display.money the api-equivalent estimate leads the meter share", async () => withHome({ money: true }, async (h) => {
+test("status footer: with display.money the api-equivalent estimate leads the meter share", () => withHome({ money: true }, async (h) => {
   const out = await statusOf(h);
   ok(out.includes(`tokens · ${MONEY_TEXT}`), out);
 }));
@@ -79,14 +79,14 @@ test("run closing line and swarm ask: display.money prints the estimate, labelle
 
 // ── the estate and the routes ───────────────────────────────────────────────────
 
-test("estate row: carries each unit priced separately, so the server only formats", async () => withHome({}, async (h) => {
+test("estate row: carries each unit priced separately, so the server only formats", () => withHome({}, async (h) => {
   const row = buildSnapshot(h.home, new Map(), { now: NOW }).rows.find((r) => r.name === NAME);
   ok(Math.abs(row.cost.usd - 0.67) < 1e-9, JSON.stringify(row.cost));
   equal(row.cost.usdKind, "api-equivalent");
   ok(Math.abs(row.cost.weekPct - 3.2) < 1e-9, JSON.stringify(row.cost));
 }));
 
-test("estate row: an unmeasured meter leaves the share blank while the dollars stay", async () => withHome({}, async (h) => {
+test("estate row: an unmeasured meter leaves the share blank while the dollars stay", () => withHome({}, async (h) => {
   rmSync(join(h.home, "usage-history.jsonl"));
   const row = buildSnapshot(h.home, new Map(), { now: NOW }).rows.find((r) => r.name === NAME);
   ok(row.cost.usd > 0 && row.cost.weekPct === undefined, JSON.stringify(row.cost));
@@ -98,7 +98,7 @@ const routes = (h, money, fn) => withServer({ home: h.home, cfg: serverCfg(money
   leaf: async (id) => (await get(`/api/runs/${PROJECT}/${NAME}/leaves/${id}`)).body,
 }));
 
-test("routes: the run list and run screen carry the meter share alone by default, and no dollar figure", async () => withHome({}, (h) => routes(h, false, async (r) => {
+test("routes: the run list and run screen carry the meter share alone by default, and no dollar figure", () => withHome({}, (h) => routes(h, false, async (r) => {
   const row = await r.runs();
   equal(row.costText, DEFAULT_TEXT);
   equal(row.cost, undefined, "no usd reaches the wire without the opt-in");
@@ -107,19 +107,19 @@ test("routes: the run list and run screen carry the meter share alone by default
   ok(!JSON.stringify(run).includes('"usd"') && !JSON.stringify(row).includes('"usd"'));
 })));
 
-test("routes: with display.money the run list and run screen add the api-equivalent estimate", async () => withHome({}, (h) => routes(h, true, async (r) => {
+test("routes: with display.money the run list and run screen add the api-equivalent estimate", () => withHome({}, (h) => routes(h, true, async (r) => {
   equal((await r.runs()).costText, MONEY_TEXT);
   equal((await r.run()).costText, MONEY_TEXT);
 })));
 
-test("leaf route: priced from the run's own row — the result file's costUsd (2.18, 0.9) is never read", async () => withHome({}, (h) => routes(h, false, async (r) => {
+test("leaf route: priced from the run's own row — the result file's costUsd (2.18, 0.9) is never read", () => withHome({}, (h) => routes(h, false, async (r) => {
   equal((await r.leaf("cloud-leaf")).costText, DEFAULT_TEXT);
   const claude = await r.leaf("claude-leaf");
   ok(!claude.costText, `a subscription leaf has no default figure: ${claude.costText}`);
   ok(!JSON.stringify(claude).includes("$"));
 })));
 
-test("leaf route: with display.money a subscription leaf is an estimate from its buckets, not its result costUsd", async () => withHome({}, (h) => routes(h, true, async (r) => {
+test("leaf route: with display.money a subscription leaf is an estimate from its buckets, not its result costUsd", () => withHome({}, (h) => routes(h, true, async (r) => {
   equal((await r.leaf("claude-leaf")).costText, "≈$0.32 api-eq");
   equal((await r.leaf("codex-leaf")).costText, "≈$0.35 api-eq");
   equal((await r.leaf("cloud-leaf")).costText, DEFAULT_TEXT, "a :cloud leaf never shows dollars");

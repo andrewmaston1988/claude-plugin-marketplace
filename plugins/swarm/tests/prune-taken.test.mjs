@@ -39,7 +39,7 @@ const recordPort = (f, over = {}) => appendTaken({
 
 const prune = async (f, args = []) => runCliInProcess(["prune", ...args, f.runDir], { cwd: f.repo, env: { SWARM_HOME: f.home } });
 
-test("row 10: a lane ported then superseded is pruned without --discard-unlanded", async () => withFixture(async (f) => {
+test("row 10: a lane ported then superseded is pruned without --discard-unlanded", () => withFixture(async (f) => {
   recordPort(f);
   publishDefault(f.repo);
   const r = await prune(f);
@@ -50,7 +50,7 @@ test("row 10: a lane ported then superseded is pruned without --discard-unlanded
     "the lane branch is gone");
 }));
 
-test("row 10: with the taken log deleted the same lane is kept as today", async () => withFixture(async (f) => {
+test("row 10: with the taken log deleted the same lane is kept as today", () => withFixture(async (f) => {
   recordPort(f);
   fs.rmSync(join(f.home, "taken"), { recursive: true, force: true });
   const r = await prune(f);
@@ -59,7 +59,7 @@ test("row 10: with the taken log deleted the same lane is kept as today", async 
   ok(fs.existsSync(f.lane.path), "without the proof the lane is kept");
 }));
 
-test("row 11: an unproved port keeps the lane, naming why", async () => withFixture(async (f) => {
+test("row 11: an unproved port keeps the lane, naming why", () => withFixture(async (f) => {
   recordPort(f);
   // The branch was never merged: main still sits where the squash landed on. Published
   // after the reset, so this row exercises "not merged", not "no default branch".
@@ -80,7 +80,7 @@ test("row 11: an unproved port keeps the lane, naming why", async () => withFixt
   ok(fs.existsSync(f.lane.path), "the unproved lane is kept");
 }));
 
-test("row 11: a lane with no record keeps today's message", async () => withFixture(async (f) => {
+test("row 11: a lane with no record keeps today's message", () => withFixture(async (f) => {
   const r = await prune(f, ["--dry-run"]);
   ok(r.stdout.includes("2 unlanded"), r.stdout);
   equal(r.stdout.includes("taken into"), false, "no taken reason without a record");
@@ -88,7 +88,7 @@ test("row 11: a lane with no record keeps today's message", async () => withFixt
 
 // The nudge measures through plan() with the same taken map, so the squash that landed
 // the port is also what lets a HEAD-moving command name the run from the main checkout.
-test("row 12: the port nudge counts a taken lane once the squash lands", async () => withFixture(async (f) => {
+test("row 12: the port nudge counts a taken lane once the squash lands", () => withFixture(async (f) => {
   recordPort(f);
   publishDefault(f.repo);
   const out = runPortNudge({
