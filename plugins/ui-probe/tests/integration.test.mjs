@@ -14,7 +14,6 @@ import { fileURLToPath } from "node:url";
 import { startFixtureServer, AUTH_COOKIE } from "./fixtures/server.mjs";
 import { BUILTIN_VIEWPORTS } from "../src/config.mjs";
 import { findBrowser, launch } from "../src/browser.mjs";
-import { connect } from "../src/cdp.mjs";
 import { observe } from "../src/observe.mjs";
 import { run } from "../src/runner.mjs";
 import { capture } from "../src/capture.mjs";
@@ -96,7 +95,7 @@ before(async () => {
   outRoot = mkdtempSync(join(tmpdir(), "ui-probe-integration-"));
   if (browserPath) {
     browser = await launch({ browser: browserPath });
-    client = await connect(browser.port);
+    client = await browser.attachPage();
   }
 });
 
