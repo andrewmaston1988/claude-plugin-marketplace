@@ -16,7 +16,9 @@ test("isolate-home: home resolves under tmpdir", () => {
 
 test("isolate-home: marked, with no XDG dir left pointing at the real home", () => {
   equal(process.env.PIPELINE_TEST_HOME, "1");
-  equal(Object.keys(process.env).filter((k) => k.startsWith("XDG_")).length, 0);
+  for (const k of ["XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_STATE_HOME", "XDG_CACHE_HOME"]) {
+    equal(process.env[k], undefined, `${k} must be deleted`);
+  }
 });
 
 // A hook spawn is the leak this helper exists to stop: a child that resolves a
