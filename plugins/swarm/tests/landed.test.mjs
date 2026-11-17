@@ -68,9 +68,11 @@ function landed(repo, branch, gitRunner = git, extraBases = []) {
 
 function recording(gitRunner = git) {
   const calls = [];
+  const inputs = [];
   return {
     calls,
-    run: (args, cwd, opts) => { calls.push(args); return gitRunner(args, cwd, opts); },
+    inputs,
+    run: (args, cwd, opts) => { calls.push(args); inputs.push(opts?.input); return gitRunner(args, cwd, opts); },
   };
 }
 
@@ -159,8 +161,8 @@ test("row 5: a later edit on the default branch does not un-land the squash", ()
 
   const rec = recording();
   equal(unlandedCount("swarm/leaf", repo, { prefix: PREFIX, gitRunner: rec.run, extraBases: [] }), 0);
-  ok(rec.calls.some((args) => args[0] === "merge-tree" && args[2] === squash),
-    "the squash commit itself must be one of the scanned bases");
+  ok(rec.inputs.some((input, i) => rec.calls[i][0] === "merge-tree" && input?.includes(squash)),
+    "the squash commit itself must be one of the scanned batch rows");
 }));
 
 test("row 6: a leaf commit on its own branch alone is unlanded and blocks prune", () => withRepo((repo) => {
@@ -279,7 +281,13 @@ test("row 11: cost is bounded and the cap reports unlanded, never 0", () => with
   equal(rec.calls.filter((args) => args.some((a) => String(a).includes("%(symref)"))).length, 1,
     "one remote-HEAD read names the default branch its bases come from");
   ok(rec.calls.filter((args) => args[0] === "merge-base").length <= 3, "at most three candidate bases");
-  equal(rec.calls.filter((args) => args[0] === "merge-tree").length, 21, "the tip plus at most 20 touching commits");
+  const version = must(["version"], repo);
+  if (/git version (?:2\.(?:3[9]|[4-9]\d)|[3-9]\.)/.test(version)) {
+    equal(rec.calls.filter((args) => args[0] === "merge-tree").length, 1);
+    equal(rec.inputs.find((input, i) => rec.calls[i][0] === "merge-tree").trim().split(/\r?\n/).length, 21,
+      "the batch includes the tip and at most 20 touching commits");
+    equal(rec.calls.filter((args) => args[0] === "rev-parse" && args[1]?.endsWith("^{tree}")).length, 1);
+  } else equal(rec.calls.filter((args) => args[0] === "merge-tree").length, 21, "the tip plus at most 20 touching commits");
 }));
 
 test("row 12: extraBases is required, absorbs a cherry-pick, dedupes, and drops an unresolvable SHA", () => withRepo((repo) => {
