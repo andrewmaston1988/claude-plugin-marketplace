@@ -14,7 +14,10 @@ const HOOK_PATH = fileURLToPath(new URL("./user-prompt-submit.mjs", import.meta.
 
 // The hook logs under homedir()/.pipeline on every platform, so a grown count
 // here proves the spawn wrote inside the isolated home, not the operator's log.
+// A missing helper would still grow a file — the operator's — so every read
+// first insists the home it measures is the throwaway one.
 function hookLogLines() {
+  assert.equal(process.env.PIPELINE_TEST_HOME, "1", "hook rows require the isolated home");
   try {
     const log = join(homedir(), ".pipeline", "logs", "user-prompt-submit.log");
     return readFileSync(log, "utf8").split("\n").filter(Boolean).length;
