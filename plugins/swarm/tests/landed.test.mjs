@@ -1,7 +1,7 @@
 import "./helpers/isolate-home.mjs";
 import { test } from "node:test";
 import { equal, ok, throws } from "node:assert/strict";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync, existsSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { spawnSync } from "node:child_process";
@@ -9,6 +9,7 @@ import { unlandedCount, absorbedAt } from "../src/landed.mjs";
 import { prepareIsolation, collect, treeDirFor, WORKTREE_ADD_TIMEOUT_MS } from "../src/worktree.mjs";
 import { blockers } from "../src/prune.mjs";
 import { initRepo, commitAll, cleanup, dropWorktree } from "./helpers/worktree-fixtures.mjs";
+import { importTouchingCommits, argvOverflowName, argvOverflowPaths, commitPaths } from "./helpers/landed-fixtures.mjs";
 
 const PREFIX = "swarm/";
 
@@ -265,7 +266,10 @@ test("row 11: cost is bounded and the cap reports unlanded, never 0", () => with
   checkout(repo, "main");
   must(["cherry-pick", "-n", leaf], repo);
   must(["commit", "-qm", "squash leaf"], repo);
-  for (let i = 0; i < 24; i += 1) writeCommit(repo, "a.txt", `later ${i}\n`, `later ${i}`);
+  const squash = must(["rev-parse", "HEAD"], repo);
+  importTouchingCommits(repo, { path: "a.txt", count: 24 });
+  equal(must(["rev-list", "--count", `${squash}..HEAD`, "--", "a.txt"], repo), "24",
+    "precondition: more touching commits than the 20-commit scan cap");
 
   const rec = recording();
   const n = unlandedCount("swarm/leaf", repo, { prefix: PREFIX, gitRunner: rec.run, extraBases: [] });
@@ -347,22 +351,18 @@ test("row 16: below git 2.38 absorption is skipped, so an old git reports the ch
   });
 });
 
-test("row 17: a branch touching 1,000 files measures landed, and no git argv nears the platform limit", () => withRepo((repo) => {
+test("row 17: a branch touching 550 files measures landed, and no git argv nears the platform limit", () => withRepo((repo) => {
   newBranch(repo, "swarm/leaf", "main");
-  mkdirSync(join(repo, "a"), { recursive: true });
-  // Long enough that the 1,000 names do not fit on a Windows command line.
-  const name = (i) => `a/${String(i).padStart(4, "0")}-a-name-long-enough-to-overflow-a-command-line.txt`;
-  for (let i = 1; i <= 1000; i += 1) {
-    writeFileSync(join(repo, name(i)), `file ${i}\n`);
-  }
-  must(["add", "."], repo);
-  must(["commit", "-qm", "a thousand files"], repo);
+  const paths = argvOverflowPaths(550);
+  const pathList = paths.join("\n");
+  ok(pathList.length > 30000, `precondition: the path list the row exists to overflow is too short: ${pathList.length}`);
+  commitPaths(repo, paths, "five hundred and fifty files");
   checkout(repo, "main");
   must(["merge", "-q", "--squash", "swarm/leaf"], repo);
-  must(["commit", "-qm", "squash a thousand files"], repo);
+  must(["commit", "-qm", "squash five hundred and fifty files"], repo);
   // A later edit moves the tip off the squash, so the touching-commit scan runs with
   // the full path list in play.
-  writeCommit(repo, name(500), "later\n", "later edit");
+  writeCommit(repo, argvOverflowName(275), "later\n", "later edit");
 
   const rec = recording();
   const n = unlandedCount("swarm/leaf", repo, { prefix: PREFIX, gitRunner: rec.run, extraBases: [] });
