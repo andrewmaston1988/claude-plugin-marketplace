@@ -96,6 +96,51 @@ function launchWith({ answers = 2, child = fakeChild(), fs = fakeFs(), reap, kil
   return { deps, fs, child, sockets, events, calls, fetches: () => fetchUrls };
 }
 
+test("U1 retries transient DevToolsActivePort read failures", async () => {
+  const fs = fakeFs();
+  let reads = 0;
+  fs.readFileSync = () => {
+    reads += 1;
+    if (reads <= 3) throw Object.assign(new Error("locked"), { code: "EBUSY" });
+    return "9333\n/devtools/browser/abc";
+  };
+  const { deps } = launchWith({ fs });
+  const session = await launch(deps);
+  assert.equal(session.port, 9333);
+});
+
+test("U2 names a persistent port-file read failure at the poll budget", async () => {
+  const fs = fakeFs();
+  let reads = 0;
+  fs.readFileSync = () => { reads += 1; throw Object.assign(new Error("locked"), { code: "EBUSY" }); };
+  const { deps } = launchWith({ fs });
+  let error;
+  try { await launch(deps); } catch (caught) { error = caught; }
+  assert.ok(reads > 1, `expected repeated reads, got ${reads}`);
+  assert.match(error.message, /browser never wrote DevToolsActivePort.*EBUSY/);
+});
+
+test("U3 names a persistent port-file read failure at launcher early exit", async () => {
+  const fs = fakeFs();
+  fs.readFileSync = () => { throw Object.assign(new Error("locked"), { code: "EBUSY" }); };
+  const child = fakeChild();
+  child.exitCode = 0;
+  const { deps } = launchWith({ fs, child });
+  let now = 0;
+  deps._now = () => { now += 9000; return now; };
+  await assert.rejects(launch(deps), /browser exited early.*EBUSY/);
+});
+
+test("U4 keeps polling until the port file has its second line", async () => {
+  const fs = fakeFs();
+  let reads = 0;
+  fs.readFileSync = () => ++reads <= 3 ? "9" : "9333\n/devtools/browser/abc";
+  const { deps } = launchWith({ fs });
+  const session = await launch(deps);
+  assert.equal(session.port, 9333);
+  assert.equal(reads, 4);
+});
+
 test("launch returns the port, the browser socket, the profile and a close", async () => {
   const { deps } = launchWith();
   const session = await launch(deps);
