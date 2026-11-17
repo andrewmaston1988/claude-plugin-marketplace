@@ -161,6 +161,32 @@ test("failure blocks dependents transitively; independent branch completes", asy
   }
 });
 
+// A launch can fail synchronously, before the seat yield opens (a worktree prepare
+// throw), so the loop reaches the exit without another pass over the dependents. The exit sweep must still mark them blocked.
+test("a launch-time failure blocks its dependents before the run exits", async () => {
+  const dir = tmp();
+  try {
+    const spawn = fakeSpawnFactory(() => ({}));
+    const io = makeIo(spawn, {
+      worktree: fakeWorktree([], { failPrepare: (t) => t.id === "bad" }),
+    });
+    const p = plan(dir, [
+      task("bad", { worktreeName: "bad" }),
+      task("child", { after: ["bad"] }),
+      task("grandchild", { after: ["child"] }),
+    ]);
+    const r = await runPlan(p, CFG, io);
+    const states = Object.fromEntries(r.summary.tasks.map((t) => [t.id, t.state]));
+    equal(states.bad, "failed");
+    equal(states.child, "blocked");
+    equal(states.grandchild, "blocked");
+    deepEqual(r.summary.blocked.sort(), ["child", "grandchild"]);
+    equal(spawn.calls.length, 0); // neither dependent ever spawned
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("rate-limit-shaped failure classified 'rate-limited'", async () => {
   const dir = tmp();
   try {

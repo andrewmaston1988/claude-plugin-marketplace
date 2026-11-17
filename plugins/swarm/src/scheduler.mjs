@@ -286,13 +286,10 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), {
 
   Object.assign(ctx, createHeartbeatTick(ctx));
 
-  // The try (not re-indented, to keep the diff readable) closes after the stopped sweep. Its
-  // finally owns the heartbeat and the signal handlers on every exit path.
-  try {
-
-  for (;;) {
-    // Block anything whose dependency chain is doomed (fail/timeout/rate-limit/
-    // blocked). Independent branches keep going.
+  // Block anything whose dependency chain is doomed (fail/timeout/rate-limit/
+  // blocked). Independent branches keep going. A fixed point, so a grandchild
+  // resolves in the same call.
+  const sweepBlocked = () => {
     let changed = true;
     while (changed) {
       changed = false;
@@ -303,6 +300,14 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), {
         }
       }
     }
+  };
+
+  // The try (not re-indented, to keep the diff readable) closes after the stopped sweep. Its
+  // finally owns the heartbeat and the signal handlers on every exit path.
+  try {
+
+  for (;;) {
+    sweepBlocked();
 
     let progressed = false;
     if (!ctx.stopRequested) {
@@ -352,6 +357,9 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), {
       ctx.wake = () => {};
     }
   }
+  // A leaf can fail and give up its slot without the loop coming back round (a
+  // synchronous worktree prepare throw), so the top sweep misses its dependents.
+  sweepBlocked();
   // A leaf that never got a slot (still pending) or was mid-backoff never runs
   // classifyFailure's stopped branch — say so here, or a stopped run leaves it
   // reading "pending" forever, indistinguishable from a run that just hasn't
