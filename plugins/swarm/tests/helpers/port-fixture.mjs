@@ -48,6 +48,7 @@ function templateRoot() {
   mkdirSync(root, { recursive: true });
   return root;
 }
+
 const readdirSafe = (dir) => { try { return readdirSync(dir); } catch { return []; } };
 
 function jsonFiles(dir, out = []) {
@@ -63,8 +64,7 @@ function jsonFiles(dir, out = []) {
 
 // The fixture API over one home. Everything path-shaped derives from `home`/`repo`, so a
 // copy is a new home handed to this same builder.
-function makeFixture(home, repo) {
-  const toplevel = realRepoToplevel(repo) || repo;
+function makeFixture(home, repo, toplevel = realRepoToplevel(repo) || repo) {
   const runsRoot = join(home, "runs", runsKeyFor(toplevel));
   const cfg = { worktreeBranchPrefix: "swarm/", treeRoot: join(home, "worktrees") };
   const spawn = spawnSync;
@@ -215,7 +215,7 @@ function copyHome(template, { root = tmpdir(), prefix = "port-nudge-" } = {}) {
     rewritePaths(file, template.home, home, oldKey, newKey);
   }
   repairWorktrees(home, repo);
-  return { home, repo };
+  return { home, repo, toplevel };
 }
 
 let portBase = null;
@@ -233,7 +233,7 @@ const portTemplate = () => (portBase ??= buildPortBase());
 
 export function portFixture() {
   const copy = copyHome(portTemplate());
-  return makeFixture(copy.home, copy.repo);
+  return makeFixture(copy.home, copy.repo, copy.toplevel);
 }
 
 // The cached template itself, for the row that proves a copy equals it. Its cleanup is a
@@ -244,7 +244,7 @@ export const portFixtureTemplate = () => ({ ...portTemplate(), cleanup: () => {}
 // commits or their patch, so every content check reads unlanded.
 function buildTaken({ run = "run-1", id = "implement-rating", branch = "feat", launcher = null } = {}) {
   const copy = copyHome(portTemplate(), { root: templateRoot(), prefix: "taken-" });
-  const f = makeFixture(copy.home, copy.repo);
+  const f = makeFixture(copy.home, copy.repo, copy.toplevel);
   const { repo, home } = f;
   const body = (over = {}) => Array.from({ length: 15 }, (_, i) => over[i + 1] ?? `line${String(i + 1).padStart(2, "0")}`).join("\n") + "\n";
 
@@ -303,7 +303,7 @@ export const takenFixtureTemplate = (opts) => ({ ...takenTemplate(opts), cleanup
 export function takenFixture(opts) {
   const template = takenTemplate(opts);
   const copy = copyHome(template);
-  const api = makeFixture(copy.home, copy.repo);
+  const api = makeFixture(copy.home, copy.repo, copy.toplevel);
   const at = (path) => join(api.home, relative(template.home, path));
   return {
     ...api,
