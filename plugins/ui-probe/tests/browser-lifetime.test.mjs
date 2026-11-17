@@ -15,6 +15,9 @@ const REQUIRED = process.env.UI_PROBE_REQUIRE_BROWSER === "1";
 const OVERRIDE = process.env.UI_PROBE_BROWSER || undefined;
 const HOLD_DEADLINE_MS = 10_000;
 const POLL_MS = 250;
+// A listing of every process on a machine busy with other suites can outrun the reap's own
+// five-second ceiling; this row is about the browser, not the lister's budget.
+const LISTING_TIMEOUT_MS = 60_000;
 
 let browserPath = null;
 let browserProblem = null;
@@ -32,7 +35,7 @@ const wait = (ms) => new Promise((done) => setTimeout(done, ms));
 // The real listing: every process holding this exact profile, renderer children included.
 async function holdersOf(profile) {
   const target = foldPath(profile);
-  const processes = await listProcesses();
+  const processes = await listProcesses({ timeoutMs: LISTING_TIMEOUT_MS });
   return processes.filter((entry) => {
     const found = profileFromCommandLine(entry.cmd);
     return found != null && foldPath(found) === target;
@@ -102,7 +105,7 @@ if (!browserPath && REQUIRED) {
 test("row 1: a killed probe's browser is ended by the next launch's reaper", { skip: SKIP, timeout: 240000 }, async () => {
   const probe = startProbe();
   const profile = await probe.profile;
-  let reaped = null;
+  let reaped = false;
   let next = null;
   try {
     // No close(): the owner simply disappears, which is what a killed session leaves.
@@ -111,8 +114,11 @@ test("row 1: a killed probe's browser is ended by the next launch's reaper", { s
 
     next = await launch({
       browser: browserPath,
+      // The launch caps the reap at five seconds and a loaded suite can still be inside it when
+      // the launch returns, so this asserts the call, not its completion; nobodyHolds is the rest.
       _reap: async () => {
-        reaped = await reapOrphans();
+        reaped = true;
+        await reapOrphans();
       },
     });
     assert.ok(reaped, "the next launch ran the reaper");
@@ -122,7 +128,7 @@ test("row 1: a killed probe's browser is ended by the next launch's reaper", { s
   } finally {
     if (next) await next.close();
     if (existsSync(profile)) {
-      await killBrowserForProfile(profile);
+      await killBrowserForProfile(profile, { timeoutMs: LISTING_TIMEOUT_MS });
       try { rmSync(profile, { recursive: true, force: true }); } catch { /* a failing cleanup must not mask the row */ }
     }
     if (probe.child.exitCode == null) probe.child.kill();
@@ -158,7 +164,7 @@ test("row 2: a launch that fails after the spawn ends its browser and retries th
     // A row that fails here has just leaked the browser it is complaining about.
     const leaked = attempts[0];
     if (leaked && existsSync(leaked)) {
-      await killBrowserForProfile(leaked);
+      await killBrowserForProfile(leaked, { timeoutMs: LISTING_TIMEOUT_MS });
       try { rmSync(leaked, { recursive: true, force: true }); } catch { /* a failing cleanup must not mask the row */ }
     }
   }
