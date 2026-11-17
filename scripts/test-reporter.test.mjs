@@ -12,7 +12,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
 
-import { HEARTBEAT_MS, abortableSleep, createReporter } from "./test-lib/reporter.mjs";
+import { HEARTBEAT_MS, TIMINGS_FLUSH_MS, abortableSleep, createReporter } from "./test-lib/reporter.mjs";
 
 // --- Harness ---------------------------------------------------------------
 
@@ -437,7 +437,7 @@ test("timings are keyed by the repo-relative path with the file's content hash",
   assert.deepEqual(timings["tests/landed.test.mjs"], { ms: 45000, sha256, at: 42 });
 });
 
-test("the timing cache is written once per run, through fast.recordTimings", async (t) => {
+test("two finished files cost one batched write, not one per file", async (t) => {
   const root = makeRoot(t);
   const a = join(root, "tests", "a.test.mjs");
   const b = join(root, "tests", "b.test.mjs");
@@ -461,4 +461,38 @@ test("the timing cache is written once per run, through fast.recordTimings", asy
   const timings = JSON.parse(readFileSync(join(root, "test-results", "timings.json"), "utf8"));
   assert.deepEqual(Object.keys(timings).sort(), ["tests/a.test.mjs", "tests/b.test.mjs"]);
   assert.equal(writes, 1, "each finished file rewrote the whole timing cache");
+});
+
+// --- B1: a run killed at its cap -------------------------------------------
+
+test("B1: a run killed before its end has already persisted the timings of every file that finished", async (t) => {
+  const root = makeRoot(t);
+  const [done, slow] = ["done", "slow"].map((name) => join(root, "tests", `${name}.test.mjs`));
+  mkdirSync(dirname(done), { recursive: true });
+  writeFileSync(done, "// done\n", "utf8");
+
+  const clock = fakeClock();
+  let calls = 0;
+  const rows = [dequeue(done), complete(done, { ms: 200 }), dequeue(slow)];
+  const source = {
+    [Symbol.asyncIterator]() { return this; },
+    next() {
+      calls += 1;
+      return calls <= rows.length ? Promise.resolve({ value: rows[calls - 1], done: false }) : new Promise(() => {});
+    },
+  };
+  const iterator = createReporter({ env: envFor(root), now: clock.now, sleep: clock.sleep })(source);
+  assert.match((await iterator.next()).value, /^✓ tests\/done\.test\.mjs/);
+  const beat = iterator.next();
+  await until(() => calls >= 4, "the still-running file");
+  clock.advance(TIMINGS_FLUSH_MS + 5000);
+  clock.fire();
+  assert.match((await beat).value, /still running/);
+
+  // Read while the run is open: a SIGKILL never reaches the end block.
+  const written = JSON.parse(readFileSync(join(root, "test-results", "timings.json"), "utf8"));
+  assert.deepEqual(Object.keys(written), ["tests/done.test.mjs"]);
+  assert.equal(written["tests/done.test.mjs"].ms, 200);
+
+  await iterator.return(); // the kill
 });

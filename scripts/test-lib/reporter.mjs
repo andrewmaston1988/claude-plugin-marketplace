@@ -10,6 +10,9 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { recordTimings } from "./fast.mjs";
 
 export const HEARTBEAT_MS = 60_000;
+// A run killed at its cap never reaches the end-of-run write, so completed
+// timings are also flushed on this cadence: a kill loses at most the last minute.
+export const TIMINGS_FLUSH_MS = 60_000;
 export const SLOW_TEST_MS = 1_000;
 export const SLOW_TEST_LIMIT = 10;
 export const STDERR_TAIL_LINES = 20;
@@ -219,11 +222,26 @@ export function createReporter({ now = Date.now, sleep = abortableSleep, env = p
     const failures = new Map();     // repo-relative path -> leaf failures
     const stderr = new Map();       // repo-relative path -> last lines
     const failedFiles = [];         // completion order
-    const measured = [];            // { file, ms } of passing files, written once at exit
+    const measured = [];            // { file, ms } of passing files, flushed in batches
     const slow = [];
     let totals = null;
+    let flushed = 0;                // measured entries already persisted
+    let lastFlush = startedAt;
 
     const inFlightPath = () => join(resultsDir, `${label}.${process.pid}.inflight.json`);
+
+    /** One timings writer: recordTimings merges the batch into the cache. */
+    function flushTimings() {
+      if (measured.length === flushed) return;
+      const entries = measured.slice(flushed);
+      flushed = measured.length;
+      lastFlush = now();
+      recordTimings({ resultsDir, repoRoot, entries, now, _fs: fs });
+    }
+
+    function maybeFlushTimings() {
+      if (measured.length > flushed && now() - lastFlush >= TIMINGS_FLUSH_MS) flushTimings();
+    }
 
     function writeInFlight() {
       const payload = {
@@ -400,6 +418,7 @@ export function createReporter({ now = Date.now, sleep = abortableSleep, env = p
         if (abort.signal.aborted) break; // the consumer closed us; do not emit more
         if (winner === HEARTBEAT) {
           sleeper = null;
+          maybeFlushTimings();
           const line = heartbeat();
           if (line) yield line;
           continue;
@@ -410,10 +429,11 @@ export function createReporter({ now = Date.now, sleep = abortableSleep, env = p
         // resumes its body synchronously, so pulling first would let the run
         // advance past state this event wrote.
         const out = handle(value);
+        maybeFlushTimings();
         if (out) yield out;
         pending = iterator.next();
       }
-      recordTimings({ resultsDir, repoRoot, entries: measured, now, _fs: fs });
+      flushTimings();
       writeAtomic(join(resultsDir, `${label}.log`), logText());
       running.clear();
       writeInFlight();
@@ -421,6 +441,11 @@ export function createReporter({ now = Date.now, sleep = abortableSleep, env = p
       if (lines.length > 0) yield `${lines.join("\n")}\n`;
     } finally {
       abort.abort();
+      try {
+        flushTimings(); // a closed generator still owns the files that finished
+      } catch {
+        // The cache is an optimisation; a run must never fail over it.
+      }
       // Not awaited: a source suspended on its own await cannot settle its
       // return(), and close must not block on it.
       try {
