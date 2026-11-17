@@ -13,7 +13,7 @@ import { prepareIsolation, treeDirFor, WORKTREE_ADD_TIMEOUT_MS } from "../src/wo
 import { swarmHome, runsKeyFor } from "../src/config.mjs";
 import { listRuns, readRun } from "../src/runlog.mjs";
 import { buildSnapshot } from "../src/serve/estate.mjs";
-import { runCli } from "./helpers/cli.mjs";
+import { runCliInProcess } from "./helpers/cli.mjs";
 import { gitOut } from "./helpers/cli-fixture.mjs";
 import { initRepo, cleanup, commitAll, dropWorktree, CFG, ADD } from "./helpers/worktree-fixtures.mjs";
 
@@ -51,7 +51,7 @@ function treeWithoutRecord(repo, dir, name = "impl") {
   return wt;
 }
 
-test("prune finds a tree in the run's scratch dir that neither a record nor summary.json names", () => {
+test("prune finds a tree in the run's scratch dir that neither a record nor summary.json names", async () => {
   const repo = initRepo();
   const dir = runDir("prune-scratch-discovery");
   let wt;
@@ -72,7 +72,7 @@ test("prune finds a tree in the run's scratch dir that neither a record nor summ
   }
 });
 
-test("prune's refusal is unchanged: unlanded work in a scratch-dir tree still blocks the destroy", () => {
+test("prune's refusal is unchanged: unlanded work in a scratch-dir tree still blocks the destroy", async () => {
   const repo = initRepo();
   const dir = runDir("prune-scratch-unlanded");
   let wt;
@@ -93,7 +93,7 @@ test("prune's refusal is unchanged: unlanded work in a scratch-dir tree still bl
   }
 });
 
-test("prune still discovers and removes a legacy <run>/wt-* tree — the pre-upgrade layout is untouched", () => {
+test("prune still discovers and removes a legacy <run>/wt-* tree — the pre-upgrade layout is untouched", async () => {
   const repo = initRepo();
   const dir = runDir("prune-legacy");
   const legacy = join(dir, "wt-impl");
@@ -113,7 +113,7 @@ test("prune still discovers and removes a legacy <run>/wt-* tree — the pre-upg
   }
 });
 
-test("the nudge counts a finished run's scratch-dir tree even when summary.json lists none", () => {
+test("the nudge counts a finished run's scratch-dir tree even when summary.json lists none", async () => {
   const repo = initRepo();
   const dir = runDir("nudge-scratch");
   let wt;
@@ -131,7 +131,7 @@ test("the nudge counts a finished run's scratch-dir tree even when summary.json 
   }
 });
 
-test("the nudge stays silent for a live run holding a scratch-dir tree", () => {
+test("the nudge stays silent for a live run holding a scratch-dir tree", async () => {
   const repo = initRepo();
   const dir = runDir("nudge-live");
   let wt;
@@ -149,7 +149,7 @@ test("the nudge stays silent for a live run holding a scratch-dir tree", () => {
   }
 });
 
-test("prune (CLI) removes an unrecorded new-layout run's tree and branch", () => {
+test("prune (CLI) removes an unrecorded new-layout run's tree and branch", async () => {
   const repo = initRepo();
   const dir = runDir("cli-prune-scratch");
   let wt;
@@ -158,7 +158,7 @@ test("prune (CLI) removes an unrecorded new-layout run's tree and branch", () =>
     finishRun(dir, { kept: [] , summary: {} });
     writeFileSync(join(dir, "manifest.json"), JSON.stringify({ resultsDir: dir, cwd: repo, tasks: [] }));
 
-    const r = runCli(["prune", dir], { cwd: repo });
+    const r = await runCliInProcess(["prune", dir], { cwd: repo });
     equal(r.status, 0, r.stdout + r.stderr);
     ok(r.stdout.includes(wt.path), `prune must name the tree it removed: ${r.stdout}`);
     ok(existsSync(wt.path) === false, "the tree under treeRoot must be gone");
@@ -170,7 +170,7 @@ test("prune (CLI) removes an unrecorded new-layout run's tree and branch", () =>
   }
 });
 
-test("prune (CLI) removes a recorded tree's record and empty treeRoot parents", () => {
+test("prune (CLI) removes a recorded tree's record and empty treeRoot parents", async () => {
   const repo = initRepo();
   const name = "cli-prune-recorded";
   // Its own project key: the shipped default root is shared with the rows above,
@@ -190,7 +190,7 @@ test("prune (CLI) removes a recorded tree's record and empty treeRoot parents", 
 
     const record = join(dir, "trees", "impl.json");
     ok(existsSync(record), "prepareIsolation wrote the tree record");
-    const r = runCli(["prune", dir], { cwd: repo, env: { SWARM_HOME: swarmHome() } });
+    const r = await runCliInProcess(["prune", dir], { cwd: repo, env: { SWARM_HOME: swarmHome() } });
     equal(r.status, 0, r.stdout + r.stderr);
     ok(r.stdout.includes(wt.path), `prune must name the tree it removed: ${r.stdout}`);
     deepEqual([
@@ -206,7 +206,7 @@ test("prune (CLI) removes a recorded tree's record and empty treeRoot parents", 
   }
 });
 
-test("swarm stop on a dead engine records the scratch-dir tree and prints its prune hint", () => {
+test("swarm stop on a dead engine records the scratch-dir tree and prints its prune hint", async () => {
   const repo = initRepo();
   const dir = runDir("cli-stop-scratch");
   let wt;
@@ -226,7 +226,7 @@ test("swarm stop on a dead engine records the scratch-dir tree and prints its pr
     utimesSync(runLog, stale, stale);
     utimesSync(heartbeat, stale, stale);
 
-    const r = runCli(["stop", dir], { cwd: repo });
+    const r = await runCliInProcess(["stop", dir], { cwd: repo });
     equal(r.status, 0, r.stdout + r.stderr);
     ok(r.stdout.includes(wt.path), `the dead-engine record must name the tree: ${r.stdout}`);
     ok(r.stdout.includes("prune when done"), r.stdout);
@@ -242,7 +242,7 @@ test("swarm stop on a dead engine records the scratch-dir tree and prints its pr
 
 // History lives in the run dir, so a kept tree's root going missing can never cost
 // the run its record. The root is never created at all — nothing is deleted.
-test("a kept tree whose root is gone leaves the run's results, summary and dashboard row readable", () => {
+test("a kept tree whose root is gone leaves the run's results, summary and dashboard row readable", async () => {
   const dir = runDir("guard-gone-root");
   const goneTree = join(swarmHome(), "tree-root-never-created", runsKeyFor("C--code-lifecycle"), "guard-gone-root", "impl");
   try {
@@ -261,7 +261,7 @@ test("a kept tree whose root is gone leaves the run's results, summary and dashb
   }
 });
 
-test("treeDirFor and prune agree on where a recorded tree lives", () => {
+test("treeDirFor and prune agree on where a recorded tree lives", async () => {
   const repo = initRepo();
   const dir = runDir("agree-on-path");
   let wt;

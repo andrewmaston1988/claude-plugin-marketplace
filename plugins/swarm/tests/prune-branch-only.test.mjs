@@ -6,7 +6,7 @@ import { equal, ok } from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { existsSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { runCli } from "./helpers/cli.mjs";
+import { runCliInProcess } from "./helpers/cli.mjs";
 import { commitAll, gitOut } from "./helpers/cli-fixture.mjs";
 import { writeFinishedRun, pruneFixture, dropSnapPrune } from "./helpers/prune-fixture.mjs";
 import { runScopeKey, treeDirFor } from "../src/worktree.mjs";
@@ -31,7 +31,7 @@ function addBranchTree(repo, branch, path, { lock = false } = {}) {
 }
 
 for (const lock of [false, true]) {
-  test(`row 1: a registered tree whose directory is gone is pruned${lock ? ", even locked" : ""}`, () => {
+  test(`row 1: a registered tree whose directory is gone is pruned${lock ? ", even locked" : ""}`, async () => {
     const f = pruneFixture();
     const branch = `swarm/${runScopeKey(f.resultsDir)}/impl`;
     try {
@@ -41,12 +41,12 @@ for (const lock of [false, true]) {
       const env = { SWARM_HOME: join(f.dir, "home") };
       const config = cliCfg(f.dir);
 
-      const dry = runCli(["prune", f.resultsDir, "--dry-run"], { cwd: f.dir, env, config });
+      const dry = await runCliInProcess(["prune", f.resultsDir, "--dry-run"], { cwd: f.dir, env, config });
       equal(dry.status, 0, dry.stdout + dry.stderr);
       ok(dry.stdout.includes(f.tree), `a missing registered tree is still a row: ${dry.stdout}`);
       ok(!/uncommitted/.test(dry.stdout), `a directory that is gone holds no uncommitted work: ${dry.stdout}`);
 
-      const pruned = runCli(["prune", f.resultsDir], { cwd: f.dir, env, config });
+      const pruned = await runCliInProcess(["prune", f.resultsDir], { cwd: f.dir, env, config });
       equal(pruned.status, 0, pruned.stdout + pruned.stderr);
       ok(!gitOut(["worktree", "list", "--porcelain"], f.repo).includes("impl"), "the registration is gone");
       equal(gitOut(["branch", "--list", branch], f.repo), "", "the branch is gone");
@@ -57,7 +57,7 @@ for (const lock of [false, true]) {
   });
 }
 
-test("row 3: the run's own branches are rows with no tree — landed ones go, unlanded ones refuse", () => {
+test("row 3: the run's own branches are rows with no tree — landed ones go, unlanded ones refuse", async () => {
   const f = pruneFixture();
   const scope = runScopeKey(f.resultsDir);
   const landed = `swarm/${scope}/swept`;
@@ -74,20 +74,20 @@ test("row 3: the run's own branches are rows with no tree — landed ones go, un
 
     const env = { SWARM_HOME: join(f.dir, "home") };
     const config = cliCfg(f.dir);
-    const dry = runCli(["prune", f.resultsDir, "--dry-run"], { cwd: f.dir, env, config });
+    const dry = await runCliInProcess(["prune", f.resultsDir, "--dry-run"], { cwd: f.dir, env, config });
     equal(dry.status, 0, dry.stdout + dry.stderr);
     ok(dry.stdout.includes("(no tree)"), dry.stdout);
     ok(dry.stdout.includes(landed) && dry.stdout.includes(open), dry.stdout);
     ok(dry.stdout.includes("1 unlanded"), dry.stdout);
 
-    const partial = runCli(["prune", f.resultsDir], { cwd: f.dir, env, config });
+    const partial = await runCliInProcess(["prune", f.resultsDir], { cwd: f.dir, env, config });
     equal(partial.status, 1, partial.stdout + partial.stderr);
     ok(partial.stderr.includes("(no tree)") && partial.stderr.includes(open), partial.stderr);
     ok(/freed .* across 0 worktrees and 1 branch/.test(partial.stdout), partial.stdout);
     equal(gitOut(["branch", "--list", landed], f.repo), "", "the landed branch-only row goes");
     ok(gitOut(["branch", "--list", open], f.repo), "the unlanded branch-only row is kept");
 
-    const discarded = runCli(["prune", f.resultsDir, "--discard-unlanded"], { cwd: f.dir, env, config });
+    const discarded = await runCliInProcess(["prune", f.resultsDir, "--discard-unlanded"], { cwd: f.dir, env, config });
     equal(discarded.status, 0, discarded.stdout + discarded.stderr);
     equal(gitOut(["branch", "--list", landed], f.repo), "", "the landed branch is deleted");
     equal(gitOut(["branch", "--list", open], f.repo), "", "--discard-unlanded is the operator's word");
@@ -96,7 +96,7 @@ test("row 3: the run's own branches are rows with no tree — landed ones go, un
   }
 });
 
-test("row 4: another run's key, outside the prefix, an unscoped name and a held branch are never rows", () => {
+test("row 4: another run's key, outside the prefix, an unscoped name and a held branch are never rows", async () => {
   const f = pruneFixture();
   const scope = runScopeKey(f.resultsDir);
   const other = `swarm/${runScopeKey(join(f.dir, "other-run"))}/leaf`;
@@ -111,14 +111,14 @@ test("row 4: another run's key, outside the prefix, an unscoped name and a held 
 
     const env = { SWARM_HOME: join(f.dir, "home") };
     const config = cliCfg(f.dir);
-    const dry = runCli(["prune", f.resultsDir, "--dry-run"], { cwd: f.dir, env, config });
+    const dry = await runCliInProcess(["prune", f.resultsDir, "--dry-run"], { cwd: f.dir, env, config });
     equal(dry.status, 0, dry.stdout + dry.stderr);
     for (const name of [other, outsidePrefix, unscoped, held]) {
       ok(!dry.stdout.includes(name), `${name} must not be a row: ${dry.stdout}`);
     }
     ok(/has no kept worktrees or branches/.test(dry.stdout), dry.stdout);
 
-    const pruned = runCli(["prune", f.resultsDir], { cwd: f.dir, env, config });
+    const pruned = await runCliInProcess(["prune", f.resultsDir], { cwd: f.dir, env, config });
     equal(pruned.status, 0, pruned.stdout + pruned.stderr);
     for (const name of [other, outsidePrefix, unscoped, held]) {
       ok(gitOut(["branch", "--list", name], f.repo), `${name} survives`);
@@ -135,7 +135,7 @@ test("row 5: a fan-in run's unchanged source branch, which no tree holds, is pru
   const scope = runScopeKey(resultsDir);
   const config = { worktreeBranchPrefix: "swarm/", treeRoot: join(process.env.SWARM_HOME, "worktrees") };
   try {
-    const spawn = fakeSpawnFactory((call) => {
+    const spawn = fakeSpawnFactory(async (call) => {
       const cwd = call.opts.cwd;
       if (cwd.endsWith("feat")) {
         writeFileSync(join(cwd, "base.txt"), "base\n");
@@ -171,7 +171,7 @@ test("row 5: a fan-in run's unchanged source branch, which no tree holds, is pru
     equal(gitIn(repo, ["merge", "-q", "--ff-only", integrate]).status, 0);
 
     const env = { SWARM_HOME: process.env.SWARM_HOME };
-    const pruned = runCli(["prune", resultsDir], { cwd: dir, env, config });
+    const pruned = await runCliInProcess(["prune", resultsDir], { cwd: dir, env, config });
     equal(pruned.status, 0, pruned.stdout + pruned.stderr);
     equal(gitOut(["branch", "--list", source], repo), "", "the source branch no tree holds is gone");
     equal(gitOut(["branch", "--list", integrate], repo), "", "the integrate branch is gone");

@@ -6,7 +6,7 @@ import { test } from "node:test";
 import { equal, ok } from "node:assert/strict";
 import { existsSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { runCli } from "./helpers/cli.mjs";
+import { runCliInProcess } from "./helpers/cli.mjs";
 import { commitAll, gitOut } from "./helpers/cli-fixture.mjs";
 import { prepareIsolation, runScopeKey, WORKTREE_ADD_TIMEOUT_MS } from "../src/worktree.mjs";
 import { dropSnapPrune, pruneFixture, writeFinishedRun } from "./helpers/prune-fixture.mjs";
@@ -44,11 +44,11 @@ function partialRun() {
   return { f, landed, held, orphan };
 }
 
-test("row 10: a partial prune removes the landed rows and keeps the unlanded one", () => {
+test("row 10: a partial prune removes the landed rows and keeps the unlanded one", async () => {
   const { f, landed, held, orphan } = partialRun();
   try {
     const env = { SWARM_HOME: join(f.dir, "home") };
-    const first = runCli(["prune", f.resultsDir], { cwd: f.dir, env });
+    const first = await runCliInProcess(["prune", f.resultsDir], { cwd: f.dir, env });
     equal(first.status, 1, first.stdout + first.stderr);
     ok(!existsSync(landed.path), "the landed tree is removed");
     equal(gitOut(["branch", "--list", landed.branch], f.repo), "", "its branch is removed");
@@ -59,7 +59,7 @@ test("row 10: a partial prune removes the landed rows and keeps the unlanded one
     ok(/^freed .* across 1 worktree and 1 branch$/m.test(first.stdout), first.stdout);
 
     spawnSync("git", ["merge", "-q", held.branch], { cwd: f.repo, windowsHide: true });
-    const second = runCli(["prune", f.resultsDir], { cwd: f.dir, env });
+    const second = await runCliInProcess(["prune", f.resultsDir], { cwd: f.dir, env });
     equal(second.status, 0, second.stdout + second.stderr);
     ok(!existsSync(held.path), "the now-landed tree is removed");
     equal(gitOut(["branch", "--list", held.branch], f.repo), "", "its branch is removed");
@@ -68,10 +68,10 @@ test("row 10: a partial prune removes the landed rows and keeps the unlanded one
   }
 });
 
-test("row 11: partial --dry-run lists what would go and what would stay, removing nothing", () => {
+test("row 11: partial --dry-run lists what would go and what would stay, removing nothing", async () => {
   const { f, landed, held, orphan } = partialRun();
   try {
-    const r = runCli(["prune", f.resultsDir, "--dry-run"], { cwd: f.dir, env: { SWARM_HOME: join(f.dir, "home") } });
+    const r = await runCliInProcess(["prune", f.resultsDir, "--dry-run"], { cwd: f.dir, env: { SWARM_HOME: join(f.dir, "home") } });
     equal(r.status, 0, r.stdout + r.stderr);
     const [free, keep] = r.stdout.split("would keep");
     ok(free && keep, `dry-run names both halves: ${r.stdout}`);
@@ -86,7 +86,7 @@ test("row 11: partial --dry-run lists what would go and what would stay, removin
   }
 });
 
-test("row 12: a removal git refuses is reported kept with git's reason, never freed", () => {
+test("row 12: a removal git refuses is reported kept with git's reason, never freed", async () => {
   const f = pruneFixture();
   try {
     const base = gitOut(["rev-parse", "HEAD"], f.repo);
@@ -102,7 +102,7 @@ test("row 12: a removal git refuses is reported kept with git's reason, never fr
     equal(lock.status, 0, String(lock.stderr));
     writeFinishedRun(f.resultsDir, [{ name: "locked", branch: wt.branch, path: wt.path }]);
 
-    const r = runCli(["prune", f.resultsDir], { cwd: f.dir, env: { SWARM_HOME: join(f.dir, "home") } });
+    const r = await runCliInProcess(["prune", f.resultsDir], { cwd: f.dir, env: { SWARM_HOME: join(f.dir, "home") } });
     equal(r.status, 1, r.stdout + r.stderr);
     ok(!/freed/.test(r.stdout), `a row git refused must never read as freed: ${r.stdout}`);
     ok(r.stderr.includes(wt.path), r.stderr);
@@ -115,7 +115,7 @@ test("row 12: a removal git refuses is reported kept with git's reason, never fr
 
     // Still no flag advice when the operator already passed it: `--discard-unlanded` sends
     // this row down the same removal git just refused.
-    const discarded = runCli(["prune", f.resultsDir, "--discard-unlanded"], { cwd: f.dir, env: { SWARM_HOME: join(f.dir, "home") } });
+    const discarded = await runCliInProcess(["prune", f.resultsDir, "--discard-unlanded"], { cwd: f.dir, env: { SWARM_HOME: join(f.dir, "home") } });
     equal(discarded.status, 1, discarded.stdout + discarded.stderr);
     ok(/kept 1 row that git refused to remove/.test(discarded.stderr), discarded.stderr);
     ok(!discarded.stderr.includes("--discard-unlanded"), `never suggest the flag that was just passed: ${discarded.stderr}`);
@@ -125,12 +125,12 @@ test("row 12: a removal git refuses is reported kept with git's reason, never fr
   }
 });
 
-test("row 13: a run with both kinds of kept row prints both remedies", () => {
+test("row 13: a run with both kinds of kept row prints both remedies", async () => {
   const { f, landed, held } = partialRun();
   try {
     // The landed tree is locked, so git refuses it; the held tree is blocked on work.
     equal(spawnSync("git", ["worktree", "lock", landed.path], { cwd: f.repo, windowsHide: true }).status, 0);
-    const r = runCli(["prune", f.resultsDir], { cwd: f.dir, env: { SWARM_HOME: join(f.dir, "home") } });
+    const r = await runCliInProcess(["prune", f.resultsDir], { cwd: f.dir, env: { SWARM_HOME: join(f.dir, "home") } });
     equal(r.status, 1, r.stdout + r.stderr);
     ok(/kept 1 row that still holds work — .*--discard-unlanded/.test(r.stderr),
       `the work row keeps the landing advice: ${r.stderr}`);

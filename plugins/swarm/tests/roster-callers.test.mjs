@@ -9,7 +9,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { spawnSync } from "node:child_process";
-import { runCli } from "./helpers/cli.mjs";
+import { runCli, runCliInProcess } from "./helpers/cli.mjs";
 import { readRosterEnvelope } from "../src/roster.mjs";
 
 const CATALOG_MODEL = "claude-fable-5-1";
@@ -66,10 +66,10 @@ function world({ catalog = true, model = CATALOG_MODEL } = {}) {
 
 const cleanup = (dir) => rmSync(dir, { recursive: true, force: true });
 
-test("swarm models banks Claude's entry through the reader, with the catalog identity it read", () => {
+test("swarm models banks Claude's entry through the reader, with the catalog identity it read", async () => {
   const w = world();
   try {
-    const r = runCli(["models"], { cwd: w.dir, env: { SWARM_HOME: w.home } });
+    const r = await runCliInProcess(["models"], { cwd: w.dir, env: { SWARM_HOME: w.home } });
     equal(r.status, 0, r.stderr);
     const entry = readRosterEnvelope({ SWARM_HOME: w.home }).providers.claude;
     ok(entry, "swarm models wrote no claude entry — it is not going through the reader");
@@ -80,14 +80,14 @@ test("swarm models banks Claude's entry through the reader, with the catalog ide
   }
 });
 
-test("swarm validate reads the roster through the reader: a catalog model's efforts bind with no models run", () => {
+test("swarm validate reads the roster through the reader: a catalog model's efforts bind with no models run", async () => {
   const w = world();
   try {
     const p = join(w.dir, "m.json");
     writeFileSync(p, JSON.stringify({
       tasks: [{ id: "a", prompt: "x", provider: "claude", model: CATALOG_MODEL, effort: "xhigh" }],
     }));
-    const r = runCli(["validate", p], { cwd: w.dir, env: { SWARM_HOME: w.home } });
+    const r = await runCliInProcess(["validate", p], { cwd: w.dir, env: { SWARM_HOME: w.home } });
     equal(r.status, 1, `the catalog's declared efforts never reached validate:\n${r.stdout}${r.stderr}`);
     ok(r.stderr.includes("effort 'xhigh'"), r.stderr);
     ok(r.stderr.includes(CATALOG_MODEL), r.stderr);
@@ -96,7 +96,7 @@ test("swarm validate reads the roster through the reader: a catalog model's effo
     writeFileSync(p, JSON.stringify({
       tasks: [{ id: "a", prompt: "x", provider: "claude", model: CATALOG_MODEL, effort: "high" }],
     }));
-    const good = runCli(["validate", p], { cwd: w.dir, env: { SWARM_HOME: w.home } });
+    const good = await runCliInProcess(["validate", p], { cwd: w.dir, env: { SWARM_HOME: w.home } });
     equal(good.status, 0, `${good.stdout}${good.stderr}`);
   } finally {
     cleanup(w.dir);
@@ -105,7 +105,7 @@ test("swarm validate reads the roster through the reader: a catalog model's effo
 
 const OFFLINE = new URL("./helpers/offline-fetch.mjs", import.meta.url).href;
 
-test("swarm refresh-prices reads the roster before it fetches, and reaches the vendor fetch", () => {
+test("swarm refresh-prices reads the roster before it fetches, and reaches the vendor fetch", async () => {
   const w = world();
   try {
     const r = runCli(["refresh-prices", "--dry-run"], { cwd: w.dir, env: { SWARM_HOME: w.home, NODE_OPTIONS: `--import=${OFFLINE}` } });
@@ -116,10 +116,10 @@ ${r.stderr}`);
   }
 });
 
-test("swarm cost prices a model the catalog just carried in, with no models run", () => {
+test("swarm cost prices a model the catalog just carried in, with no models run", async () => {
   const w = world({ model: UNPRICED_MODEL });
   try {
-    const r = runCli(["cost"], { cwd: w.dir, env: { SWARM_HOME: w.home } });
+    const r = await runCliInProcess(["cost"], { cwd: w.dir, env: { SWARM_HOME: w.home } });
     equal(r.status, 0, r.stderr);
     ok(r.stdout.includes(UNPRICED_MODEL), `the catalog's model is missing from the cost list:\n${r.stdout}`);
     ok(/unpriced/.test(r.stdout.slice(r.stdout.indexOf(UNPRICED_MODEL))), "the row must be the roster's unpriced listing, not a table entry");
@@ -128,13 +128,13 @@ test("swarm cost prices a model the catalog just carried in, with no models run"
   }
 });
 
-test("swarm validate names a corrupt roster on stderr instead of reading it as empty", () => {
+test("swarm validate names a corrupt roster on stderr instead of reading it as empty", async () => {
   const w = world();
   try {
     const p = join(w.dir, "m.json");
     writeFileSync(p, JSON.stringify({ tasks: [{ id: "a", prompt: "x", provider: "claude", model: CATALOG_MODEL }] }));
     writeFileSync(join(w.home, "models-cache.json"), "{ not json");
-    const r = runCli(["validate", p], { cwd: w.dir, env: { SWARM_HOME: w.home } });
+    const r = await runCliInProcess(["validate", p], { cwd: w.dir, env: { SWARM_HOME: w.home } });
     ok(/^roster: file — .*models cache is unreadable/m.test(r.stderr), `${r.stdout}${r.stderr}`);
   } finally {
     cleanup(w.dir);

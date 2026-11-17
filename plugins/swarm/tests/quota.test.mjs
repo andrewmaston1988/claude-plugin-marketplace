@@ -8,7 +8,7 @@ import { tmpdir } from "node:os";
 import {
   matchQuota, parseQuotaReset, parseUsageLimits, checkQuota, DEFAULT_QUOTA_PATTERNS,
 } from "../src/quota.mjs";
-import { runCliAsync } from "./helpers/cli.mjs";
+import { runCliInProcess } from "./helpers/cli.mjs";
 import { createCodexProviderAdapter } from "../src/codex.mjs";
 
 // Trimmed from a live probe of the OAuth usage endpoint (2026-07-11).
@@ -20,7 +20,7 @@ const USAGE_FIXTURE = {
   ],
 };
 
-test("matchQuota: recognises Anthropic limit messages, not rate limits", () => {
+test("matchQuota: recognises Anthropic limit messages, not rate limits", async () => {
   ok(matchQuota("Claude AI usage limit reached|1751210400", DEFAULT_QUOTA_PATTERNS));
   ok(matchQuota("You've hit your limit. Your limit will reset at 3pm", DEFAULT_QUOTA_PATTERNS));
   ok(matchQuota("out of extra usage credits", DEFAULT_QUOTA_PATTERNS));
@@ -28,14 +28,14 @@ test("matchQuota: recognises Anthropic limit messages, not rate limits", () => {
   ok(!matchQuota("segfault", DEFAULT_QUOTA_PATTERNS));
 });
 
-test("parseQuotaReset: epoch suffix, human phrasing, or null", () => {
+test("parseQuotaReset: epoch suffix, human phrasing, or null", async () => {
   equal(parseQuotaReset("Claude AI usage limit reached|1751210400"), new Date(1751210400000).toISOString());
   equal(parseQuotaReset("Your limit will reset at 3pm (Europe/London)."), "3pm (Europe/London)");
   equal(parseQuotaReset("usage limit reached, resets at 2026-07-11T12:19:59Z"), "2026-07-11T12:19:59Z");
   equal(parseQuotaReset("segfault"), null);
 });
 
-test("parseUsageLimits: extracts limits with worst-by-percent", () => {
+test("parseUsageLimits: extracts limits with worst-by-percent", async () => {
   const p = parseUsageLimits(USAGE_FIXTURE);
   equal(p.limits.length, 3);
   equal(p.worst.kind, "session");
@@ -50,7 +50,7 @@ test("parseUsageLimits: extracts limits with worst-by-percent", () => {
 // as account-wide exhaustion grounded every Claude leaf (Opus, Sonnet, Haiku) while
 // the Fable-scoped weekly bucket sat at 100% and the unscoped buckets had headroom;
 // the session doing the dispatch was itself running on Opus at the time.
-test("parseUsageLimits: a model-scoped limit at 100% does NOT exhaust the account", () => {
+test("parseUsageLimits: a model-scoped limit at 100% does NOT exhaust the account", async () => {
   const p = parseUsageLimits({
     limits: [
       { kind: "session", percent: 24, resets_at: "R1", scope: null },
@@ -63,7 +63,7 @@ test("parseUsageLimits: a model-scoped limit at 100% does NOT exhaust the accoun
   deepEqual(p.exhaustedScopes, [{ scope: "Fable", percent: 100, resetsAt: "R3" }]);
 });
 
-test("parseUsageLimits: an UNSCOPED limit at 100% DOES exhaust the account", () => {
+test("parseUsageLimits: an UNSCOPED limit at 100% DOES exhaust the account", async () => {
   const p = parseUsageLimits({
     limits: [
       { kind: "session", percent: 12, resets_at: "R1", scope: null },
@@ -159,7 +159,7 @@ test("quota: prints the cached Codex row and never spawns the app-server", async
   try {
     const { home, log } = codexSpawnSpy(dir);
     writeFileSync(join(home, "codex-usage.json"), JSON.stringify(CODEX_CACHED));
-    const r = await runCliAsync(["quota"], { cwd: dir, env: { SWARM_HOME: home, TZ: "Europe/London" } });
+    const r = await runCliInProcess(["quota"], { cwd: dir, env: { SWARM_HOME: home, TZ: "Europe/London" } });
     equal(r.status, 0, r.stderr + r.stdout);
     ok(r.stdout.includes("codex session: 20%"), r.stdout);
     equal(existsSync(log), false, `quota must not spawn the Codex app-server:\n${r.stdout}`);
@@ -172,7 +172,7 @@ test("quota: names the missing Codex reading rather than fetching one", async ()
   const dir = mkdtempSync(join(tmpdir(), "swarm-quota-cli-"));
   try {
     const { home, log } = codexSpawnSpy(dir);
-    const r = await runCliAsync(["quota"], { cwd: dir, env: { SWARM_HOME: home } });
+    const r = await runCliInProcess(["quota"], { cwd: dir, env: { SWARM_HOME: home } });
     equal(r.status, 0, r.stderr + r.stdout);
     ok(r.stdout.includes("codex: no cached reading yet"), r.stdout);
     equal(existsSync(log), false, `quota must not spawn the Codex app-server:\n${r.stdout}`);
@@ -187,7 +187,7 @@ test("quota: the same spy logs when the app-server IS spawned", async () => {
     const { home, log } = codexSpawnSpy(dir);
     // `usage` is the command whose job the Codex fetch is. Without this half,
     // "no log" above would hold just as well for a spy that never logs at all.
-    await runCliAsync(["usage", "--provider", "codex"], { cwd: dir, env: { SWARM_HOME: home } });
+    await runCliInProcess(["usage", "--provider", "codex"], { cwd: dir, env: { SWARM_HOME: home } });
     ok(existsSync(log), "the spy must log a genuine app-server spawn");
   } finally {
     rmSync(dir, { recursive: true, force: true });
@@ -222,7 +222,7 @@ test("quota: prints per-window utilization from the usage endpoint", async () =>
     const home = anthropicHome(dir, server.address().port);
     const creds = join(home, "creds.json");
     writeFileSync(creds, JSON.stringify({ claudeAiOauth: { accessToken: "tok" } }));
-    const r = await runCliAsync(["quota"], { cwd: dir, env: { SWARM_HOME: home, SWARM_CREDENTIALS: creds, TZ: "Europe/London" } });
+    const r = await runCliInProcess(["quota"], { cwd: dir, env: { SWARM_HOME: home, SWARM_CREDENTIALS: creds, TZ: "Europe/London" } });
     equal(r.status, 0, r.stderr + r.stdout);
     ok(r.stdout.includes("session: 22%"), r.stdout);
     ok(r.stdout.includes("resets Sat 11 Jul, 13:19"), r.stdout);
@@ -250,7 +250,7 @@ test("quota: C0b every line is prefixed claude, the provider id", async () => {
     const home = anthropicHome(dir, server.address().port);
     const creds = join(home, "creds.json");
     writeFileSync(creds, JSON.stringify({ claudeAiOauth: { accessToken: "tok" } }));
-    const r = await runCliAsync(["quota"], { cwd: dir, env: { SWARM_HOME: home, SWARM_CREDENTIALS: creds } });
+    const r = await runCliInProcess(["quota"], { cwd: dir, env: { SWARM_HOME: home, SWARM_CREDENTIALS: creds } });
     equal(r.status, 0, r.stderr + r.stdout);
     const lines = r.stdout.trim().split("\n");
     equal(lines.length, 3, r.stdout);
@@ -273,7 +273,7 @@ test("quota: usage --provider codex fetches live even with a cache under 5 min o
     writeFileSync(cache, JSON.stringify(CODEX_CACHED));
     const before = JSON.parse(readFileSync(cache, "utf8")).fetchedAt;
 
-    const r = await runCliAsync(["usage", "--provider", "codex"], { cwd: dir, env: { SWARM_HOME: home } });
+    const r = await runCliInProcess(["usage", "--provider", "codex"], { cwd: dir, env: { SWARM_HOME: home } });
     equal(r.status, 0, r.stderr + r.stdout);
     ok(existsSync(log), `--provider must spawn despite a fresh cache:\n${r.stdout}`);
     // The spy exits at once, so this live read fails outright: it must leave the cached
@@ -316,7 +316,7 @@ test("quota: a codex preflight read banks, and quota straight afterwards shows i
       clientFactory: async () => codexStubClient(55),
     });
 
-    const r = await runCliAsync(["quota"], { cwd: dir, env: { SWARM_HOME: home } });
+    const r = await runCliInProcess(["quota"], { cwd: dir, env: { SWARM_HOME: home } });
     equal(r.status, 0, r.stderr + r.stdout);
     ok(r.stdout.includes("codex session: 55%"), r.stdout);
     ok(!r.stdout.includes("codex session: 20%"), `the preflight's figure replaces the older one:\n${r.stdout}`);
