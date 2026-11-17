@@ -95,6 +95,7 @@ export function createCodexAppServerClient({
   let killed = false;
   const pending = new Map();
   const subscribers = new Set();
+  const lateErrors = [];
 
   function killChild() {
     if (killed || !child) return;
@@ -111,7 +112,14 @@ export function createCodexAppServerClient({
   }
 
   function closeWith(error = null) {
-    if (closed) return;
+    // A real cause arriving after close is still the only explanation for why.
+    // An uncoded second close (the ordinary idempotent call) records nothing.
+    if (closed) {
+      if (error?.code && lateErrors.length < 5) {
+        lateErrors.push({ code: error.code, message: error.message });
+      }
+      return;
+    }
     closed = true;
     closeError = error ? asError(error) : null;
     rejectPending(closeError || new Error("Codex app-server client closed"));
@@ -209,9 +217,15 @@ export function createCodexAppServerClient({
     const id = nextId++;
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
-        const error = new Error(`Codex app-server request timed out: ${method}`);
-        error.code = "ETIMEDOUT";
-        closeWith(error);
+        // Yield one turn so a stdin error or reply already queued for this request
+        // lands first. Guarded per request, never on `closed`: a request answered in
+        // the yield window must not kill a child that is still serving siblings.
+        setImmediate(() => {
+          if (!pending.has(id)) return;
+          const error = new Error(`Codex app-server request timed out: ${method}`);
+          error.code = "ETIMEDOUT";
+          closeWith(error);
+        });
       }, requestTimeoutMs);
       pending.set(id, { method, resolve, reject, timer });
       try {
@@ -263,7 +277,7 @@ export function createCodexAppServerClient({
     close: () => closeWith(),
     get child() { return child; },
     get initialized() { return initialized; },
-    get diagnostics() { return { stderr, stdoutNoise, pending: pending.size, closed, killed }; },
+    get diagnostics() { return { stderr, stdoutNoise, pending: pending.size, closed, killed, lateErrors }; },
   };
 }
 
