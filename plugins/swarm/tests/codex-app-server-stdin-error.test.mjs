@@ -28,6 +28,24 @@ function childWithAsyncStdinError() {
   });
 }
 
+// Holds the write callback so the test decides when stdin fails. A failure the child
+// schedules itself lands in whichever loop phase the test body happened to start in,
+// which makes the ordering between the deadline and the error depend on the runner.
+function childHoldingWrite() {
+  const error = Object.assign(new Error("write EPIPE"), { code: "EPIPE" });
+  const writes = [];
+  const stdin = new Writable({
+    write(_chunk, _encoding, callback) { writes.push(callback); },
+  });
+  const child = Object.assign(new EventEmitter(), {
+    stdin,
+    stdout: new PassThrough(),
+    stderr: new PassThrough(),
+    kill() {},
+  });
+  return { child, failHeldWrite: () => writes.shift()(error) };
+}
+
 function childWithLateStdinError(delayMs) {
   const error = Object.assign(new Error("write EPIPE"), { code: "EPIPE" });
   const stdin = new Writable({
@@ -86,14 +104,16 @@ test("a stdin error queued before the deadline wins over a stalled timeout", asy
 });
 
 test("both in-flight requests reject with the stdin error across a stall", async () => {
+  let held;
   const client = createCodexAppServerClient({
     timeoutMs: 30,
-    spawnImpl: childWithAsyncStdinError,
+    spawnImpl: () => (held = childHoldingWrite()).child,
   });
   try {
     const first = client.request("account/usage/read");
     const second = client.request("account/rateLimits/read");
     stall(40);
+    setImmediate(held.failHeldWrite);
     const errors = await Promise.all([
       first.catch((error) => error),
       second.catch((error) => error),
