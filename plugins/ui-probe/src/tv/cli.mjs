@@ -425,13 +425,11 @@ export function runTvBranch({
   });
 }
 
-/** `capture --device tv`. The bin resolves the out dir once, so a thrown capture and the
- *  capture itself name the same place. */
+/** `capture --device tv`. `outDir` is the bin's one resolution; `captureDir` avoids shadowing it. */
 export function captureTvBranch({ screen, config, outDir = undefined, rest, getFlag, source = null, baseDir = null, file = null, _attach = attach }) {
   const { port, problem } = portFrom(getFlag, rest);
   if (problem) return { exitCode: 64, stderr: problem };
   return branch(async () => {
-    // `captureDir` because a local `outDir` would shadow the parameter the argument reads.
     const { digest, outDir: captureDir, tvReturn } = await captureOnTv({
       screen,
       config,
