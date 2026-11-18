@@ -153,6 +153,9 @@ test("row 2: a launch that fails after the spawn ends its browser and retries th
     browser: browserPath,
     _fs: fs,
     _fetch: async () => { throw new Error("connect refused"); },
+    // A listing that overruns the default budget under load is unverified and keeps the folder by
+    // design; this row is about the retried removal, so give the real lister room to answer.
+    _kill: (profile) => killBrowserForProfile(profile, { timeoutMs: LISTING_TIMEOUT_MS }),
   });
 
   try {
