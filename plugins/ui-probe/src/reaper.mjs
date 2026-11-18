@@ -13,6 +13,7 @@ import {
   pidAlive,
   queryProcessStarts,
 } from "./reaper-process.mjs";
+import { profilesDir } from "./temp-paths.mjs";
 
 // The OS seam stays reachable from this module: browser.mjs and the tests import one path.
 export {
@@ -87,12 +88,27 @@ export function foldPath(path, platform = process.platform) {
   return platform === "win32" ? absolute.toLowerCase() : absolute;
 }
 
-/** True only for a folder this plugin minted: a direct child of `tmpDir`, named
- *  with our prefix. A path that resolves out of `tmpDir` is never ours. */
-export function isUiProbeProfile(profile, { tmpDir = tmpdir(), platform = process.platform } = {}) {
+/** The root an injected tmpDir implies. `UI_PROBE_TEMP` wins because minting follows it:
+ *  scanning the real root while minting elsewhere would sweep the wrong probes. */
+function profilesRootFor(tmpDir) {
+  return process.env.UI_PROBE_TEMP ? profilesDir() : join(tmpDir, "ui-probe", "profiles");
+}
+
+/** True only for a folder this plugin minted: a direct child of the profiles root, or — for
+ *  one release — of `tmpDir`, where older versions left theirs. Anything deeper, or outside
+ *  both roots, is never ours. */
+export function isUiProbeProfile(profile, {
+  tmpDir = tmpdir(),
+  profilesRoot = profilesRootFor(tmpDir),
+  platform = process.platform,
+} = {}) {
   if (typeof profile !== "string" || profile === "") return false;
-  const root = foldPath(tmpDir, platform);
   const full = foldPath(profile, platform);
+  return namedProfileIn(full, foldPath(profilesRoot, platform))
+    || namedProfileIn(full, foldPath(tmpDir, platform));
+}
+
+function namedProfileIn(full, root) {
   if (!full.startsWith(`${root}/`)) return false;
   const name = full.slice(root.length + 1);
   return !name.includes("/") && name.startsWith(PROFILE_PREFIX);
@@ -137,14 +153,14 @@ function startMatches(owner, { start, toleranceMs, selfPid = process.pid, selfSt
   return start - owner.startMs <= toleranceMs;
 }
 
-function candidateFromProcess(entry, { tmpDir, platform }) {
+function candidateFromProcess(entry, { tmpDir, profilesRoot, platform }) {
   if (!entry || !Number.isInteger(entry.pid) || entry.pid <= 0) return null;
   const commandLine = String(entry.cmd ?? "");
   if (!BROWSER_NAME.test(commandLine)) return null;
   // Renderer and GPU children carry --type=; stopping the root takes them with it.
   if (commandLine.includes("--type=")) return null;
   const profile = profileFromCommandLine(commandLine);
-  if (!profile || !isUiProbeProfile(profile, { tmpDir, platform })) return null;
+  if (!profile || !isUiProbeProfile(profile, { tmpDir, profilesRoot, platform })) return null;
   return { pid: entry.pid, profile };
 }
 
@@ -173,24 +189,37 @@ function candidateVerdict(owner, {
   return at - start > graceMs ? "orphan" : "young";
 }
 
-function listProfileDirs(fs, tmpDir) {
+function profileDirsIn(fs, root) {
   let entries;
   try {
-    entries = fs.readdirSync(tmpDir, { withFileTypes: true });
-  } catch {
-    return null;
+    entries = fs.readdirSync(root, { withFileTypes: true });
+  } catch (error) {
+    // A root that does not exist yet has no profiles; one that cannot be read is unknown.
+    return error?.code === "ENOENT" ? [] : null;
   }
   const dirs = [];
   for (const entry of entries) {
     const name = String(entry?.name ?? entry);
     if (!name.startsWith(PROFILE_PREFIX)) continue;
     if (entry && typeof entry.isDirectory === "function" && !entry.isDirectory()) continue;
-    const path = join(tmpDir, name);
+    const path = join(root, name);
     try {
       dirs.push({ path, mtimeMs: fs.statSync(path).mtimeMs });
     } catch {
       return null; // one vanished folder: staleness is unknowable, so let the lister run
     }
+  }
+  return dirs;
+}
+
+/** Both roots: the profiles dir, and the top of tmpDir where older versions left theirs. A
+ *  clean new root never licenses skipping while a legacy profile still exists. */
+function listProfileDirs(fs, { tmpDir, profilesRoot }) {
+  const dirs = [];
+  for (const root of new Set([profilesRoot, tmpDir])) {
+    const found = profileDirsIn(fs, root);
+    if (!found) return null;
+    dirs.push(...found);
   }
   return dirs;
 }
@@ -202,6 +231,7 @@ export async function preScanProfiles({
   fs = DEFAULT_FS,
   now = Date.now,
   tmpDir = tmpdir(),
+  profilesRoot = profilesRootFor(tmpDir),
   graceMs = PROFILE_GRACE_MS,
   toleranceMs = START_TOLERANCE_MS,
   isAlive = pidAlive,
@@ -209,7 +239,7 @@ export async function preScanProfiles({
   selfPid = process.pid,
   selfStartMs = ownerStartMs(),
 } = {}) {
-  const profiles = listProfileDirs(fs, tmpDir);
+  const profiles = listProfileDirs(fs, { tmpDir, profilesRoot });
   if (!profiles) return { skip: false, reason: "unreadable" };
   const owners = [];
   for (const profile of profiles) {
@@ -237,12 +267,13 @@ export async function sweepProfiles({
   fs = DEFAULT_FS,
   now = Date.now,
   tmpDir = tmpdir(),
+  profilesRoot = profilesRootFor(tmpDir),
   platform = process.platform,
   graceMs = PROFILE_GRACE_MS,
   liveProfiles = [],
 } = {}) {
   const held = new Set(liveProfiles.map((profile) => foldPath(profile, platform)));
-  const profiles = listProfileDirs(fs, tmpDir) ?? [];
+  const profiles = listProfileDirs(fs, { tmpDir, profilesRoot }) ?? [];
   const removed = [];
   const kept = [];
   const failed = [];
@@ -276,6 +307,7 @@ export async function reapOrphans({
   fs = DEFAULT_FS,
   now = Date.now,
   tmpDir = tmpdir(),
+  profilesRoot = profilesRootFor(tmpDir),
   platform = process.platform,
   graceMs = PROFILE_GRACE_MS,
   toleranceMs = START_TOLERANCE_MS,
@@ -286,7 +318,7 @@ export async function reapOrphans({
   const started = now();
 
   const prescan = await preScanProfiles({
-    fs, now, tmpDir, graceMs, toleranceMs, isAlive, queryStarts, selfPid, selfStartMs,
+    fs, now, tmpDir, profilesRoot, graceMs, toleranceMs, isAlive, queryStarts, selfPid, selfStartMs,
   });
   if (prescan.skip) {
     return { skipped: "prescan", killed: [], failed: [], swept: [], elapsedMs: now() - started };
@@ -304,7 +336,7 @@ export async function reapOrphans({
 
   const candidates = [];
   for (const entry of processes) {
-    const candidate = candidateFromProcess(entry, { tmpDir, platform });
+    const candidate = candidateFromProcess(entry, { tmpDir, profilesRoot, platform });
     if (candidate) candidates.push(candidate);
   }
 
@@ -339,6 +371,6 @@ export async function reapOrphans({
 
   const stopped = new Set(killed);
   const liveProfiles = candidates.filter((candidate) => !stopped.has(candidate.pid)).map((c) => c.profile);
-  const swept = (await sweepProfiles({ fs, now, tmpDir, platform, graceMs, liveProfiles })).removed;
+  const swept = (await sweepProfiles({ fs, now, tmpDir, profilesRoot, platform, graceMs, liveProfiles })).removed;
   return { skipped: null, killed, failed, swept, elapsedMs: now() - started };
 }

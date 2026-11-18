@@ -4,10 +4,10 @@
 // scenario actually reaches a step that needs one.
 
 import { readFileSync, writeFileSync, mkdirSync, renameSync } from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import { checkFlags, deviceFlag, getFlag, hasFlag, positionals, varsFrom, wantsHelp } from "../src/flags.mjs";
 import { HELP } from "../src/help.mjs";
+import { resolveOutDir } from "../src/temp-paths.mjs";
 
 const argv = process.argv.slice(2);
 const cmd = argv[0];
@@ -470,12 +470,6 @@ function writeResults(outDir, result) {
   // Only a browser-backed run carries these: an http run touched no page to record.
   if (result.console) write("console.json", result.console);
   if (result.network) write("network.json", result.network);
-}
-
-function resolveOutDir(config, explicit) {
-  if (explicit) return explicit;
-  if (config?.outDir) return config.outDir;
-  return path.join(os.tmpdir(), "ui-probe", String(Date.now()));
 }
 
 function scenarioFormat(file) {

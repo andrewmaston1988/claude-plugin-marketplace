@@ -1,7 +1,7 @@
 import { readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
-import os from 'node:os';
 import { DEFAULT_FOCUS_SELECTOR } from './focus.mjs';
+import { defaultRunDir } from './temp-paths.mjs';
 import { APP_ID } from './tv/rest.mjs';
 
 export class ConfigError extends Error {
@@ -253,7 +253,10 @@ export function loadConfig(configPath) {
     config.tv = { ...data.tv, focusSelector: data.tv.focusSelector ?? DEFAULT_FOCUS_SELECTOR };
   }
   if (config.outDir === undefined) {
-    config.outDir = path.join(os.tmpdir(), 'ui-probe', new Date().toISOString().replace(/[:.]/g, '-'));
+    config.outDir = defaultRunDir();
+    // Non-enumerable so the config keeps its documented keys; the run command reads it to
+    // know the path is ui-probe's to prune.
+    Object.defineProperty(config, 'outDirDefaulted', { value: true, enumerable: false });
   }
   Object.defineProperty(config, 'configDir', { value: path.dirname(path.resolve(configPath)), enumerable: false });
   return config;

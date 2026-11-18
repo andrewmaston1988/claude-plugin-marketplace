@@ -57,7 +57,7 @@ The TV write guard blocks and records intercepted write requests outside the con
 | `viewports` | object | Named `{width, height, dpr?, touch?}` viewports. Built-ins: `phone` (390×844, DPR 3, touch) and `desktop` (1280×900). |
 | `screens` | object | Named `{url, steps?, measure?}` screens. `steps` run before capture; `measure` lists CSS selectors to measure. |
 | `auth.cookies` | array | Cookie entries `{name, command: [argv...], domain?}`. The command's stdout supplies the cookie value. |
-| `outDir` | string | Output directory; defaults to `<os tmpdir>/ui-probe/<stamp>`. |
+| `outDir` | string | Output directory; defaults to `<os tmpdir>/ui-probe/runs/<stamp>`. |
 | `browser` | string | Browser executable path, overriding discovery. |
 | `tv` | object | Optional TV settings: `host`, `appid`, optional `sdb`, `testOrigin`, `focusSelector`, `returnApps`, and `returnToApp`. |
 
@@ -73,13 +73,25 @@ Scenario runs write `results.json` with each step's source, operation, optional 
 
 A TV run, capture or probe also writes `tv-return.json` beside its other output, holding the app it put back and the outcome. `results.json` and `platform.json` keep their shape; a joined `--attach-port` session writes no `tv-return.json`, because it launched over nothing.
 
+## Temp layout
+
+Everything ui-probe writes to temp lives under one root — `<os tmpdir>/ui-probe`, or `UI_PROBE_TEMP` when it is set:
+
+| Path | Holds |
+| --- | --- |
+| `runs/<ISO stamp>/` | one directory per run; the default `outDir` |
+| `profiles/ui-probe-profile-*/` | a launched browser's profile folder |
+| `platform-<appid>.json` | the last TV platform probe |
+
+A run on the default `outDir` first prunes `runs/`: directories older than 24 hours go, the newest 20 always stay, and one run deletes at most 200 so a backlog never delays a probe. Run directories an earlier release left directly under `ui-probe/` are pruned by the same rule. An `outDir` given in the config or with `--out` is never pruned.
+
 ## Read-only guard
 
 By default, before a click or tap the action allowlist refuses a non-GET form submit as `write_blocked`. A CDP network guard also blocks and records requests other than GET, HEAD, and OPTIONS. `--allow-writes` disables the action guard; on TV it allows intercepted writes only to `tv.testOrigin`, while writes to other origins remain blocked and recorded. Neither guard can stop a GET request with a side effect, and the network guard cannot stop writes made outside intercepted network requests. Use a safe target environment.
 
 ## Browser lifetime
 
-A capture or run ends its browser with it, including when the launch fails part-way. A session killed outright cannot: on Windows the browser is not a child of the node process, so it survives. Every launch therefore reaps first — it stops browsers whose owner file names a dead or reused process, and browsers with no owner file at all once they are more than an hour old, then removes `ui-probe-profile-*` folders under the temp directory older than an hour that no live browser holds. A process listing that fails is skipped, never read as an empty one, so a browser whose owner file names a live probe is never touched. The reap runs inside a five-second budget, so a slow process listing delays a launch by at most that; it is asynchronous, so the budget binds. `--remote-debugging-pipe` was probed on Windows Edge and rejected: the browser answered no CDP frame over the pipes while it was alive, so pipe mode could not tie the browser to its owner.
+A capture or run ends its browser with it, including when the launch fails part-way. A session killed outright cannot: on Windows the browser is not a child of the node process, so it survives. Every launch therefore reaps first — it stops browsers whose owner file names a dead or reused process, and browsers with no owner file at all once they are more than an hour old, then removes `ui-probe-profile-*` folders older than an hour that no live browser holds, in `ui-probe/profiles/` and in the temp directory itself where earlier releases left theirs. A process listing that fails is skipped, never read as an empty one, so a browser whose owner file names a live probe is never touched. The reap runs inside a five-second budget, so a slow process listing delays a launch by at most that; it is asynchronous, so the budget binds. `--remote-debugging-pipe` was probed on Windows Edge and rejected: the browser answered no CDP frame over the pipes while it was alive, so pipe mode could not tie the browser to its owner.
 
 ## Limitations
 

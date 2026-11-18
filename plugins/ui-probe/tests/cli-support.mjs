@@ -14,6 +14,10 @@ const execFile = promisify(execFileCallback);
 export const PLUGIN = fileURLToPath(new URL("..", import.meta.url));
 export const BIN = path.join(PLUGIN, "bin", "ui-probe.mjs");
 
+// One temp root for the probes that name no directory, so no CLI child ever reaches the
+// operator's real results: a default-outDir run prunes the root it writes to.
+const TEST_TEMP = mkdtempSync(path.join(os.tmpdir(), "ui-probe-cli-temp-"));
+
 // Async spawn, never spawnSync: the fixture server lives in this process's event loop, and a
 // synchronous child would block it until every baseUrl check timed out.
 export async function probe(args, { cwd = PLUGIN, hook = false, log = null, env: overrides = null } = {}) {
@@ -25,6 +29,9 @@ export async function probe(args, { cwd = PLUGIN, hook = false, log = null, env:
     : [BIN, ...args];
   const env = { ...process.env };
   delete env.NODE_TEST_CONTEXT;
+  // The caller's scratch dir is the fixture; a hook probe runs from PLUGIN, whose tree must
+  // not collect temp.
+  env.UI_PROBE_TEMP = cwd === PLUGIN ? TEST_TEMP : cwd;
   // A null override deletes the variable: that is how a test hides sdb from findSdb.
   for (const [name, value] of Object.entries(overrides ?? {})) {
     if (value === null) delete env[name];

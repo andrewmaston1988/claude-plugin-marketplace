@@ -4,6 +4,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { writeFileSync, readFileSync, existsSync } from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { startFixtureServer } from "./fixtures/server.mjs";
 import { findBrowser } from "../src/browser.mjs";
@@ -86,6 +87,38 @@ test("run exits 0/1/2/3/64 and reports later steps not run", async () => {
       2,
       `a refused connection exited ${inconclusive.status}: ${inconclusive.stderr}`,
     );
+  } finally {
+    await fixture.close();
+  }
+});
+
+test("A7: a default-outDir run writes under the fixture's UI_PROBE_TEMP, never the real temp", async () => {
+  const fixture = await startFixtureServer();
+  const dir = scratchDir("ui-probe-default-temp");
+  scratchConfig(dir, { baseUrl: fixture.origin });
+  const scenario = path.join(dir, "temp-root.yaml");
+  writeFileSync(scenario, [
+    "id: temp-root",
+    "backend: http",
+    "steps:",
+    `  - expect_json: { url: "${fixture.path("/json/data")}", path: "ok", equals: true }`,
+    "",
+  ].join("\n"));
+
+  try {
+    const result = await probe(["run", scenario], { cwd: dir });
+    assert.equal(result.status, 0, `run exited ${result.status}: ${result.stderr}`);
+    const digest = result.stdout.split("\n").find((line) => /^run: .*→ /.test(line));
+    assert.ok(digest, `the digest names the output dir: ${result.stdout}`);
+    const outDir = digest.slice(digest.lastIndexOf("→ ") + 2).trim();
+    assert.equal(path.dirname(outDir), path.join(dir, "runs"), "the fixture is the temp root");
+    assert.match(path.basename(outDir), /^\d{4}-\d{2}-\d{2}T[\d-]+Z$/);
+    assert.equal(
+      outDir.startsWith(path.join(os.tmpdir(), "ui-probe") + path.sep),
+      false,
+      `the real temp was not used: ${outDir}`,
+    );
+    assert.equal(existsSync(path.join(outDir, "results.json")), true);
   } finally {
     await fixture.close();
   }
