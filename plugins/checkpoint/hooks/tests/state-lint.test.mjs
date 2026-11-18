@@ -1,5 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import {
@@ -61,6 +62,30 @@ test('bound constants and the saved form stay at the corpus values', () => {
   assert.ok(SAVED_RE.test(SAVED_EXAMPLE));
   assert.equal(SECTIONS.length, 7);
   assert.deepEqual(LIVE_SECTIONS, ['CURRENT STATE', 'NEXT ACTIONS', 'KEY FILES']);
+});
+
+test('C6: the template states the lint\'s own bounds', () => {
+  const template = fs.readFileSync(
+    new URL('../../skills/checkpoint/templates/state-template.md', import.meta.url), 'utf8');
+  const stated = (re, what) => {
+    const m = template.match(re);
+    assert.ok(m, `template must state the ${what} bound in the lint's words`);
+    return Number(m[1].replace(/,/g, ''));
+  };
+  assert.equal(stated(/`resume:` ≤ ([\d,]+)/, 'resume'), RESUME_MAX);
+  assert.equal(stated(/`session:` ≤ ([\d,]+)/, 'session'), SESSION_MAX);
+  assert.equal(stated(/whole file stays ≤ ([\d,]+)/, 'file'), FILE_MAX);
+  assert.equal(stated(/any one section ≤ ([\d,]+)/, 'section'), SECTION_MAX);
+
+  // The template's stated saved: form is the lint's pattern, example included.
+  const form = template.match(/`saved:` is written for you by the `stampState` helper as `([^`]+)`/);
+  assert.ok(form, 'template must state the saved: form');
+  const derived = form[1]
+    .replace('YYYY', '\\d{4}').replace('MM', '\\d{2}').replace('DD', '\\d{2}')
+    .replace('HH', '\\d{2}').replace('MM', '\\d{2}');
+  assert.equal(`^${derived}$`, SAVED_RE.source, 'template saved: form must equal the lint pattern');
+  assert.ok(new RegExp(`^${derived}$`).test(SAVED_EXAMPLE),
+    `the lint's example "${SAVED_EXAMPLE}" must fit the template's form "${form[1]}"`);
 });
 
 test('C1: header fields are single-line and within their caps', () => {
