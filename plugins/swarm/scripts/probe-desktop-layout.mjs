@@ -6,7 +6,7 @@
 // Outside `npm test`: node plugins/swarm/scripts/probe-desktop-layout.mjs [--browser <path>]; exits 1 outside tolerance.
 
 import { spawn, spawnSync } from "node:child_process";
-import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createServer } from "../src/serve/server.mjs";
@@ -272,8 +272,10 @@ let home = null, profile = null, browser = null, browserWs = null;
 
 async function main() {
   const exe = findBrowser();
-  home = mkdtempSync(join(tmpdir(), "swarm-desktop-probe-"));
-  profile = mkdtempSync(join(tmpdir(), "swarm-desktop-profile-"));
+  // Under the one `swarm` temp dir, so a probe's leftovers are findable.
+  mkdirSync(join(tmpdir(), "swarm"), { recursive: true });
+  home = mkdtempSync(join(tmpdir(), "swarm", "desktop-probe-"));
+  profile = mkdtempSync(join(tmpdir(), "swarm", "desktop-profile-"));
   const rows = [LIVE, LIVE_2, ...FINISHED];
   const estate = { current: () => Promise.resolve({ version: 1, rows }), refresh() {}, onSnapshot() {}, close() {} };
   const cfg = { dashboard: { port: 0, bind: "127.0.0.1", token: null }, grading: true };

@@ -1,14 +1,15 @@
 import "./helpers/isolate-home.mjs";
 import { test } from "node:test";
-import { equal, ok } from "node:assert/strict";
+import { equal, match, ok } from "node:assert/strict";
 import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { homedir, tmpdir } from "node:os";
-import { dirname, join, relative, sep } from "node:path";
-import { fileURLToPath } from "node:url";
+import { basename, dirname, join, relative, sep } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 const TESTS = fileURLToPath(new URL(".", import.meta.url));
 const HELPER = join(TESTS, "helpers", "isolate-home.mjs");
+const LEAK_FIXTURE = join(TESTS, "fixtures", "temp-leak.fixture.mjs");
 
 function testFiles(dir) {
   const out = [];
@@ -148,4 +149,75 @@ test("a repo-local core.hooksPath still runs its hook", () => {
     rmSync(repo, { recursive: true, force: true });
     rmSync(hooks, { recursive: true, force: true });
   }
+});
+
+// The helper also redirects the temp root into the home it mints. That is what stops
+// a bare `node --test` — no test runner around it — from littering the OS temp dir.
+
+test("a test process leaves nothing in the outer temp root", () => {
+  const outer = mkdtempSync(join(tmpdir(), "swarm-outer-"));
+  try {
+    // SWARM_HOME and SWARM_TEST_HOME are what the helper checks, so a child that saw
+    // them would mint no home and prove nothing. NODE_TEST_CONTEXT makes a child think
+    // it is nested and skip its files, so it goes too — and the pass count below is
+    // the proof the fixture's test actually ran.
+    const env = { ...process.env, TEMP: outer, TMP: outer, TMPDIR: outer };
+    delete env.SWARM_HOME;
+    delete env.SWARM_TEST_HOME;
+    delete env.NODE_TEST_CONTEXT;
+    // TAP pinned: the default reporter (and so the pass line) differs by Node version.
+    const run = spawnSync(process.execPath, ["--test", "--test-reporter=tap", LEAK_FIXTURE], {
+      encoding: "utf8",
+      env,
+    });
+    const output = `${run.stdout}${run.stderr}`;
+    equal(run.status, 0, `the fixture must pass:\n${output}`);
+    match(output, /^# pass 1$/m, `the fixture's test must run, not be skipped:\n${output}`);
+
+    const entries = readdirSync(outer);
+    equal(
+      entries.filter((entry) => entry.startsWith("leak-")).length,
+      0,
+      `the fixture's temp dir landed in the outer temp root: ${entries.join(", ")}`,
+    );
+    equal(
+      entries.filter((entry) => entry !== "swarm").length,
+      0,
+      `only the shared swarm dir may remain in the outer temp root: ${entries.join(", ")}`,
+    );
+  } finally {
+    rmSync(outer, { recursive: true, force: true });
+  }
+});
+
+test("os.tmpdir() is inside this process's own home", () => {
+  const home = process.env.SWARM_HOME;
+  ok(
+    tmpdir().startsWith(home),
+    `os.tmpdir() is ${tmpdir()}, which is outside the throwaway home ${home}: a temp dir made there outlives the run`,
+  );
+  equal(
+    basename(dirname(home)),
+    "swarm",
+    `the home must sit under one swarm temp dir, not directly in the temp root: ${home}`,
+  );
+});
+
+test("a child that imports the helper reuses this home and temp dir", () => {
+  // The child has to load the helper, or there is nothing in it that could mint a
+  // second home — a bare `node -e` would pass no matter what the helper did.
+  const script = [
+    'import { tmpdir } from "node:os";',
+    `await import(${JSON.stringify(pathToFileURL(HELPER).href)});`,
+    'process.stdout.write(JSON.stringify({ home: process.env.SWARM_HOME, tmp: tmpdir() }) + "\\n");',
+  ].join("\n");
+  const run = spawnSync(process.execPath, ["--input-type=module", "-e", script], {
+    encoding: "utf8",
+    env: process.env,
+  });
+  equal(run.status, 0, `the child must run:\n${run.stderr}`);
+  // The first line only: importing node:test makes the child print a run summary at exit.
+  const seen = JSON.parse(run.stdout.split("\n")[0]);
+  equal(seen.home, process.env.SWARM_HOME, "a child that inherits SWARM_TEST_HOME must not mint a second home");
+  equal(seen.tmp, tmpdir(), "a child must inherit the redirected temp dir, not resolve the OS temp root");
 });

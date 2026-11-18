@@ -3,7 +3,7 @@
 // Outside `npm test`: node plugins/swarm/scripts/probe-report-width.mjs
 
 import { spawn, spawnSync } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -46,7 +46,9 @@ async function main() {
     return;
   }
 
-  tempDir = mkdtempSync(join(tmpdir(), "swarm-report-width-"));
+  // Under the one `swarm` temp dir, so a probe's leftovers are findable.
+  mkdirSync(join(tmpdir(), "swarm"), { recursive: true });
+  tempDir = mkdtempSync(join(tmpdir(), "swarm", "report-width-"));
   const htmlPath = join(tempDir, "fixture.html");
   const profile = join(tempDir, "profile");
   writeFileSync(htmlPath, mdToHtml(fixture, { title: "Report width probe" }), "utf8");

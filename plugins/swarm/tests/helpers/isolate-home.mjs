@@ -12,9 +12,17 @@ import { after } from "node:test";
 // Each test-file process mints its own home; the marker lets a CLI child a test
 // spawns inherit that dir rather than minting a second.
 if (!process.env.SWARM_HOME || process.env.SWARM_TEST_HOME !== "1") {
-  const dir = mkdtempSync(join(tmpdir(), "swarm-test-home-"));
+  // One `swarm` dir under the OS temp root keeps every temp path we mint findable
+  // (and one place to sweep); the home below is the only thing a run removes.
+  mkdirSync(join(tmpdir(), "swarm"), { recursive: true });
+  const dir = mkdtempSync(join(tmpdir(), "swarm", "test-home-"));
   const binDir = join(dir, "bin");
   mkdirSync(binDir);
+  // Every later os.tmpdir() here, and in a child that inherits this env, lands in
+  // the home, so the exit handler below takes its temp dirs with it.
+  const tmpDir = join(dir, "tmp");
+  mkdirSync(tmpDir);
+  process.env.TEMP = process.env.TMP = process.env.TMPDIR = tmpDir;
   // A test-owned config, never the operator's: theirs carries hooks that act on
   // their machine (one MSYS spawn per git command on Windows) and LFS filters.
   // A global FILE still loses to a repo-local core.hooksPath, which one test

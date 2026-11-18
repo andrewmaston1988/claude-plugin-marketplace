@@ -6,7 +6,7 @@
 // Exits 1 when any |delta| > TOL_PX; removes its temp dirs, kills only its own browser.
 
 import { spawn, spawnSync } from "node:child_process";
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createServer } from "../src/serve/server.mjs";
@@ -72,7 +72,9 @@ const MEASURE = `(() => {
 
 // ── the fixture home ────────────────────────────────────────────────────────
 function seedHome() {
-  const home = mkdtempSync(join(tmpdir(), "swarm-rank-"));
+  // Under the one `swarm` temp dir, so a probe's leftovers are findable.
+  mkdirSync(join(tmpdir(), "swarm"), { recursive: true });
+  const home = mkdtempSync(join(tmpdir(), "swarm", "rank-"));
   writeFileSync(join(home, "model-scores.jsonl"), MODELS.map((m, i) => JSON.stringify({
     ts: "2026-09-26T00:00:00Z", resultsDir: "/r/probe-1", leaf: `leaf-${i}`, model: m.model, effort: null,
     domain: "node", grades: { ...GRADES, adherence: m.grade, handoff: m.grade, truthfulness: m.grade, depth: m.grade },
@@ -108,7 +110,7 @@ let home = null, profile = null, browser = null, browserWs = null;
 async function main() {
   const exe = findBrowser();
   home = seedHome();
-  profile = mkdtempSync(join(tmpdir(), "swarm-rank-profile-"));
+  profile = mkdtempSync(join(tmpdir(), "swarm", "rank-profile-"));
   const estate = { current: () => Promise.resolve({ version: 0, runs: [] }), refresh() {}, onSnapshot() {}, close() {} };
   const cfg = { dashboard: { port: 0, bind: "127.0.0.1", token: null }, grading: { enabled: true } };
   const server = createServer({ tls: null, home, cfg, _estate: estate, _watch: () => ({ close() {} }), _heartbeatMs: 60_000, _pollMs: 60_000 });
