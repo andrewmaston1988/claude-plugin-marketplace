@@ -86,12 +86,16 @@ async function compactFile(file, { _fs, dryRun }) {
   try {
     source = _fs.createReadStream(file);
     const stream = gz ? source.pipe(createGunzip()) : source;
+    // One listener per pause: a single filter.push can write many lines, and a
+    // listener per false write piles up past MaxListeners before a drain fires.
+    let paused = false;
     const filter = createLogLineFilter((buf) => {
       after += buf.length;
       if (!writer || writer.destroyed) return;
-      if (!writer.write(buf)) {
+      if (!writer.write(buf) && !paused) {
+        paused = true;
         stream.pause();
-        writer.once("drain", () => stream.resume());
+        writer.once("drain", () => { paused = false; stream.resume(); });
       }
     });
     for await (const chunk of stream) changed = filter.push(chunk) || changed;
