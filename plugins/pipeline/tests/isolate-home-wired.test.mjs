@@ -4,19 +4,21 @@ import { ok } from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { findSuite } from "../../../scripts/test-suites.mjs";
-import { expandRun } from "../../../scripts/test-lib/select.mjs";
+import { expandRun } from "test-runner/src/select.mjs";
+import { skipDirsFor } from "test-runner/src/graph.mjs";
+import config from "../../../test-runner.config.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = join(here, "..", "..", "..");
 const HELPER = join(repoRoot, "plugins", "pipeline", "tests", "helpers", "isolate-home.mjs");
 
-// Every file the pipeline suite actually runs, read off the registry rather than
-// re-globbed here — a new glob in scripts/test-suites.mjs is covered for free.
+// Every file the pipeline suite actually runs, read off the config rather than
+// re-globbed here — a new glob in test-runner.config.mjs is covered for free.
 function suiteFiles() {
   const files = new Set();
-  for (const run of findSuite("pipeline").runs) {
-    for (const file of expandRun(run, { repoRoot })) files.add(file);
+  const skipDirs = skipDirsFor(config);
+  for (const run of config.suites.find((suite) => suite.name === "pipeline").runs) {
+    for (const file of expandRun(run, { repoRoot, skipDirs })) files.add(file);
   }
   return [...files].sort();
 }
