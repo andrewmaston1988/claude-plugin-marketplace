@@ -57,6 +57,20 @@ function stripValue(value, counts) {
     }
     return value;
   }
+  // The Read tool carries the same image a second time, in its own result shape:
+  // `{type:"image", file:{base64, type, originalSize, dimensions}}`.
+  if (value.type === "image" && value.file && typeof value.file === "object"
+      && typeof value.file.base64 === "string") {
+    const file = value.file;
+    if (file.base64 !== STUB) {
+      const raw = Buffer.from(file.base64, "base64");
+      file.base64 = STUB;
+      file.bytes = raw.length;
+      file.sha256 = digest(raw);
+      counts.n++;
+    }
+    return value;
+  }
   for (const key of Object.keys(value)) {
     // Codex coverage measures this field's bytes and line windows, so stripping
     // inside it would move the very windows coverage is checked against.
