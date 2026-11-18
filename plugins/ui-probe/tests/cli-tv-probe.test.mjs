@@ -12,7 +12,8 @@ import {
 test("tv probe attaches, writes platform.json to both homes and ends on the verdict line", async () => {
   const dir = scratchDir("ui-probe-tv-probe-cli");
   const home = scratchDir("ui-probe-tv-probe-home");
-  const env = noSdbEnv(home);
+  // The platform cache lives in the temp root; this test reads it from its own home.
+  const env = { ...noSdbEnv(home), UI_PROBE_TEMP: path.join(home, "ui-probe") };
   const outDir = path.join(dir, "out");
   const appid = "torrenthub.main";
   scratchConfig(dir, {

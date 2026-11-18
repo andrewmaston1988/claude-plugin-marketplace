@@ -3,7 +3,8 @@
 
 import test from "node:test";
 import assert from "node:assert/strict";
-import { writeFileSync, readFileSync, existsSync } from "node:fs";
+import { writeFileSync, readFileSync, existsSync, mkdirSync, utimesSync } from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { startFixtureServer } from "./fixtures/server.mjs";
 import { findBrowser } from "../src/browser.mjs";
@@ -86,6 +87,38 @@ test("run exits 0/1/2/3/64 and reports later steps not run", async () => {
       2,
       `a refused connection exited ${inconclusive.status}: ${inconclusive.stderr}`,
     );
+  } finally {
+    await fixture.close();
+  }
+});
+
+test("A7: a default-outDir run writes under the fixture's UI_PROBE_TEMP, never the real temp", async () => {
+  const fixture = await startFixtureServer();
+  const dir = scratchDir("ui-probe-default-temp");
+  scratchConfig(dir, { baseUrl: fixture.origin });
+  const scenario = path.join(dir, "temp-root.yaml");
+  writeFileSync(scenario, [
+    "id: temp-root",
+    "backend: http",
+    "steps:",
+    `  - expect_json: { url: "${fixture.path("/json/data")}", path: "ok", equals: true }`,
+    "",
+  ].join("\n"));
+
+  try {
+    const result = await probe(["run", scenario], { cwd: dir });
+    assert.equal(result.status, 0, `run exited ${result.status}: ${result.stderr}`);
+    const digest = result.stdout.split("\n").find((line) => /^run: .*→ /.test(line));
+    assert.ok(digest, `the digest names the output dir: ${result.stdout}`);
+    const outDir = digest.slice(digest.lastIndexOf("→ ") + 2).trim();
+    assert.equal(path.dirname(outDir), path.join(dir, "runs"), "the fixture is the temp root");
+    assert.match(path.basename(outDir), /^\d{4}-\d{2}-\d{2}T[\d-]+Z$/);
+    assert.equal(
+      outDir.startsWith(path.join(os.tmpdir(), "ui-probe") + path.sep),
+      false,
+      `the real temp was not used: ${outDir}`,
+    );
+    assert.equal(existsSync(path.join(outDir, "results.json")), true);
   } finally {
     await fixture.close();
   }
@@ -192,6 +225,55 @@ test("capture prints the browser digest and exits 0", async (t) => {
     assert.match(result.stdout, /\[data-testid=action-tile\] widths=111,111,111/);
     assert.match(result.stdout, /blocked: \d+/);
     assert.match(result.stdout, /out:/);
+  } finally {
+    await fixture.close();
+  }
+});
+
+test("A9: a defaulted capture prunes runs/, an explicit --out capture does not", async (t) => {
+  let browser;
+  try {
+    browser = findBrowser({});
+  } catch (error) {
+    if (process.env.UI_PROBE_REQUIRE_BROWSER === "1") throw error;
+    t.skip(`no Chromium browser found: ${error.message}`);
+    return;
+  }
+
+  const fixture = await startFixtureServer();
+  const dir = scratchDir("ui-probe-capture-prune");
+  scratchConfig(dir, {
+    baseUrl: fixture.origin,
+    browser,
+    viewports: { desktop: { width: 800, height: 600 } },
+    screens: { tiles: { url: "/tiles-good.html" } },
+  });
+  const runs = path.join(dir, "runs");
+  const staleRun = (name) => {
+    const run = path.join(runs, name);
+    mkdirSync(run, { recursive: true });
+    const old = (Date.now() - 48 * 60 * 60 * 1000) / 1000;
+    utimesSync(run, old, old);
+    return run;
+  };
+  // The 20 fresh dirs fill the keep window, so the stale one is the only prune candidate.
+  for (let i = 0; i < 20; i++) mkdirSync(path.join(runs, `fresh-${i}`), { recursive: true });
+  const stale = staleRun("stale");
+
+  try {
+    const first = await probe(["capture", "tiles", "--viewport", "desktop"], { cwd: dir });
+    assert.equal(first.status, 0, `capture exited ${first.status}: ${first.stderr}`);
+    assert.equal(existsSync(stale), false, "a defaulted capture prunes the stale run");
+    const outLine = first.stdout.split("\n").find((line) => line.startsWith("out: "));
+    assert.ok(outLine, `the digest names the out dir: ${first.stdout}`);
+    const outDir = outLine.slice("out: ".length).trim();
+    assert.equal(path.dirname(path.dirname(outDir)), runs, "the defaulted capture wrote under runs/");
+    assert.match(path.basename(path.dirname(outDir)), /^\d{4}-\d{2}-\d{2}T[\d-]+Z$/);
+
+    const explicit = staleRun("stale-out");
+    const second = await probe(["capture", "tiles", "--viewport", "desktop", "--out", path.join(dir, "out")], { cwd: dir });
+    assert.equal(second.status, 0, `capture exited ${second.status}: ${second.stderr}`);
+    assert.equal(existsSync(explicit), true, "an explicit --out capture never prunes");
   } finally {
     await fixture.close();
   }

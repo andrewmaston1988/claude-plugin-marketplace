@@ -425,12 +425,12 @@ export function runTvBranch({
   });
 }
 
-/** `capture --device tv`. */
-export function captureTvBranch({ screen, config, rest, getFlag, source = null, baseDir = null, file = null, _attach = attach }) {
+/** `capture --device tv`. `outDir` is the bin's one resolution; `captureDir` avoids shadowing it. */
+export function captureTvBranch({ screen, config, outDir = undefined, rest, getFlag, source = null, baseDir = null, file = null, _attach = attach }) {
   const { port, problem } = portFrom(getFlag, rest);
   if (problem) return { exitCode: 64, stderr: problem };
   return branch(async () => {
-    const { digest, outDir, tvReturn } = await captureOnTv({
+    const { digest, outDir: captureDir, tvReturn } = await captureOnTv({
       screen,
       config,
       attachPort: port,
@@ -438,18 +438,18 @@ export function captureTvBranch({ screen, config, rest, getFlag, source = null, 
       allowWrites: rest.includes("--allow-writes"),
       screenshot: rest.includes("--screenshot"),
       includeBackground: rest.includes("--include-background"),
-      outDir: getFlag("--out", rest) ?? undefined,
+      outDir,
       source,
       baseDir,
       file,
       _attach,
     });
-    return { digest, outDir, tvReturn };
+    return { digest, outDir: captureDir, tvReturn };
   });
 }
 
-/** `tv probe`. */
-export async function tvProbeBranch({ config, rest, getFlag, resolveOutDir, out, err }) {
+/** `tv probe`. `outDir` is the bin's single resolution: resolving it again here would prune twice. */
+export async function tvProbeBranch({ config, outDir, rest, getFlag, out, err }) {
   // `--listen` takes an optional key list; the per-key wait moved to its own flag.
   const listenValue = getFlag("--listen", rest);
   const listenWaitValue = getFlag("--listen-wait", rest);
@@ -481,7 +481,7 @@ export async function tvProbeBranch({ config, rest, getFlag, resolveOutDir, out,
   return branch(async () => {
     const { lines, tvReturn } = await tvProbeCommand({
       config,
-      outDir: resolveOutDir(config, getFlag("--out", rest)),
+      outDir,
       video: getFlag("--video", rest),
       navigate: getFlag("--navigate", rest),
       listenKeys,

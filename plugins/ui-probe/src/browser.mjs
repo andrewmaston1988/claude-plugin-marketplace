@@ -1,9 +1,9 @@
 import { spawn, spawnSync } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { connect, sleep } from "./cdp.mjs";
-import { REAP_BUDGET_MS, killBrowserForProfile, reapOrphans, writeOwnerFile } from "./reaper.mjs";
+import { PROFILE_PREFIX, REAP_BUDGET_MS, killBrowserForProfile, reapOrphans, writeOwnerFile } from "./reaper.mjs";
+import { profilesDir } from "./temp-paths.mjs";
 
 const CANDIDATES = {
   win32: [
@@ -167,7 +167,11 @@ export async function launch({
   // Whatever an earlier run left behind goes before this one adds to it.
   logReap(await reapWithinBudget(_reap, REAP_BUDGET_MS));
 
-  const profile = _fs.mkdtempSync(join(tmpdir(), "ui-probe-profile-"));
+  // The profiles root is created here, not through _fs: every injected fake is a read/delete
+  // seam and none of them carries mkdirSync.
+  const profiles = profilesDir();
+  mkdirSync(profiles, { recursive: true });
+  const profile = _fs.mkdtempSync(join(profiles, PROFILE_PREFIX));
   let browserWs = null;
 
   try {

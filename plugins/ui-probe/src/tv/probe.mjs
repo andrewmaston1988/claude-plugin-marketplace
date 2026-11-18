@@ -2,8 +2,6 @@
 // the page, and where navigation can go. The steps live in steps.mjs; this file runs them and
 // turns the evidence into the one line a consumer acts on.
 
-import os from 'node:os';
-import { join } from 'node:path';
 import {
   exitStep,
   fetchStep,
@@ -17,12 +15,10 @@ import {
 import { listenStep } from './listen.mjs';
 
 export { FEATURES_JS, pageOf } from './steps.mjs';
+// The temp layout has one owner; this module only re-exports its path.
+export { platformPath } from '../temp-paths.mjs';
 
 const defaultSleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-
-export function platformPath(appid) {
-  return join(os.tmpdir(), 'ui-probe', `platform-${appid}.json`);
-}
 
 function describeOutcome(entry) {
   if (!entry || entry.outcome == null) return 'absent';
