@@ -335,10 +335,9 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), {
         if (ctx.stopRequested) break;
       }
     }
-    // Re-scan once a seat has been spent: a launched leaf can settle inside this very
-    // batch — the blocking git calls above let its callbacks run — and the dependents
-    // that settlement unlocks must be seated, or the idle check below ends the run
-    // with them still pending.
+    // Re-scan once a seat has been spent: a launched leaf can settle inside this batch
+    // (the setImmediate turn between seats lets its callbacks run), and the dependents it
+    // unlocks must be seated, or the idle check below ends the run with them pending.
     if (progressed || launched) continue;
 
     // Stop wins: whatever is parked or waiting gets swept to failed:stopped below.
@@ -363,8 +362,8 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), {
       ctx.wake = () => {};
     }
   }
-  // A leaf can fail and give up its slot without the loop coming back round (a
-  // synchronous worktree prepare throw), so the top sweep misses its dependents.
+  // A failure recorded on the loop's last pass, after the top sweep ran, still blocks
+  // its dependents, so sweep once more before the run ends.
   sweepBlocked();
   // A leaf that never got a slot (still pending) or was mid-backoff never runs
   // classifyFailure's stopped branch — say so here, or a stopped run leaves it
