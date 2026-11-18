@@ -122,10 +122,12 @@ export async function killBrowserForProfile(profile, { _list = listProcesses, _k
   try {
     processes = await _list({ platform, timeoutMs, _execFile });
   } catch {
-    return { killed: [], failed: [] };
+    // The listing did not run, so nothing is known about the browser: not a clean no-match.
+    return { killed: [], failed: [], unverified: true };
   }
+  if (!Array.isArray(processes)) return { killed: [], failed: [], unverified: true };
   const pids = [];
-  for (const entry of Array.isArray(processes) ? processes : []) {
+  for (const entry of processes) {
     if (!entry || !Number.isInteger(entry.pid)) continue;
     const commandLine = String(entry.cmd ?? "");
     if (!BROWSER_NAME.test(commandLine) || commandLine.includes("--type=")) continue;

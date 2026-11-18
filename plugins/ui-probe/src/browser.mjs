@@ -132,7 +132,7 @@ function logReap(result) {
 
 /** A kill only licenses deleting the profile when the module could verify the browser gone. */
 function killVerified(result) {
-  return !(result?.failed?.length);
+  return !result?.unverified && !result?.failed?.length;
 }
 
 /** Windows holds the profile open for a moment after the browser goes, so one rmdir is not enough. */

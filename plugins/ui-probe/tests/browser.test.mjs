@@ -286,6 +286,51 @@ test("a launch that fails after the spawn keeps the profile when the kill is unv
   assert.deepEqual(fs.removed, [], "the folder stays for the next reap");
 });
 
+test("A3: an unverified kill after an ignored Browser.close keeps the profile folder", async () => {
+  const { deps, fs, calls } = launchWith({
+    answers: Number.POSITIVE_INFINITY,
+    kill: async () => ({ killed: [], failed: [], unverified: true }),
+  });
+  const session = await launch(deps);
+  const warnings = [];
+  const original = console.warn;
+  console.warn = (message) => warnings.push(String(message));
+  try {
+    await session.close();
+  } finally {
+    console.warn = original;
+  }
+  assert.deepEqual(calls.kills, [PROFILE]);
+  assert.deepEqual(fs.removed, [], "an unverified kill is not grounds to delete the profile");
+  assert.match(warnings.join("\n"), /kept the browser profile/);
+});
+
+test("A3b: a launch that fails after the spawn keeps the profile when the kill is unverified", async () => {
+  const fs = fakeFs();
+  fs.existsSync = (path) => path.endsWith("msedge.exe");
+  const { deps } = launchWith({ fs, kill: async () => ({ killed: [], failed: [], unverified: true }) });
+  await assert.rejects(launch(deps), /DevToolsActivePort/);
+  assert.deepEqual(fs.removed, [], "the folder stays for the next reap");
+});
+
+test("A4: a kill whose listing ran and found nothing still removes the profile", async () => {
+  const { deps, fs } = launchWith({
+    answers: Number.POSITIVE_INFINITY,
+    kill: async () => ({ killed: [], failed: [] }),
+  });
+  const session = await launch(deps);
+  const warnings = [];
+  const original = console.warn;
+  console.warn = (message) => warnings.push(String(message));
+  try {
+    await session.close();
+  } finally {
+    console.warn = original;
+  }
+  assert.deepEqual(fs.removed, [PROFILE], "a verified no-match is still a verified kill");
+  assert.ok(!warnings.some((line) => /kept the browser profile/.test(line)));
+});
+
 test("the profile removal is retried when the first attempt fails", async () => {
   let attempts = 0;
   const fs = fakeFs();

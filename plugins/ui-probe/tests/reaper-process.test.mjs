@@ -5,7 +5,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import {
@@ -22,7 +22,7 @@ import {
   writeOwnerFile,
 } from "../src/reaper.mjs";
 import { runPowerShell, survivorScript } from "../src/reaper-process.mjs";
-import { OLD, cmdFor, profileFolder, recorder, tempRoot } from "./reaper-support.mjs";
+import { aged, cmdFor, profileFolder, recorder, tempRoot } from "./reaper-support.mjs";
 
 // --- row 8: batched kills -----------------------------------------------------
 
@@ -107,6 +107,20 @@ test("row 8: the 19-browser reap batches its kill into one invocation", async (t
   assert.equal(result.killed.length, 19);
 });
 
+test("A5: the launch sweep deletes nothing when the lister returns empty output", async (t) => {
+  const dir = tempRoot(t);
+  const profile = profileFolder(dir, "empty-listing");
+  aged(profile); // past the grace: a listing read as empty would sweep it
+  const result = await reapOrphans({
+    tmpDir: dir,
+    listProcesses: () => listProcessesWindows({ _execFile: async () => ({ stdout: "" }) }),
+    kill: recorder(),
+  });
+  assert.equal(result.skipped, "listing-failed");
+  assert.deepEqual(result.swept, []);
+  assert.ok(existsSync(profile), "an unreadable listing is not grounds to delete a profile");
+});
+
 test("row 8: elsewhere the kill is one loop over the same PIDs", async () => {
   const killed = [];
   const result = await killPids([21, 21, 22, 0, -1, 1.5], {
@@ -155,7 +169,10 @@ test("the Windows lister parses both CIM shapes and refuses what it cannot read"
     }),
   });
   assert.deepEqual(many, [{ pid: 1, cmd: "a" }, { pid: 2, cmd: "" }]);
-  assert.deepEqual(await listProcessesWindows({ _execFile: async () => ({ stdout: "" }) }), []);
+  await assert.rejects(
+    () => listProcessesWindows({ _execFile: async () => ({ stdout: "" }) }),
+    /could not read the process listing: empty output/,
+  );
   // A command line carrying a raw control character is not valid JSON text, but it is still a
   // listing: refusing it would disable the reaper on any machine that has such a process.
   const control = await listProcessesWindows({
@@ -178,7 +195,7 @@ test("the Windows lister falls back to powershell only when pwsh is absent", asy
     _execFile: async (exe) => {
       seen.push(exe);
       if (exe === "pwsh") throw Object.assign(new Error("absent"), { code: "ENOENT" });
-      return { stdout: "" };
+      return { stdout: JSON.stringify([{ ProcessId: 9, CommandLine: "x" }]) };
     },
   });
   assert.deepEqual(seen, ["pwsh", "powershell"]);
@@ -196,7 +213,10 @@ test("the POSIX lister parses ps output and refuses a listing it cannot read", a
     { pid: 42, cmd: "msedge --user-data-dir=/tmp/ui-probe-profile-a" },
     { pid: 43, cmd: "chrome" },
   ]);
-  assert.deepEqual(await listProcessesPosix({ _execFile: async () => ({ stdout: "" }) }), []);
+  await assert.rejects(
+    () => listProcessesPosix({ _execFile: async () => ({ stdout: "" }) }),
+    /could not read the process listing: empty output/,
+  );
   await assert.rejects(
     () => listProcessesPosix({ _execFile: async () => ({ stdout: "garbage\n" }) }),
     /could not parse the process listing/,
@@ -333,4 +353,38 @@ test("the error-path killer stops the exact profile's root and stays quiet on fa
   assert.deepEqual(result.killed, [31]);
   const quiet = await killBrowserForProfile(profile, { _list: () => { throw new Error("no lister"); } });
   assert.deepEqual(quiet.killed, []);
+});
+
+test("A2: a listing that throws or is not a list makes the kill unverified", async () => {
+  const profile = join(tmpdir(), `${PROFILE_PREFIX}unverified`);
+  const thrown = await killBrowserForProfile(profile, {
+    platform: "linux",
+    _list: () => { throw new Error("no lister"); },
+    _kill: () => assert.fail("no listing, no kill"),
+  });
+  assert.equal(thrown.unverified, true);
+  assert.deepEqual(thrown.killed, []);
+  const notAList = await killBrowserForProfile(profile, {
+    platform: "linux",
+    _list: () => null,
+    _kill: () => assert.fail("no listing, no kill"),
+  });
+  assert.equal(notAList.unverified, true);
+  assert.deepEqual(notAList.killed, []);
+});
+
+test("A2b: a listing that ran and found no match verifies, and nothing is killed", async () => {
+  const profile = join(tmpdir(), `${PROFILE_PREFIX}clean`);
+  let kills = 0;
+  const result = await killBrowserForProfile(profile, {
+    platform: "linux",
+    _list: () => [{ pid: 41, cmd: cmdFor(`${profile}-other`) }],
+    _kill: () => {
+      kills += 1;
+      return { killed: [] };
+    },
+  });
+  assert.equal(result.unverified, undefined, "a real listing with no match is verified");
+  assert.deepEqual(result, { killed: [], failed: [] });
+  assert.equal(kills, 0);
 });
