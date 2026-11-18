@@ -281,17 +281,10 @@ function withSaved(body, stamp) {
   return lines.join(eol);
 }
 
-// Stamp a STATE file from the clock: rewrite `saved:` and embed the same
-// instant in the filename, in one atomic step. `renameStateToNow` remains
-// exported as an alias.
-//
-// Order matters: the final free stamp is chosen (including the 1-second
-// collision bump) BEFORE anything is written, so `saved:` names exactly the
-// instant the filename does, and a crash at any step leaves a complete file at
-// one of the two names — never a half-written one.
-//
-// A `CLAUDE_STATE_PATH` with a non-STATE basename is updated in place: there is
-// no sid to re-stamp. Any other non-STATE path throws.
+// Stamp a STATE file from the clock: rewrite `saved:` and embed the same instant
+// in the filename, atomically. The free stamp is chosen before any write, so a
+// crash leaves a complete file at one of the two names. A `CLAUDE_STATE_PATH`
+// override is stamped in place; any other non-STATE path throws.
 export function stampState(statePath, now = new Date()) {
   if (!statePath) throw new Error('stampState: path required');
   if (!fs.existsSync(statePath)) throw new Error(`stampState: source not found: ${statePath}`);

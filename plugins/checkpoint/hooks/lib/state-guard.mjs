@@ -1,22 +1,6 @@
-// State guard: the read gate and the round pre-image, fed by two hooks.
-//
-// A Read of a STATE file appends its covered line range to an append-only
-// per-session log — parallel page Reads cannot clobber each other's coverage —
-// and a partial Read made before the session's first acting call arms a gate on
-// that file (decision 7). A Write/Edit/MultiEdit on a STATE path is linted after
-// the fact and blocks the turn with the errors.
-//
-// PreToolUse denies an acting call while the armed file is still partly unread,
-// and records the round's pre-image: the live-section hash of the file as it
-// stood before this round's first write, which the Stop hook compares against.
-//
-// Every path fails open. A gate that bricks a session costs far more than a
-// stale STATE, so anything unreadable, stale, malformed or internal allows the
-// call.
-//
-// Stop-hook API (fs injected as `_fs`, state dir as `_dir`):
-//   readPreImage(sid)  -> { hash, path, ts } | null
-//   clearPreImage(sid) -> boolean
+// State guard: the read gate (coverage logged by Reads, armed before the first
+// act or by compaction) and the round pre-image the Stop hook judges against.
+// Every path fails open: a gate that bricks a session costs more than a stale STATE.
 import fs from 'node:fs';
 import path from 'node:path';
 
@@ -64,9 +48,8 @@ export function isStatePath(p, { _env = process.env, _platform = process.platfor
   return !!override && stateKey(override, _platform) === stateKey(p, _platform);
 }
 
-// The allowlist (decision 6): a session can always finish reading or ask. The
-// matcher never sends these, so this is the in-script backstop for a broadened
-// matcher — and the exact set the deny list was rejected for missing.
+// The allowlist: a session can always finish reading or ask. The matcher never
+// sends these, so this is the in-script backstop for a broadened matcher.
 export function isAllowedTool(name) {
   if (!name) return false;
   if (ALWAYS_ALLOWED.has(name)) return true;

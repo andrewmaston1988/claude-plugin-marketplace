@@ -80,7 +80,7 @@ function main() {
     const kind = classifyState(statePath);
 
     // The resumed file must be read in full before the session acts. Armed here
-    // because the compact event is the evidence; a startup is not (decision 7).
+    // because the compact event is the evidence; a startup is not.
     if (kind === 'rich') {
       try { armGate(payload.session_id || '', statePath); } catch { /* fail open */ }
     }

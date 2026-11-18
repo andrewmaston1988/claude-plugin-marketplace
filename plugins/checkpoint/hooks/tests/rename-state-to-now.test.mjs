@@ -98,7 +98,7 @@ test('renameStateToNow: throws when no free stamp within 60s window', () => {
   assert.equal(fs.existsSync(oldPath), true);
 });
 
-// ---- stampState (decision 10): `saved:` and the filename from one instant ----
+// ---- stampState: `saved:` and the filename from one instant ----
 
 const FRONT = [
   '---',

@@ -1,9 +1,6 @@
 #!/usr/bin/env node
 // Deterministic shape lint for a checkpoint STATE file. It judges shape, not
-// truth: a header that is a log, a file too big for one Read, narrative inlined
-// instead of filed, and a resume line that disagrees with NEXT ACTIONS.
-// The messages are the teaching surface — one round trip should reach green.
-//
+// truth; the messages are the teaching surface, so one round trip reaches green.
 // CLI: node hooks/lib/state-lint.mjs <path>  (exit 0 pass, 1 fail)
 import fs from 'node:fs';
 import { createHash } from 'node:crypto';
@@ -30,7 +27,7 @@ export const SECTIONS = [
   'OUT OF SCOPE',
 ];
 
-// The sections a checkpoint must rewrite from current reality (decision 4).
+// The sections a checkpoint must rewrite from current reality.
 export const LIVE_SECTIONS = ['CURRENT STATE', 'NEXT ACTIONS', 'KEY FILES'];
 
 const nfmt = (n) => n.toLocaleString('en-US');

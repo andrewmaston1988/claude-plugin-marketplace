@@ -148,7 +148,7 @@ test('buildCheckpointNudge: both bands frame the full checkpoint, neither the ol
 });
 
 // Test plan row 13d (W4): only the pre-compact `now` band carries the frame —
-// it is the last thing a session reads before compaction (decision 12).
+// it is the last thing a session reads before compaction.
 test('buildCheckpointNudge: only the now band opens with the EXTREMELY_IMPORTANT frame (W4)', () => {
   const now = buildCheckpointNudge('now', 410_000, 467_000);
   assert.ok(now.startsWith('<EXTREMELY_IMPORTANT>'), 'now band must open with the frame');

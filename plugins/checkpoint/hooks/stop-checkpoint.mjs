@@ -2,14 +2,9 @@
 // Stop hook: when a batch of substantial work finishes without a checkpoint,
 // block the stop once and ask the model to judge whether a significant feature
 // just completed — and if so, invoke the checkpoint skill to write it up.
-// The hook detects mechanically (commits / edits / operator rulings);
-// significance is the model's call. Loop-safe via stop_hook_active; skips if
-// CORRELATION_ID set.
-//
-// A checkpoint's stamp is a claim, not evidence: it stands down only when the
-// STATE passes the shape lint AND its [live] sections moved against the round's
-// pre-image (else the last accepted hash). A header-only or failing write keeps
-// the block and says why.
+// Signals are mechanical (commits / edits / answered questions); significance is
+// the model's call. A stamp is a claim, not evidence: it stands down only when the
+// lint passes and [live] sections moved. Loop-safe; skips under CORRELATION_ID.
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
@@ -30,11 +25,11 @@ export const NUDGE_COOLDOWN_MS    = 15 * 60 * 1000; // between block-once nudges
 
 const MUTATION_TOOLS = new Set(['Edit', 'Write', 'NotebookEdit']);
 const SHELL_TOOLS    = new Set(['Bash', 'PowerShell']);
-// An operator ruling changes the state a handover must carry (decision 11).
+// An operator ruling changes the state a handover must carry.
 const RULING_TOOLS   = new Set(['AskUserQuestion']);
 
 // Every block reason names the seven sections, so a reconcile has to answer
-// each rather than advance a stamp (decision 11).
+// each rather than advance a stamp.
 const SEVEN_SECTIONS = SECTIONS.join(', ');
 
 // --- testable pure helpers (exported) ---
