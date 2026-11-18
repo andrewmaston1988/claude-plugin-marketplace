@@ -20,8 +20,8 @@ const RECORD = join(ROOT, "node_modules", ".test-install-hash");
 const hashOf = (bytes) => createHash("sha256").update(bytes).digest("hex");
 
 /** An in-memory fs, keyed by the same absolute paths the shim builds. */
-function fakeFs({ existing = [], contents = {}, unreadable = [] } = {}) {
-  const files = new Map([[LOCKFILE, LOCK], ...Object.entries(contents)]);
+function fakeFs({ existing = [], contents = {}, unreadable = [], lockfile = true } = {}) {
+  const files = new Map([...(lockfile ? [[LOCKFILE, LOCK]] : []), ...Object.entries(contents)]);
   for (const path of existing) if (!files.has(path)) files.set(path, "");
   const dirs = new Set();
   const writes = [];
@@ -61,7 +61,7 @@ function installedRoot(hash) {
 test("installs when the package is missing", () => {
   const fs = fakeFs();
   const spawn = fakeSpawn();
-  const result = ensureInstalled({ root: ROOT, _fs: fs, _spawnSync: spawn, _platform: "linux" });
+  const result = ensureInstalled({ root: ROOT, _fs: fs, _spawnSync: spawn, _platform: "linux", _env: {} });
 
   assert.deepEqual(result, { installed: true });
   assert.equal(spawn.calls.length, 1);
@@ -76,7 +76,7 @@ test("does not install when the package and the hash record both match", () => {
   const fs = installedRoot(hashOf(LOCK));
   const spawn = fakeSpawn();
 
-  assert.deepEqual(ensureInstalled({ root: ROOT, _fs: fs, _spawnSync: spawn, _platform: "linux" }), { installed: false });
+  assert.deepEqual(ensureInstalled({ root: ROOT, _fs: fs, _spawnSync: spawn, _platform: "linux", _env: {} }), { installed: false });
   assert.equal(spawn.calls.length, 0);
 });
 
@@ -86,7 +86,7 @@ test("installs when the record is absent or unreadable", () => {
     fakeFs({ existing: [PACKAGE], unreadable: [RECORD] }),
   ]) {
     const spawn = fakeSpawn();
-    assert.deepEqual(ensureInstalled({ root: ROOT, _fs: fs, _spawnSync: spawn, _platform: "linux" }), { installed: true });
+    assert.deepEqual(ensureInstalled({ root: ROOT, _fs: fs, _spawnSync: spawn, _platform: "linux", _env: {} }), { installed: true });
     assert.equal(spawn.calls.length, 1);
     assert.equal(fs.files.get(RECORD), hashOf(LOCK));
   }
@@ -96,7 +96,7 @@ test("installs again when the lockfile bytes change", () => {
   const fs = installedRoot(hashOf("{ \"lockfileVersion\": 2 }"));
   const spawn = fakeSpawn();
 
-  assert.deepEqual(ensureInstalled({ root: ROOT, _fs: fs, _spawnSync: spawn, _platform: "linux" }), { installed: true });
+  assert.deepEqual(ensureInstalled({ root: ROOT, _fs: fs, _spawnSync: spawn, _platform: "linux", _env: {} }), { installed: true });
   assert.equal(spawn.calls.length, 1);
   assert.equal(fs.files.get(RECORD), hashOf(LOCK));
 });
@@ -105,7 +105,7 @@ test("returns an error and writes no record when the install fails", () => {
   for (const outcome of [{ error: new Error("spawn npm ENOENT") }, { status: 1 }]) {
     const fs = fakeFs();
     const spawn = fakeSpawn(outcome);
-    const result = ensureInstalled({ root: ROOT, _fs: fs, _spawnSync: spawn, _platform: "linux" });
+    const result = ensureInstalled({ root: ROOT, _fs: fs, _spawnSync: spawn, _platform: "linux", _env: {} });
 
     assert.equal(result.installed, false);
     assert.equal(typeof result.error, "string");
@@ -114,12 +114,39 @@ test("returns an error and writes no record when the install fails", () => {
   }
 });
 
-test("uses a shell on win32 only", () => {
-  const shells = [];
+test("CI=true skips the install gate, because the job already ran npm ci", () => {
+  const fs = fakeFs(); // package missing, no hash record
+  const spawn = fakeSpawn();
+
+  assert.deepEqual(
+    ensureInstalled({ root: ROOT, _fs: fs, _spawnSync: spawn, _platform: "linux", _env: { CI: "true" } }),
+    { installed: false },
+  );
+  assert.equal(spawn.calls.length, 0);
+  assert.equal(fs.writes.length, 0);
+});
+
+test("a missing root lockfile is an error, not a crash", () => {
+  const fs = fakeFs({ lockfile: false });
+  const spawn = fakeSpawn();
+
+  assert.deepEqual(
+    ensureInstalled({ root: ROOT, _fs: fs, _spawnSync: spawn, _platform: "linux", _env: {} }),
+    { installed: false, error: `no package-lock.json at ${ROOT} — run npm install` },
+  );
+  assert.equal(spawn.calls.length, 0);
+});
+
+test("uses a shell on win32 only, passing one command string there", () => {
+  const calls = [];
   for (const platform of ["win32", "linux"]) {
     const spawn = fakeSpawn();
-    ensureInstalled({ root: ROOT, _fs: fakeFs(), _spawnSync: spawn, _platform: platform });
-    shells.push(spawn.calls[0].options.shell);
+    ensureInstalled({ root: ROOT, _fs: fakeFs(), _spawnSync: spawn, _platform: platform, _env: {} });
+    calls.push(spawn.calls[0]);
   }
-  assert.deepEqual(shells, [true, false]);
+  assert.deepEqual(calls.map((call) => call.options.shell), [true, false]);
+  assert.equal(calls[0].command, "npm ci");
+  assert.deepEqual(calls[0].args, []);
+  assert.equal(calls[1].command, "npm");
+  assert.deepEqual(calls[1].args, ["ci"]);
 });

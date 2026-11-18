@@ -1,5 +1,5 @@
 // Self-installing shim into the test-runner package. A fresh worktree has no
-// root `npm ci`, and CLAUDE.md, TESTING.md and every leaf brief name this file.
+// root `npm ci`, and TESTING.md and every leaf brief name this file.
 
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
@@ -24,16 +24,28 @@ function readRecord(path, _fs) {
 }
 
 /** `npm ci` in the repo root whenever the package is missing or the lockfile
- *  bytes differ from the recorded hash. */
-export function ensureInstalled({ root, _fs = nodeFs, _spawnSync = spawnSync, _platform = process.platform }) {
-  const hash = createHash("sha256").update(_fs.readFileSync(join(root, "package-lock.json"))).digest("hex");
+ *  bytes differ from the recorded hash. Skipped under CI, where every job runs
+ *  its own `npm ci` step before the shim. */
+export function ensureInstalled({
+  root,
+  _fs = nodeFs,
+  _spawnSync = spawnSync,
+  _platform = process.platform,
+  _env = process.env,
+}) {
+  if (_env.CI === "true") return { installed: false };
+  const lockfile = join(root, "package-lock.json");
+  if (!_fs.existsSync(lockfile)) {
+    return { installed: false, error: `no package-lock.json at ${root} — run npm install` };
+  }
+  const hash = createHash("sha256").update(_fs.readFileSync(lockfile)).digest("hex");
   const record = join(root, RECORD);
   if (_fs.existsSync(join(root, PACKAGE)) && readRecord(record, _fs) === hash) return { installed: false };
-  const result = _spawnSync("npm", ["ci"], {
-    cwd: root,
-    stdio: "inherit",
-    shell: _platform === "win32", // npm is npm.cmd here, which spawn cannot exec directly
-  });
+  const shell = _platform === "win32"; // npm is npm.cmd here, which spawn cannot exec directly
+  // An args array with shell:true is DEP0190, so the shell path passes one string.
+  const result = shell
+    ? _spawnSync("npm ci", [], { cwd: root, stdio: "inherit", shell })
+    : _spawnSync("npm", ["ci"], { cwd: root, stdio: "inherit", shell });
   if (!result || result.error || result.status !== 0) {
     const detail = result && result.error ? result.error.message : `exit ${result ? result.status : "unknown"}`;
     return { installed: false, error: `npm ci failed in ${root} (${detail})` };

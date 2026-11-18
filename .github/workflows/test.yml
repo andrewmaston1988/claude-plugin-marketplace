@@ -19,6 +19,9 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
+          cache: npm
+          # The shim's install reads the root lockfile, so that is the cache key.
+          cache-dependency-path: package-lock.json
       - name: Install root dependencies
         run: npm ci
       - name: 500-line bar
@@ -47,6 +50,9 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
+          cache: npm
+          # The shim's install reads the root lockfile, so that is the cache key.
+          cache-dependency-path: package-lock.json
       - name: Install root dependencies
         run: npm ci
       - name: Run tests
@@ -64,6 +70,9 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
+          cache: npm
+          # The shim's install reads the root lockfile, so that is the cache key.
+          cache-dependency-path: package-lock.json
       - name: Install root dependencies
         run: npm ci
       - name: Unit tests
@@ -79,6 +88,9 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
+          cache: npm
+          # The shim's install reads the root lockfile, so that is the cache key.
+          cache-dependency-path: package-lock.json
       - name: Install root dependencies
         run: npm ci
       - name: Run tests
@@ -94,6 +106,9 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
+          cache: npm
+          # The shim's install reads the root lockfile, so that is the cache key.
+          cache-dependency-path: package-lock.json
       - name: Install root dependencies
         run: npm ci
       # Read-only, not just hashed: a test that overwrites a real file and writes
@@ -112,7 +127,7 @@ jobs:
           find ~/.swarm ~/.claude \( -type f -o -type l \) -print0 | sort -z | xargs -0 sha256sum > "$RUNNER_TEMP/sentinel-hashes"
       # Every test file imports tests/helpers/isolate-home.mjs first, so the
       # suite resolves the throwaway home whether the runner or a person starts
-      # it. The suite's cwd (plugins/swarm) comes from the registry.
+      # it. The suite's cwd (plugins/swarm) comes from test-runner.config.mjs.
       - name: Run tests
         run: node scripts/test.mjs --suite swarm ${{ github.event_name == 'pull_request' && format('--if-selected --against {0}', github.event.pull_request.base.sha) || '' }}
       - name: Verify home sentinels untouched
@@ -137,6 +152,9 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
+          cache: npm
+          # The shim's install reads the root lockfile, so that is the cache key.
+          cache-dependency-path: package-lock.json
       - name: Install root dependencies
         run: npm ci
       - name: Check plugin file types
@@ -160,7 +178,11 @@ jobs:
         with:
           node-version: "22"
           cache: npm
-          cache-dependency-path: plugins/pipeline/package-lock.json
+          # Root lockfile powers the shim's install; the pipeline lockfile the
+          # suite's own `install: npm ci` runs inside plugins/pipeline.
+          cache-dependency-path: |
+            package-lock.json
+            plugins/pipeline/package-lock.json
       - name: Install root dependencies
         run: npm ci
       # Suite runs carry `install: npm ci`, hash-gated, so there is no separate
@@ -203,6 +225,9 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
+          cache: npm
+          # The shim's install reads the root lockfile, so that is the cache key.
+          cache-dependency-path: package-lock.json
       - name: Install root dependencies
         run: npm ci
       - name: Run tests
@@ -218,6 +243,9 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
+          cache: npm
+          # The shim's install reads the root lockfile, so that is the cache key.
+          cache-dependency-path: package-lock.json
       - name: Install root dependencies
         run: npm ci
       - name: Run tests
@@ -233,6 +261,9 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
+          cache: npm
+          # The shim's install reads the root lockfile, so that is the cache key.
+          cache-dependency-path: package-lock.json
       - name: Install root dependencies
         run: npm ci
       - name: Run tests

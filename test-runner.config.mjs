@@ -1,5 +1,6 @@
-// The one place "how to test plugin X" is written. `scripts/test.mjs` is its
-// only reader, so CI and a local run execute the same commands by construction.
+// The one place "how to test plugin X" is written. The test-runner CLI reads it
+// and scripts/test-config.test.mjs imports it, so CI and a local run execute the
+// same commands by construction.
 
 const TEN_MIN = 10 * 60 * 1000;
 const TWENTY_MIN = 20 * 60 * 1000;

@@ -21,7 +21,6 @@ const yml = readFileSync(WORKFLOW, "utf8");
 function jobBlocks() {
   return yml
     .split(/^  [a-z-]+:$/m)
-    .map((block) => block)
     .filter((block) => block.includes("runs-on:"));
 }
 
@@ -72,8 +71,9 @@ test("every job installs the root dependencies before the shim runs", () => {
     const name = /^\s+name: (.+)$/m.exec(job)?.[1] ?? "(anonymous job)";
     const install = job.indexOf("run: npm ci");
     const firstShim = job.indexOf("node scripts/");
-    assert.ok(install !== -1, `${name}: no "run: npm ci" step, so the shim installs mid-run`);
+    assert.ok(install !== -1, `${name}: no "run: npm ci" step, so a local run has nothing installed`);
     assert.ok(firstShim !== -1, `${name}: no "node scripts/" step`);
+    // The step installs; the shim skips its own install gate under CI.
     assert.ok(install < firstShim, `${name}: its npm ci step runs after the first "node scripts/" step`);
   }
 });
