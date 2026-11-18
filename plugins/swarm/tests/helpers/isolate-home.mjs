@@ -1,10 +1,10 @@
 // Imported first by every test file: points SWARM_HOME, HOME and USERPROFILE at a
 // throwaway dir so a run cannot read or write the real ~/.swarm or ~/.claude.
 // Child processes (node --test workers, CLI spawns) inherit it.
-import { copyFileSync, linkSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { copyFileSync, linkSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { delimiter, join } from "node:path";
-import { tmpdir } from "node:os";
 import { after } from "node:test";
+import { swarmTempDir } from "../../src/temp-dir.mjs";
 
 // An inherited SWARM_HOME is only trustworthy when WE set it — the marker says so.
 // Without it, an operator who exports SWARM_HOME in their shell gets their real
@@ -12,16 +12,13 @@ import { after } from "node:test";
 // Each test-file process mints its own home; the marker lets a CLI child a test
 // spawns inherit that dir rather than minting a second.
 if (!process.env.SWARM_HOME || process.env.SWARM_TEST_HOME !== "1") {
-  // One `swarm` dir under the OS temp root keeps every temp path we mint findable
-  // (and one place to sweep); the home below is the only thing a run removes.
-  mkdirSync(join(tmpdir(), "swarm"), { recursive: true });
-  const dir = mkdtempSync(join(tmpdir(), "swarm", "test-home-"));
+  const dir = swarmTempDir("test-home-");
   const binDir = join(dir, "bin");
   mkdirSync(binDir);
   // Every later os.tmpdir() here, and in a child that inherits this env, lands here.
   // A SIBLING of the home, never a child: the governance gate reads everything under
   // the home as swarm-owned, so a fixture inside it would pass checks it must fail.
-  const tmpDir = mkdtempSync(join(tmpdir(), "swarm", "tmp-"));
+  const tmpDir = swarmTempDir("tmp-");
   process.env.TEMP = process.env.TMP = process.env.TMPDIR = tmpDir;
   // A test-owned config, never the operator's: theirs carries hooks that act on
   // their machine (one MSYS spawn per git command on Windows) and LFS filters.
