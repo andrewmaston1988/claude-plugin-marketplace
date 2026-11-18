@@ -11,6 +11,9 @@ import {
   DEFAULT_COMPACT_RESERVE_TOKENS,
 } from '../lib/nudge.mjs';
 import { resolveTtlSource } from '../lib/cadence.mjs';
+import { buildStopNudge } from '../stop-checkpoint.mjs';
+import { buildPickupNote } from '../session-start-compact.mjs';
+import { renderResumeOffer } from '../session-start-resume.mjs';
 import { writeCatalog } from './helpers/catalog.mjs';
 
 const OPUS = 'claude-opus-5-5';
@@ -154,6 +157,21 @@ test('buildCheckpointNudge: only the now band opens with the EXTREMELY_IMPORTANT
   assert.match(now, /digging/);
   const soon = buildCheckpointNudge('soon', 350_000, 467_000);
   assert.doesNotMatch(soon, /<EXTREMELY_IMPORTANT>/);
+
+  // The frame is claimed for the pre-compact nudge alone: the stop reasons,
+  // the compact pickup note and the resume offer stay plain.
+  const others = [
+    buildStopNudge({ edits: 12, commits: 1 }),
+    buildStopNudge({ cause: 'header-only', since: '2026-11-18 02:00 UTC' }),
+    buildStopNudge({ cause: 'lint', errors: ['saved: not the clock form'] }),
+    buildPickupNote('rich', 'C:/x/STATE_a_20261118T010000Z.md', { snapshotPath: '' }),
+    renderResumeOffer({
+      template: fs.readFileSync(new URL('../templates/resume-offer.md', import.meta.url), 'utf8'),
+      dir: 'C:/x',
+      candidates: [{ slug: 's', sid: 'i', stampMs: Date.now(), path: 'C:/x/STATE_a.md', summary: 'x' }],
+    }),
+  ];
+  for (const text of others) assert.doesNotMatch(text, /<EXTREMELY_IMPORTANT>/);
 });
 
 // Test plan row 13b (W3, second half): SKILL.md orders stampState, then the
