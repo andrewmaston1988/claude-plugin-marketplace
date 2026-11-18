@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { renameStateToNow } from '../lib/paths.mjs';
+import { renameStateToNow, stampState } from '../lib/paths.mjs';
 
 function tmpDir() {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'cps-rename-'));
@@ -96,4 +96,86 @@ test('renameStateToNow: throws when no free stamp within 60s window', () => {
   );
   // Source must still exist on disk — the helper must not have moved it before failing
   assert.equal(fs.existsSync(oldPath), true);
+});
+
+// ---- stampState (decision 10): `saved:` and the filename from one instant ----
+
+const FRONT = [
+  '---',
+  'session: torrent-hub work',
+  'saved: 2026-11-15 22:00 UTC',
+  'cwd: C:/code/torrent-hub   branch: main (clean)',
+  'resume: Finish the reconcile',
+  '---',
+  '',
+  '## CURRENT STATE [live]',
+  'In progress.',
+  '',
+].join('\n');
+
+test('stampState (A1a): writes saved: from the same instant as the filename stamp', () => {
+  const dir = tmpDir();
+  const oldPath = writeState(dir, 'sid-aaaa', '20261115T000000Z', FRONT);
+  const newPath = stampState(oldPath, new Date('2026-11-18T01:56:10Z'));
+
+  assert.equal(path.basename(newPath), 'STATE_sid-aaaa_20261118T015610Z.md');
+  assert.equal(fs.readFileSync(newPath, 'utf8'),
+    FRONT.replace('saved: 2026-11-15 22:00 UTC', 'saved: 2026-11-18 01:56 UTC'),
+    'every byte except the saved: value is unchanged');
+  assert.equal(fs.existsSync(oldPath), false, 'old name is gone');
+});
+
+test('stampState (A1b): inserts a missing saved: after session:', () => {
+  const dir = tmpDir();
+  const body = '---\nsession: hello\nresume: go\n---\n';
+  const oldPath = writeState(dir, 'sid-bbbb', '20260101T000000Z', body);
+  const newPath = stampState(oldPath, new Date('2026-11-18T01:56:10Z'));
+  assert.equal(fs.readFileSync(newPath, 'utf8'),
+    '---\nsession: hello\nsaved: 2026-11-18 01:56 UTC\nresume: go\n---\n');
+});
+
+test('stampState (A1c): a CRLF file stays CRLF', () => {
+  const dir = tmpDir();
+  const body = FRONT.replace(/\n/g, '\r\n');
+  const oldPath = writeState(dir, 'sid-cccc', '20260101T000000Z', body);
+  const newPath = stampState(oldPath, new Date('2026-11-18T01:56:10Z'));
+  const out = fs.readFileSync(newPath, 'utf8');
+  assert.match(out, /^saved: 2026-11-18 01:56 UTC\r$/m);
+  assert.ok(!/(^|[^\r])\n/.test(out), 'no bare LF in a CRLF file');
+});
+
+test('stampState (A1d): a collision bumps the stamp and saved: together', () => {
+  const dir = tmpDir();
+  const oldPath = writeState(dir, 'sid-dddd', '20260101T000000Z', FRONT);
+  const collision = writeState(dir, 'sid-dddd', '20261118T015959Z', 'collision');
+  const newPath = stampState(oldPath, new Date('2026-11-18T01:59:59Z'));
+
+  assert.equal(path.basename(newPath), 'STATE_sid-dddd_20261118T020000Z.md');
+  assert.match(fs.readFileSync(newPath, 'utf8'), /^saved: 2026-11-18 02:00 UTC$/m);
+  assert.equal(fs.readFileSync(collision, 'utf8'), 'collision', 'parallel write not clobbered');
+});
+
+test('stampState (A1e): CLAUDE_STATE_PATH with a non-STATE basename updates in place', () => {
+  const dir = tmpDir();
+  const pinned = path.join(dir, 'handover.md');
+  fs.writeFileSync(pinned, FRONT, 'utf8');
+  const prev = process.env.CLAUDE_STATE_PATH;
+  process.env.CLAUDE_STATE_PATH = pinned;
+  try {
+    const out = stampState(pinned, new Date('2026-11-18T01:56:10Z'));
+    assert.equal(out, pinned);
+    assert.equal(fs.existsSync(pinned), true, 'not renamed');
+    assert.deepEqual(fs.readdirSync(dir), ['handover.md'], 'no second file minted');
+    assert.match(fs.readFileSync(pinned, 'utf8'), /^saved: 2026-11-18 01:56 UTC$/m);
+  } finally {
+    if (prev === undefined) delete process.env.CLAUDE_STATE_PATH;
+    else process.env.CLAUDE_STATE_PATH = prev;
+  }
+});
+
+test('stampState (A1f): leaves no .tmp behind', () => {
+  const dir = tmpDir();
+  const oldPath = writeState(dir, 'sid-ffff', '20260101T000000Z', FRONT);
+  stampState(oldPath, new Date('2026-11-18T01:56:10Z'));
+  assert.deepEqual(fs.readdirSync(dir).filter(n => n.endsWith('.tmp')), []);
 });
