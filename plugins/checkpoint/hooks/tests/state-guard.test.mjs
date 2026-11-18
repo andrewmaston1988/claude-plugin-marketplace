@@ -111,6 +111,38 @@ test('G2: overlapping, out-of-order Reads clear the gate', (t) => {
   assert.equal(bash('s3', o), null);
 });
 
+test('the gate arms only on the session own STATE, not a peer STATE it reads', (t) => {
+  const dir = tmpDir(t);
+  const own = path.join(dir, 'STATE_own_20261118T010000Z.md');
+  const peer = path.join(dir, 'STATE_peer_20261118T010000Z.md');
+  fs.writeFileSync(own, stateBody(112));
+  fs.writeFileSync(peer, stateBody(112));
+  const o = opts(dir, { _ownStatePath: own });
+
+  onPostToolUse(readPayload('sc', peer, 1, 4, 112), o);
+  assert.equal(fs.existsSync(gatePath('sc', dir)), false, 'a peer STATE arms nothing');
+
+  onPostToolUse(readPayload('sc', own, 1, 4, 112), o);
+  assert.equal(fs.existsSync(gatePath('sc', dir)), true, 'the own STATE arms');
+});
+
+test('a no-offset Read counts as the whole file and clears the gate', (t) => {
+  const dir = tmpDir(t);
+  const file = path.join(dir, STATE_NAME);
+  const body = stateBody(112);
+  fs.writeFileSync(file, body);
+  const o = opts(dir, { _ownStatePath: file });
+  armGate('dr', file, o);
+
+  onPostToolUse({
+    session_id: 'dr',
+    tool_name: 'Read',
+    tool_input: { file_path: file },
+    tool_response: { file: { filePath: file, content: body } }, // no startLine/numLines
+  }, o);
+  assert.equal(bash('dr', o), null, 'a full-content Read must clear the gate, never stick it');
+});
+
 test('a full Read from before the gate was armed does not satisfy it', (t) => {
   const dir = tmpDir(t);
   const file = path.join(dir, STATE_NAME);
@@ -336,6 +368,19 @@ test('the pre-image is recorded once, on the own STATE, from the inherited file'
 
   assert.equal(clearPreImage('p1', { _dir: dir }), true);
   assert.equal(readPreImage('p1', { _dir: dir }), null);
+});
+
+test('the read-gate opt-out still records the round pre-image', (t) => {
+  const dir = tmpDir(t);
+  const file = path.join(dir, STATE_NAME);
+  const original = stateBody(112);
+  fs.writeFileSync(file, original);
+  const o = opts(dir, {
+    _ownStatePath: file, _settings: { checkpoint: { readGate: false } },
+  });
+  onPreToolUse({ session_id: 'p4', tool_name: 'Edit', tool_input: { file_path: file } }, o);
+  assert.equal(readPreImage('p4', { _dir: dir }).hash, liveSectionsHash(original),
+    'the Stop must still be able to judge the round');
 });
 
 test('a mint records no pre-image: there is nothing to compare', (t) => {

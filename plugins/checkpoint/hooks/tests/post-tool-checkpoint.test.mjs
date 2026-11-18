@@ -193,6 +193,27 @@ test('PostToolUse is silent when CORRELATION_ID is set', (t) => {
   assert.equal(fs.existsSync(nudgeStatePath('pt-f', f.nudgeDir)), false, 'nothing written at all');
 });
 
+test('PostToolUse never blocks a headless leaf, even on a failing STATE write', (t) => {
+  const f = fixture(t);
+  const statePath = path.join(f.cwd, 'STATE_pt-f2_20261118T010000Z.md');
+  write(statePath, ['---', 'session: a session', `resume: ${'x'.repeat(401)}`, '---', ''].join('\n'));
+  const r = runHook(f.home, {
+    cwd: f.cwd, session_id: 'pt-f2', transcript_path: '',
+    tool_name: 'Write', tool_input: { file_path: statePath },
+  }, { CORRELATION_ID: 'leaf-1' });
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.stdout.trim(), '', 'no decision:block for a headless leaf');
+
+  const read = runHook(f.home, {
+    cwd: f.cwd, session_id: 'pt-f2', transcript_path: '',
+    tool_name: 'Read',
+    tool_input: { file_path: statePath },
+    tool_response: { file: { filePath: statePath, startLine: 1, numLines: 1, totalLines: 4 } },
+  }, { CORRELATION_ID: 'leaf-1' });
+  assert.equal(read.status, 0, read.stderr);
+  assert.equal(fs.existsSync(path.join(f.nudgeDir, 'pt-f2.read.jsonl')), false, 'no guard state written');
+});
+
 test('PostToolUse is silent without a transcript or session id', (t) => {
   const f = fixture(t);
   const missing = runHook(f.home, { cwd: f.cwd, session_id: 'pt-g', transcript_path: '' });

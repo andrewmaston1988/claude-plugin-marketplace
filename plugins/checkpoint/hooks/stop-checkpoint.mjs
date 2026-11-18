@@ -35,24 +35,34 @@ const SEVEN_SECTIONS = SECTIONS.join(', ');
 // --- testable pure helpers (exported) ---
 
 // Count work signals in a transcript JSONL slice: file-mutation tool uses,
-// `git commit` shell commands, and answered operator questions; assistant
-// turns only.
+// `git commit` shell commands, and AskUserQuestion calls that received an
+// answer — a question the operator never answered ruled nothing.
 export function scanWorkSignals(text) {
-  let edits = 0, commits = 0, rulings = 0;
+  let edits = 0, commits = 0;
+  const asked = new Set();
+  const answered = new Set();
   for (const line of String(text || '').split('\n')) {
     const t = line.trim();
     if (!t) continue;
     let e;
     try { e = JSON.parse(t); } catch { continue; }
     const msg = e && e.message;
-    if (!msg || msg.role !== 'assistant' || !Array.isArray(msg.content)) continue;
-    for (const item of msg.content) {
-      if (!item || item.type !== 'tool_use') continue;
-      if (MUTATION_TOOLS.has(item.name)) edits++;
-      else if (RULING_TOOLS.has(item.name)) rulings++;
-      else if (SHELL_TOOLS.has(item.name) && /\bgit\s+commit\b/.test(String(item.input?.command || ''))) commits++;
+    if (!msg || !Array.isArray(msg.content)) continue;
+    if (msg.role === 'assistant') {
+      for (const item of msg.content) {
+        if (!item || item.type !== 'tool_use') continue;
+        if (MUTATION_TOOLS.has(item.name)) edits++;
+        else if (RULING_TOOLS.has(item.name) && item.id) asked.add(item.id);
+        else if (SHELL_TOOLS.has(item.name) && /\bgit\s+commit\b/.test(String(item.input?.command || ''))) commits++;
+      }
+    } else if (msg.role === 'user') {
+      for (const item of msg.content) {
+        if (item && item.type === 'tool_result' && item.tool_use_id) answered.add(item.tool_use_id);
+      }
     }
   }
+  let rulings = 0;
+  for (const id of asked) if (answered.has(id)) rulings++;
   return { edits, commits, rulings };
 }
 

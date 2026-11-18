@@ -173,6 +173,23 @@ test('stampState (A1e): CLAUDE_STATE_PATH with a non-STATE basename updates in p
   }
 });
 
+test('stampState: a STATE-shaped CLAUDE_STATE_PATH override is stamped in place', () => {
+  const dir = tmpDir();
+  const pinned = writeState(dir, 'sid-eeee', '20260101T000000Z', FRONT);
+  const prev = process.env.CLAUDE_STATE_PATH;
+  process.env.CLAUDE_STATE_PATH = pinned;
+  try {
+    const out = stampState(pinned, new Date('2026-11-18T01:56:10Z'));
+    assert.equal(out, pinned, 'the override path survives');
+    assert.equal(fs.existsSync(pinned), true, 'no rename, no unlink');
+    assert.deepEqual(fs.readdirSync(dir), [path.basename(pinned)], 'no second file minted');
+    assert.match(fs.readFileSync(pinned, 'utf8'), /^saved: 2026-11-18 01:56 UTC$/m);
+  } finally {
+    if (prev === undefined) delete process.env.CLAUDE_STATE_PATH;
+    else process.env.CLAUDE_STATE_PATH = prev;
+  }
+});
+
 test('stampState (A1f): leaves no .tmp behind', () => {
   const dir = tmpDir();
   const oldPath = writeState(dir, 'sid-ffff', '20260101T000000Z', FRONT);

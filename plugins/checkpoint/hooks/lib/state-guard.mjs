@@ -259,6 +259,15 @@ function preToolUse(payload, { _fs, _now, _env, _dir, _platform, _settings, _own
   const tool = String((payload && payload.tool_name) || '');
   if (!sid || !tool) return null;
   if (_env && _env.CORRELATION_ID) return null; // headless pipeline sessions
+
+  // Recorded before the gate opt-out: the Stop's content check needs the
+  // pre-image and the acted marker even when the read gate is off.
+  if (!isAllowedTool(tool)) {
+    markActed(_fs, sid, _dir);
+    if (WRITE_TOOLS.has(tool)) {
+      recordPreImage(payload, sid, { _fs, _now, _platform, _dir, _ownStatePath });
+    }
+  }
   if (_settings && _settings.checkpoint && _settings.checkpoint.readGate === false) return null;
 
   const gate = readJson(_fs, gatePath(sid, _dir));
@@ -272,13 +281,6 @@ function preToolUse(payload, { _fs, _now, _env, _dir, _platform, _settings, _own
       // Covered, or the file is gone/unreadable at deny time: the gate can no
       // longer be satisfied, so release it.
       removeFile(_fs, gatePath(sid, _dir));
-    }
-  }
-
-  if (!isAllowedTool(tool)) {
-    markActed(_fs, sid, _dir);
-    if (WRITE_TOOLS.has(tool)) {
-      recordPreImage(payload, sid, { _fs, _now, _platform, _dir, _ownStatePath });
     }
   }
   return null;
@@ -318,14 +320,16 @@ function markActed(_fs, sid, dir) {
 function recordPreImage(payload, sid, { _fs, _now, _platform, _dir, _ownStatePath }) {
   const target = String((payload.tool_input && payload.tool_input.file_path) || '');
   if (!target) return;
+  const p = preImagePath(sid, _dir);
+  // Nothing to do once the round's pre-image is recorded — and the resolve
+  // below is a directory scan on every write, so skip it.
+  if (!p || fileExists(_fs, p)) return;
   let own = _ownStatePath;
   if (own === undefined) {
     try { own = resolveOwnStatePath(String(payload.cwd || ''), sid); } catch { own = ''; }
   }
   // A coordinator writing a peer's STATE must not seed its own round.
   if (!own || stateKey(own, _platform) !== stateKey(target, _platform)) return;
-  const p = preImagePath(sid, _dir);
-  if (!p || fileExists(_fs, p)) return;
   let body = '';
   try { body = _fs.readFileSync(target, 'utf8'); } catch { return; } // a mint: nothing to compare
   publishOnce(_fs, p, { hash: liveSectionsHash(body), path: target, ts: _now() });

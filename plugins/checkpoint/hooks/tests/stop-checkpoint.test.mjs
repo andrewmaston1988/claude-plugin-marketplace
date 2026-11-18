@@ -7,15 +7,20 @@ import {
   scanWorkSignals, decideStopNudge, buildStopNudge, stateStampMs, judgeCheckpoint, runStop,
   EDIT_NUDGE_THRESHOLD, NUDGE_COOLDOWN_MS,
 } from '../stop-checkpoint.mjs';
-import { projectDir } from '../lib/paths.mjs';
 import { SECTIONS, lintState, liveSectionsHash } from '../lib/state-lint.mjs';
 import { onPostToolUse, onPreToolUse, preImagePath, readPreImage } from '../lib/state-guard.mjs';
 
 function line(obj) { return JSON.stringify(obj) + '\n'; }
 
-function assistantToolUse(name, input = {}) {
+function assistantToolUse(name, input = {}, id) {
   return line({
-    message: { role: 'assistant', content: [{ type: 'tool_use', name, input }] },
+    message: { role: 'assistant', content: [{ type: 'tool_use', name, input, ...(id ? { id } : {}) }] },
+  });
+}
+
+function toolResult(id) {
+  return line({
+    message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: id, content: 'yes' }] },
   });
 }
 
@@ -29,10 +34,16 @@ test('scanWorkSignals: counts file-mutation tool uses', () => {
   assert.equal(commits, 0);
 });
 
-test('scanWorkSignals: counts an answered AskUserQuestion as a ruling', () => {
-  const text = assistantToolUse('AskUserQuestion', { questions: [{ question: 'Which?' }] });
-  const { edits, commits, rulings } = scanWorkSignals(text);
-  assert.deepEqual({ edits, commits, rulings }, { edits: 0, commits: 0, rulings: 1 });
+test('scanWorkSignals: counts only an ANSWERED AskUserQuestion as a ruling', () => {
+  const answered = assistantToolUse('AskUserQuestion', { questions: [{ question: 'Which?' }] }, 'q1')
+    + toolResult('q1');
+  assert.deepEqual(scanWorkSignals(answered), { edits: 0, commits: 0, rulings: 1 });
+
+  const unanswered = assistantToolUse('AskUserQuestion', { questions: [{ question: 'Which?' }] }, 'q2');
+  assert.equal(scanWorkSignals(unanswered).rulings, 0, 'a question with no answer ruled nothing');
+
+  const otherResult = assistantToolUse('AskUserQuestion', { questions: [] }, 'q3') + toolResult('different');
+  assert.equal(scanWorkSignals(otherResult).rulings, 0, 'a result for another call does not count');
 });
 
 test('scanWorkSignals: detects git commit via Bash and PowerShell', () => {
@@ -92,7 +103,31 @@ test('stateStampMs: returns 0 for non-STATE names', () => {
 
 // ---- Stop stand-down rules ----
 
-function tmpDir(prefix = 'stop-cp-') { return fs.mkdtempSync(path.join(os.tmpdir(), prefix)); }
+// Everything a stop-hook test needs, under one temp root cleaned up with the
+// test: nothing here may touch the operator's ~/.claude.
+function fixture(t) {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'stop-cp-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const dir = path.join(root, 'nudge');
+  fs.mkdirSync(dir, { recursive: true });
+  return {
+    root,
+    cwd: path.join(root, 'repo'),
+    dir,
+    db: path.join(root, 'state.json'),
+    transcript(signals = '') {
+      const p = path.join(root, `tx-${Math.random().toString(36).slice(2)}.jsonl`);
+      fs.writeFileSync(p, signals, 'utf8');
+      return p;
+    },
+    statePath(sid, { stamp = '20261118T020000Z', body } = {}) {
+      const p = path.join(root, 'states', `STATE_${sid}_${stamp}.md`);
+      fs.mkdirSync(path.dirname(p), { recursive: true });
+      if (body !== undefined) fs.writeFileSync(p, body, 'utf8');
+      return p;
+    },
+  };
+}
 
 // A STATE body that passes the lint: seven sections, one-line header, resume
 // mirroring item 1.
@@ -134,83 +169,68 @@ function stateBody({
   ].join('\n');
 }
 
-function ownStatePath(cwd, sid, stamp = '20261118T020000Z') {
-  const dir = projectDir(cwd);
-  fs.mkdirSync(dir, { recursive: true });
-  return path.join(dir, `STATE_${sid}_${stamp}.md`);
-}
-
-function writeTranscript(signals = '') {
-  const p = path.join(tmpDir('stop-tx-'), 'transcript.jsonl');
-  fs.writeFileSync(p, signals, 'utf8');
-  return p;
-}
-
-function run(cwd, sid, { db, dir, signals = '' } = {}) {
+function run(f, sid, { signals = '', ownStatePath } = {}) {
+  assert.ok(ownStatePath, 'inject the own STATE path — never resolve through the real home');
   return runStop(
-    { session_id: sid, cwd, transcript_path: writeTranscript(signals) },
+    { session_id: sid, cwd: f.cwd, transcript_path: f.transcript(signals) },
     // Empty env: the ambient CORRELATION_ID would skip every headless session.
-    { _db: db, _dir: dir, _settings: {}, _env: {}, _now: () => Date.UTC(2026, 10, 18, 2, 5, 0) },
+    {
+      _db: f.db, _dir: f.dir, _settings: {}, _env: {},
+      _now: () => Date.UTC(2026, 10, 18, 2, 5, 0), _ownStatePath: ownStatePath,
+    },
   );
 }
 
-test('S1: a moved live hash stands down, stores lastLiveHash and clears the pre-image', () => {
-  const cwd = tmpDir();
+test('S1: a moved live hash stands down, stores lastLiveHash and clears the pre-image', (t) => {
+  const f = fixture(t);
   const sid = 'sid-s1';
-  const statePath = ownStatePath(cwd, sid);
-  fs.writeFileSync(statePath, stateBody({ current: 'New state.' }), 'utf8');
-  const dir = tmpDir();
-  const dbPath = path.join(tmpDir(), 'state.json');
-  fs.writeFileSync(preImagePath(sid, dir), JSON.stringify({
+  const statePath = f.statePath(sid, { body: stateBody({ current: 'New state.' }) });
+  fs.writeFileSync(preImagePath(sid, f.dir), JSON.stringify({
     hash: liveSectionsHash(stateBody({ current: 'Old state.' })),
     path: statePath,
     ts: Date.UTC(2026, 10, 18, 1, 0, 0),
   }), 'utf8');
 
-  const out = run(cwd, sid, { db: dbPath, dir });
+  const out = run(f, sid, { ownStatePath: statePath });
 
   assert.equal(out, null, 'no block');
-  const db = JSON.parse(fs.readFileSync(dbPath, 'utf8'));
+  const db = JSON.parse(fs.readFileSync(f.db, 'utf8'));
   assert.equal(db[sid].lastLiveHash, liveSectionsHash(stateBody({ current: 'New state.' })));
   assert.equal(db[sid].lastStateStampMs, Date.UTC(2026, 10, 18, 2, 0, 0));
-  assert.equal(readPreImage(sid, { _dir: dir }), null, 'pre-image cleared on stand-down');
+  assert.equal(readPreImage(sid, { _dir: f.dir }), null, 'pre-image cleared on stand-down');
 });
 
-test('S2: a header-only round blocks with the header-only reason', () => {
-  const cwd = tmpDir();
+test('S2: a header-only round blocks with the header-only reason', (t) => {
+  const f = fixture(t);
   const sid = 'sid-s2';
-  const statePath = ownStatePath(cwd, sid);
   const live = stateBody({ current: 'Same live state.' });
-  fs.writeFileSync(statePath, live, 'utf8');
-  const dir = tmpDir();
-  const dbPath = path.join(tmpDir(), 'state.json');
-  fs.writeFileSync(preImagePath(sid, dir), JSON.stringify({
+  const statePath = f.statePath(sid, { body: live });
+  fs.writeFileSync(preImagePath(sid, f.dir), JSON.stringify({
     hash: liveSectionsHash(live), path: statePath, ts: Date.UTC(2026, 10, 18, 1, 0, 0),
   }), 'utf8');
 
-  const out = run(cwd, sid, { db: dbPath, dir });
+  const out = run(f, sid, { ownStatePath: statePath });
 
   assert.ok(out && out.reason);
   assert.match(out.reason, /only the header moved/i);
   for (const name of ['CURRENT STATE', 'NEXT ACTIONS', 'KEY FILES']) {
     assert.ok(out.reason.includes(name), `reason names ${name}`);
   }
-  assert.ok(readPreImage(sid, { _dir: dir }), 'pre-image kept so the retry is judged against the same round');
-  const db = JSON.parse(fs.readFileSync(dbPath, 'utf8'));
+  assert.ok(readPreImage(sid, { _dir: f.dir }), 'pre-image kept so the retry is judged against the same round');
+  const db = JSON.parse(fs.readFileSync(f.db, 'utf8'));
   assert.equal(db[sid].lastLiveHash, undefined);
   assert.equal(db[sid].lastStateStampMs, undefined);
 });
 
-test('S3: a lint failure blocks with at most five lint errors', () => {
-  const cwd = tmpDir();
+test('S3: a lint failure blocks with at most five lint errors', (t) => {
+  const f = fixture(t);
   const sid = 'sid-s3';
-  const statePath = ownStatePath(cwd, sid);
   const body = ['---', 'session: x', '---', '', '## OBJECTIVE', 'only this', ''].join('\n');
-  fs.writeFileSync(statePath, body, 'utf8');
+  const statePath = f.statePath(sid, { body });
   const { errors } = lintState(body, {});
   assert.ok(errors.length > 5, 'fixture must fail more than five rules');
 
-  const out = run(cwd, sid, { db: path.join(tmpDir(), 'state.json'), dir: tmpDir() });
+  const out = run(f, sid, { ownStatePath: statePath });
 
   assert.ok(out && out.reason);
   assert.match(out.reason, /lint/i);
@@ -235,30 +255,27 @@ test('S5: a ruling alone does not nudge; a ruling plus threshold-1 edits does', 
   assert.equal(decideStopNudge({ edits: EDIT_NUDGE_THRESHOLD - 1, commits: 0, rulings: 1, lastNudgeTs: 0, now }), true);
 });
 
-test('S6: the round pre-image lets a multi-Edit checkpoint stand down; the header-only edit alone blocks', () => {
-  const cwd = tmpDir();
+test('S6: the round pre-image lets a multi-Edit checkpoint stand down; the header-only edit alone blocks', (t) => {
+  const f = fixture(t);
   const sid = 'sid-s6';
-  const statePath = ownStatePath(cwd, sid);
-  fs.writeFileSync(statePath, stateBody({ current: 'Base state.' }), 'utf8');
-  const dir = tmpDir();
-  const dbPath = path.join(tmpDir(), 'state.json');
+  const statePath = f.statePath(sid, { body: stateBody({ current: 'Base state.' }) });
 
   // Edit 1 is header-only; the guard records the pre-image before it lands.
   const edit = () => {
     assert.equal(onPreToolUse(
-      { session_id: sid, cwd, tool_name: 'Edit', tool_input: { file_path: statePath } },
-      { _dir: dir, _ownStatePath: statePath, _env: {} },
+      { session_id: sid, cwd: f.cwd, tool_name: 'Edit', tool_input: { file_path: statePath } },
+      { _dir: f.dir, _ownStatePath: statePath, _env: {} },
     ), null);
   };
   const wrote = () => onPostToolUse(
     { session_id: sid, tool_name: 'Edit', tool_input: { file_path: statePath } },
-    { _dir: dir, _env: {} },
+    { _dir: f.dir, _env: {} },
   );
   edit();
   fs.writeFileSync(statePath, stateBody({ resume: 'Do the next', current: 'Base state.' }), 'utf8');
   assert.equal(wrote(), null);
 
-  const first = run(cwd, sid, { db: dbPath, dir });
+  const first = run(f, sid, { ownStatePath: statePath });
   assert.ok(first && first.reason);
   assert.match(first.reason, /only the header moved/i);
 
@@ -268,33 +285,28 @@ test('S6: the round pre-image lets a multi-Edit checkpoint stand down; the heade
     resume: 'Do the next', current: 'Base state.', next: '1. Do the next\n2. Then the other thing',
   }), 'utf8');
   assert.equal(wrote(), null);
-  assert.equal(run(cwd, sid, { db: dbPath, dir }), null);
-  const db = JSON.parse(fs.readFileSync(dbPath, 'utf8'));
+  assert.equal(run(f, sid, { ownStatePath: statePath }), null);
+  const db = JSON.parse(fs.readFileSync(f.db, 'utf8'));
   assert.equal(db[sid].lastStateStampMs, Date.UTC(2026, 10, 18, 2, 0, 0));
 });
 
-test('S7: the sid\'s newest file is judged, not the skeleton beside it', () => {
-  const cwd = tmpDir();
+test('S7: the sid\'s newest file is judged, not the skeleton beside it', (t) => {
+  const f = fixture(t);
   const sid = 'sid-s7';
-  const dir = projectDir(cwd);
-  fs.mkdirSync(dir, { recursive: true });
-  const skeleton = path.join(dir, `STATE_${sid}_20261118T010000Z.md`);
-  const rich = path.join(dir, `STATE_task_${sid}_20261118T020000Z.md`);
-  fs.writeFileSync(skeleton, 'Skeletal backstop written by `pre-compact-snapshot.mjs`\n', 'utf8');
-  fs.writeFileSync(rich, stateBody({ current: 'Rich current state.' }), 'utf8');
+  f.statePath(sid, { stamp: '20261118T010000Z', body: 'Skeletal backstop written by `pre-compact-snapshot.mjs`\n' });
+  const rich = f.statePath(`task_${sid}`, { stamp: '20261118T020000Z', body: stateBody({ current: 'Rich current state.' }) });
 
-  const dbPath = path.join(tmpDir(), 'state.json');
-  fs.writeFileSync(dbPath, JSON.stringify({
+  fs.writeFileSync(f.db, JSON.stringify({
     [sid]: {
       lastStateStampMs: 0,
       lastLiveHash: liveSectionsHash(stateBody({ current: 'Older rich state.' })),
     },
   }), 'utf8');
 
-  const out = run(cwd, sid, { db: dbPath, dir: tmpDir() });
+  const out = run(f, sid, { ownStatePath: rich });
 
   assert.equal(out, null, 'the rich file passes and moved');
-  const db = JSON.parse(fs.readFileSync(dbPath, 'utf8'));
+  const db = JSON.parse(fs.readFileSync(f.db, 'utf8'));
   assert.equal(db[sid].lastStateStampMs, Date.UTC(2026, 10, 18, 2, 0, 0),
     'judged the T02 file, not the T01 skeleton');
 });

@@ -297,7 +297,9 @@ export function stampState(statePath, now = new Date()) {
 
   let target = statePath;
   let at = now;
-  if (m) {
+  // An override keeps its path — resolveOwnStatePath returns it verbatim, so a
+  // rename would leave that escape hatch pointing at nothing.
+  if (m && !isOverride) {
     target = '';
     // Bump by 1s on collision; cap at 60s to avoid runaway loops in degenerate cases.
     for (let i = 0; i < 60; i++) {

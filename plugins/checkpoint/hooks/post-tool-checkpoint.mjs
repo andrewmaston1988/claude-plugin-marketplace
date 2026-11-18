@@ -28,6 +28,9 @@ function emit(text) {
 }
 
 function handle(payload) {
+  // Headless leaves are never held or blocked, so they skip the guard too.
+  if (process.env.CORRELATION_ID) process.exit(0);
+
   // The state guard rides this process: a Read's coverage append and a
   // post-write lint block need no extra spawn per tool call, and both must run
   // before the growth throttle can skip the rest.
@@ -37,8 +40,6 @@ function handle(payload) {
     process.stdout.write(JSON.stringify(guard) + '\n');
     process.exit(0);
   }
-
-  if (process.env.CORRELATION_ID) process.exit(0);
 
   const transcriptPath = String(payload.transcript_path || '');
   const sessionId = String(payload.session_id || '');
