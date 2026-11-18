@@ -190,16 +190,21 @@ test("a test process leaves nothing in the outer temp root", () => {
   }
 });
 
-test("os.tmpdir() is inside this process's own home", () => {
+test("os.tmpdir() is under the one swarm temp dir, outside the home", () => {
   const home = process.env.SWARM_HOME;
-  ok(
-    tmpdir().startsWith(home),
-    `os.tmpdir() is ${tmpdir()}, which is outside the throwaway home ${home}: a temp dir made there outlives the run`,
-  );
   equal(
     basename(dirname(home)),
     "swarm",
     `the home must sit under one swarm temp dir, not directly in the temp root: ${home}`,
+  );
+  equal(
+    dirname(tmpdir()),
+    dirname(home),
+    `os.tmpdir() is ${tmpdir()}, not under the same swarm dir as the home ${home}: a temp dir made there outlives the run`,
+  );
+  ok(
+    !tmpdir().startsWith(home),
+    `os.tmpdir() is inside the home ${home} — the governance gate reads everything under it as a swarm-owned tree`,
   );
 });
 

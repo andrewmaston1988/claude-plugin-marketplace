@@ -18,10 +18,10 @@ if (!process.env.SWARM_HOME || process.env.SWARM_TEST_HOME !== "1") {
   const dir = mkdtempSync(join(tmpdir(), "swarm", "test-home-"));
   const binDir = join(dir, "bin");
   mkdirSync(binDir);
-  // Every later os.tmpdir() here, and in a child that inherits this env, lands in
-  // the home, so the exit handler below takes its temp dirs with it.
-  const tmpDir = join(dir, "tmp");
-  mkdirSync(tmpDir);
+  // Every later os.tmpdir() here, and in a child that inherits this env, lands here.
+  // A SIBLING of the home, never a child: the governance gate reads everything under
+  // the home as swarm-owned, so a fixture inside it would pass checks it must fail.
+  const tmpDir = mkdtempSync(join(tmpdir(), "swarm", "tmp-"));
   process.env.TEMP = process.env.TMP = process.env.TMPDIR = tmpDir;
   // A test-owned config, never the operator's: theirs carries hooks that act on
   // their machine (one MSYS spawn per git command on Windows) and LFS filters.
@@ -54,9 +54,10 @@ if (!process.env.SWARM_HOME || process.env.SWARM_TEST_HOME !== "1") {
   } else {
     writeFileSync(join(binDir, "codex"), "#!/bin/sh\nexit 1\n", { mode: 0o755 });
   }
-  // Only the process that minted it removes it; a worker would pull the dir out
+  // Only the process that minted them removes them; a worker would pull a dir out
   // from under its siblings.
   process.on("exit", () => {
+    try { rmSync(tmpDir, { recursive: true, force: true }); } catch { /* best effort on exit */ }
     try { rmSync(dir, { recursive: true, force: true }); } catch { /* best effort on exit */ }
   });
 }
