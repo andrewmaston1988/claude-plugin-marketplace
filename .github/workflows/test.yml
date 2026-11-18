@@ -19,6 +19,8 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
+      - name: Install root dependencies
+        run: npm ci
       - name: 500-line bar
         # `pull_request` and `push` both supply a base. `before` is all zeros on
         # a branch's first push -- the checker reports that as no comparable
@@ -31,7 +33,7 @@ jobs:
 
   # Every test job below runs the runner, so CI and a local `node
   # scripts/test.mjs --suite <name>` execute the same commands. The suites and
-  # their commands live in scripts/test-suites.mjs; only CI-only steps -- the
+  # their commands live in test-runner.config.mjs; only CI-only steps -- the
   # read-only home sentinels, the file-type check -- stay here.
 
   checkpoint:
@@ -45,6 +47,8 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
+      - name: Install root dependencies
+        run: npm ci
       - name: Run tests
         # A PR runs the suite only when the diff selects it; a push to master
         # always runs it whole.
@@ -60,6 +64,8 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
+      - name: Install root dependencies
+        run: npm ci
       - name: Unit tests
         run: node scripts/test.mjs --suite slack-bridge ${{ github.event_name == 'pull_request' && format('--if-selected --against {0}', github.event.pull_request.base.sha) || '' }}
 
@@ -73,6 +79,8 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
+      - name: Install root dependencies
+        run: npm ci
       - name: Run tests
         run: node scripts/test.mjs --suite claude-peers ${{ github.event_name == 'pull_request' && format('--if-selected --against {0}', github.event.pull_request.base.sha) || '' }}
 
@@ -86,6 +94,8 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
+      - name: Install root dependencies
+        run: npm ci
       # Read-only, not just hashed: a test that overwrites a real file and writes
       # it back leaves a snapshot unchanged, but it cannot restore a file it was
       # denied permission to write. The config is valid so a leak fails here
@@ -127,6 +137,8 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
+      - name: Install root dependencies
+        run: npm ci
       - name: Check plugin file types
         run: |
           unexpected=$(find plugins/ui-probe/ -type f ! -name '*.mjs' ! -name '*.md' ! -name '*.json' -print)
@@ -149,6 +161,8 @@ jobs:
           node-version: "22"
           cache: npm
           cache-dependency-path: plugins/pipeline/package-lock.json
+      - name: Install root dependencies
+        run: npm ci
       # Suite runs carry `install: npm ci`, hash-gated, so there is no separate
       # install step here.
       # Read-only, not just hashed: a write-and-restore leaves a snapshot
@@ -189,6 +203,8 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
+      - name: Install root dependencies
+        run: npm ci
       - name: Run tests
         run: node scripts/test.mjs --suite agent-investigation ${{ github.event_name == 'pull_request' && format('--if-selected --against {0}', github.event.pull_request.base.sha) || '' }}
 
@@ -202,6 +218,8 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
+      - name: Install root dependencies
+        run: npm ci
       - name: Run tests
         run: node scripts/test.mjs --suite discipline ${{ github.event_name == 'pull_request' && format('--if-selected --against {0}', github.event.pull_request.base.sha) || '' }}
 
@@ -215,5 +233,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
+      - name: Install root dependencies
+        run: npm ci
       - name: Run tests
         run: node scripts/test.mjs --suite repo ${{ github.event_name == 'pull_request' && format('--if-selected --against {0}', github.event.pull_request.base.sha) || '' }}
