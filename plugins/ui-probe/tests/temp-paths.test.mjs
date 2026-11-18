@@ -177,9 +177,12 @@ test('A4: a caller-supplied outDir is never pruned', (t) => {
   const root = fixture(t);
   const env = { UI_PROBE_TEMP: join(root, 'ui-probe') };
   const opts = { _tmpdir: () => root, env };
-  const old = join(runsDir(opts), 'old-run');
-  makeRun(old);
-  age(old, 48 * HOUR);
+  // Past the keep window, so a prune of any kind would reach at least the oldest one.
+  for (let i = 0; i < 21; i++) {
+    makeRun(join(runsDir(opts), `old-${pad(i)}`));
+    age(join(runsDir(opts), `old-${pad(i)}`), 48 * HOUR + i);
+  }
+  const old = join(runsDir(opts), 'old-20');
 
   const calls = [];
   const fs = {
