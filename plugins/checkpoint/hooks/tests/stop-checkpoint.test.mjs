@@ -9,7 +9,7 @@ import {
 } from '../stop-checkpoint.mjs';
 import { projectDir } from '../lib/paths.mjs';
 import { SECTIONS, lintState, liveSectionsHash } from '../lib/state-lint.mjs';
-import { onPreToolUse, preImagePath, readPreImage } from '../lib/state-guard.mjs';
+import { onPostToolUse, onPreToolUse, preImagePath, readPreImage } from '../lib/state-guard.mjs';
 
 function line(obj) { return JSON.stringify(obj) + '\n'; }
 
@@ -244,21 +244,30 @@ test('S6: the round pre-image lets a multi-Edit checkpoint stand down; the heade
   const dbPath = path.join(tmpDir(), 'state.json');
 
   // Edit 1 is header-only; the guard records the pre-image before it lands.
-  const allowed = onPreToolUse(
-    { session_id: sid, cwd, tool_name: 'Edit', tool_input: { file_path: statePath } },
-    { _dir: dir, _ownStatePath: statePath, _env: {} },
+  const edit = () => {
+    assert.equal(onPreToolUse(
+      { session_id: sid, cwd, tool_name: 'Edit', tool_input: { file_path: statePath } },
+      { _dir: dir, _ownStatePath: statePath, _env: {} },
+    ), null);
+  };
+  const wrote = () => onPostToolUse(
+    { session_id: sid, tool_name: 'Edit', tool_input: { file_path: statePath } },
+    { _dir: dir, _env: {} },
   );
-  assert.equal(allowed, null);
+  edit();
   fs.writeFileSync(statePath, stateBody({ resume: 'Do the next', current: 'Base state.' }), 'utf8');
+  assert.equal(wrote(), null);
 
   const first = run(cwd, sid, { db: dbPath, dir });
   assert.ok(first && first.reason);
   assert.match(first.reason, /only the header moved/i);
 
   // Edit 2 moves NEXT ACTIONS in the same round: the Stop now stands down.
+  edit();
   fs.writeFileSync(statePath, stateBody({
     resume: 'Do the next', current: 'Base state.', next: '1. Do the next\n2. Then the other thing',
   }), 'utf8');
+  assert.equal(wrote(), null);
   assert.equal(run(cwd, sid, { db: dbPath, dir }), null);
   const db = JSON.parse(fs.readFileSync(dbPath, 'utf8'));
   assert.equal(db[sid].lastStateStampMs, Date.UTC(2026, 10, 18, 2, 0, 0));
