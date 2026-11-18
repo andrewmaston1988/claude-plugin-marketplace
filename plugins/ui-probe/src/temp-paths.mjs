@@ -10,7 +10,7 @@ const DEFAULT_FS = { readdirSync, rmSync, statSync };
 // A day covers an agent reading yesterday's results; the newest 20 cover a burst.
 export const RUNS_KEEP = 20;
 export const RUNS_MAX_AGE_MS = 24 * 60 * 60 * 1000;
-// A backlog must never stall a probe start, so one run deletes only so much of it.
+// One run deletes at most this many dirs, so a backlog drains over several runs.
 export const RUNS_DELETE_CAP = 200;
 
 // Run folders an earlier release left directly in ui-probe/: an ISO stamp or a Date.now() one.
