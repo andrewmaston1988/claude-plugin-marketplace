@@ -1,10 +1,7 @@
 #!/usr/bin/env node
-// Stop hook: when a batch of substantial work finishes without a checkpoint,
-// block the stop once and ask the model to judge whether a significant feature
-// just completed — and if so, invoke the checkpoint skill to write it up.
-// Signals are mechanical (commits / edits / answered questions); significance is
-// the model's call. A stamp is a claim, not evidence: it stands down only when the
-// lint passes and [live] sections moved. Loop-safe; skips under CORRELATION_ID.
+// Stop hook: substantial work finishing without a checkpoint blocks the stop once
+// and asks the model to judge. A stamp is a claim — it stands down only on a passing
+// lint and moved [live] sections. Loop-safe; skips under CORRELATION_ID.
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
