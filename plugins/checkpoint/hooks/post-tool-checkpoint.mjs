@@ -11,6 +11,7 @@ import { readJSON } from './lib/paths.mjs';
 import { readRecentAssistantTurns } from './lib/context.mjs';
 import { checkpointNudge, nudgeStatePath, readNudgeState } from './lib/nudge.mjs';
 import { BYTES_PER_TOKEN } from './prompt-submit-checkpoint.mjs';
+import { onPostToolUse } from './lib/state-guard.mjs';
 
 // Below this much transcript growth the decision is skipped entirely: no tail
 // read, no settings read, no write.
@@ -27,6 +28,16 @@ function emit(text) {
 }
 
 function handle(payload) {
+  // The state guard rides this process: a Read's coverage append and a
+  // post-write lint block need no extra spawn per tool call, and both must run
+  // before the growth throttle can skip the rest.
+  let guard = null;
+  try { guard = onPostToolUse(payload); } catch { /* fail open */ }
+  if (guard && guard.decision) {
+    process.stdout.write(JSON.stringify(guard) + '\n');
+    process.exit(0);
+  }
+
   if (process.env.CORRELATION_ID) process.exit(0);
 
   const transcriptPath = String(payload.transcript_path || '');

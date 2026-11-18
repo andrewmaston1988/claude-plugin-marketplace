@@ -227,6 +227,52 @@ test('checkpointNudge records the transcript size when it has no token count', (
   assert.equal(readNudgeState(nudgeStatePath('pt-i', f.nudgeDir)).lastSize, 200_000);
 });
 
+// ---- (j) the state guard rides this process ----
+
+test('PostToolUse blocks a STATE write that fails the lint', (t) => {
+  const f = fixture(t);
+  const statePath = path.join(f.cwd, 'STATE_pt-j_20261118T010000Z.md');
+  write(statePath, [
+    '---',
+    'session: a session',
+    `resume: ${'x'.repeat(401)}`,
+    'saved: 2026-11-18 01:56 UTC',
+    '---',
+    '',
+  ].join('\n'));
+
+  const r = runHook(f.home, {
+    cwd: f.cwd, session_id: 'pt-j', transcript_path: '',
+    tool_name: 'Write', tool_input: { file_path: statePath },
+  });
+  assert.equal(r.status, 0, r.stderr);
+  const out = JSON.parse(r.stdout);
+  assert.equal(out.decision, 'block');
+  assert.match(out.reason, /resume: 401 characters, over the 400/);
+});
+
+test('PostToolUse appends Read coverage for a STATE file', (t) => {
+  const f = fixture(t);
+  const statePath = path.join(f.cwd, 'STATE_pt-k_20261118T010000Z.md');
+  write(statePath, 'line\n'.repeat(112));
+
+  const r = runHook(f.home, {
+    cwd: f.cwd, session_id: 'pt-k', transcript_path: '',
+    tool_name: 'Read',
+    tool_input: { file_path: statePath },
+    tool_response: { file: { filePath: statePath, startLine: 1, numLines: 4, totalLines: 112 } },
+  });
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.stdout.trim(), '');
+
+  const log = fs.readFileSync(path.join(f.nudgeDir, 'pt-k.read.jsonl'), 'utf8').trim().split('\n');
+  assert.equal(log.length, 1);
+  assert.deepEqual(
+    { start: JSON.parse(log[0]).start, end: JSON.parse(log[0]).end },
+    { start: 1, end: 4 },
+  );
+});
+
 // ---- (g) eight concurrent writeJSON writers leave valid JSON ----
 
 test('writeJSON from eight concurrent writers never leaves invalid JSON', async (t) => {

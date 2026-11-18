@@ -2,10 +2,11 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
+import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import os from 'node:os';
 import { shouldPickUp, buildPickupNote, classifyState } from '../session-start-compact.mjs';
-import { SKELETON_MARKER, readStateHead, latestPrecompactSnapshot, docsDirPath } from '../lib/paths.mjs';
+import { SKELETON_MARKER, readStateHead, latestPrecompactSnapshot, docsDirPath, encodeProject } from '../lib/paths.mjs';
 
 const HOOKS = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const TEMPLATE = path.resolve(HOOKS, '..', 'skills', 'checkpoint', 'templates', 'state-template.md');
@@ -144,7 +145,7 @@ test('row 7a: rich note leads with the read-first sentence, then the snapshot, t
     fs.writeFileSync(snap, 'snapshot body', 'utf8');
 
     const note = buildPickupNote('rich', statePath);
-    assert.ok(note.startsWith(`Read \`${statePath}\` in full before your next action`),
+    assert.ok(note.startsWith(`Read \`${statePath}\` in full — every page`),
       `note must lead with the read-first sentence, got: ${note.slice(0, 120)}`);
     assert.ok(note.indexOf('precompact-20261115T130000Z.md') > note.indexOf('before your next action'),
       'snapshot path comes after the read-first sentence');
@@ -203,8 +204,43 @@ test('row 7d: the note stays within 10,000 chars even with a huge NEXT ACTIONS',
     const statePath = writeState(dir, body);
     const note = buildPickupNote('rich', statePath);
     assert.ok(note.length <= 10_000, `note must stay within 10,000 chars, got ${note.length}`);
-    assert.ok(note.startsWith(`Read \`${statePath}\` in full before your next action`));
+    assert.ok(note.startsWith(`Read \`${statePath}\` in full — every page`));
   });
+});
+
+// ---- W1: the rich note asks for the whole file and a live-section reconcile ----
+
+test('W1: the rich note demands every page and a live-section reconcile', () => {
+  const note = buildPickupNote('rich', 'C:/x/STATE_a_20261118T010000Z.md', { snapshotPath: '' });
+  assert.match(note, /in full/);
+  assert.match(note, /every page/);
+  assert.match(note, /every \[live\] section/);
+  assert.doesNotMatch(note, /correct only what changed/,
+    'the old minimal-edit wording must not survive');
+});
+
+test('W1: a compaction on a rich STATE arms the read gate for that path', (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ckpt-compact-gate-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const home = path.join(root, 'home');
+  const cwd = path.join(root, 'repo');
+  const projectDir = path.join(home, '.claude', 'projects', encodeProject(cwd));
+  fs.mkdirSync(projectDir, { recursive: true });
+  const statePath = path.join(projectDir, 'STATE_w1_20261118T010000Z.md');
+  fs.writeFileSync(statePath, '# STATE\n## OBJECTIVE\nreal work\n');
+
+  const env = { ...process.env, HOME: home, USERPROFILE: home };
+  delete env.CORRELATION_ID;
+  const r = spawnSync(process.execPath, [path.join(HOOKS, 'session-start-compact.mjs')], {
+    input: JSON.stringify({ source: 'compact', session_id: 'w1', cwd }),
+    encoding: 'utf8', env,
+  });
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(JSON.parse(r.stdout).hookSpecificOutput.additionalContext, /every page/);
+
+  const gate = JSON.parse(fs.readFileSync(
+    path.join(home, '.claude', '.checkpoint-nudge', 'w1.gate.json'), 'utf8'));
+  assert.equal(gate.path, statePath);
 });
 
 test('latestPrecompactSnapshot picks the newest snapshot, or empty', () => {
