@@ -431,7 +431,8 @@ export function captureTvBranch({ screen, config, outDir = undefined, rest, getF
   const { port, problem } = portFrom(getFlag, rest);
   if (problem) return { exitCode: 64, stderr: problem };
   return branch(async () => {
-    const { digest, outDir, tvReturn } = await captureOnTv({
+    // `captureDir` because a local `outDir` would shadow the parameter the argument reads.
+    const { digest, outDir: captureDir, tvReturn } = await captureOnTv({
       screen,
       config,
       attachPort: port,
@@ -445,7 +446,7 @@ export function captureTvBranch({ screen, config, outDir = undefined, rest, getF
       file,
       _attach,
     });
-    return { digest, outDir, tvReturn };
+    return { digest, outDir: captureDir, tvReturn };
   });
 }
 
