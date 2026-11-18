@@ -397,7 +397,8 @@ source array, or a failed clone, behave exactly as they do for a hand-listed `fr
                              # outside the repo; a run's leaf trees live under `treeRoot` instead
   manifest.json              # the effective plan at dispatch (args substituted) — runs record their own intent
   results/<id>.json          # { id, model, ok, exit, durationMs, tokens?, costUsd?, numTurns?, sessionId?, prompt?, cwd, allowedTools, output, outputJson?, citations?, worktree? }
-  results/<id>.log           # the leaf's stream minus per-token thinking_tokens progress events — tail one leaf's tool calls live
+  results/<id>.log           # the leaf's stream minus per-token thinking_tokens progress events and inline image
+                             # bytes — tail one leaf's tool calls live
   digest.md                  # when a digest block is present — read this, not the raw results
   digest.html                # the run's own readable pages, rendered by the engine as the
   report.html                # run finishes (report.html in report mode); phone-friendly
@@ -504,6 +505,28 @@ pid — is never cleared automatically; delete `<resultsDir>/engine.lock` with n
 `status <resultsDir>` renders the same roster read-only (`--watch` for live repaint). Past
 that same staleness window it relabels every `running`/`retrying` row `interrupted` and
 adds `⚠ engine dead — no heartbeat since <iso>` — a crashed engine reads as dead, not quiet.
+
+## Transcripts hold no image bytes
+
+A vision leaf reads images, and every image it reads would otherwise land in
+`results/<id>.log` as a base64 block — the bulk of a vision run's disk use. The line
+filter rewrites each block as it is written: the block, its position and its media type
+stay, and `data` becomes `"[stripped]"` beside the decoded `bytes` and `sha256`, so the
+image can still be matched back to its file. A `data:image/…;base64,` string is stubbed
+the same way, at any depth. Nothing that reads a transcript wants the bytes — coverage
+reads the Read calls, grading reads the model's words — and a codex `aggregated_output`
+is left verbatim because coverage measures its lines. A line with nothing to strip, or
+one that does not parse, is written back exactly as it arrived.
+
+`swarm compact <path> [--dry-run]` applies the same per-line rule to transcripts already
+on disk. The path is a results dir, a run dir or a whole runs root; files are found by
+shape (`<run>/results/<id>.log`, plain or `.log.gz`, never `*.ask.log`) at any depth.
+Each file is rewritten through a `.tmp` sibling and renamed, so a torn write can never
+leave half a transcript, and a run the shared liveness rule reports alive is skipped and
+named. A `.log.gz` becomes a plain stripped `.log` and the `.gz` goes only once the rename
+lands; one with a sibling `.log` is skipped, because a resumed run wrote the newer one.
+`--dry-run` prints the before and after bytes and writes nothing. It removes disk use,
+never spend: an image already sent to a model was billed as tokens.
 
 ## Interrogating a leaf
 
