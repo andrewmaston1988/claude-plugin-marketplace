@@ -199,6 +199,51 @@ test('A4: a caller-supplied outDir is never pruned', (t) => {
   assert.ok(existsSync(old), 'the stale run is still there for a default run to prune');
 });
 
+// A8 ---------------------------------------------------------------------------
+
+test('A8: a defaulted config reaches the prune on its way to the run dir', (t) => {
+  const root = fixture(t);
+  const temp = join(root, 'ui-probe');
+  const previous = process.env.UI_PROBE_TEMP;
+  process.env.UI_PROBE_TEMP = temp;
+  t.after(() => {
+    if (previous === undefined) delete process.env.UI_PROBE_TEMP;
+    else process.env.UI_PROBE_TEMP = previous;
+  });
+  const configDir = join(root, 'config');
+  mkdirSync(configDir);
+  const file = join(configDir, '.ui-probe.json');
+  writeFileSync(file, JSON.stringify({ baseUrl: 'http://127.0.0.1:9' }));
+  const config = loadConfig(file);
+
+  const runs = join(temp, 'runs');
+  // The 20 fresh dirs fill the keep window, so the stale one is the only prune candidate.
+  for (let i = 0; i < 20; i++) {
+    makeRun(join(runs, `fresh-${pad(i)}`));
+    age(join(runs, `fresh-${pad(i)}`), HOUR);
+  }
+  const stale = join(runs, 'stale');
+  makeRun(stale);
+  age(stale, 48 * HOUR);
+
+  const calls = [];
+  const fs = {
+    readdirSync,
+    statSync,
+    rmSync: (path, options) => {
+      calls.push(path);
+      rmSync(path, options);
+    },
+  };
+  const resolved = resolveOutDir(config, undefined, { _tmpdir: () => root, env: process.env, _fs: fs });
+  assert.equal(resolved, config.outDir, 'the defaulted dir is what a run writes to');
+  assert.deepEqual(calls, [stale], 'resolveOutDir reached the prune');
+  assert.equal(existsSync(stale), false, 'the stale run is gone');
+  for (let i = 0; i < 20; i++) {
+    assert.ok(existsSync(join(runs, `fresh-${pad(i)}`)), `fresh-${pad(i)} is under 24 h`);
+  }
+});
+
 // A5 ---------------------------------------------------------------------------
 
 test('A5: only a direct child of either profile root with our prefix is ours', (t) => {

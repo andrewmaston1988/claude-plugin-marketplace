@@ -91,7 +91,7 @@ export function foldPath(path, platform = process.platform) {
 /** The root an injected tmpDir implies. `UI_PROBE_TEMP` wins because minting follows it:
  *  scanning the real root while minting elsewhere would sweep the wrong probes. */
 function profilesRootFor(tmpDir) {
-  return process.env.UI_PROBE_TEMP ? profilesDir() : join(tmpDir, "ui-probe", "profiles");
+  return profilesDir({ _tmpdir: () => tmpDir, env: process.env });
 }
 
 /** True only for a folder this plugin minted: a direct child of the profiles root, or — for

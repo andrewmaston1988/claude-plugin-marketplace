@@ -79,7 +79,9 @@ export function pruneRuns({
   for (const [index, run] of runs.entries()) {
     if (index >= keep && at - run.mtimeMs > maxAgeMs) remove(run.path);
   }
-  for (const entry of childDirs(_fs, uiProbeTemp(opts))) {
+  // Legacy names only ever lived in the real temp root. Rooting the sweep at UI_PROBE_TEMP
+  // would turn it on directories ui-probe never made wherever an operator pointed that.
+  for (const entry of childDirs(_fs, join(_tmpdir(), 'ui-probe'))) {
     if (LEGACY_RUN.test(entry.name) && at - entry.mtimeMs > maxAgeMs) remove(entry.path);
   }
   return removed;

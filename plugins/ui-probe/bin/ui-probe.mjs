@@ -69,12 +69,16 @@ function refuseUnknown(subcommand, args) {
     const device = deviceFlag(rest);
     if (device.problem) { err(device.problem); settle(64); return; }
 
+    // One resolution for both capture branches: a defaulted dir mints runs/<stamp> and prunes
+    // there first; a dir from --out or the config belongs to the caller and is never pruned.
+    const outDir = resolveOutDir(config, getFlag("--out", rest));
+
     if (device.value === "tv") {
       const { captureTvBranch, tvCaptureDir, tvCommandLines, writeTvReturn } = await import("../src/tv/cli.mjs");
       // Resolved before the call so a thrown capture still has somewhere to write its record.
-      const captureDir = tvCaptureDir(getFlag("--out", rest) ?? config.outDir);
+      const captureDir = tvCaptureDir(outDir);
       tvOutDir = captureDir;
-      const done = await captureTvBranch({ screen, config, rest, getFlag, source: name ?? url });
+      const done = await captureTvBranch({ screen, config, outDir, rest, getFlag, source: name ?? url });
       if (done.stderr) err(done.stderr);
       if (done.tvReturn) writeTvReturn(done.outDir ?? captureDir, done.tvReturn);
       // The return is reported last, after the digest, and never changes the exit code.
@@ -93,7 +97,7 @@ function refuseUnknown(subcommand, args) {
           session = await openBrowser(config.browser);
           return session.client;
         },
-        outDir: getFlag("--out", rest) ?? undefined,
+        outDir,
         viewports,
         vars,
         allowWrites: hasFlag("--allow-writes", rest),
@@ -268,7 +272,7 @@ function refuseUnknown(subcommand, args) {
     const outDir = resolveOutDir(loaded.config, getFlag("--out", rest));
     tvOutDir = outDir;
     const { tvProbeBranch, tvCommandLines, writeTvReturn } = await import("../src/tv/cli.mjs");
-    const done = await tvProbeBranch({ config: loaded.config, rest, getFlag, resolveOutDir, out, err });
+    const done = await tvProbeBranch({ config: loaded.config, outDir, rest, getFlag, out, err });
     if (done.stderr) err(done.stderr);
     if (done.exitCode !== 0 && done.tvReturn) {
       // A probe that threw wrote no output; its record still gets a file and the last line.

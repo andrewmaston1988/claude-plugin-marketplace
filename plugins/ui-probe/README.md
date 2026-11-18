@@ -83,7 +83,7 @@ Everything ui-probe writes to temp lives under one root — `<os tmpdir>/ui-prob
 | `profiles/ui-probe-profile-*/` | a launched browser's profile folder |
 | `platform-<appid>.json` | the last TV platform probe |
 
-A run on the default `outDir` first prunes `runs/`: directories older than 24 hours go, the newest 20 always stay, and one run deletes at most 200 so a backlog never delays a probe. Run directories an earlier release left directly under `ui-probe/` are pruned by the same rule. An `outDir` given in the config or with `--out` is never pruned.
+A capture or run on the default `outDir` first prunes `runs/`: directories older than 24 hours go, the newest 20 always stay, and one invocation deletes at most 200 directories, so a large backlog drains over several invocations. Run directories an earlier release left directly under `<os tmpdir>/ui-probe/` are pruned once older than 24 hours. An `outDir` given in the config or with `--out` is never pruned.
 
 ## Read-only guard
 
