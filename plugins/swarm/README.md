@@ -516,8 +516,9 @@ stay, and `data` becomes `"[stripped]"` beside the decoded `bytes` and `sha256`,
 image can still be matched back to its file. A `data:image/…;base64,` string is stubbed
 the same way, at any depth. The Read tool returns the image a second time in its own
 `tool_use_result.file.base64`, keeping `type`, `originalSize` and `dimensions`; that copy
-is stubbed with the same `bytes` and `sha256` fields. Nothing that reads a transcript wants the bytes — coverage
-reads the Read calls, grading reads the model's words — and a codex `aggregated_output`
+is stubbed with the same `bytes` and `sha256` fields. Nothing that reads a transcript
+wants the bytes — coverage reads the Read calls, grading reads the model's words — and a
+codex `aggregated_output`
 is left verbatim because coverage measures its lines. A line with nothing to strip, or
 one that does not parse, is written back exactly as it arrived.
 
