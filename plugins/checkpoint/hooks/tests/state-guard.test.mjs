@@ -49,7 +49,7 @@ test('G1: a partial Read before the first act arms the gate; after acting it doe
   const dir = tmpDir(t);
   const file = path.join(dir, STATE_NAME);
   fs.writeFileSync(file, stateBody(112));
-  const o = opts(dir);
+  const o = opts(dir, { _ownStatePath: file });
 
   onPostToolUse(readPayload('s1', file, 1, 4, 112), o);
   const gate = JSON.parse(fs.readFileSync(gatePath('s1', dir), 'utf8'));
@@ -109,6 +109,26 @@ test('G2: overlapping, out-of-order Reads clear the gate', (t) => {
     onPostToolUse(readPayload('s3', file, start, num, 112), o);
   }
   assert.equal(bash('s3', o), null);
+});
+
+test('a full Read from before the gate was armed does not satisfy it', (t) => {
+  const dir = tmpDir(t);
+  const file = path.join(dir, STATE_NAME);
+  fs.writeFileSync(file, stateBody(112));
+  const o = opts(dir, { _ownStatePath: file });
+
+  // The pre-compaction read is already in the log when the gate arms: the
+  // resumed session must read the file again, not act on the summary.
+  onPostToolUse(readPayload('b1', file, 1, 112, 112), o);
+  assert.equal(fs.existsSync(gatePath('b1', dir)), false, 'a full read arms nothing');
+  armGate('b1', file, o);
+
+  const denied = bash('b1', o);
+  assert.equal(denied?.hookSpecificOutput?.permissionDecision, 'deny', 'pre-arm coverage must not count');
+  assert.match(denied.hookSpecificOutput.permissionDecisionReason, /offset 1\b/);
+
+  onPostToolUse(readPayload('b1', file, 1, 112, 112), o);
+  assert.equal(bash('b1', o), null, 'a fresh full read clears it');
 });
 
 // ---- G3: allowlist vs denied tools ----

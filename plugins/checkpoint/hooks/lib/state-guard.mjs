@@ -135,7 +135,7 @@ function mergeRanges(list) {
   return out;
 }
 
-function coverageRanges(_fs, p, key) {
+function coverageRanges(_fs, p, key, gen = null) {
   let raw = '';
   try { raw = _fs.readFileSync(p, 'utf8'); } catch { return []; }
   const ranges = [];
@@ -144,6 +144,7 @@ function coverageRanges(_fs, p, key) {
     let e;
     try { e = JSON.parse(line); } catch { continue; }
     if (!e || e.path !== key) continue;
+    if (gen !== null && String(e.gen || '') !== gen) continue;
     const start = Number(e.start);
     const end = Number(e.end);
     if (Number.isFinite(start) && Number.isFinite(end) && end >= start) ranges.push([start, end]);
@@ -176,14 +177,14 @@ function lineCount(body) {
 // guard costs no extra spawn per tool call.
 export function onPostToolUse(payload, {
   _fs = fs, _now = () => Date.now(), _env = process.env,
-  _dir = NUDGE_DIR, _platform = process.platform,
+  _dir = NUDGE_DIR, _platform = process.platform, _ownStatePath,
 } = {}) {
   try {
     const sid = String((payload && payload.session_id) || '');
     if (!sid) return null;
     const tool = String((payload && payload.tool_name) || '');
     if (tool === 'Read') {
-      onRead(payload, sid, { _fs, _now, _env, _dir, _platform });
+      onRead(payload, sid, { _fs, _now, _env, _dir, _platform, _ownStatePath });
       return null;
     }
     if (WRITE_TOOLS.has(tool)) return onWrite(payload, { _fs, _env, _platform });
@@ -191,29 +192,52 @@ export function onPostToolUse(payload, {
   } catch { return null; }
 }
 
-function onRead(payload, sid, { _fs, _now, _env, _dir, _platform }) {
+function onRead(payload, sid, { _fs, _now, _env, _dir, _platform, _ownStatePath }) {
   const file = payload && payload.tool_response && payload.tool_response.file;
   if (!file) return; // an errored Read fires no PostToolUse at all (P0)
   const filePath = String(file.filePath || (payload.tool_input && payload.tool_input.file_path) || '');
   if (!isStatePath(filePath, { _env, _platform })) return;
-  const start = Number(file.startLine) || 0;
-  const num = Number(file.numLines) || 0;
-  const total = Number(file.totalLines) || 0;
-  if (start < 1 || num < 1) return;
-
+  let start = Number(file.startLine) || 0;
+  let num = Number(file.numLines) || 0;
+  let total = Number(file.totalLines) || 0;
+  // A no-offset Read carries the content but no pagination; count it as the
+  // whole file so a genuine full read always clears the gate.
+  if (start < 1 || num < 1) {
+    if (typeof file.content !== 'string') return;
+    start = 1;
+    num = total > 0 ? total : lineCount(file.content);
+    total = total || num;
+  }
+  const end = start + num - 1;
   const key = stateKey(filePath, _platform);
   const log = readLogPath(sid, _dir);
-  appendCoverage(_fs, log, { path: key, start, end: start + num - 1, total, ts: _now() });
+  const gateFile = gatePath(sid, _dir);
+  const gate = readJson(_fs, gateFile);
+  // Coverage only counts against the gate that was armed after it: a Read from
+  // before compaction must not satisfy the post-compact gate.
+  let gen = gate && typeof gate.key === 'string'
+    ? (gate.key === key ? String(gate.gen || '') : '')
+    : null;
 
-  // Arm only on a partial Read before the session's first act: the file the
-  // operator picked must be finished. A coordinator that already acted is not
-  // held, and a full Read needs no gate.
-  const gate = gatePath(sid, _dir);
-  if (fileExists(_fs, gate) || fileExists(_fs, actedPath(sid, _dir))) return;
-  const ranges = coverageRanges(_fs, log, key);
-  const known = total || ranges.reduce((m, [, e]) => Math.max(m, e), 0);
-  if (known > 0 && !firstGap(ranges, known)) return;
-  writeJsonAtomic(_fs, gate, { key, path: filePath, armedAt: _now(), total: known });
+  if (gen === null) {
+    // Arm only on a partial Read of the session's OWN STATE before its first
+    // act: the file the operator picked must be finished. A coordinator's peek
+    // at a peer's STATE arms nothing, and a full Read needs no gate.
+    let own = _ownStatePath;
+    if (own === undefined) {
+      try { own = resolveOwnStatePath(String(payload.cwd || ''), sid); } catch { own = ''; }
+    }
+    if (own && stateKey(own, _platform) === key && !fileExists(_fs, actedPath(sid, _dir))) {
+      const ranges = mergeRanges([...coverageRanges(_fs, log, key), [start, end]]);
+      const known = total || ranges.reduce((m, [, e]) => Math.max(m, e), 0);
+      if (!(known > 0 && !firstGap(ranges, known))) {
+        gen = `${_now()}-${Math.random().toString(36).slice(2)}`;
+        writeJsonAtomic(_fs, gateFile, { key, path: filePath, armedAt: _now(), total: known, gen });
+      }
+    }
+    if (gen === null) gen = '';
+  }
+  appendCoverage(_fs, log, { path: key, start, end, total, ts: _now(), gen });
 }
 
 // The post-write check judges shape only. Judging "changed" per write would
@@ -280,7 +304,7 @@ function preToolUse(payload, { _fs, _now, _env, _dir, _platform, _settings, _own
 function denyWhileUnread(gate, sid, { _fs, _dir }) {
   let body = '';
   try { body = _fs.readFileSync(gate.path, 'utf8'); } catch { return null; }
-  const ranges = coverageRanges(_fs, readLogPath(sid, _dir), gate.key);
+  const ranges = coverageRanges(_fs, readLogPath(sid, _dir), gate.key, String(gate.gen || ''));
   const covered = ranges.reduce((m, [, e]) => Math.max(m, e), 0);
   const total = Math.max(Number(gate.total) || 0, covered, lineCount(body));
   const gap = firstGap(ranges, total);
@@ -346,8 +370,10 @@ export function armGate(sessionId, statePath, {
 } = {}) {
   const p = gatePath(sessionId, _dir);
   if (!p || !statePath) return false;
+  // `gen` scopes the gate to coverage recorded after it was armed.
+  const gen = `${_now()}-${Math.random().toString(36).slice(2)}`;
   writeJsonAtomic(_fs, p, {
-    key: stateKey(statePath, _platform), path: String(statePath), armedAt: _now(), total: 0,
+    key: stateKey(statePath, _platform), path: String(statePath), armedAt: _now(), total: 0, gen,
   });
   return true;
 }
