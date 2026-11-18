@@ -167,6 +167,7 @@ swarm status --mine       # list this session's finished runs still holding kept
 swarm wait <resultsDir> [--timeout <secs>]  # wait for settlement (exit 0 clean, 1 leaf not ok, 2 engine died, 3 timed out)
 swarm stop <resultsDir>    # cooperatively stop a live engine
 swarm prune <resultsDir> [--dry-run] [--discard-unlanded]  # destroy kept trees and branches
+swarm compact <path> [--dry-run]  # strip inline image bytes from leaf transcripts
 swarm mcp list [--json]    # list leaf MCP servers and off/on state
 swarm mcp set --off <a,b> [--repo <repo>=<servers>]…  # set leaf MCP configuration
 swarm ask <resultsDir> <leaf-id> "follow-up?" [--model <m>]   # interrogate a finished leaf

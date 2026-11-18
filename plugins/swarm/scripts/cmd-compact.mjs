@@ -1,17 +1,11 @@
 // `swarm compact` — strip inline image bytes from leaf transcripts already on disk.
-// It applies the same per-line function the live filter uses, so a compacted run and
-// a fresh one have identical shape; only the bytes go. Files are rewritten through a
-// `.tmp` sibling and renamed, so a torn write can never leave half a transcript, and
-// a run the shared liveness rule calls alive is skipped rather than rewritten under a
-// running leaf.
 import * as fs from "node:fs";
-import { once } from "node:events";
-import { createInterface } from "node:readline";
-import { finished } from "node:stream/promises";
 import { createGunzip } from "node:zlib";
 import { basename, dirname, join, resolve } from "node:path";
-import { stripImages } from "../src/log-line-filter.mjs";
+import { finished } from "node:stream/promises";
+import { createLogLineFilter } from "../src/log-line-filter.mjs";
 import { runLiveness } from "../src/runlog.mjs";
+import { getConfig } from "../src/config.mjs";
 import { out, err } from "../src/ui.mjs";
 
 const RENAME_ATTEMPTS = 3;
@@ -42,12 +36,6 @@ function transcriptFiles(_fs, root) {
   return found.sort();
 }
 
-async function* transcriptLines(_fs, file, gz) {
-  const source = _fs.createReadStream(file);
-  const stream = gz ? source.pipe(createGunzip()) : source;
-  for await (const line of createInterface({ input: stream, crlfDelay: Infinity })) yield line;
-}
-
 // EPERM against a concurrent reader is the known Windows failure (see results.mjs);
 // a few quick retries cover it, and anything else fails straight away.
 async function renameWithRetry(_fs, from, to) {
@@ -67,8 +55,8 @@ function removeQuietly(_fs, path) {
   try { _fs.unlinkSync(path); } catch { /* already gone */ }
 }
 
-// { before, after } in bytes, or { skipped: reason }. Bytes are counted as the stream
-// is read, so a dry run measures the same numbers without writing anything.
+// { before, after, changed } in on-disk bytes, or { skipped: reason, failed? }.
+// Nothing stripped leaves the file alone — a `.gz` stays compressed and `.tmp` goes.
 async function compactFile(file, { _fs, dryRun }) {
   const gz = file.endsWith(".log.gz");
   const target = gz ? file.slice(0, -3) : file;
@@ -77,39 +65,72 @@ async function compactFile(file, { _fs, dryRun }) {
   if (gz && _fs.existsSync(target)) {
     return { skipped: "a sibling .log exists — a resumed run wrote a newer transcript" };
   }
-  const tmp = `${target}.tmp`;
-  let before = 0;
-  let after = 0;
-  const writer = dryRun ? null : _fs.createWriteStream(tmp);
+  let before;
   try {
-    for await (const line of transcriptLines(_fs, file, gz)) {
-      const raw = Buffer.from(line + "\n", "utf8");
-      before += raw.length;
-      const stripped = stripImages(raw);
-      after += stripped.length;
-      if (writer && !writer.write(stripped)) await once(writer, "drain");
-    }
-    if (writer) {
-      writer.end();
-      await finished(writer);
-    }
+    before = _fs.statSync(file).size;
   } catch (e) {
-    writer?.destroy();
-    removeQuietly(_fs, tmp);
-    return { skipped: `unreadable (${e?.code || e?.message})` };
+    return { skipped: `unreadable (${e?.code || e?.message})`, failed: true };
   }
-  if (dryRun) return { before, after };
+  const tmp = `${target}.tmp`;
+  const writer = dryRun ? null : _fs.createWriteStream(tmp);
+  // Taken at creation: an async open/write failure (EACCES, a directory at the .tmp
+  // path) rejects here instead of escaping unhandled, and the destroy unblocks the read.
+  const writerDone = writer ? finished(writer) : null;
+  // A handler from the start: the rejection is awaited later, but an error mid-read
+  // would otherwise sit unhandled and take the process down before the await runs.
+  if (writerDone) writerDone.catch(() => {});
+  let source = null;
+  if (writer) writer.once("error", () => source?.destroy());
+  let changed = false;
+  let after = 0;
+  try {
+    source = _fs.createReadStream(file);
+    const stream = gz ? source.pipe(createGunzip()) : source;
+    const filter = createLogLineFilter((buf) => {
+      after += buf.length;
+      if (!writer || writer.destroyed) return;
+      if (!writer.write(buf)) {
+        stream.pause();
+        writer.once("drain", () => stream.resume());
+      }
+    });
+    for await (const chunk of stream) changed = filter.push(chunk) || changed;
+    changed = filter.end() || changed;
+    if (writer && !writer.destroyed) writer.end();
+    if (writerDone) await writerDone;
+  } catch (e) {
+    source?.destroy();
+    writer?.destroy();
+    if (writerDone) await writerDone.catch(() => {});
+    removeQuietly(_fs, tmp);
+    return { skipped: `unreadable (${e?.code || e?.message})`, failed: true };
+  }
+  if (dryRun) return { before, after: changed ? after : before, changed };
+  if (!changed) {
+    removeQuietly(_fs, tmp);
+    return { before, after: before, changed: false };
+  }
   if (!(await renameWithRetry(_fs, tmp, target))) {
     removeQuietly(_fs, tmp);
-    return { skipped: "the rename failed — the original is untouched" };
+    return { skipped: "the rename failed — the original is untouched", failed: true };
   }
   // Only once the plain transcript is in place: the .gz is the last copy of the
   // bytes until the rename lands.
   if (gz) removeQuietly(_fs, file);
-  return { before, after };
+  let afterBytes = after;
+  try { afterBytes = _fs.statSync(target).size; } catch { /* stat is reporting only */ }
+  return { before, after: afterBytes, changed: true };
 }
 
-export async function cmdCompact(rest, { usage, _fs = fs, now } = {}) {
+function verbFor(before, after, dryRun) {
+  if (after < before) return dryRun ? "would shrink" : "shrank";
+  if (after > before) return dryRun ? "would grow" : "grew";
+  return dryRun ? "would be unchanged" : "was unchanged";
+}
+
+export async function cmdCompact(rest, { usage, _fs = fs, now, _getConfig = getConfig } = {}) {
+  const unknown = rest.find((arg) => arg.startsWith("--") && arg !== "--dry-run");
+  if (unknown) { err(`swarm: unknown option ${unknown}`); err(usage); return 1; }
   const target = rest.find((arg) => !arg.startsWith("--"));
   if (!target) { err(usage); return 1; }
   const root = resolve(target);
@@ -117,6 +138,9 @@ export async function cmdCompact(rest, { usage, _fs = fs, now } = {}) {
   const dryRun = rest.includes("--dry-run");
   const files = transcriptFiles(_fs, root);
   if (!files.length) { out(`swarm: no transcripts under ${root}`); return 0; }
+
+  const cfg = _getConfig();
+  const heartbeatMs = Math.max(50, (cfg.heartbeatSecs ?? 15) * 1000);
 
   const byRun = new Map();
   for (const file of files) {
@@ -129,8 +153,9 @@ export async function cmdCompact(rest, { usage, _fs = fs, now } = {}) {
   let totalAfter = 0;
   let compacted = 0;
   let skipped = 0;
+  let failed = 0;
   for (const [runDir, runFiles] of [...byRun].sort(([a], [b]) => a.localeCompare(b))) {
-    const live = runLiveness(runDir, now ? { now } : {});
+    const live = runLiveness(runDir, { heartbeatMs, ...(now ? { now } : {}) });
     if (live.finishedMs == null && live.stoppedMs == null && live.abortedMs == null) {
       err(`  ${runDir}: live — skipped, its leaf may still be writing`);
       skipped += runFiles.length;
@@ -143,6 +168,11 @@ export async function cmdCompact(rest, { usage, _fs = fs, now } = {}) {
       if (result.skipped) {
         err(`  ${file}: skipped — ${result.skipped}`);
         skipped++;
+        if (result.failed) failed++;
+        continue;
+      }
+      if (!result.changed) {
+        err(`  ${file}: nothing to strip`);
         continue;
       }
       runBefore += result.before;
@@ -154,7 +184,11 @@ export async function cmdCompact(rest, { usage, _fs = fs, now } = {}) {
     totalBefore += runBefore;
     totalAfter += runAfter;
   }
-  out(`swarm compact: ${compacted} transcript(s) ${dryRun ? "would shrink" : "shrank"} `
-    + `${formatBytes(totalBefore)} → ${formatBytes(totalAfter)}${skipped ? `, ${skipped} skipped` : ""}`);
-  return 0;
+  if (!compacted) {
+    out(`swarm compact: nothing to strip${skipped ? `, ${skipped} skipped` : ""}`);
+  } else {
+    out(`swarm compact: ${compacted} transcript(s) ${verbFor(totalBefore, totalAfter, dryRun)} `
+      + `${formatBytes(totalBefore)} → ${formatBytes(totalAfter)}${skipped ? `, ${skipped} skipped` : ""}`);
+  }
+  return failed ? 1 : 0;
 }

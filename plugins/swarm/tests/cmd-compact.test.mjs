@@ -4,7 +4,7 @@ import "./helpers/isolate-home.mjs";
 import { test } from "node:test";
 import { deepEqual, equal, ok } from "node:assert/strict";
 import * as fs from "node:fs";
-import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, statSync, utimesSync, writeFileSync, rmSync } from "node:fs";
 import { gzipSync } from "node:zlib";
 import { join } from "node:path";
 import { runCliInProcess } from "./helpers/cli.mjs";
@@ -133,7 +133,7 @@ test("K3b: a rename that always fails leaves the .gz untouched and removes the .
       restore();
     }
 
-    equal(status, 0);
+    equal(status, 1);
     deepEqual(readFileSync(gz), gzBytes, "the original .gz is untouched");
     ok(!existsSync(join(run, "results", "b.log")), "no .log is written past a failed rename");
     ok(!existsSync(join(run, "results", "b.log.tmp")), "the .tmp is cleaned up");
@@ -224,6 +224,123 @@ test("K6: a runs root is walked by shape, so a transcript three dirs down is fou
     equal(r.status, 0, r.stdout + r.stderr);
     ok(stripped(log), readFileSync(log, "utf8").slice(0, 200));
     ok(statSync(log).size < beforeSize);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("K7a: the configured heartbeat window decides liveness, not the 15 s default", async () => {
+  const dir = tmp();
+  try {
+    const run = join(dir, "run");
+    writeRun(run, { live: true });
+    const hb = join(run, "heartbeat");
+    const old = new Date(Date.now() - 50_000);
+    utimesSync(hb, old, old);
+    const log = join(run, "results", "x.log");
+    writeFileSync(log, logText());
+    const bytes = readFileSync(log);
+
+    const { buf, restore } = capture();
+    let status;
+    try {
+      status = await cmdCompact([run], { usage: "usage", _getConfig: () => ({ heartbeatSecs: 60 }) });
+    } finally {
+      restore();
+    }
+
+    equal(status, 0);
+    deepEqual(readFileSync(log), bytes, "50 s is inside 3 x 60 s, so the run is live and untouched");
+    ok(/live/.test(buf.stderr), buf.stderr);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("K7b: a directory at the .tmp path fails that file, carries on and exits 1", async () => {
+  const dir = tmp();
+  try {
+    const run = join(dir, "run");
+    writeRun(run);
+    const a = join(run, "results", "a.log");
+    const b = join(run, "results", "b.log");
+    writeFileSync(a, logText());
+    writeFileSync(b, logText());
+    const aBytes = readFileSync(a);
+    mkdirSync(`${a}.tmp`);
+
+    const { buf, restore } = capture();
+    let status;
+    try {
+      status = await cmdCompact([run], { usage: "usage" });
+    } finally {
+      restore();
+    }
+
+    equal(status, 1, buf.stdout + buf.stderr);
+    deepEqual(readFileSync(a), aBytes, "the file that could not be written is untouched");
+    ok(stripped(b), "compact carries on to the next transcript");
+    ok(buf.stderr.includes(a) && /skipped/.test(buf.stderr), buf.stderr);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("K7c: a CRLF transcript keeps CRLF and its unterminated final line", async () => {
+  const dir = tmp();
+  try {
+    const run = join(dir, "run");
+    writeRun(run);
+    const log = join(run, "results", "a.log");
+    writeFileSync(log, [imageLine(), plainLines[0], plainLines[1]].join("\r\n"));
+
+    const r = await cli(dir, [run]);
+    equal(r.status, 0, r.stdout + r.stderr);
+
+    const after = readFileSync(log, "utf8");
+    ok(stripped(log));
+    equal(after.replace(/\r\n/g, "").includes("\n"), false, "every newline stays CRLF");
+    ok(!after.endsWith("\n"), "an unterminated tail gains no terminator");
+    ok(after.endsWith(plainLines[1]), "the tail is byte-for-byte");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("K7d: a .log.gz with no image stays compressed and untouched", async () => {
+  const dir = tmp();
+  try {
+    const run = join(dir, "run");
+    writeRun(run);
+    const gz = join(run, "results", "b.log.gz");
+    writeFileSync(gz, gzipSync(plainLines.join("\n") + "\n"));
+    const bytes = readFileSync(gz);
+
+    const r = await cli(dir, [run]);
+    equal(r.status, 0, r.stdout + r.stderr);
+    deepEqual(readFileSync(gz), bytes, "nothing to strip leaves the compressed file alone");
+    ok(!existsSync(join(run, "results", "b.log")), "no plain .log is written");
+    ok(/nothing to strip/.test(r.stderr), r.stderr);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("K7e: an unknown flag is refused with exit 1 before anything is written", async () => {
+  const dir = tmp();
+  try {
+    const run = join(dir, "run");
+    writeRun(run);
+    const log = join(run, "results", "a.log");
+    writeFileSync(log, logText());
+    const bytes = readFileSync(log);
+
+    const r = await cli(dir, [run, "--dryrun"]);
+    equal(r.status, 1, r.stdout + r.stderr);
+    ok(/unknown option/.test(r.stderr), r.stderr);
+    ok(/usage:/.test(r.stderr), r.stderr);
+    deepEqual(readFileSync(log), bytes, "a refused flag must never strip for real");
+    ok(!existsSync(`${log}.tmp`));
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

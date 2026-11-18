@@ -13,13 +13,9 @@ function shouldDrop(line) {
 }
 
 // ── image stripping ───────────────────────────────────────────────────────────
-// A vision leaf's transcript is mostly base64: every image a leaf reads is written
-// into the log as a tool result. Nothing that reads a transcript wants those bytes
-// back — coverage reads tool_use inputs, grading reads the model's words — so each
-// block is replaced by a stub that keeps its position, its media type and a digest.
-// The two byte gates are independent: the block shape has no `"data":"` key, and a
-// data URL carries no `"type":"image"` object. Both are cheap contains, so an
-// ordinary line never pays for a parse.
+// Each image block becomes a stub keeping its position, media type and a digest.
+// The two byte gates are independent (a block has no `"data":"` key, a data URL no
+// `"type":"image"` object), so an ordinary line never pays for a parse.
 const IMAGE_TYPE_GATE = Buffer.from('"type":"image"');
 const DATA_URL_GATE = Buffer.from("data:image/");
 const STUB = "[stripped]";
@@ -90,13 +86,18 @@ export function stripImages(line) {
   return Buffer.from(JSON.stringify(walked) + eol, "utf8");
 }
 
+// `push`/`end` return whether anything was dropped or stripped so far, which lets a
+// rewriter skip a file that would come out byte-identical.
 export function createLogLineFilter(write) {
   let pending = [];
   let pendingLength = 0;
   let ended = false;
+  let changed = false;
   const writeLine = (line) => {
-    if (shouldDrop(line)) return;
-    write(stripImages(line));
+    if (shouldDrop(line)) { changed = true; return; }
+    const stripped = stripImages(line);
+    if (stripped !== line) changed = true;
+    write(stripped);
   };
   const completeLine = (chunk, start, end) => {
     const segment = chunk.subarray(start, end);
@@ -110,7 +111,7 @@ export function createLogLineFilter(write) {
 
   return {
     push(chunk) {
-      if (ended) return;
+      if (ended) return changed;
       const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
       let start = 0;
       for (;;) {
@@ -124,13 +125,15 @@ export function createLogLineFilter(write) {
         pending.push(remainder);
         pendingLength += remainder.length;
       }
+      return changed;
     },
     end() {
-      if (ended) return;
+      if (ended) return changed;
       ended = true;
       if (pendingLength > 0) writeLine(Buffer.concat(pending, pendingLength));
       pending = [];
       pendingLength = 0;
+      return changed;
     },
   };
 }
