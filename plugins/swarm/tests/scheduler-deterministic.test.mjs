@@ -5,6 +5,7 @@ import { rmSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { spawn as nodeSpawn, spawnSync } from "node:child_process";
+import { EventEmitter } from "node:events";
 import { oracleSnapKey } from "./helpers/snap-key.mjs";
 import { runPlan } from "../src/scheduler.mjs";
 import { writeResult, readResult, initResultsDir } from "../src/results.mjs";
@@ -407,6 +408,55 @@ test("quota fail-fast never dooms pending compute steps", async () => {
     equal(states.slow, "ok");
     equal(states.c, "ok");
     equal(readResult(p.resultsDir, "c").outputJson, true);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// A leaf whose close falls due while the loop is still seating the batch: the spawn
+// handler blocks a few ms AFTER arming the close, so the timer is already overdue
+// when the loop's own turn comes round and the earlier seats settle before the loop
+// comes back to schedule.
+function closingSpawn(calls, { holdMs = 20 } = {}) {
+  const spawn = (cmd, args, opts) => {
+    calls.push({ cmd, args, opts });
+    const child = new EventEmitter();
+    child.stdout = new EventEmitter();
+    child.stderr = new EventEmitter();
+    child.exitCode = null;
+    child.signalCode = null;
+    child.kill = () => { child.exitCode = 0; child.emit("close", 0); };
+    const close = () => { if (child.exitCode !== null) return; child.exitCode = 0; child.emit("close", 0); };
+    setTimeout(close, 0);
+    const until = Date.now() + holdMs;
+    while (Date.now() < until) { /* let the armed timer fall due */ }
+    return child;
+  };
+  spawn.calls = calls;
+  return spawn;
+}
+
+test("a dependent is seated after its deps settle inside the launch batch", async () => {
+  const dir = tmp();
+  try {
+    const calls = [];
+    const spawn = closingSpawn(calls);
+    // `guard` fails at its tree prepare, which settles its launch without waiting on
+    // a process — the last seat of the batch can therefore be done by the time the
+    // loop reaches its idle check, the position a real `worktree add` leaves the
+    // batch in when its blocking git calls let every earlier leaf finish.
+    const worktree = fakeWorktree([], { failPrepare: (t) => t.id === "guard" });
+    const p = plan(dir, [
+      task("a"), task("b"),
+      task("guard", { worktreeName: "guard" }),
+      task("gate", { after: ["a", "b"] }),
+    ]);
+    const r = await runPlan(p, CFG, makeIo(spawn, { worktree }));
+    const states = Object.fromEntries(r.summary.tasks.map((t) => [t.id, t.state]));
+    equal(states.a, "ok");
+    equal(states.b, "ok");
+    equal(states.gate, "ok", "a dependent whose deps settled inside the launch batch is still run");
+    equal(calls.length, 3, "gate was dispatched, not left pending");
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

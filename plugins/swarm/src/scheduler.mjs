@@ -310,6 +310,7 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), {
     sweepBlocked();
 
     let progressed = false;
+    let launched = 0;
     if (!ctx.stopRequested) {
       const seats = settleInline(tasks, {
         pending: (t) => ctx.state.get(t.id) === "pending",
@@ -325,6 +326,7 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), {
         // first leaf of a run must never be gated by the machine's headroom.
         if (ctx.running.size > 0 && ctx.memLow(cfg.minFreeMemMb)) { ctx.parkForMemory(t); continue; }
         ctx.launch(t);
+        launched++;
         // A launch blocks the loop in prepareIsolation (git worktree add is sync), so
         // without a turn between seats a running leaf's armed callbacks starve.
         await new Promise((resume) => setImmediate(resume));
@@ -333,7 +335,11 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), {
         if (ctx.stopRequested) break;
       }
     }
-    if (progressed) continue;
+    // Re-scan once a seat has been spent: a launched leaf can settle inside this very
+    // batch — the blocking git calls above let its callbacks run — and the dependents
+    // that settlement unlocks must be seated, or the idle check below ends the run
+    // with them still pending.
+    if (progressed || launched) continue;
 
     // Stop wins: whatever is parked or waiting gets swept to failed:stopped below.
     if (ctx.running.size === 0 && (ctx.stopRequested || (ctx.memoryParked.size === 0 && ctx.retryWaiting === 0))) break;
