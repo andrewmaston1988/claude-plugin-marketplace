@@ -9,6 +9,9 @@
     "PostToolUse": [
       { "hooks": [ { "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/post-tool-checkpoint.mjs\"" } ] }
     ],
+    "PreToolUse": [
+      { "matcher": "^(Edit|Write|MultiEdit|NotebookEdit|Bash|PowerShell|Agent|Workflow|SendMessage|CronCreate|RemoteTrigger|PushNotification|EnterWorktree|Artifact.*|mcp__.*)$", "hooks": [ { "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/state-guard.mjs\"" } ] }
+    ],
     "SessionStart": [
       { "matcher": "startup|clear", "hooks": [ { "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/session-start-resume.mjs\"" } ] },
       { "matcher": "compact", "hooks": [ { "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/session-start-compact.mjs\"" } ] }

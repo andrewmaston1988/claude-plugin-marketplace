@@ -101,6 +101,25 @@ test('resolveOwnStatePath: per-session isolation — sid A and sid B get differe
   assert.match(b, /STATE_sid-B_/);
 });
 
+test('resolveOwnStatePath: returns the newest-stamped file for the sid, whatever the directory order', (t) => {
+  const cwd = tmpCwd();
+  const dir = projectDir(cwd);
+  fs.mkdirSync(dir, { recursive: true });
+  const skeleton = path.join(dir, 'STATE_sid-eeee_20261118T010000Z.md');
+  const rich = path.join(dir, 'STATE_my-task_sid-eeee_20261118T020000Z.md');
+  fs.writeFileSync(skeleton, 'skeleton', 'utf8');
+  fs.writeFileSync(rich, 'rich', 'utf8');
+
+  // Native readdir order is filesystem-dependent; pin both directions so the
+  // test fails on a first-match implementation either way.
+  const names = [path.basename(skeleton), path.basename(rich)];
+  let order = names;
+  t.mock.method(fs, 'readdirSync', () => [...order]);
+  assert.equal(resolveOwnStatePath(cwd, 'sid-eeee'), rich, `order: ${order.join(', ')}`);
+  order = [...names].reverse();
+  assert.equal(resolveOwnStatePath(cwd, 'sid-eeee'), rich, `order: ${order.join(', ')}`);
+});
+
 test('resolveLatestStatePath: picks the lexicographically greatest STATE_* (latest UTC stamp)', () => {
   const cwd = tmpCwd();
   const dir = path.join(os.homedir(), '.claude', 'projects', cwd.replace(/[\\/:]/g, '-'));

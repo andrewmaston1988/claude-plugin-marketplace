@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
+import { pathToFileURL } from 'node:url';
 
 export const STATE_DB = path.join(os.homedir(), '.claude', '.checkpoint-state.json');
 export const KEEPALIVE_LOG = path.join(os.homedir(), '.claude', '.checkpoint-keepalive.jsonl');
@@ -13,7 +14,7 @@ export function encodeProject(p) { return p.replace(/[\\/:]/g, '-'); }
 // Filename: STATE_[<slug>_]<sanitizedSid>_<YYYYMMDDTHHMMSSZ>.md
 // UTC ISO compact timestamp sorts lexicographically (descending = newest first).
 // Group 1 spans `_`, so it captures `slug_sid` on slugged names.
-const STATE_FILE_RE = /^STATE_([A-Za-z0-9_-]+)_(\d{8}T\d{6}Z)\.md$/;
+export const STATE_FILE_RE = /^STATE_([A-Za-z0-9_-]+)_(\d{8}T\d{6}Z)\.md$/;
 
 export function sanitizeSid(sid) {
   if (!sid) return '';
@@ -39,6 +40,21 @@ export function nowStamp(d = new Date()) {
   );
 }
 
+// The only `saved:` form the lint accepts: minute resolution, UTC, 20 characters.
+export const SAVED_RE = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2} UTC$/;
+export const SAVED_EXAMPLE = '2026-11-18 01:56 UTC';
+
+export function savedStamp(d = new Date()) {
+  const pad = (n) => String(n).padStart(2, '0');
+  return (
+    d.getUTCFullYear().toString() + '-' +
+    pad(d.getUTCMonth() + 1) + '-' +
+    pad(d.getUTCDate()) + ' ' +
+    pad(d.getUTCHours()) + ':' +
+    pad(d.getUTCMinutes()) + ' UTC'
+  );
+}
+
 export function projectDir(cwd) {
   return path.join(os.homedir(), '.claude', 'projects', encodeProject(cwd));
 }
@@ -52,8 +68,9 @@ export function sessionStateFilename(sid, stamp, slug = '') {
 }
 
 // Writer path: per-session file. If one already exists for this sid in the
-// project dir, maintain it (preserve original timestamp); otherwise mint a new
-// one with the current UTC stamp. Returns absolute path or '' if no sid.
+// project dir, maintain the NEWEST-stamped one (a fresh slugged file can sit
+// beside an older skeleton); otherwise mint a new one with the current UTC
+// stamp. Returns absolute path or '' if no sid.
 // `CLAUDE_STATE_PATH` overrides everything (escape hatch).
 export function resolveOwnStatePath(cwd, sid, opts = {}) {
   if (process.env.CLAUDE_STATE_PATH) return process.env.CLAUDE_STATE_PATH;
@@ -61,10 +78,12 @@ export function resolveOwnStatePath(cwd, sid, opts = {}) {
   if (!safe) return '';
   const dir = projectDir(cwd);
   let existing = '';
+  let existingStamp = '';
   try {
     for (const name of fs.readdirSync(dir)) {
       const m = name.match(STATE_FILE_RE);
-      if (m && (m[1] === safe || m[1].endsWith('_' + safe))) { existing = path.join(dir, name); break; }
+      if (!m || !(m[1] === safe || m[1].endsWith('_' + safe))) continue;
+      if (!existing || m[2] > existingStamp) { existing = path.join(dir, name); existingStamp = m[2]; }
     }
   } catch { /* dir missing yet — fine */ }
   if (existing) return existing;
@@ -236,33 +255,71 @@ export function latestPrecompactSnapshot(docsDir) {
   return snaps.length ? path.join(docsDir, snaps[snaps.length - 1]) : '';
 }
 
-// Rename a STATE file to embed the *current* UTC stamp. The sessionId portion
-// of the filename is preserved; only the trailing `YYYYMMDDTHHMMSSZ` advances.
-// If the target name already exists in the same directory (e.g. another
-// checkpoint landed in the same second), bump `now` by one second until the
-// target is free — never clobber a parallel write. Returns the new absolute
-// path. Throws if `oldPath` is not a STATE file or does not exist.
-export function renameStateToNow(oldPath, now = new Date()) {
-  if (!oldPath) throw new Error('renameStateToNow: oldPath required');
-  if (!fs.existsSync(oldPath)) throw new Error(`renameStateToNow: source not found: ${oldPath}`);
-  const dir = path.dirname(oldPath);
-  const base = path.basename(oldPath);
-  const m = base.match(STATE_FILE_RE);
-  if (!m) throw new Error(`renameStateToNow: not a STATE file: ${base}`);
-  const sid = m[1];
-  let stamp = nowStamp(now);
-  // Bump by 1s on collision; cap at 60s to avoid runaway loops in degenerate cases.
-  for (let i = 0; i < 60; i++) {
-    const target = path.join(dir, sessionStateFilename(sid, stamp));
-    if (!fs.existsSync(target)) {
-      fs.renameSync(oldPath, target);
-      return target;
-    }
-    const d = new Date(now.getTime() + (i + 1) * 1000);
-    stamp = nowStamp(d);
+// Rewrite (or insert) the `saved:` header field, keeping the file's own line
+// endings. A file with no frontmatter block is left byte-identical: there is no
+// header for the field to belong to.
+function withSaved(body, stamp) {
+  const eol = body.includes('\r\n') ? '\r\n' : '\n';
+  const lines = body.split(/\r?\n/);
+  if (!lines.length || lines[0].trim() !== '---') return body;
+  let end = -1;
+  for (let i = 1; i < lines.length; i++) {
+    if (lines[i].trim() === '---') { end = i; break; }
   }
-  throw new Error(`renameStateToNow: could not find free stamp in 60s window for ${oldPath}`);
+  if (end < 0) return body;
+  for (let i = 1; i < end; i++) {
+    const m = lines[i].match(/^(\s*saved\s*:\s*).*$/);
+    if (m) {
+      lines[i] = m[1] + stamp;
+      return lines.join(eol);
+    }
+  }
+  let at = 1;
+  for (let i = 1; i < end; i++) {
+    if (/^\s*session\s*:/.test(lines[i])) { at = i + 1; break; }
+  }
+  lines.splice(at, 0, `saved: ${stamp}`);
+  return lines.join(eol);
 }
+
+// Stamp a STATE file from the clock: rewrite `saved:` and embed the same instant
+// in the filename, atomically. The free stamp is chosen before any write, so a
+// crash leaves a complete file at one of the two names. A `CLAUDE_STATE_PATH`
+// override is stamped in place; any other non-STATE path throws.
+export function stampState(statePath, now = new Date()) {
+  if (!statePath) throw new Error('stampState: path required');
+  if (!fs.existsSync(statePath)) throw new Error(`stampState: source not found: ${statePath}`);
+  const dir = path.dirname(statePath);
+  const base = path.basename(statePath);
+  const m = base.match(STATE_FILE_RE);
+  const override = process.env.CLAUDE_STATE_PATH;
+  const isOverride = !!override && path.resolve(override) === path.resolve(statePath);
+  if (!m && !isOverride) throw new Error(`stampState: not a STATE file: ${base}`);
+
+  let target = statePath;
+  let at = now;
+  // An override keeps its path — resolveOwnStatePath returns it verbatim, so a
+  // rename would leave that escape hatch pointing at nothing.
+  if (m && !isOverride) {
+    target = '';
+    // Bump by 1s on collision; cap at 60s to avoid runaway loops in degenerate cases.
+    for (let i = 0; i < 60; i++) {
+      const instant = new Date(now.getTime() + i * 1000);
+      const candidate = path.join(dir, sessionStateFilename(m[1], nowStamp(instant)));
+      if (!fs.existsSync(candidate)) { target = candidate; at = instant; break; }
+    }
+    if (!target) throw new Error(`stampState: could not find free stamp in 60s window for ${statePath}`);
+  }
+
+  const body = fs.readFileSync(statePath, 'utf8');
+  const tmp = `${statePath}.${process.pid}.${Math.random().toString(36).slice(2)}.tmp`;
+  fs.writeFileSync(tmp, withSaved(body, savedStamp(at)), 'utf8');
+  fs.renameSync(tmp, target);
+  if (target !== statePath) fs.unlinkSync(statePath);
+  return target;
+}
+
+export const renameStateToNow = stampState;
 
 // The line pre-compact-snapshot.mjs stamps into every skeletal backstop, and
 // the only way a reader can tell a skeleton from a real checkpoint.
@@ -307,4 +364,23 @@ export function appendJSONL(p, obj) {
     fs.mkdirSync(path.dirname(p), { recursive: true });
     fs.appendFileSync(p, JSON.stringify(obj) + '\n', 'utf8');
   } catch { /* non-fatal */ }
+}
+
+// CLI: node hooks/lib/paths.mjs stamp <state-file>  (prints the stamped path)
+function main() {
+  const [cmd, target] = process.argv.slice(2);
+  if (cmd !== 'stamp' || !target) {
+    process.stderr.write('usage: node hooks/lib/paths.mjs stamp <state-file>\n');
+    process.exit(1);
+  }
+  try {
+    process.stdout.write(stampState(target) + '\n');
+  } catch (e) {
+    process.stderr.write(`${e.message}\n`);
+    process.exit(1);
+  }
+}
+
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  main();
 }

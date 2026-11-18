@@ -73,6 +73,7 @@ test('renderResumeOffer: no candidates → find-instructions only, and nothing t
   assert.match(out, /\/home\/u\/\.claude\/projects\/C--foo/);
   assert.match(out, /newest `STATE\*\.md`/);
   assert.match(out, /plain `STATE\.md`/);
+  assert.match(out, /Read the chosen file in full/);
   // Nothing to choose between — the hook must not tell the agent to ask.
   assert.doesNotMatch(out, /AskUserQuestion/);
   assert.doesNotMatch(out, /Start fresh/);
@@ -94,6 +95,21 @@ test('renderResumeOffer: candidates → one labelled row each, plus the instruct
   assert.match(out, /- Resume voice \(2 hours ago\) — `\/p\/STATE_b\.md` — second thing/);
   // The find-instructions survive — the shortlist is additive.
   assert.match(out, /newest `STATE\*\.md`/);
+});
+
+// Test plan row 12 (W2): on a pick, the file is read in full before anything
+// else — a partial page view is what left the resumer grepping instead of reading.
+test('renderResumeOffer: the pick instruction demands a full read first (W2)', () => {
+  const out = renderResumeOffer({
+    template: loadTemplate(),
+    dir: '/home/u/.claude/projects/C--foo',
+    candidates: [{ slug: 's', sid: 'i', stampMs: NOW, path: '/p/STATE_a.md', summary: 'x' }],
+    now: NOW,
+  });
+  assert.match(out, /in full — every page/);
+  assert.match(out, /continue from its `resume:` action/);
+  // Test plan row 13d (W4): the resume offer gets plain wording only.
+  assert.doesNotMatch(out, /<EXTREMELY_IMPORTANT>/);
 });
 
 test('renderResumeOffer: a rambling session line is capped, not pasted whole', () => {

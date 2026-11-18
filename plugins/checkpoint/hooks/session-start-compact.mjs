@@ -9,6 +9,7 @@ import os from 'node:os';
 import { pathToFileURL } from 'node:url';
 import { readJSON, resolveOwnStatePath, isMeaningfulState, isSkeletonState, docsDirPath, latestPrecompactSnapshot, readStateHead } from './lib/paths.mjs';
 import { SKILL_INVOCATION, SKILL_DISAMBIGUATION } from './lib/skill-ref.mjs';
+import { armGate } from './lib/state-guard.mjs';
 
 const SETTINGS = path.join(os.homedir(), '.claude', 'settings.json');
 // Hard ceiling for the whole note; the inline head gets its own budget inside it.
@@ -37,7 +38,7 @@ export function buildPickupNote(kind, statePath, opts = {}) {
   if (kind === 'rich') {
     const docsDir = statePath ? docsDirPath(statePath) : '';
     const snapshotPath = 'snapshotPath' in opts ? opts.snapshotPath : latestPrecompactSnapshot(docsDir);
-    const lead = `Read \`${statePath}\` in full before your next action. Then correct only what changed since its stamp; never rewrite a section from the summary.`;
+    const lead = `Read \`${statePath}\` in full — every page if the Read is truncated — before your next action. Then reconcile it: rewrite every [live] section against what is true now; [stable] sections stay unless a fact moved; never write from the summary alone.`;
     const snapLine = snapshotPath ? `\nA pre-compact snapshot is at \`${snapshotPath}\`.` : '';
     const budget = Math.max(0, Math.min(HEAD_BUDGET, NOTE_LIMIT - lead.length - snapLine.length - 2));
     const head = statePath ? readStateHead(statePath, budget) : '';
@@ -77,6 +78,12 @@ function main() {
     let statePath = '';
     try { statePath = resolveOwnStatePath(payload.cwd || '', payload.session_id || ''); } catch {}
     const kind = classifyState(statePath);
+
+    // The resumed file must be read in full before the session acts. Armed here
+    // because the compact event is the evidence; a startup is not.
+    if (kind === 'rich') {
+      try { armGate(payload.session_id || '', statePath); } catch { /* fail open */ }
+    }
 
     process.stdout.write(JSON.stringify({
       hookSpecificOutput: {

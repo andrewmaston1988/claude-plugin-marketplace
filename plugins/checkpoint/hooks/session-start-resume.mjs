@@ -62,8 +62,9 @@ export function renderResumeOffer({ template, dir, candidates = [], now = Date.n
       '',
       'Before your first reply, ask which of these to resume using AskUserQuestion: one option '
       + 'per row below, using its label verbatim and its summary as the option description, plus '
-      + 'a final "Start fresh" option. On a pick, read that file and continue from its `resume:` '
-      + 'action. On "Start fresh", do not mention resuming again.',
+      + 'a final "Start fresh" option. On a pick, read that file in full — every page if the Read '
+      + 'is truncated — before anything else, then continue from its `resume:` action. On "Start '
+      + 'fresh", do not mention resuming again.',
       '',
       rows,
     ].join('\n');
