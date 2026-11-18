@@ -45,15 +45,29 @@ export function claimBand(sessionId, cycle, band, dir = NUDGE_DIR) {
 
 const kilo = (n) => Math.round(n / 1000);
 
+// Decision 12: the only framed text in the plugin — nothing shares this constant.
+// The pre-compact `now` nudge is the last thing a mid-task session reads, and both
+// observed failures swept it aside as an interruption, so it opens with the frame
+// and one line of why: the STATE is the handover that spares the resuming agent
+// from digging up graves.
+const NOW_FRAME = '<EXTREMELY_IMPORTANT>\n'
+  + 'The STATE file is the durable handover a fresh agent reads instead of digging up '
+  + 'graves (transcripts, git archaeology, stale run dirs) — a section left stale sends '
+  + 'it digging.\n'
+  + '</EXTREMELY_IMPORTANT>\n';
+
 export function buildCheckpointNudge(band, used, trigger) {
   const left = Math.max(0, trigger - used);
   const body = band === 'now'
-    ? `Compaction in ~${kilo(left)}k tokens. Checkpoint now, before your next tool call: call `
-      + `${SKILL_INVOCATION} to write a STATE.md handover. A checkpoint written after compaction `
-      + `works from the summary, which has already lost detail.`
+    ? `${NOW_FRAME}Compaction in ~${kilo(left)}k tokens. Write a full checkpoint: re-read the `
+      + `STATE in full, rewrite its [live] sections from current reality, and file narrative `
+      + `to the docs dir — the reserve is for that work, not a one-line update. Call `
+      + `${SKILL_INVOCATION} now, while the full context is still here.`
     : `Context is ~${kilo(used)}k of ~${kilo(trigger)}k before compaction (~${kilo(left)}k left). `
-      + `No need to stop — at your next natural pause, call ${SKILL_INVOCATION} to write a STATE.md `
-      + `handover while the full context is still here.`;
+      + `No need to stop — at your next natural pause, call ${SKILL_INVOCATION} to write a full `
+      + `checkpoint: re-read the STATE in full, rewrite its [live] sections from current reality, `
+      + `and file narrative to the docs dir. The reserve is for that, not a one-line update, and `
+      + `the handover keeps its detail only while the full context is still here.`;
   return `${body} ${SKILL_DISAMBIGUATION}`;
 }
 
