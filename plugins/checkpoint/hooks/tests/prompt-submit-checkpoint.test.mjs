@@ -11,6 +11,9 @@ import {
   DEFAULT_COMPACT_RESERVE_TOKENS,
 } from '../lib/nudge.mjs';
 import { resolveTtlSource } from '../lib/cadence.mjs';
+import { buildStopNudge } from '../stop-checkpoint.mjs';
+import { buildPickupNote } from '../session-start-compact.mjs';
+import { renderResumeOffer } from '../session-start-resume.mjs';
 import { writeCatalog } from './helpers/catalog.mjs';
 
 const OPUS = 'claude-opus-5-5';
@@ -64,7 +67,6 @@ test('operator settings: Opus compacts at 467k, nudges at 347k and 407k', (t) =>
   assert.match(soon, /next natural pause/i);
   const now = nudgeAt(f, 407_000);
   assert.match(now, /Compaction in ~60k tokens/);
-  assert.match(now, /before your next tool call/i);
 });
 
 test('operator settings: deepseek compacts at 367k, nudges at 247k and 307k', (t) => {
@@ -131,6 +133,59 @@ test('buildCheckpointNudge names the qualified skill and never inlines the templ
     assert.match(note, /handover/i);
     assert.doesNotMatch(note, /## 1\. OBJECTIVE/);
   }
+});
+
+// Test plan row 13b (W3): both bands ask for the full reconcile — the reserve
+// exists to re-read and rewrite the live sections, and the old minimal-edit
+// framing ("before your next tool call") is gone.
+test('buildCheckpointNudge: both bands frame the full checkpoint, neither the old interrupt (W3)', () => {
+  for (const band of ['soon', 'now']) {
+    const note = buildCheckpointNudge(band, 400_000, 467_000);
+    assert.match(note, /full checkpoint/, band);
+    assert.match(note, /\[live\] sections/, band);
+    assert.doesNotMatch(note, /before your next tool call/i, band);
+  }
+});
+
+// Test plan row 13d (W4): only the pre-compact `now` band carries the frame —
+// it is the last thing a session reads before compaction.
+test('buildCheckpointNudge: only the now band opens with the EXTREMELY_IMPORTANT frame (W4)', () => {
+  const now = buildCheckpointNudge('now', 410_000, 467_000);
+  assert.ok(now.startsWith('<EXTREMELY_IMPORTANT>'), 'now band must open with the frame');
+  assert.match(now, /<\/EXTREMELY_IMPORTANT>/);
+  assert.match(now, /durable handover/);
+  assert.match(now, /digging/);
+  const soon = buildCheckpointNudge('soon', 350_000, 467_000);
+  assert.doesNotMatch(soon, /<EXTREMELY_IMPORTANT>/);
+
+  // The frame is claimed for the pre-compact nudge alone: the stop reasons,
+  // the compact pickup note and the resume offer stay plain.
+  const others = [
+    buildStopNudge({ edits: 12, commits: 1 }),
+    buildStopNudge({ cause: 'header-only', since: '2026-11-18 02:00 UTC' }),
+    buildStopNudge({ cause: 'lint', errors: ['saved: not the clock form'] }),
+    buildPickupNote('rich', 'C:/x/STATE_a_20261118T010000Z.md', { snapshotPath: '' }),
+    renderResumeOffer({
+      template: fs.readFileSync(new URL('../templates/resume-offer.md', import.meta.url), 'utf8'),
+      dir: 'C:/x',
+      candidates: [{ slug: 's', sid: 'i', stampMs: Date.now(), path: 'C:/x/STATE_a.md', summary: 'x' }],
+    }),
+  ];
+  for (const text of others) assert.doesNotMatch(text, /<EXTREMELY_IMPORTANT>/);
+});
+
+// Test plan row 13b (W3, second half): SKILL.md orders stampState, then the
+// lint, before the tell-the-user step — "saved" is only claimed after exit 0.
+test('SKILL.md orders stampState, then the lint, before telling the user (W3)', () => {
+  const skill = fs.readFileSync(new URL('../../skills/checkpoint/SKILL.md', import.meta.url), 'utf8');
+  const stamp = skill.indexOf('stampState');
+  const lint = skill.indexOf('state-lint.mjs');
+  const tell = skill.toLowerCase().indexOf('tell the user');
+  assert.ok(stamp > 0, 'SKILL.md must name stampState');
+  assert.ok(lint > 0, 'SKILL.md must name the lint command');
+  assert.ok(tell > 0, 'SKILL.md must have a tell-the-user step');
+  assert.ok(stamp < lint, 'stampState before the lint');
+  assert.ok(lint < tell, 'lint passes before any "saved" claim');
 });
 
 test('the byte fallback is measured in tokens, ~4 bytes per token', (t) => {

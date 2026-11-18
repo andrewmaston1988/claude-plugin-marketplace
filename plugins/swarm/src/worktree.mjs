@@ -229,7 +229,10 @@ export function prepareIsolation(task, cfg, resultsDir, { reset = false, addTime
   // that is not there.
   writeTreeRecord(resultsDir, { name, path, branch, repo, state: "creating" });
 
-  let add = git(["worktree", "add", path, "-b", branch, "--no-track", base], repo, { timeout: addTimeoutMs });
+  // LFS files stay pointers: smudging every object into every tree filled the disk.
+  // A leaf that needs one runs `git lfs pull --include=<path>`.
+  const addEnv = { GIT_LFS_SKIP_SMUDGE: "1" };
+  let add = git(["worktree", "add", path, "-b", branch, "--no-track", base], repo, { timeout: addTimeoutMs, env: addEnv });
   if (add.status !== 0 && /already exists/i.test(add.stderr)) {
     // Stale branch (path was cleaned but the branch lingered): force it to the base.
     // But -B RESETS the branch, so refuse when it still carries unlanded work.
@@ -244,7 +247,7 @@ export function prepareIsolation(task, cfg, resultsDir, { reset = false, addTime
         `    inspect:  git log ${branch}\n` +
         `    reuse it: name a different worktree, merge/delete '${branch}' yourself, or re-run with --force`);
     }
-    add = git(["worktree", "add", path, "-B", branch, "--no-track", base], repo, { timeout: addTimeoutMs });
+    add = git(["worktree", "add", path, "-B", branch, "--no-track", base], repo, { timeout: addTimeoutMs, env: addEnv });
   }
   if (add.status !== 0) {
     // A branch live in another worktree is not a retryable add failure: the message
