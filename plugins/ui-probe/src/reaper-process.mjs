@@ -54,7 +54,9 @@ function parseCimProcesses(stdout) {
   // them inside a string. Any process carrying one would otherwise make every listing
   // unreadable, so the reaper would never run again on that machine.
   const text = String(stdout ?? "").replace(/[\u0000-\u001f]+/g, " ");
-  if (!text.trim()) return []; // a successful empty listing licenses the sweep
+  // A real listing always carries the query's own process, so empty output means the query
+  // did not run — and an empty listing would read as "nothing holds this profile".
+  if (!text.trim()) throw new Error("could not read the process listing: empty output");
   let parsed;
   try {
     parsed = JSON.parse(text);
@@ -99,7 +101,8 @@ function parsePsProcesses(stdout) {
     if (!match) continue;
     processes.push({ pid: Number(match[1]), cmd: match[2] });
   }
-  if (sawLine && processes.length === 0) throw new Error("could not parse the process listing");
+  if (!sawLine) throw new Error("could not read the process listing: empty output");
+  if (processes.length === 0) throw new Error("could not parse the process listing");
   return processes;
 }
 
