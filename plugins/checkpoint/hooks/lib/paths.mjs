@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
+import { pathToFileURL } from 'node:url';
 
 export const STATE_DB = path.join(os.homedir(), '.claude', '.checkpoint-state.json');
 export const KEEPALIVE_LOG = path.join(os.homedir(), '.claude', '.checkpoint-keepalive.jsonl');
@@ -363,4 +364,23 @@ export function appendJSONL(p, obj) {
     fs.mkdirSync(path.dirname(p), { recursive: true });
     fs.appendFileSync(p, JSON.stringify(obj) + '\n', 'utf8');
   } catch { /* non-fatal */ }
+}
+
+// CLI: node hooks/lib/paths.mjs stamp <state-file>  (prints the stamped path)
+function main() {
+  const [cmd, target] = process.argv.slice(2);
+  if (cmd !== 'stamp' || !target) {
+    process.stderr.write('usage: node hooks/lib/paths.mjs stamp <state-file>\n');
+    process.exit(1);
+  }
+  try {
+    process.stdout.write(stampState(target) + '\n');
+  } catch (e) {
+    process.stderr.write(`${e.message}\n`);
+    process.exit(1);
+  }
+}
+
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  main();
 }
