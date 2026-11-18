@@ -69,7 +69,7 @@ node scripts/test.mjs --wsl
 
 Name wholly Windows-specific test files `*.win.test.mjs`. Put Windows-only cases from mixed files in a sibling with that suffix, and skip those cases on other platforms. Tests that merely mock win32 remain portable and keep their ordinary names.
 
-For swarm tests, follow the first-import home-isolation contract in [isolate-home.mjs](plugins/swarm/tests/helpers/isolate-home.mjs).
+For swarm tests, follow the first-import home-isolation contract in [isolate-home.mjs](plugins/swarm/tests/helpers/isolate-home.mjs). Temp dirs live under the one swarm temp dir and go with the run.
 
 Build absolute paths from temporary directories using platform path utilities. Make Git fixture commits differ through content or explicit metadata.
 
