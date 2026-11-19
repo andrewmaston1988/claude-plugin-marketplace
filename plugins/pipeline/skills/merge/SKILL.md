@@ -81,16 +81,34 @@ combined patch-id that does not match the individual commits, so the replay
 conflicts against content that is already present. Git cannot infer the fork-point,
 so this one is yours:
 
+First find the worktree holding the branch. `git update-ref` succeeds on a ref
+checked out in a linked worktree and leaves that worktree's index holding the old
+tree, so its next `git status` reports the delta as staged:
+
+```bash
+git worktree list --porcelain | awk '/^worktree /{p=$2} /^branch refs\/heads\/<branch>$/{print p}'
+```
+
+If that prints a path, rebase in it — the branch stays checked out and the index
+stays consistent:
+
+```bash
+git -C <that-worktree> rebase --onto <target_branch> <fork-point>   # fork-point = last commit predating the upstream squash
+```
+
+Only when no worktree holds the branch, replay it detached and move the ref
+yourself:
+
 ```bash
 wt="$(mktemp -d)/wt"
 git worktree add --detach "$wt" <branch>
-git -C "$wt" rebase --onto <target_branch> <fork-point>   # fork-point = last commit predating the upstream squash
+git -C "$wt" rebase --onto <target_branch> <fork-point>
 git update-ref "refs/heads/<branch>" "$(git -C "$wt" rev-parse HEAD)"
 git worktree remove --force "$wt"
 ```
 
-The replay runs in a throwaway detached worktree, never in the shared checkout —
-a `git checkout <branch>` there is what wiped live sessions' work on 2026-11-19.
+Neither path touches the shared checkout — a `git checkout <branch>` there is what
+wiped live sessions' work on 2026-11-19.
 Then re-run the driver's printed command with `--no-rebase` appended, which skips
 `step0aRebase` and goes straight to the 3-way squash merge. Operator-only — the
 default path must keep rebasing for every branch that has not hit this exact
