@@ -73,25 +73,47 @@ function gitOk(cwd, ...args) {
   return spawnSync("git", args, { ...SPAWN, cwd }).status === 0;
 }
 
+// The stable patch id of the diff `args` produces, or "" when either step fails.
+function patchId(cwd, args) {
+  const diff = spawnSync("git", args, { ...SPAWN, cwd });
+  if (diff.status !== 0) return "";
+  const id = spawnSync("git", ["patch-id", "--stable"], { ...SPAWN, cwd, input: diff.stdout ?? "" });
+  return id.status === 0 ? ((id.stdout ?? "").trim().split(/\s+/)[0] ?? "") : "";
+}
+
+// A squash of a branch with more than one commit: no individual commit is
+// upstream, but the branch's combined diff from its merge-base is the patch of
+// exactly one commit on the target.
+function squashLanded(cwd, ref, branch) {
+  const mb = git(["merge-base", ref, branch], cwd);
+  if (!mb) return false;
+  const branchPatch = patchId(cwd, ["diff", mb, branch]);
+  if (!branchPatch) return false;
+  const commits = git(["rev-list", `${mb}..${ref}`], cwd).split(/\r?\n/).filter(Boolean);
+  return commits.some((c) => patchId(cwd, ["diff", `${c}^`, c]) === branchPatch);
+}
+
 // Read the world for each guarded step.
 export function observeWorld(projectDir, branches, targetBranch, plansDir, project) {
   const ref = worldRef(projectDir, targetBranch);
 
-  // Two probes, in the order the orchestrator uses: `ancestor` is fast but blind to
-  // squashes, and a squash merge is the normal case here — it rewrites the commits,
-  // so the branch never becomes an ancestor. `git cherry` compares patch-ids and
-  // prefixes an already-applied commit with "-", which is what actually detects a
-  // landed squash. Checking ancestry alone reports a completed merge as pending and
-  // the resume re-squashes it.
+  // Three probes, each catching a shape the others miss. Ancestry sees a
+  // fast-forward. `git cherry` sees commits applied individually (every line
+  // "-"). Neither sees the normal case — a multi-commit branch squashed into one
+  // commit, where cherry prints "+" for every line — so the combined diff's
+  // patch-id is compared against each commit on the target. Without the third
+  // probe a completed squash reads pending and the resume re-squashes it.
   const merged = branches.every((b) => {
     if (gitOk(projectDir, "merge-base", "--is-ancestor", b, ref)) return true;
 
     const cherry = spawnSync("git", ["cherry", ref, b],
       { ...SPAWN, cwd: projectDir });
-    if (cherry.status !== 0) return false;
-    const lines = (cherry.stdout ?? "").trim().split(/\r?\n/).filter(Boolean);
-    // Every commit accounted for upstream, and there was something to account for.
-    return lines.length > 0 && lines.every((l) => l.startsWith("-"));
+    if (cherry.status === 0) {
+      const lines = (cherry.stdout ?? "").trim().split(/\r?\n/).filter(Boolean);
+      // Every commit accounted for upstream, and there was something to account for.
+      if (lines.length > 0 && lines.every((l) => l.startsWith("-"))) return true;
+    }
+    return squashLanded(projectDir, ref, b);
   });
 
   let planMoved = false;
