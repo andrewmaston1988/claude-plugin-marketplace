@@ -124,12 +124,20 @@ export function runClaude({ cwd, addDir, prompt, sessionId, model, proxy, timeou
     child.stdout.on("data", c => { stdout += c; });
     child.stderr.on("data", c => { stderr += c; });
 
+    // One settlement point: a late exit or error after the timeout must not resolve,
+    // reject, or start a resume-retry on a run the timer already owned.
+    let settled = false;
+
     const timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
       _killTree(child);
       reject(new Error(`claude timed out after ${timeoutMs}ms`));
     }, timeoutMs);
 
     child.on("exit", code => {
+      if (settled) return;
+      settled = true;
       clearTimeout(timer);
       if (code !== 0) {
         // --resume targeted a session that no longer exists (cleaned up / expired).
@@ -153,6 +161,8 @@ export function runClaude({ cwd, addDir, prompt, sessionId, model, proxy, timeou
     });
 
     child.on("error", e => {
+      if (settled) return;
+      settled = true;
       clearTimeout(timer);
       reject(new Error(`failed to spawn claude: ${e.message}`));
     });

@@ -70,6 +70,22 @@ test("a timeout kills the process tree, not just the wrapper", async () => {
   assert.equal(child.killCalls, 0, "child.kill only reaches the cmd.exe wrapper; the timeout owns the tree kill");
 });
 
+// A late exit must not start the resume retry: the timeout already settled the run,
+// and a queued "No conversation found" exit would otherwise spawn a second claude.
+test("an exit queued behind a timeout never starts the resume retry", async () => {
+  const child = fakeChild(4243);
+  let spawns = 0;
+  const run = runClaude({
+    cwd: process.cwd(), prompt: "hi", sessionId: "gone", timeoutMs: 20,
+    _spawn: () => { spawns++; return child; },
+    _killTree: () => {},
+  });
+  await assert.rejects(run, /claude timed out after 20ms/);
+  child.stderr.emit("data", "No conversation found with session ID: gone");
+  child.emit("exit", 1);
+  assert.equal(spawns, 1, "a queued exit after the timeout must not start a second claude");
+});
+
 test("multi-line prompt is delivered via stdin, not as a -p argv element", () => {
   // cmd.exe /d /s /c parses argv line-by-line: a literal newline inside a
   // -p <prompt> element terminates the /c command and drops every arg after it
