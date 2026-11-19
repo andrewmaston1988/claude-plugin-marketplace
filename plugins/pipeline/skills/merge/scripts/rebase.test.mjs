@@ -90,6 +90,53 @@ test("A10: step0aRebase rebases in the feature worktree, not the shared checkout
   }
 });
 
+// ── A10b — a branch the feature path cannot derive ───────────────────────────
+// Rows may declare any branch name; the worktree directory stays plan-stem
+// derived, so featureWorktreePath misses `anm/x` entirely. Resolving the holder
+// from `git worktree list --porcelain` is what keeps its index consistent.
+
+test("A10b: a non-derived branch is rebased in the worktree that holds it, leaving its index clean", async () => {
+  const tmp = mkdtempSync(join(tmpdir(), "rebase-nonderived-"));
+  const repo = join(tmp, "repo");
+  try {
+    mkdirSync(repo, { recursive: true });
+    git(repo, "init", "--initial-branch=master");
+    git(repo, "config", "user.email", "test@test");
+    git(repo, "config", "user.name", "test");
+    git(repo, "config", "commit.gpgsign", "false");
+    writeFileSync(join(repo, "README.md"), "init\n", "utf8");
+    git(repo, "add", "-A");
+    git(repo, "commit", "-m", "seed");
+    git(repo, "checkout", "-b", "anm/x");
+    writeFileSync(join(repo, "x.txt"), "x\n", "utf8");
+    git(repo, "add", "-A");
+    git(repo, "commit", "-m", "x");
+    git(repo, "checkout", "master");
+    writeFileSync(join(repo, "target.txt"), "target moved\n", "utf8");
+    git(repo, "add", "-A");
+    git(repo, "commit", "-m", "target");
+
+    // Deliberately nowhere near featureWorktreePath's default for the project.
+    const wt = join(tmp, "elsewhere", "held");
+    mkdirSync(dirname(wt), { recursive: true });
+    git(repo, "worktree", "add", wt, "anm/x");
+    const before = reflogCount(repo);
+
+    const okResult = await step0aRebase(repo, ["anm/x"], "master");
+
+    equal(okResult, true, "step0aRebase must succeed for a branch a worktree holds");
+    equal(gitMaybe(repo, "merge-base", "--is-ancestor", "master", "anm/x").status, 0,
+      "the rebased branch must contain the target");
+    equal(git(wt, "status", "--porcelain"), "",
+      "the holding worktree's index must still match its branch after the rebase");
+    equal(git(repo, "rev-parse", "--abbrev-ref", "HEAD"), "master",
+      "the shared checkout must stay on its branch");
+    equal(reflogCount(repo), before, "the shared checkout's HEAD reflog must not change");
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
 // ── A11 — the index.lock retry resolves through rev-parse --git-path ─────────
 
 test("A11: the lock retry finds index.lock in a linked worktree and waits it out", async () => {
