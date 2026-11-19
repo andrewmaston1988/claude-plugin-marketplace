@@ -30,7 +30,7 @@ import { createMergeWorktree } from "./worktree.mjs";
 import {
   MergeAbort, step5SquashMerge, findOpenPR, verifyAlreadyIntegrated,
 } from "./merge-branches.mjs";
-import { featureWorktreePath } from "../../../src/worktree-paths.mjs";
+import { featureWorktreePath, mergeSessionSlug } from "../../../src/worktree-paths.mjs";
 
 // Step 5 and its helpers live in merge-branches.mjs (this file is over the
 // file-size bar); re-exported so every existing call site keeps working.
@@ -193,11 +193,10 @@ async function main() {
 
   const projectDir = args.projectDir ?? process.cwd();
   const project = projectName(projectDir);
-  const now = new Date();
-  const sessionSlug = args.sessionSlug
-    ?? `merge_${now.getFullYear()}${String(now.getMonth()+1).padStart(2,"0")}${String(now.getDate()).padStart(2,"0")}-${String(now.getHours()).padStart(2,"0")}${String(now.getMinutes()).padStart(2,"0")}`;
 
   const branches = (args.branches ?? "").split(",").map(b => b.trim()).filter(Boolean);
+  const sessionSlug = args.sessionSlug
+    ?? mergeSessionSlug(branches.length ? branchSlug(branches[0]) : "merge");
   if (!branches.length && !args.landOnly) { logErr("BLOCKER: no branches given"); return exitSoon(2); }
 
   // Resolve target branch: CLI > DB > auto-detected default

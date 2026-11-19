@@ -12,7 +12,7 @@ import { featureWorktreePath } from "../../../src/worktree-paths.mjs";
 
 export class MergeWorktreeExistsError extends Error {}
 
-// One path per merge invocation (`merge_<YYYYMMDD-HHMM>`), resolved through the
+// One path per merge invocation (`merge_<feature>_<YYYYMMDD-HHMMSS>`), resolved through the
 // canonical per-feature template. An existing path is refused, not reclaimed:
 // it may belong to a live run, and removing it would delete that run's work.
 export function createMergeWorktree({ project, projectDir, sessionSlug, sha }) {

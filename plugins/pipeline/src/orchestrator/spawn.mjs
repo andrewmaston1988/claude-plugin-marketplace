@@ -10,7 +10,7 @@ import {
 } from "../db/index.mjs";
 import { loadPipelineConfig } from "../../src/pipeline-config.mjs";
 import { PIPELINE_DEFAULTS } from "../../src/config-defaults.mjs";
-import { featureWorktreePath, resolveRowBranch } from "../worktree-paths.mjs";
+import { featureWorktreePath, mergeSessionSlug, resolveRowBranch } from "../worktree-paths.mjs";
 import { publishNotification } from "../publisher.mjs";
 import { detectDefaultBranch } from "../../src/cli/helpers.mjs";
 
@@ -677,7 +677,7 @@ export function spawnMerge(project, row, projectRoot, model, { db, dryRun, logFn
   const plansDirFlag = resolvedPlansDir ? `--plans-dir "${resolvedPlansDir}"` : "";
   const ts = new Date().toISOString().replace(/\.\d{3}Z$/, "Z").replace(/[-:]/g, "");
   const correlationId = `merge-${feature}-${ts}`;
-  const sessionSlug   = `merge_${feature}`;
+  const sessionSlug   = mergeSessionSlug(feature);
 
   const mergeScript = fileURLToPath(new URL("../../skills/merge/scripts/merge.mjs", import.meta.url));
   const prompt = [
