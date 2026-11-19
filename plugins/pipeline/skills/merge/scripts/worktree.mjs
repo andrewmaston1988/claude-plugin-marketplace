@@ -1,8 +1,9 @@
 // worktree.mjs — the throwaway worktree a merge owns.
 //
-// Every mutating git call in /merge runs here, never in the shared checkout.
-// The merge worktree is detached at the target's tip, so no branch is checked
-// out twice and the squash builds on what origin holds.
+// The squash, the plan writes and the close commit run here. The rebase runs in
+// the feature worktree, parking writes a ref in the shared repo, and the land
+// fast-forwards the shared checkout. Detached at the target's tip, so no branch
+// is checked out twice and the squash builds on what origin holds.
 import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";

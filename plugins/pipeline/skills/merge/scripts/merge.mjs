@@ -2,9 +2,10 @@
 /**
  * merge.mjs — Mechanical /merge pipeline runner (steps 0a-9).
  *
- * Every mutating git call runs in a throwaway worktree this run owns. The
- * shared checkout is touched once, at the end, by a fast-forward that refuses
- * rather than overwrites (land.mjs:landTarget).
+ * The squash, the plan writes and the close commit run in a throwaway worktree
+ * this run owns; the rebase runs in the feature worktree, and the shared
+ * checkout is touched once, at the end, by a fast-forward that refuses rather
+ * than overwrites (land.mjs:landTarget).
  *
  * Usage:
  *   node merge.mjs --branches b1,b2,... --project-dir <path>
