@@ -8,8 +8,11 @@
 import "../../../tests/helpers/isolate-home.mjs";
 import { test } from "node:test";
 import { equal, deepEqual, ok, match } from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { tmpdir } from "node:os";
+import { fileURLToPath } from "node:url";
+import { spawnSync } from "node:child_process";
 import {
   parseBranches,
   chooseModel,
@@ -186,6 +189,11 @@ test("stepDone: an unknown step is never assumed done", () => {
   equal(stepDone("no-such-step", { merged: true, planMoved: true, marker: "completed" }), false);
 });
 
+test("stepDone: land guard reads whether the shared checkout contains the ref", () => {
+  equal(stepDone("land", { merged: true, planMoved: true, landed: true, marker: "pending" }), true);
+  equal(stepDone("land", { merged: true, planMoved: true, landed: false, marker: "completed" }), false);
+});
+
 test("resumeFrom: picks the first step the world says is incomplete", () => {
   // Squash landed, plan move did not — the classic half-completed merge.
   equal(resumeFrom({ merged: true, planMoved: false }), "move-plans");
@@ -195,8 +203,12 @@ test("resumeFrom: nothing done yet resumes at the squash", () => {
   equal(resumeFrom({ merged: false, planMoved: false }), "squash");
 });
 
+test("resumeFrom: work complete on origin but not landed resumes at land", () => {
+  equal(resumeFrom({ merged: true, planMoved: true, landed: false }), "land");
+});
+
 test("resumeFrom: everything done resumes at nothing", () => {
-  equal(resumeFrom({ merged: true, planMoved: true }), null);
+  equal(resumeFrom({ merged: true, planMoved: true, landed: true }), null);
 });
 
 // ── Scenario 8 — mutex on a foreign subject ──────────────────────────────────
@@ -226,4 +238,88 @@ test("observeWorld: detects a landed SQUASH merge, not just a fast-forward", () 
     src.indexOf('"cherry"') > src.indexOf('"--is-ancestor"'),
     "ancestry first (cheap), cherry as the squash-aware fallback",
   );
+});
+
+// ── A12 — a merge on origin but not in the shared checkout resumes at land ───
+//
+// The squash and the plan close are pushed, the shared checkout's target is
+// behind: the world says the merge is done, so the driver must emit a land-only
+// command rather than a second squash.
+
+const RUN_MERGE_MJS = fileURLToPath(new URL("./run-merge.mjs", import.meta.url));
+const MERGE_MJS = fileURLToPath(new URL("./merge.mjs", import.meta.url));
+const PLAN_MIN = "# feat-x\n\n## Goal\n\nLand feat-x.\n\n## Current Status\n\n- in progress\n";
+
+function gitIn(cwd, ...args) {
+  const r = spawnSync("git", ["-C", cwd, ...args], { encoding: "utf8" });
+  if (r.status !== 0) throw new Error(`git ${args.join(" ")} failed: ${r.stderr}`);
+  return r.stdout.trim();
+}
+
+// origin/master carries the squash (the branch's patch) and the plan close;
+// local master is still at the seed, exactly the post-push pre-land state.
+function makeLandedOnOrigin() {
+  const tmp = mkdtempSync(join(tmpdir(), "run-merge-land-"));
+  const repo = join(tmp, "repo");
+  const bare = join(tmp, "origin.git");
+  mkdirSync(join(repo, "plans"), { recursive: true });
+  spawnSync("git", ["init", "--bare", "--initial-branch=master", bare], { encoding: "utf8" });
+
+  gitIn(repo, "init", "--initial-branch=master");
+  gitIn(repo, "config", "user.email", "test@test");
+  gitIn(repo, "config", "user.name", "test");
+  gitIn(repo, "config", "commit.gpgsign", "false");
+  writeFileSync(join(repo, "README.md"), "init\n", "utf8");
+  writeFileSync(join(repo, "plans", "feat-x.md"), PLAN_MIN, "utf8");
+  gitIn(repo, "add", "-A");
+  gitIn(repo, "commit", "-m", "seed");
+
+  gitIn(repo, "checkout", "-b", "autonomous/feat-x");
+  writeFileSync(join(repo, "feat.txt"), "feat\n", "utf8");
+  gitIn(repo, "add", "-A");
+  gitIn(repo, "commit", "-m", "feat");
+  gitIn(repo, "checkout", "master");
+
+  gitIn(repo, "remote", "add", "origin", bare);
+  gitIn(repo, "push", "origin", "master");
+
+  gitIn(repo, "checkout", "-b", "landed");
+  writeFileSync(join(repo, "feat.txt"), "feat\n", "utf8");
+  gitIn(repo, "add", "-A");
+  gitIn(repo, "commit", "-m", "feat squash");
+  mkdirSync(join(repo, "plans", "complete"), { recursive: true });
+  gitIn(repo, "mv", "plans/feat-x.md", "plans/complete/feat-x.md");
+  gitIn(repo, "commit", "-m", "close feat-x");
+  gitIn(repo, "push", "origin", "HEAD:refs/heads/master");
+  gitIn(repo, "checkout", "master");
+  gitIn(repo, "branch", "-D", "landed");
+
+  return { tmp, repo, bare };
+}
+
+test("A12: a merge already on origin but not in the shared checkout resumes at land", () => {
+  const { tmp, repo } = makeLandedOnOrigin();
+  try {
+    const r = spawnSync(process.execPath, [
+      RUN_MERGE_MJS, "--branches", "autonomous/feat-x", "--project-dir", repo,
+      "--target-branch", "master",
+    ], { encoding: "utf8", timeout: 60_000 });
+
+    equal(r.status, 0, `driver must pause cleanly; stdout=${r.stdout} stderr=${r.stderr}`);
+    ok(/resuming at land/.test(r.stdout), `driver must say it resumes at land: ${r.stdout}`);
+    ok(r.stdout.includes("--land-only"), `the emitted command must be land-only: ${r.stdout}`);
+    ok(!r.stdout.includes("--branches"), `a completed squash must not be re-emitted: ${r.stdout}`);
+
+    const before = gitIn(repo, "rev-parse", "master");
+    const land = spawnSync(process.execPath, [
+      MERGE_MJS, "--land-only", "--project-dir", repo, "--target-branch", "master", "--skip-smoke",
+    ], { encoding: "utf8", timeout: 60_000 });
+
+    equal(land.status, 0, `land-only must exit 0; stdout=${land.stdout} stderr=${land.stderr}`);
+    ok(gitIn(repo, "rev-parse", "master") !== before, "land-only must move the shared checkout");
+    equal(gitIn(repo, "rev-parse", "master"), gitIn(repo, "rev-parse", "origin/master"),
+      "the shared checkout must fast-forward to what origin holds");
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
 });

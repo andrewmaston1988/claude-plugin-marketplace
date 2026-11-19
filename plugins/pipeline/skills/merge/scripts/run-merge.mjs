@@ -21,7 +21,7 @@
  *                      [--skip-testing] [--dry-run]
  */
 import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { join, relative, isAbsolute } from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
@@ -205,7 +205,7 @@ export function collectSignals(project, branches, projectDir, targetBranch) {
 // ── Resume — guards on observable reality ────────────────────────────────────
 
 // The driver's own step list, distinct from merge.mjs's ten internal steps.
-export const DRIVER_STEPS = ["squash", "move-plans"];
+export const DRIVER_STEPS = ["squash", "move-plans", "land"];
 
 // Is this step already done? Answered by inspecting the WORLD, never the progress
 // marker. A merge half-completes routinely — the squash lands and the plan move
@@ -213,6 +213,7 @@ export const DRIVER_STEPS = ["squash", "move-plans"];
 export function stepDone(step, world) {
   if (step === "squash") return world.merged === true;
   if (step === "move-plans") return world.planMoved === true;
+  if (step === "land") return world.landed === true;
   return false; // an unrecognised step is never assumed done
 }
 
@@ -231,8 +232,31 @@ export function mutexConflict({ existingSubject, requested }) {
   return existingSubject !== requested;
 }
 
+// The ref the world is read from: what origin holds, else a parked squash, else
+// the local target. Reading origin is what lets a resume see a merge that was
+// pushed while the shared checkout was behind.
+function worldRef(projectDir, targetBranch) {
+  const hasOrigin = git(["remote", "get-url", "origin"], projectDir).length > 0;
+  if (hasOrigin) {
+    git(["fetch", "origin", targetBranch], projectDir);
+    if (git(["rev-parse", "--verify", "--quiet", `origin/${targetBranch}`], projectDir).length > 0) {
+      return `origin/${targetBranch}`;
+    }
+  }
+  if (git(["rev-parse", "--verify", "--quiet", `refs/merge/${targetBranch}`], projectDir).length > 0) {
+    return `refs/merge/${targetBranch}`;
+  }
+  return targetBranch;
+}
+
+function gitOk(cwd, ...args) {
+  return spawnSync("git", args, { ...SPAWN, cwd }).status === 0;
+}
+
 // Read the world for each guarded step.
 export function observeWorld(projectDir, branches, targetBranch, plansDir, project) {
+  const ref = worldRef(projectDir, targetBranch);
+
   // Two probes, in the order the orchestrator uses: `ancestor` is fast but blind to
   // squashes, and a squash merge is the normal case here — it rewrites the commits,
   // so the branch never becomes an ancestor. `git cherry` compares patch-ids and
@@ -240,11 +264,9 @@ export function observeWorld(projectDir, branches, targetBranch, plansDir, proje
   // landed squash. Checking ancestry alone reports a completed merge as pending and
   // the resume re-squashes it.
   const merged = branches.every((b) => {
-    const anc = spawnSync("git", ["merge-base", "--is-ancestor", b, targetBranch],
-      { ...SPAWN, cwd: projectDir });
-    if (anc.status === 0) return true;
+    if (gitOk(projectDir, "merge-base", "--is-ancestor", b, ref)) return true;
 
-    const cherry = spawnSync("git", ["cherry", targetBranch, b],
+    const cherry = spawnSync("git", ["cherry", ref, b],
       { ...SPAWN, cwd: projectDir });
     if (cherry.status !== 0) return false;
     const lines = (cherry.stdout ?? "").trim().split(/\r?\n/).filter(Boolean);
@@ -254,13 +276,24 @@ export function observeWorld(projectDir, branches, targetBranch, plansDir, proje
 
   let planMoved = false;
   if (plansDir) {
+    const relDir = relative(projectDir, plansDir);
+    const plansInRepo = Boolean(relDir) && !relDir.startsWith("..") && !isAbsolute(relDir);
     planMoved = branches.every((b) => {
       const planFile = queryRow(project, featureOf(b), "plan_file");
       const stem = planFile ? planFile.split(/[/\\]/).pop() : `${featureOf(b)}.md`;
+      if (plansInRepo) {
+        const rel = `${relDir.split("\\").join("/")}/complete/${stem}`;
+        return gitOk(projectDir, "cat-file", "-e", `${ref}:${rel}`);
+      }
+      // Plans outside the repo have no tree entry to read on the ref.
       return existsSync(join(plansDir, "complete", stem));
     });
   }
-  return { merged, planMoved };
+
+  // The shared checkout already contains what the ref holds: nothing left to land.
+  const landed = gitOk(projectDir, "merge-base", "--is-ancestor", ref, targetBranch);
+
+  return { merged, planMoved, landed, ref };
 }
 
 // ── main ──────────────────────────────────────────────────────────────────────
@@ -404,8 +437,23 @@ export async function main({ _argv, _config, _projectRow } = {}) {
   if (next === null) {
     out(
       `Nothing to do — this merge is already complete.\n` +
-        `  squash:     landed (${branches.join(", ")} already applied to ${targetBranch})\n` +
-        `  move-plans: done (plan(s) already in complete/)\n`,
+        `  squash:     landed (${branches.join(", ")} already applied to ${world.ref})\n` +
+        `  move-plans: done (plan(s) already in complete/)\n` +
+        `  land:       done (${targetBranch} already contains ${world.ref})\n`,
+    );
+    return 0;
+  }
+  // The merge is complete on origin (or parked) and only the shared checkout
+  // lags. Re-squashing would double the work; emit the land-only resume.
+  if (next === "land") {
+    const landCmd =
+      `node "${posix(MERGE_MJS)}" --land-only --project-dir "${projectDir}" ` +
+      `--target-branch "${targetBranch}"`;
+    out(
+      `resuming at land — the squash and the plan move are on ${world.ref};\n` +
+        `the shared checkout's ${targetBranch} is behind it.\n\n` +
+        `Spawn a background agent running:\n` +
+        `  ${landCmd}\n\n`,
     );
     return 0;
   }
@@ -413,7 +461,8 @@ export async function main({ _argv, _config, _projectRow } = {}) {
     out(
       `Resuming at "${next}" — earlier steps already landed:\n` +
         `  squash:     ${world.merged ? "landed" : "pending"}\n` +
-        `  move-plans: ${world.planMoved ? "done" : "pending"}\n\n`,
+        `  move-plans: ${world.planMoved ? "done" : "pending"}\n` +
+        `  land:       ${world.landed ? "done" : "pending"}\n\n`,
     );
   }
 
