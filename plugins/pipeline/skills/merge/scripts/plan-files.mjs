@@ -328,7 +328,15 @@ export async function step3UpdateStatus(planFiles, projectDir, project, { testRe
 export function step6MovePlans(planFiles, { projectDir = null, wtPath = null } = {}) {
   for (const [_branch, plan] of Object.entries(planFiles)) {
     const target = projectDir && wtPath ? planPathInWorktree(projectDir, wtPath, plan) : plan;
-    if (!target || !existsSync(target)) continue;
+    if (!target || !existsSync(target)) {
+      if (plan) {
+        process.stdout.write(
+          `[6] WARN: ${plan} is not in the merge worktree — not moved to complete/ ` +
+          `(the row will still read complete)\n`,
+        );
+      }
+      continue;
+    }
     const completeDir = join(dirname(target), "complete");
     mkdirSync(completeDir, { recursive: true });
     const dest = join(completeDir, basename(target));
