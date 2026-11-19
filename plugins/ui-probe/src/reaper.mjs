@@ -114,6 +114,9 @@ function namedProfileIn(full, root) {
   return !name.includes("/") && name.startsWith(PROFILE_PREFIX);
 }
 
+// `failed` is non-empty so a reader checking only `failed.length` never reads an unread listing as a clean kill.
+const UNVERIFIED_KILL = () => ({ killed: [], failed: ["listing-unavailable"], unverified: true });
+
 /** Stop the browser holding exactly `profile`. Best effort: the caller is already
  *  failing for another reason, and the next launch's reaper is the backstop. */
 export async function killBrowserForProfile(profile, { _list = listProcesses, _kill = killPids, platform = process.platform, timeoutMs = REAP_BUDGET_MS, _execFile } = {}) {
@@ -123,9 +126,9 @@ export async function killBrowserForProfile(profile, { _list = listProcesses, _k
     processes = await _list({ platform, timeoutMs, _execFile });
   } catch {
     // The listing did not run, so nothing is known about the browser: not a clean no-match.
-    return { killed: [], failed: [], unverified: true };
+    return UNVERIFIED_KILL();
   }
-  if (!Array.isArray(processes)) return { killed: [], failed: [], unverified: true };
+  if (!Array.isArray(processes)) return UNVERIFIED_KILL();
   const pids = [];
   for (const entry of processes) {
     if (!entry || !Number.isInteger(entry.pid)) continue;

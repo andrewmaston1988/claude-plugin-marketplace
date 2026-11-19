@@ -364,6 +364,7 @@ test("A2: a listing that throws or is not a list makes the kill unverified", asy
   });
   assert.equal(thrown.unverified, true);
   assert.deepEqual(thrown.killed, []);
+  assert.ok(thrown.failed.length > 0, "an unread listing must fail a plain failed-length check");
   const notAList = await killBrowserForProfile(profile, {
     platform: "linux",
     _list: () => null,
@@ -371,6 +372,7 @@ test("A2: a listing that throws or is not a list makes the kill unverified", asy
   });
   assert.equal(notAList.unverified, true);
   assert.deepEqual(notAList.killed, []);
+  assert.ok(notAList.failed.length > 0, "an unread listing must fail a plain failed-length check");
 });
 
 test("A2b: a listing that ran and found no match verifies, and nothing is killed", async () => {
