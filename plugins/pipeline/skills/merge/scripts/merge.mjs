@@ -146,8 +146,9 @@ function landOnly(projectDir, targetBranch, args) {
 
   const res = landTarget(projectDir, targetBranch, sha, { log: logOut, err: logErr });
   if (!res.landed) {
-    const paths = res.paths.length ? res.paths.join(", ") : "(unknown)";
-    logOut(`[land-only] the shared checkout is behind; it was not moved (blocking path(s): ${paths})`);
+    // A guard that blocks on no file has only its reason to report.
+    const detail = res.paths.length ? `blocking path(s): ${res.paths.join(", ")}` : res.reason;
+    logOut(`[land-only] the shared checkout is behind; it was not moved (${detail})`);
     return exitSoon(0);
   }
   if (park) runGit(["update-ref", "-d", parkRef], projectDir, { check: false });
@@ -369,9 +370,10 @@ async function main() {
       runGit(["update-ref", "-d", parkedRef], projectDir, { check: false });
     } else {
       // A refused land is a completed merge: the work is on origin (or parked),
-      // and someone else is mid-edit in the shared checkout.
-      const paths = land.paths.length ? land.paths.join(", ") : "(unknown)";
-      logOut(`[land] the shared checkout is behind; it was not moved (blocking path(s): ${paths})`);
+      // and someone else is mid-edit in the shared checkout. A guard that blocks
+      // on no file reports its reason instead.
+      const detail = land.paths.length ? `blocking path(s): ${land.paths.join(", ")}` : land.reason;
+      logOut(`[land] the shared checkout is behind; it was not moved (${detail})`);
       logOut(`[land] it stayed at ${projectPreSha.slice(0, 7)}; land later with:`);
       logOut(`  node "${SELF}" --land-only --project-dir "${projectDir}" --target-branch "${targetBranch}"`);
       logOut("[land] smoke skipped — the checkout does not hold the merge");
