@@ -8,10 +8,9 @@ import { fileURLToPath } from "node:url";
 import fs from "node:fs";
 import net from "node:net";
 import path from "node:path";
-import { testBrokerClient } from "./broker-harness.mjs";
+import { sleep, testBrokerClient } from "./broker-harness.mjs";
 
 const self = fileURLToPath(import.meta.url);
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 function freePort() {
   return new Promise((resolve, reject) => {
