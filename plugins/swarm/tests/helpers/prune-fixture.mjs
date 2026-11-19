@@ -1,7 +1,7 @@
 // Fixtures shared by the prune tests in cli-prune.test.mjs and the two stop/prune
 // sweeps left in cli.test.mjs.
 import { spawnSync } from "node:child_process";
-import { rmSync, writeFileSync, mkdirSync } from "node:fs";
+import { readdirSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { commitAll, gitOut, tmp } from "./cli-fixture.mjs";
 import { treeDirFor } from "../../src/worktree.mjs";
@@ -42,7 +42,36 @@ export function pruneFixture() {
   mkdirSync(resultsDir, { recursive: true });
   const sha = gitOut(["rev-parse", "HEAD"], repo);
   writeFileSync(join(resultsDir, "manifest.json"), JSON.stringify({ resultsDir, cwd: repo, tasks: [] }));
+  // The repo that ENCLOSES treeRoot (`tmp()`'s own git repo) is left explicitly dirty: a
+  // prune that runs git inside an unlinked tree measures THIS repo's files as the row's
+  // uncommitted work, so the wrong-repo count has to be visible in every row.
+  writeFileSync(join(dir, "parent-dirty-a.txt"), "parent\n");
+  writeFileSync(join(dir, "parent-dirty-b.txt"), "parent\n");
   return { repo, dir, resultsDir, sha, tree: treeDirFor(resultsDir, "impl", { treeRoot: join(dir, "home", "worktrees") }) };
+}
+
+// The half-failed prune's leftover: git unregistered the tree, removed its contents and
+// deleted the branch, but the directory itself survived with no `.git` link. The record
+// prepareIsolation wrote is the run's own memory of which repo the tree belonged to.
+export function unlinkedTree(f, { name = "impl", branch = "swarm/impl", contents = [] } = {}) {
+  const tree = treeDirFor(f.resultsDir, name, { treeRoot: join(f.dir, "home", "worktrees") });
+  mkdirSync(join(f.resultsDir, "trees"), { recursive: true });
+  writeFileSync(join(f.resultsDir, "trees", `${name}.json`),
+    JSON.stringify({ name, path: tree, branch, repo: f.repo, state: "ready" }));
+  mkdirSync(tree, { recursive: true });
+  for (const file of contents) writeFileSync(join(tree, file), "");
+  return tree;
+}
+
+// The same leftover while git still has it registered: a real worktree whose `.git` file
+// and contents are gone. `git worktree prune` is the only thing that can drop the entry.
+export function unlinkedRegisteredTree(f, { name = "impl", contents = [] } = {}) {
+  const tree = treeDirFor(f.resultsDir, name, { treeRoot: join(f.dir, "home", "worktrees") });
+  spawnSync("git", ["worktree", "add", "-q", "-b", `swarm/${name}`, tree, f.sha], { cwd: f.repo, windowsHide: true });
+  rmSync(join(tree, ".git"), { force: true });
+  for (const entry of readdirSync(tree)) rmSync(join(tree, entry), { recursive: true, force: true });
+  for (const file of contents) writeFileSync(join(tree, file), "");
+  return tree;
 }
 
 // A detached tree is what a killed `worktree add` leaves: no branch, so prune's

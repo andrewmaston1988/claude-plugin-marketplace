@@ -159,6 +159,9 @@ test("plan measures unlanded commits and dirty porcelain; blockers include unkno
       return args[1] === "-q" ? { status: 0, stdout: "refs/heads/main", stderr: "" } : { status: 1, stdout: "", stderr: "" };
     }
     if (args[0] === "rev-parse") {
+      // Discovery asks the tree whether it is still its own worktree root before it
+      // measures anything; answering with the tree itself is what a real worktree does.
+      if (args[1] === "--show-toplevel") return { status: 0, stdout: "/tree", stderr: "" };
       return args[1] === "--verify"
         ? { status: 0, stdout: "base-sha", stderr: "" }
         : { status: 0, stdout: "base-tree", stderr: "" };
