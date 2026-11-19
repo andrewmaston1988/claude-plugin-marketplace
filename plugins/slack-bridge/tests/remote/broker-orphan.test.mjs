@@ -41,9 +41,8 @@ const INNER = process.env.BROKER_ORPHAN_INNER === "1";
 
 if (INNER) {
   // The failing test A2 forces: it touches the client, then its assertion fails.
-  test("inner: a test whose own assertion fails", async (t) => {
+  test("inner: a test whose own assertion fails", async () => {
     const port = Number(process.env.BROKER_ORPHAN_PORT);
-    t.after(() => reap(port));
     const client = testBrokerClient(port);
     await client.ensureBroker().catch(() => {});
     assert.fail("forced failure");
@@ -59,8 +58,9 @@ if (INNER) {
       "the client spawned a real detached broker on a dead port — a test must inject a spawn stub");
   });
 
-  // A2 drives the same scenario through a child run whose test fails, so the
-  // failure itself cannot mark this row red; only an orphan can.
+  // A2 drives the scenario through a child run whose test fails. The inner test
+  // reaps nothing, so only this outer row can shut down a broker the client
+  // spawned: if one is alive here, it outlived the failing child.
   test("A2: a test that failed after touching the client leaves no broker listening", async (t) => {
     const port = await freePort();
     t.after(() => reap(port));
