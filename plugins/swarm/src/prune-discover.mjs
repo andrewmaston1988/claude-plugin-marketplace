@@ -3,7 +3,7 @@
 // destroys what this finds. Every name is re-exported from prune.mjs, so the public
 // surface and every existing call site stay unchanged.
 import { basename, dirname, join, resolve } from "node:path";
-import { existsSync, readdirSync } from "node:fs";
+import { existsSync, readdirSync, realpathSync } from "node:fs";
 import { getConfig } from "./config.mjs";
 import { normalizeForCompare } from "./roots.mjs";
 import { legacyTreeDirs, listTreeRecords, runOfTree, runScopeKey, treeDirFor } from "./worktree.mjs";
@@ -89,21 +89,30 @@ export function registeredForRun(git, repo, resultsDir, { cfg } = {}) {
   return rows.filter((row) => key(runOfTree(row.path, root, { runsRoot })) === want);
 }
 
-// Whether a directory is its own worktree root. Git prints its toplevel with forward
-// slashes and the filesystem's own case, while a recorded tree path carries backslashes
-// and the case swarm derived — a raw `===` calls every real worktree unlinked. Compare
-// through the one path normaliser instead.
-// "unlinked" needs git to have ANSWERED and named a different directory: a git that
-// cannot answer says nothing about the link, and its row falls through to the ordinary
-// measurement, which fails closed and blocks.
-export function worktreeLink(git, path) {
-  const top = git(["rev-parse", "--show-toplevel"], path);
-  if (top.status !== 0 || !top.stdout) return "unknown";
-  return normalizeForCompare(top.stdout) === normalizeForCompare(path) ? "linked" : "unlinked";
+// git resolves a junction or symlink on the way to its toplevel; a recorded path keeps the
+// spelling swarm created it under. A path that no longer exists keeps its own spelling.
+function canonicalPath(path) {
+  try { return realpathSync.native(path); } catch { return path; }
 }
 
-export const isWorktreeRoot = (git, path) => worktreeLink(git, path) === "linked";
-export const isUnlinked = (git, path) => worktreeLink(git, path) === "unlinked";
+// Whether a directory is its own worktree root. Git prints its toplevel with forward
+// slashes, the filesystem's case and any junction resolved, while a recorded path carries
+// the spelling swarm derived — so both sides are canonicalised, then compared through the
+// one path normaliser. "unlinked" needs git to have ANSWERED with a different directory;
+// a git that cannot answer is "unknown" and its row fails closed in the ordinary measurement.
+export function worktreeLink(git, path, memo = null) {
+  const key = normalizeForCompare(path);
+  if (memo?.has(key)) return memo.get(key);
+  const top = git(["rev-parse", "--show-toplevel"], path);
+  const verdict = top.status !== 0 || !top.stdout
+    ? "unknown"
+    : normalizeForCompare(canonicalPath(top.stdout)) === normalizeForCompare(canonicalPath(path)) ? "linked" : "unlinked";
+  memo?.set(key, verdict);
+  return verdict;
+}
+
+export const isWorktreeRoot = (git, path, memo = null) => worktreeLink(git, path, memo) === "linked";
+export const isUnlinked = (git, path, memo = null) => worktreeLink(git, path, memo) === "unlinked";
 
 // How many entries a leftover directory holds. `Infinity` when it cannot be read: an
 // unreadable directory is never "empty", so it is never removed.
@@ -133,8 +142,8 @@ export function repoFromRecords(resultsDir, name, fs) {
 // git cannot answer, which is how a stray directory is told apart from a real worktree — a
 // row prune cannot resolve is not one it may destroy. A directory that is no longer a
 // worktree root is classified by the caller and never measured by walking up out of it.
-export function treeFacts(git, path) {
-  if (!isWorktreeRoot(git, path)) return null;
+export function treeFacts(git, path, memo = null) {
+  if (!isWorktreeRoot(git, path, memo)) return null;
   const common = git(["rev-parse", "--git-common-dir"], path);
   if (common.status !== 0 || !common.stdout) return null;
   const head = git(["rev-parse", "--abbrev-ref", "HEAD"], path);
@@ -152,6 +161,9 @@ export function* discoveredLanes(run, git, fs, { cfg } = {}) {
   const prefix = cfg?.worktreeBranchPrefix || "swarm/";
   const trees = new Set();
   const lanes = new Set();
+  // One verdict per directory for this pass: discovery and the facts probe ask the same
+  // tree, and the answer cannot change mid-pass.
+  const linkMemo = new Map();
   const laneKey = (repo, branch) => `${normalizeForCompare(repo)}\n${branch}`;
   const freshTree = (path) => {
     const key = normalizeForCompare(path);
@@ -165,28 +177,22 @@ export function* discoveredLanes(run, git, fs, { cfg } = {}) {
     if (!over.orphan && over.repo && over.branch) lanes.add(laneKey(over.repo, over.branch));
     return { path: null, branch: null, repo: null, missing: false, head: null, orphan: false, ...over };
   };
-  // summary.json's own list: how the run reported what it left, and the only source that
-  // carries a shared chain's taskIds. It is not authoritative for what EXISTS — a killed
-  // run wrote no summary, a summary entry can name a path already moved — so the two
-  // scans below add to it rather than replacing it.
-  // A row whose directory is on disk but is not its own toplevel has lost its `.git`
-  // link: `unlinked`, measured by branch in the repo the run recorded, never by a cwd
-  // inside it. `entries` decides whether the leftover directory may be cleared at all.
-  // The run's own records name a tree's repo; when they cannot, a run that dispatched into
-  // exactly one repo has only one answer left.
+  // The run's own records name a tree's repo; a single dispatched-into repo is the only answer left.
   const repoFor = (repo, name) =>
     repo ?? repoFromRecords(run.resultsDir, name, fs)
       ?? (run.repos?.length === 1 ? resolve(run.repos[0]) : null);
+  // On disk but not its own toplevel: it lost its `.git` link; `entries` gates clearing it.
   const unlinkedLane = (path, branch, repo) =>
     lane({ path, branch, repo, unlinked: true, entries: entryCount(fs, path) });
   // A row whose repo is gone is measured as unmeasurable whatever its directory is, so it
   // is never worth a git call — and a git call against a missing repo is exactly what the
   // caller promised not to make.
   const worthProbing = (repo) => !repo || fs.existsSync(repo);
+  // summary.json's own list is what the run reported, not proof of what EXISTS.
   for (const wt of run.worktreesKept || []) {
     const onDisk = fs.existsSync(wt.path);
     if (onDisk && !freshTree(wt.path)) continue;
-    if (onDisk && worthProbing(wt.repo) && isUnlinked(git, wt.path)) {
+    if (onDisk && worthProbing(wt.repo) && isUnlinked(git, wt.path, linkMemo)) {
       yield unlinkedLane(wt.path, wt.branch ?? null, repoFor(wt.repo, wt.name));
       continue;
     }
@@ -196,11 +202,11 @@ export function* discoveredLanes(run, git, fs, { cfg } = {}) {
   if (run.resultsDir) {
     for (const t of heldTrees(run.resultsDir, { cfg })) {
       if (!fs.existsSync(t.path) || !freshTree(t.path)) continue;
-      if (worthProbing(t.repo) && isUnlinked(git, t.path)) {
+      if (worthProbing(t.repo) && isUnlinked(git, t.path, linkMemo)) {
         yield unlinkedLane(t.path, t.branch ?? null, repoFor(t.repo, t.name ?? basename(t.path)));
         continue;
       }
-      const facts = t.repo && t.branch ? t : treeFacts(git, t.path);
+      const facts = t.repo && t.branch ? t : treeFacts(git, t.path, linkMemo);
       if (!facts?.repo) continue; // not a worktree git can speak for — never a row to destroy
       yield lane({ path: t.path, branch: t.branch ?? facts.branch ?? null, repo: facts.repo });
     }
@@ -215,7 +221,7 @@ export function* discoveredLanes(run, git, fs, { cfg } = {}) {
         yield lane({ path: reg.path, branch: reg.branch, repo, missing: true, head: reg.head });
         continue;
       }
-      if (isUnlinked(git, reg.path)) {
+      if (isUnlinked(git, reg.path, linkMemo)) {
         yield unlinkedLane(reg.path, reg.branch, repo);
         continue;
       }

@@ -6,7 +6,7 @@ import "./helpers/isolate-home.mjs";
 import { spawnSync } from "node:child_process";
 import { test } from "node:test";
 import { equal, ok } from "node:assert/strict";
-import { existsSync, readdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, rmdirSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { runCliInProcess } from "./helpers/cli.mjs";
 import { commitAll, gitOut } from "./helpers/cli-fixture.mjs";
@@ -116,6 +116,32 @@ test("A5: a registered, .git-less directory is cleared, its registration pruned,
     equal(again.status, 0, again.stdout + again.stderr);
     ok(/nothing to prune/.test(again.stdout), again.stdout);
   } finally {
+    dropSnapPrune(f);
+  }
+});
+
+test("A9: a worktree recorded through a junction is measured as a worktree, not an unlinked leftover", { skip: process.platform !== "win32" }, async () => {
+  const f = pruneFixture();
+  let junction;
+  try {
+    const real = join(f.dir, "real-root");
+    const realTree = join(real, "wt-impl");
+    mkdirSync(real, { recursive: true });
+    spawnSync("git", ["worktree", "add", "-q", "-b", "swarm/impl", realTree, f.sha], { cwd: f.repo, windowsHide: true });
+    junction = join(f.dir, "link-root");
+    symlinkSync(real, junction, "junction");
+    // The run records the tree under the junction's spelling while git answers with the
+    // canonical one — two spellings of one directory.
+    const recorded = join(junction, "wt-impl");
+    writeFinishedRun(f.resultsDir, [{ name: "impl", branch: "swarm/impl", path: recorded }]);
+    ok(existsSync(recorded), "precondition: the tree is reachable through the junction");
+
+    const r = await runCliInProcess(["prune", f.resultsDir, "--dry-run"], { cwd: f.dir, env: env(f) });
+    equal(r.status, 0, r.stdout + r.stderr);
+    ok(!/unlinked directory/.test(r.stdout + r.stderr), `a junctioned tree is a worktree, not a leftover: ${r.stdout}${r.stderr}`);
+    ok(/would free .* across 1 worktree/.test(r.stdout), `the tree must be measured as a worktree: ${r.stdout}`);
+  } finally {
+    if (junction) { try { rmdirSync(junction); } catch { /* already gone */ } }
     dropSnapPrune(f);
   }
 });
