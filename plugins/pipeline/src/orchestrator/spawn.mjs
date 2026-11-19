@@ -12,6 +12,7 @@ import { loadPipelineConfig } from "../../src/pipeline-config.mjs";
 import { PIPELINE_DEFAULTS } from "../../src/config-defaults.mjs";
 import { featureWorktreePath, resolveRowBranch } from "../worktree-paths.mjs";
 import { publishNotification } from "../publisher.mjs";
+import { mergeSessionPrompt } from "./merge-prompt.mjs";
 import { detectDefaultBranch } from "../../src/cli/helpers.mjs";
 
 // Windows: a spawned session's Bash tool falls back to PowerShell — where `git`
@@ -680,21 +681,7 @@ export function spawnMerge(project, row, projectRoot, model, { db, dryRun, logFn
   const sessionSlug   = `merge_${feature}`;
 
   const mergeScript = fileURLToPath(new URL("../../skills/merge/scripts/merge.mjs", import.meta.url));
-  const prompt = [
-    `Run the merge for ${branch}.`,
-    `plugin-root: ${pluginRoot}. project-dir: ${projectRoot}.`,
-    `branches: ${branch}`,
-    `target-branch: ${targetBranch}`,
-    ``,
-    `Steps:`,
-    `1. Working tree may be dirty — stash with git stash --include-untracked if needed; pop after.`,
-    `2. git checkout ${targetBranch}`,
-    `3. Run: node "${mergeScript}" --branches ${branch} --project-dir "${projectRoot}" --session-slug ${sessionSlug} --target-branch ${targetBranch} ${plansDirFlag}`,
-    `4. If exit non-zero, report BLOCKER lines from stderr.`,
-    `5. If exit zero, report: branch merged, plan location, squash commit hash.`,
-    `6. Pop stash if created.`,
-    `Do NOT ask for confirmation. Proceed or emit BLOCKER and exit.`,
-  ].join("\n");
+  const prompt = mergeSessionPrompt({ branch, pluginRoot, projectRoot, targetBranch, mergeScript, sessionSlug, plansDirFlag });
 
   logFn(`[${project}] spawning merge agent for '${feature}' model=${model} (corr_id=${correlationId})`);
 
