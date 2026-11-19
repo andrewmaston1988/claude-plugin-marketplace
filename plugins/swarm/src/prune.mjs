@@ -322,11 +322,14 @@ function clearUnlinked(row, git, fs) {
     if (pruned.status !== 0) fail(pruned.stderr || pruned.stdout || `git exited ${pruned.status}`);
   }
   try {
-    fs.rmdirSync(row.path, { force: true });
-  } catch {
-    // The directory holds something: it is not this row's to delete after all.
-    fail(`${row.path} is not an empty directory`);
-    return failed;
+    fs.rmdirSync(row.path);
+  } catch (e) {
+    // Gone since the plan: already cleared, and the branch still has to be dealt with.
+    if (e.code !== "ENOENT") {
+      // Not empty, or the OS refused — either way this row's bytes stay for the operator.
+      fail(`could not clear ${row.path}: ${e.code || e.message}`);
+      return failed;
+    }
   }
   if (!row.branch || !fs.existsSync(row.repo)) return failed;
   const state = branchState(git, row.repo, row.branch);

@@ -114,6 +114,29 @@ test("execute never rm's anything outside the rows it was given — run.log, sum
   for (const f of forbidden) ok(!rmCalls.includes(f), `execute must never rm ${f}`);
 });
 
+test("execute: an unlinked leftover already gone is cleared, not a failure; a refusal reports its own code", () => {
+  const row = { path: "/results/wt-gone", branch: "swarm/k/leaf", repo: "/repo", unlinked: true, entries: 0, bytes: 0, dirty: 0, unlanded: 0 };
+  const calls = [];
+  const git = (args, cwd) => { calls.push({ args, cwd }); return { status: 0, stdout: "", stderr: "" }; };
+  let rmdirOpts = "unset";
+  const vanished = {
+    existsSync: () => true,
+    rmdirSync: (p, opts) => { rmdirOpts = opts; const e = new Error("gone"); e.code = "ENOENT"; throw e; },
+  };
+  const { failed } = execute([row], git, vanished);
+  equal(rmdirOpts, undefined, "rmdirSync accepts no options — { force } is inert");
+  deepEqual(failed, [], "a directory that vanished between plan and execute is already cleared");
+  deepEqual(calls.at(-1), { args: ["branch", "-D", "swarm/k/leaf"], cwd: "/repo" }, "the branch is still deleted");
+
+  const blockedCalls = [];
+  const blockedGit = (args, cwd) => { blockedCalls.push({ args, cwd }); return { status: 0, stdout: "", stderr: "" }; };
+  const full = { existsSync: () => true, rmdirSync: () => { const e = new Error("not empty"); e.code = "ENOTEMPTY"; throw e; } };
+  const refused = execute([row], blockedGit, full);
+  equal(refused.failed.length, 1);
+  ok(refused.failed[0].reason.includes("ENOTEMPTY"), `the real code must be reported: ${refused.failed[0].reason}`);
+  ok(!blockedCalls.some(({ args }) => args[0] === "branch"), "a directory prune could not clear keeps its branch");
+});
+
 test("formatPrune: one line per row with size, then the freed/would-free closing line", () => {
   const rows = [
     { path: "/r/wt-a", branch: "swarm/a", bytes: 1073741824, repo: "/repo" },
