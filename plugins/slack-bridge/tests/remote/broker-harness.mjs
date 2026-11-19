@@ -15,7 +15,11 @@ export function tmpState() {
 // self-heal on a dead port would otherwise spawn a real broker detached, which
 // outlives the test process and holds the checkout.
 export function testBrokerClient(port, opts = {}) {
-  return createBrokerClient({ port, ...opts });
+  return createBrokerClient({
+    port,
+    _spawn: () => { throw new Error("test tried to spawn a broker"); },
+    ...opts,
+  });
 }
 
 export const sleep = (ms) => new Promise((r) => setTimeout(r, ms));

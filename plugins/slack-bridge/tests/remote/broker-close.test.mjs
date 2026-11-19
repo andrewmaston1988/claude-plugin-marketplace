@@ -4,9 +4,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createBroker } from "../../src/remote/broker.mjs";
-import { createBrokerClient } from "../../src/remote/broker-client.mjs";
 import { startReplyLoop } from "../../src/core/handler.mjs";
-import { tmpState, sleep } from "./broker-harness.mjs";
+import { testBrokerClient, tmpState, sleep } from "./broker-harness.mjs";
 
 function silentLog() {
   const log = { info() {}, warn() {}, error() {}, child: () => log };
@@ -18,7 +17,7 @@ function silentLog() {
 async function abortedLongPoll(opts = {}) {
   const broker = createBroker({ stateFile: tmpState(), ...opts });
   const port = await broker.listen(0);
-  const client = createBrokerClient({ port });
+  const client = testBrokerClient(port);
   const loop = startReplyLoop({ broker: client, claims: { all: () => ({}) }, web: {}, config: {}, log: silentLog() });
   await sleep(100);
   loop.stop();

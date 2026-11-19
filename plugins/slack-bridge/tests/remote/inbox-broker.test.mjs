@@ -3,9 +3,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
-import { createBrokerClient } from "../../src/remote/broker-client.mjs";
 import { PRIMING_LINE } from "../../src/remote/waiter.mjs";
-import { REG, claimedSession, runEntry, sleep, startBroker } from "./broker-harness.mjs";
+import { REG, claimedSession, runEntry, sleep, startBroker, testBrokerClient } from "./broker-harness.mjs";
 
 const SID = "sess-1";
 const entry = fileURLToPath(new URL("../../hooks/inbox-hook.mjs", import.meta.url));
@@ -15,7 +14,7 @@ async function queued(t, text = "stop that") {
   const { port, call } = await startBroker(t, { _leaseMs: LEASE_MS });
   const peer = (await call("/register", REG)).body.id;
   await call("/send-message", { from_id: "sender", to_id: peer, text });
-  return { port, call, peer, client: createBrokerClient({ port }) };
+  return { port, call, peer, client: testBrokerClient(port) };
 }
 
 test("a leased take holds the row: a second take in the lease sees nothing", async (t) => {
