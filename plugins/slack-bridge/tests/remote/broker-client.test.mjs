@@ -4,10 +4,14 @@ import { createBrokerClient } from "../../src/remote/broker-client.mjs";
 
 const KINDS = ["status", "question", "prompt", "turn-end", "read"];
 
+// The client self-heals by spawning a broker detached; a unit test must never
+// reach that, so every client here carries a throwing spawn stub.
+const noSpawn = () => { throw new Error("test tried to spawn a broker"); };
+
 test("sendMessage: the kind and the hook's start time reach the broker", async () => {
   const bodies = [];
   const _fetch = async (url, opts) => { bodies.push(JSON.parse(opts.body)); return { ok: true, json: async () => ({ ok: true }) }; };
-  await createBrokerClient({ port: 1, _fetch }).sendMessage("p1", "slack-bridge", "Bash: npm test", { kind: "status", hookStartedAt: 42 });
+  await createBrokerClient({ port: 1, _fetch, _spawn: noSpawn }).sendMessage("p1", "slack-bridge", "Bash: npm test", { kind: "status", hookStartedAt: 42 });
   assert.deepEqual(bodies, [{ from_id: "p1", to_id: "slack-bridge", text: "Bash: npm test", kind: "status", hook_started_at: 42 }]);
 });
 
@@ -21,7 +25,7 @@ test("wait: the retry after a connection error keeps the caller's abort signal",
     if (signals.length === 1) throw new TypeError("fetch failed");
     return { ok: true, json: async () => [] };
   };
-  const client = createBrokerClient({ port: 1, _fetch });
+  const client = createBrokerClient({ port: 1, _fetch, _spawn: noSpawn });
   const signal = AbortSignal.timeout(60_000);
   await client.wait("p1", 55_000, { signal });
   assert.equal(signals.length, 2);
@@ -37,7 +41,7 @@ test("listPeers: the caller's fetch options reach fetch as the signal", async ()
     return { ok: true, json: async () => [] };
   };
   const signal = AbortSignal.timeout(5000);
-  await createBrokerClient({ port: 1, _fetch }).listPeers({ scope: "machine" }, { signal });
+  await createBrokerClient({ port: 1, _fetch, _spawn: noSpawn }).listPeers({ scope: "machine" }, { signal });
   assert.deepEqual(calls.map((c) => c.path), ["/list-peers"]);
   assert.equal(calls[0].signal, signal);
   assert.equal(calls[0].body.scope, "machine", "opts still go in the body");
@@ -54,7 +58,7 @@ for (const [name, call] of [["wait", (c) => c.wait("p1", 55_000)], ["takeMessage
       const body = path === "/ack" ? { ok: true } : { messages: [{ id: 7, text: "a" }, { id: 9, text: "b" }] };
       return { ok: true, json: async () => body };
     };
-    const client = createBrokerClient({ port: 1, _fetch, identity: { pid: 33, started_at: 44 } });
+    const client = createBrokerClient({ port: 1, _fetch, _spawn: noSpawn, identity: { pid: 33, started_at: 44 } });
     const res = await call(client);
     assert.deepEqual(res.messages.map((m) => m.id), [7, 9]);
     assert.equal(calls[0].body.lease, true);
@@ -79,7 +83,7 @@ test("ack: a subset clears only the posted ids, and never ids the take did not h
     }
     return { ok: true, json: async () => ({ messages: [{ id: 7 }, { id: 9 }, { id: 11 }] }) };
   };
-  const res = await createBrokerClient({ port: 1, _fetch }).wait("p1", 55_000);
+  const res = await createBrokerClient({ port: 1, _fetch, _spawn: noSpawn }).wait("p1", 55_000);
 
   await res.ack([7, 11]);
   assert.deepEqual(acks, [{ id: "p1", ids: [7, 11] }], "only the posted ids are cleared");
@@ -99,7 +103,7 @@ test("takeMessages: a failed ack still returns the messages (the lease redeliver
     if (url.endsWith("/ack")) return { ok: false, status: 404, text: async () => "not found" };
     return { ok: true, json: async () => ({ messages: [{ id: 1, text: "a" }] }) };
   };
-  const res = await createBrokerClient({ port: 1, _fetch }).takeMessages("p1");
+  const res = await createBrokerClient({ port: 1, _fetch, _spawn: noSpawn }).takeMessages("p1");
   assert.deepEqual(res.messages.map((m) => m.text), ["a"]);
 });
 

@@ -158,6 +158,9 @@ async function serverWithBroker(t, { sessionId = "session-123", sessionReader = 
   const server = createRemoteMcpServer({
     config, configPath: "/tmp/remote-config.json", input: new PassThrough(), output: new PassThrough(),
     _getPaths: () => ({ stateDir }), _readSession: sessionReader, _projectsDir: projectsDir, _cwd: cwd,
+    // A self-heal on a flaky health check would spawn a real detached broker the
+    // test cannot reap; the broker here is the harness's own.
+    _spawn: () => { throw new Error("test tried to spawn a broker"); },
     _fetch: async (url, options) => {
       if (url.endsWith("/claim")) claims.push(JSON.parse(options.body));
       if (url.endsWith("/claim")) return new Response(JSON.stringify({ ok: true, channel: "C123", channel_name: "test" }));
@@ -312,6 +315,7 @@ test("brokerFetch sends the Bearer header — requests against a token-guarded b
     config: { remote: { brokerPort: port, controlPort: 0, controlToken: "t", heartbeatIntervalMs: 60_000 } },
     input: new PassThrough(),
     output: new PassThrough(),
+    _spawn: () => { throw new Error("test tried to spawn a broker"); },
   });
   const peers = await server._brokerFetch("/list-peers", { scope: "machine", cwd: "x", git_root: null });
   assert.ok(Array.isArray(peers), "a token-guarded broker must accept the server's credentialed fetch");
@@ -337,6 +341,7 @@ test("startup logs the plugin directory, so a stale install is visible", async (
     input: new PassThrough(), output: new PassThrough(),
     _getPaths: () => ({ stateDir: path.join(root, "state") }),
     _readSession: () => ({ sessionId: "s1" }), _projectsDir: tmpProjectsDir(),
+    _spawn: () => { throw new Error("test tried to spawn a broker"); },
     log: (msg) => lines.push(String(msg)),
   });
   await server.start();
