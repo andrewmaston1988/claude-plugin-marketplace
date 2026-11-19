@@ -3,47 +3,30 @@
 // _git_*_with_retry, _detect_default_branch, step_0a_rebase.
 import { spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
-import { join, basename, isAbsolute } from "node:path";
+import { join, dirname, basename } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
-import { featureWorktreePath } from "../../../src/worktree-paths.mjs";
-import { withDetachedWorktree } from "./worktree.mjs";
 
 export class GitError extends Error {}
 
 // ── Git subprocess ─────────────────────────────────────────────────────────────
 
-export function runGit(args, cwd, { check = true, capture = true, timeoutMs = 0 } = {}) {
+export function runGit(args, cwd, { check = true, capture = true } = {}) {
   const result = spawnSync("git", ["-C", cwd, ...args], {
     encoding: "utf8",
     stdio: capture ? ["pipe", "pipe", "pipe"] : ["inherit", "inherit", "inherit"],
-    ...(timeoutMs ? { timeout: timeoutMs } : {}),
   });
   const stdout = result.stdout ?? "";
   const stderr = result.stderr ?? "";
-  const timedOut = result.error?.code === "ETIMEDOUT";
-  if (check && timedOut) {
-    throw new GitError(`git ${args.join(" ")} timed out after ${timeoutMs}ms in ${cwd}`);
-  }
   if (check && result.status !== 0) {
     throw new GitError(`git ${args.join(" ")} failed in ${cwd}:\n${stderr.trim()}`);
   }
-  return { code: result.status ?? 0, stdout, stderr, timedOut };
-}
-
-// Where git itself puts a per-checkout file. In a linked worktree `.git` is a
-// FILE pointing at the main repository's worktrees/<name> directory, so
-// `join(cwd, ".git", name)` never exists there and every lock wait was a no-op.
-function gitPath(cwd, name) {
-  const r = runGit(["rev-parse", "--git-path", name], cwd, { check: false });
-  const out = r.stdout.trim();
-  if (r.code !== 0 || !out) return join(cwd, ".git", name);
-  return isAbsolute(out) ? out : join(cwd, out);
+  return { code: result.status ?? 0, stdout, stderr };
 }
 
 // ── Lock retry ─────────────────────────────────────────────────────────────────
 
 export async function withLockWait(fn, cwd, { maxRetries = 5, backoffMs = 500, maxWaitMs = 2500 } = {}) {
-  const lockFile = gitPath(cwd, "index.lock");
+  const lockFile = join(cwd, ".git", "index.lock");
   let attempt = 0;
   let totalWaitMs = 0;
 
@@ -71,7 +54,7 @@ export async function withLockWait(fn, cwd, { maxRetries = 5, backoffMs = 500, m
 }
 
 export async function precheckLockForRebase(cwd, maxWaitMs = 2500) {
-  const lockFile = gitPath(cwd, "index.lock");
+  const lockFile = join(cwd, ".git", "index.lock");
   const start = Date.now();
   while (existsSync(lockFile) && Date.now() - start < maxWaitMs) {
     await sleep(100);
@@ -100,6 +83,10 @@ export async function gitMergeSquashWithRetry(cwd, branch) {
 
 export async function gitWorktreeWithRetry(cwd, ...args) {
   return withLockWait(() => runGit(["worktree", ...args], cwd, { check: false }), cwd);
+}
+
+export async function gitCheckoutWithRetry(cwd, ...args) {
+  return withLockWait(() => runGit(["checkout", ...args], cwd, { check: false }), cwd);
 }
 
 // ── Branch detection ───────────────────────────────────────────────────────────
@@ -142,74 +129,35 @@ export function detectDefaultBranch(projectDir) {
 
 // ── Step 0a ────────────────────────────────────────────────────────────────────
 
-// The rebase itself, in whichever worktree owns the branch this run can use.
-async function rebaseIn(cwd, branch, targetBranch) {
-  runGit(["fetch", "origin", targetBranch], cwd, { check: false });
-
-  try {
-    await precheckLockForRebase(cwd);
-  } catch (e) {
-    process.stderr.write(`BLOCKER: ${e.message}\n`);
-    return false;
-  }
-
-  const result = runGit(["rebase", targetBranch], cwd, { check: false });
-  if (result.code !== 0) {
-    runGit(["rebase", "--abort"], cwd, { check: false });
-    process.stderr.write(`BLOCKER: rebase conflict in ${branch}\n`);
-    process.stderr.write((result.stderr.trim() || result.stdout.trim()) + "\n");
-    return false;
-  }
-  return true;
-}
-
-// The worktree with `branch` checked out, by the only source that knows every
-// path: a row may declare any branch, while the directory stays plan-stem
-// derived, so featureWorktreePath alone misses `anm/<key>_<slug>`.
-function findWorktreeForBranch(projectDir, branch) {
-  const r = runGit(["worktree", "list", "--porcelain"], projectDir, { check: false });
-  if (r.code !== 0) return null;
-  let current = null;
-  for (const line of r.stdout.split(/\r?\n/)) {
-    if (line.startsWith("worktree ")) current = line.slice("worktree ".length).trim();
-    else if (line.trim() === `branch refs/heads/${branch}`) return current;
-  }
-  return null;
-}
-
 export async function step0aRebase(projectDir, branches, targetBranch = "main") {
-  const project = basename(projectDir);
-
   for (const branch of branches) {
     const slug = branch.startsWith("autonomous/") ? branch.slice("autonomous/".length) : branch;
-    const wt = findWorktreeForBranch(projectDir, branch)
-      ?? featureWorktreePath({ project, projectRoot: projectDir, feature: slug });
-    const headHere = existsSync(wt)
-      ? runGit(["rev-parse", "--abbrev-ref", "HEAD"], wt, { check: false })
-      : { code: 1, stdout: "" };
-    const holdsBranch = headHere.code === 0 && headHere.stdout.trim() === branch;
+    const wt = join(dirname(projectDir), `${basename(projectDir)}-wt`, `autonomous-${slug}`);
+    const target = existsSync(wt) ? wt : projectDir;
 
-    if (holdsBranch) {
-      // The branch is checked out in the phase-3b feature worktree. `git
-      // checkout` of it anywhere else is refused by git, and rebasing in the
-      // shared checkout would rewrite the tree other sessions are editing.
-      process.stdout.write(`[0a] Rebasing ${branch} on ${targetBranch} (in ${wt})\n`);
-      if (!(await rebaseIn(wt, branch, targetBranch))) return false;
-      continue;
+    process.stdout.write(`[0a] Rebasing ${branch} on ${targetBranch} (in ${target})\n`);
+
+    const co = await gitCheckoutWithRetry(target, branch);
+    if (co.code !== 0) {
+      process.stderr.write(`BLOCKER: cannot checkout ${branch} in ${target}\n`);
+      process.stderr.write(co.stderr.trim() + "\n");
+      return false;
     }
 
-    // No feature worktree holds the branch — replay it detached and move the
-    // branch ref to the result.
-    process.stdout.write(`[0a] Rebasing ${branch} on ${targetBranch} (in a detached worktree)\n`);
+    runGit(["fetch", "origin", targetBranch], target, { check: false });
+
     try {
-      const ok = await withDetachedWorktree(projectDir, branch, async (tmp) => {
-        if (!(await rebaseIn(tmp, branch, targetBranch))) return false;
-        runGit(["update-ref", `refs/heads/${branch}`, "HEAD"], tmp);
-        return true;
-      });
-      if (!ok) return false;
+      await precheckLockForRebase(target);
     } catch (e) {
-      process.stderr.write(`BLOCKER: could not rebase ${branch} in a detached worktree: ${e.message}\n`);
+      process.stderr.write(`BLOCKER: ${e.message}\n`);
+      return false;
+    }
+
+    const result = runGit(["rebase", targetBranch], target, { check: false });
+    if (result.code !== 0) {
+      runGit(["rebase", "--abort"], target, { check: false });
+      process.stderr.write(`BLOCKER: rebase conflict in ${branch}\n`);
+      process.stderr.write((result.stderr.trim() || result.stdout.trim()) + "\n");
       return false;
     }
   }

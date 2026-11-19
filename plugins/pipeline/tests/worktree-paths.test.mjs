@@ -6,7 +6,6 @@
 import "./helpers/isolate-home.mjs";
 import { test } from "node:test";
 import { equal, deepEqual, throws, ok } from "node:assert/strict";
-import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import {
   branchLocal,
@@ -18,7 +17,6 @@ import {
   orchestratorWorktreePath,
   handlerWorktreePath,
   reportPath,
-  mergeSessionSlug,
 } from "../src/worktree-paths.mjs";
 import { PLANS_DIR_KEYS } from "../src/plans-resolver.mjs";
 
@@ -409,24 +407,4 @@ for (const c of HANDLER_CASES) {
 test("reportPath: unknown kind throws", () => {
   throws(() => reportPath({ kind: "bogus", project: "p", projectRoot: "/x/p", feature: "f", _config: {} }),
          /unknown kind 'bogus'/);
-});
-
-// The merge worktree is per INVOCATION, not per feature: a per-feature slug means
-// a directory left behind by a crashed run makes every later merge for that
-// feature refuse. Seconds, not minutes, so an immediate retry gets its own path.
-test("mergeSessionSlug: names the feature and stamps the invocation to the second", () => {
-  const a = mergeSessionSlug("feat-x", new Date(2026, 10, 19, 13, 7, 25));
-  const b = mergeSessionSlug("feat-x", new Date(2026, 10, 19, 13, 7, 26));
-  equal(a, "merge_feat-x_20261119-130725");
-  ok(a !== b, "two invocations a second apart must not share a path");
-  equal(mergeSessionSlug("feat-x", new Date(2026, 10, 19, 13, 7, 25)), a,
-    "the same instant yields the same slug");
-});
-
-test("mergeSessionSlug: both merge call sites derive their slug from it", () => {
-  const merge = readFileSync(new URL("../skills/merge/scripts/merge.mjs", import.meta.url), "utf8");
-  const spawn = readFileSync(new URL("../src/orchestrator/spawn.mjs", import.meta.url), "utf8");
-  ok(merge.includes("mergeSessionSlug("), "merge.mjs's default slug must come from mergeSessionSlug");
-  ok(spawn.includes("mergeSessionSlug("), "the orchestrator's merge slug must come from mergeSessionSlug");
-  ok(!spawn.includes("`merge_${feature}`"), "a per-feature slug collides on every later merge");
 });

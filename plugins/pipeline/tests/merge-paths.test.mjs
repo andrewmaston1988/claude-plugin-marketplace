@@ -388,25 +388,18 @@ function initRepo(dir) {
   spawnSync("git", ["commit", "-m", "init"], { cwd: dir });
 }
 
-test("step7CommitProject: commits plans/ path-scoped, leaving a pre-staged foreign file alone", async () => {
+test("step7CommitProject: commits when plans/ has staged changes", async () => {
   const tmp = mkdtempSync(join(tmpdir(), "smoke14-s7-"));
   const repo = join(tmp, "repo");
   try {
     initRepo(repo);
     mkdirSync(join(repo, "plans", "complete"), { recursive: true });
     writeFileSync(join(repo, "plans", "complete", "feat-a.md"), "# done\n", "utf8");
-    // Another session's staged work must not ride along into the close commit.
-    writeFileSync(join(repo, "foreign.txt"), "foreign\n", "utf8");
-    spawnSync("git", ["add", "foreign.txt"], { cwd: repo });
 
     await step7CommitProject(repo, ["autonomous/feat-a"]);
 
     const log = spawnSync("git", ["log", "--oneline", "-1"], { cwd: repo, encoding: "utf8" });
     ok(log.stdout.includes("feat-a"), "commit message should reference the branch slug");
-    const files = spawnSync("git", ["show", "--name-only", "--pretty=format:"], { cwd: repo, encoding: "utf8" }).stdout;
-    ok(!files.includes("foreign.txt"), `foreign.txt must not be in the close commit: ${files}`);
-    const status = spawnSync("git", ["status", "--porcelain", "--", "foreign.txt"], { cwd: repo, encoding: "utf8" }).stdout;
-    equal(status.trim(), "A  foreign.txt", "the foreign staged file must still be staged");
   } finally { rmSync(tmp, { recursive: true, force: true }); }
 });
 

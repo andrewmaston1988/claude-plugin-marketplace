@@ -10,8 +10,9 @@ import {
 } from "../db/index.mjs";
 import { loadPipelineConfig } from "../../src/pipeline-config.mjs";
 import { PIPELINE_DEFAULTS } from "../../src/config-defaults.mjs";
-import { featureWorktreePath, mergeSessionSlug, resolveRowBranch } from "../worktree-paths.mjs";
+import { featureWorktreePath, resolveRowBranch } from "../worktree-paths.mjs";
 import { publishNotification } from "../publisher.mjs";
+import { mergeSessionPrompt } from "./merge-prompt.mjs";
 import { detectDefaultBranch } from "../../src/cli/helpers.mjs";
 
 // Windows: a spawned session's Bash tool falls back to PowerShell — where `git`
@@ -677,21 +678,10 @@ export function spawnMerge(project, row, projectRoot, model, { db, dryRun, logFn
   const plansDirFlag = resolvedPlansDir ? `--plans-dir "${resolvedPlansDir}"` : "";
   const ts = new Date().toISOString().replace(/\.\d{3}Z$/, "Z").replace(/[-:]/g, "");
   const correlationId = `merge-${feature}-${ts}`;
-  const sessionSlug   = mergeSessionSlug(feature);
+  const sessionSlug   = `merge_${feature}`;
 
   const mergeScript = fileURLToPath(new URL("../../skills/merge/scripts/merge.mjs", import.meta.url));
-  const prompt = [
-    `Run the merge for ${branch}.`,
-    `plugin-root: ${pluginRoot}. project-dir: ${projectRoot}.`,
-    `branches: ${branch}`,
-    `target-branch: ${targetBranch}`,
-    ``,
-    `Steps:`,
-    `1. Run: node "${mergeScript}" --branches ${branch} --project-dir "${projectRoot}" --session-slug ${sessionSlug} --target-branch ${targetBranch} ${plansDirFlag}`,
-    `2. If exit non-zero, report BLOCKER lines from stderr.`,
-    `3. If exit zero, report: branch merged, plan location, squash commit hash.`,
-    `Do NOT ask for confirmation. Proceed or emit BLOCKER and exit.`,
-  ].join("\n");
+  const prompt = mergeSessionPrompt({ branch, pluginRoot, projectRoot, targetBranch, mergeScript, sessionSlug, plansDirFlag });
 
   logFn(`[${project}] spawning merge agent for '${feature}' model=${model} (corr_id=${correlationId})`);
 

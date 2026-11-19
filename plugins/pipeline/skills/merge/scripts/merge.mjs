@@ -1,172 +1,140 @@
 #!/usr/bin/env node
 /**
- * merge.mjs — Mechanical /merge pipeline runner (steps 0a-9).
+ * merge.mjs — Mechanical /merge pipeline runner.
  *
- * The squash, the plan writes and the close commit run in a throwaway worktree
- * this run owns; the rebase runs in the feature worktree, and the shared
- * checkout is touched once, at the end, by a fast-forward that refuses rather
- * than overwrites (land.mjs:landTarget).
+ * Port of CLAUDE/scripts/merge.py to Node.js ESM. Steps 0a-9:
+ * rebase, verify DoD, squash merge, plan archival, project commit, smoke check.
+ *
+ * Key differences from merge.py:
+ *   - No --claude-base: plans live at --plans-dir (default: <project-dir>/plans/)
+ *   - Plan file path is read from the pipeline DB row (stored at queue time)
+ *   - "Commit CLAUDE repo" step commits plan moves in the project repo only
+ *   - All pipeline-db calls via ESM imports, no python pipeline_cli subprocess
  *
  * Usage:
  *   node merge.mjs --branches b1,b2,... --project-dir <path>
  *                  [--plans-dir <path>] [--session-slug <slug>]
  *                  [--dry-run] [--skip-smoke] [--skip-testing]
- *                  [--target-branch <branch>] [--parent <slug>] [--land-only]
+ *                  [--target-branch <branch>] [--parent <slug>]
  */
 import { existsSync } from "node:fs";
-import { join, basename, relative, isAbsolute, dirname } from "node:path";
+import { join, basename, relative, isAbsolute } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { connectUnified, close, rowGet, progressMark, planSetStatus } from "../../../src/db/index.mjs";
-import { runGit, detectDefaultBranch, step0aRebase } from "./rebase.mjs";
 import {
-  branchSlug, step1IdentifyPlans, step2VerifyDone, step3UpdateStatus,
-  step6MovePlans, step6bArchiveOrphanedPlans, dirInWorktree,
+  connectUnified, close,
+  rowGet,
+  progressMark,
+  planSetStatus,
+} from "../../../src/db/index.mjs";
+import {
+  runGit,
+  gitAddWithRetry,
+  gitCommitWithRetry,
+  detectDefaultBranch,
+  step0aRebase,
+} from "./rebase.mjs";
+import {
+  branchSlug,
+  step1IdentifyPlans,
+  step2VerifyDone,
+  step3UpdateStatus,
+  step6MovePlans,
+  step6bArchiveOrphanedPlans,
 } from "./plan-files.mjs";
 import { step0bProgress, step9Cleanup } from "./progress.mjs";
 import { readSmokeCommand, step8Smoke } from "./smoke.mjs";
-import { cleanupBranch, pushTarget, landTarget, parkSquash } from "./land.mjs";
-import { createMergeWorktree } from "./worktree.mjs";
-import {
-  MergeAbort, step5SquashMerge, findOpenPR, verifyAlreadyIntegrated,
-} from "./merge-branches.mjs";
-import { featureWorktreePath, mergeSessionSlug } from "../../../src/worktree-paths.mjs";
+import { pushTarget } from "./land.mjs";
+import { loadPipelineConfig } from "../../../src/pipeline-config.mjs";
+import { logOut, logErr, step5SquashMerge } from "./merge-step5.mjs";
 
-// Step 5 and its helpers live in merge-branches.mjs (this file is over the
-// file-size bar); re-exported so every existing call site keeps working.
-export { MergeAbort, step5SquashMerge, findOpenPR, verifyAlreadyIntegrated };
+export { findOpenPR, verifyAlreadyIntegrated, step5SquashMerge } from "./merge-step5.mjs";
 
-const SELF = fileURLToPath(import.meta.url);
-
-function logOut(msg) { process.stdout.write(msg + "\n"); }
-function logErr(msg) { process.stderr.write(msg + "\n"); }
+// ── Subprocess helpers ────────────────────────────────────────────────────────
 // Exit on a timer, per the plugin convention: a bare process.exit can drop a
 // piped stderr on Windows, and these exits are the failure report.
 function exitSoon(code) { setTimeout(() => process.exit(code), 150); }
 
+// Steps that fail on their own terms (rebase, DoD gate, smoke) abort with their
+// own exit code. Thrown, never `return`ed: a return inside the try skips the
+// trailing process.exit, the process falls off the end at 0, and a caller reads
+// the rolled-back merge as landed.
+class MergeAbort extends Error {
+  constructor(code, message) {
+    super(message);
+    this.exitCode = code;
+  }
+}
+
 // ── Path helpers ──────────────────────────────────────────────────────────────
 
-function projectName(projectDir) { return basename(projectDir); }
-
-function worktreePath(projectDir, slug) {
-  return featureWorktreePath({ project: projectName(projectDir), projectRoot: projectDir, feature: slug });
+function projectName(projectDir) {
+  return basename(projectDir);
 }
 
-function isInside(root, candidate) {
-  const rel = relative(root, candidate);
-  return Boolean(rel) && !rel.startsWith("..") && !isAbsolute(rel);
-}
+// ── Step 0a — Rebase ──────────────────────────────────────────────────────────
+// Delegated to rebase.mjs:step0aRebase (imported at top of file).
 
-// A squash whose worktree is about to be removed must stay reachable from a
-// ref. Skip the park when the commit already lives in the target or origin.
-// Only a commit that carries a squash may be parked: an abort before step 5
-// leaves the plan-only --skip-testing rewrite as HEAD, and parking that would
-// make the next --land-only land a plan edit in place of the merge.
-function parkIfUnreachable(projectDir, wtPath, targetBranch, hasOrigin) {
-  const head = runGit(["rev-parse", "HEAD"], wtPath, { check: false });
-  if (head.code !== 0) return false;
-  const sha = head.stdout.trim();
-  const isAncestorOf = (ref) =>
-    runGit(["merge-base", "--is-ancestor", sha, ref], projectDir, { check: false }).code === 0;
-  if (isAncestorOf(targetBranch)) return false;
-  if (hasOrigin) {
-    const remote = runGit(["ls-remote", "origin", `refs/heads/${targetBranch}`], projectDir, { check: false });
-    const remoteSha = (remote.stdout || "").trim().split(/\s/)[0];
-    if (remoteSha && isAncestorOf(remoteSha)) return false;
+// ── Step 0b — Progress file ───────────────────────────────────────────────────
+// Delegated to progress.mjs:step0bProgress.
+
+// ── Step 1 — Identify plan files ─────────────────────────────────────────────
+// Delegated to plan-files.mjs:step1IdentifyPlans.
+
+// ── Step 2 — Definition of done ──────────────────────────────────────────────
+// Delegated to plan-files.mjs:step2VerifyDone.
+
+// ── Step 3 — Update plan Current Status ──────────────────────────────────────
+// Delegated to plan-files.mjs:step3UpdateStatus.
+
+// ── Step 5 — Squash merge each branch ────────────────────────────────────────
+// Delegated to merge-step5.mjs:step5SquashMerge.
+
+// ── Step 7 — Commit project ───────────────────────────────────────────────────
+// (Renamed from "Commit CLAUDE repo" — commits plan file moves in project repo)
+
+export async function step7CommitProject(projectDir, branches, { plansDir = null } = {}) {
+  // Stage the plans directory — use plansDir if provided, else default to <projectDir>/plans
+  const resolvedPlansDir = plansDir || join(projectDir, "plans");
+  if (existsSync(resolvedPlansDir)) {
+    // Only stage plansDir when it lives inside projectDir. An external plansDir
+    // belongs to a different git repo; staging it from here fails and is not our job.
+    const rel = relative(projectDir, resolvedPlansDir);
+    if (!rel.startsWith("..") && !isAbsolute(rel)) {
+      await gitAddWithRetry(projectDir, resolvedPlansDir);
+    } else {
+      logOut(`[7] plansDir '${resolvedPlansDir}' is outside projectDir — skipping git add in project repo`);
+    }
   }
-  return parkSquash(projectDir, targetBranch, sha);
-}
 
-// ── Step 7 — Commit the plan close in the merge worktree ─────────────────────
-
-export async function step7CommitProject(wtDir, branches, { plansDir = null } = {}) {
-  const resolvedPlansDir = plansDir || join(wtDir, "plans");
-  if (!existsSync(resolvedPlansDir)) {
-    logOut("[7] Nothing to commit in the merge worktree");
-    return false;
-  }
-  // An external plansDir belongs to a different git repo: its move stays a
-  // filesystem operation and is not committed here.
-  if (!isInside(wtDir, resolvedPlansDir)) {
-    logOut(`[7] plansDir '${resolvedPlansDir}' is outside the merge worktree — not committed here`);
-    return false;
-  }
-  const rel = relative(wtDir, resolvedPlansDir);
-
-  // Path-scoped by construction: only the plans directory is staged, and the
-  // commit carries the same pathspec, so a foreign staged file cannot ride
-  // along into the close commit.
-  runGit(["add", "--", rel], wtDir);
-  const status = runGit(["status", "--porcelain", "--", rel], wtDir).stdout;
+  // Filter ?? (untracked) lines before deciding whether to commit
+  const status = runGit(["status", "--porcelain"], projectDir).stdout;
   const tracked = status.split("\n").filter(l => l && !l.startsWith("??"));
   if (!tracked.length) {
-    logOut("[7] Nothing to commit in the merge worktree");
+    logOut("[7] Nothing to commit in project repo");
     return false;
   }
+
   const title = `Close ${branches.map(branchSlug).join(", ")}: update plans, move to complete/`;
-  runGit(["commit", "-m", title, "--", rel], wtDir);
+  await gitCommitWithRetry(projectDir, "-m", title);
   logOut(`[7] Committed: ${title}`);
   return true;
-}
-
-// ── Land-only resume: land a merge that already completed, touch nothing else ─
-
-function landOnly(projectDir, targetBranch, args) {
-  const parkRef = `refs/merge/${targetBranch}`;
-  const originRef = `origin/${targetBranch}`;
-  const revParse = (ref) => {
-    const r = runGit(["rev-parse", "--verify", "--quiet", ref], projectDir, { check: false });
-    return r.code === 0 ? r.stdout.trim() : null;
-  };
-
-  // The park wins over origin/<target>: after a failed push origin still holds
-  // the pre-merge tip, and landing that is a no-op that then drops the squash.
-  const park = revParse(parkRef);
-  const sha = park ?? revParse(originRef);
-  if (!sha) {
-    logErr(`BLOCKER: --land-only found neither ${parkRef} nor ${originRef} in ${projectDir}`);
-    return exitSoon(2);
-  }
-  const source = park ? parkRef : originRef;
-  const sharedHead = runGit(["rev-parse", "HEAD"], projectDir, { check: false }).stdout.trim();
-  if (sha === sharedHead) {
-    logOut(`[land-only] nothing to land — the shared checkout is already at ${sha.slice(0, 7)}`);
-    return exitSoon(0);
-  }
-
-  const hasOrigin = runGit(["remote", "get-url", "origin"], projectDir, { check: false }).code === 0;
-  logOut(`[land-only] landing ${sha.slice(0, 7)} (${source}) onto ${targetBranch}`);
-
-  // A park is the only ref holding the squash. Push it before the land, and
-  // leave it in place whenever origin still lacks it.
-  if (park && hasOrigin && !pushTarget(projectDir, targetBranch, { sha: park, log: logOut, err: logErr })) {
-    logErr(`[land-only] the shared checkout was not moved; the squash is still parked at ${parkRef}`);
-    return exitSoon(7);
-  }
-
-  const res = landTarget(projectDir, targetBranch, sha, { log: logOut, err: logErr });
-  if (!res.landed) {
-    // A guard that blocks on no file has only its reason to report.
-    const detail = res.paths.length ? `blocking path(s): ${res.paths.join(", ")}` : res.reason;
-    logOut(`[land-only] the shared checkout is behind; it was not moved (${detail})`);
-    return exitSoon(0);
-  }
-  if (park) runGit(["update-ref", "-d", parkRef], projectDir, { check: false });
-  if (!args.skipSmoke) {
-    const smokeCmd = readSmokeCommand(join(projectDir, "CLAUDE.md"));
-    if (!step8Smoke(projectDir, smokeCmd)) return exitSoon(5);
-  }
-  logOut("merge.mjs — land complete");
-  return exitSoon(0);
 }
 
 // ── Arg parsing ───────────────────────────────────────────────────────────────
 
 function parseArgs(argv) {
   const args = {
-    branches: null, projectDir: null, plansDir: null, sessionSlug: null,
-    dryRun: false, skipSmoke: false, skipTesting: false, noRebase: false,
-    landOnly: false, parent: null, targetBranch: null,
+    branches: null,
+    projectDir: null,
+    plansDir: null,
+    sessionSlug: null,
+    dryRun: false,
+    skipSmoke: false,
+    skipTesting: false,
+    noRebase: false,
+    parent: null,
+    targetBranch: null,
   };
   for (let i = 0; i < argv.length; i++) {
     switch (argv[i]) {
@@ -180,7 +148,6 @@ function parseArgs(argv) {
       case "--skip-smoke":    args.skipSmoke = true; break;
       case "--skip-testing":  args.skipTesting = true; break;
       case "--no-rebase":     args.noRebase = true; break;
-      case "--land-only":     args.landOnly = true; break;
     }
   }
   return args;
@@ -190,22 +157,26 @@ function parseArgs(argv) {
 
 async function main() {
   const args = parseArgs(process.argv.slice(2));
-  if (!args.branches && !args.landOnly) { logErr("BLOCKER: --branches required"); return exitSoon(2); }
+
+  if (!args.branches) { logErr("BLOCKER: --branches required"); return exitSoon(2); }
 
   const projectDir = args.projectDir ?? process.cwd();
   const project = projectName(projectDir);
-
-  const branches = (args.branches ?? "").split(",").map(b => b.trim()).filter(Boolean);
+  const cfg = loadPipelineConfig();
+  const now = new Date();
   const sessionSlug = args.sessionSlug
-    ?? mergeSessionSlug(branches.length ? branchSlug(branches[0]) : "merge");
-  if (!branches.length && !args.landOnly) { logErr("BLOCKER: no branches given"); return exitSoon(2); }
+    ?? `merge_${now.getFullYear()}${String(now.getMonth()+1).padStart(2,"0")}${String(now.getDate()).padStart(2,"0")}-${String(now.getHours()).padStart(2,"0")}${String(now.getMinutes()).padStart(2,"0")}`;
+
+  const branches = args.branches.split(",").map(b => b.trim()).filter(Boolean);
+  if (!branches.length) { logErr("BLOCKER: no branches given"); return exitSoon(2); }
 
   // Resolve target branch: CLI > DB > auto-detected default
   let targetBranch = args.targetBranch;
-  if (!targetBranch && branches.length) {
+  if (!targetBranch) {
     const db0 = connectUnified();
     try {
-      const row0 = rowGet(db0, project, branchSlug(branches[0]));
+      const slug0 = branchSlug(branches[0]);
+      const row0 = rowGet(db0, project, slug0);
       const dbTarget = row0?.target_branch;
       if (dbTarget && !dbTarget.startsWith("autonomous/") && !branches.includes(dbTarget)) {
         targetBranch = dbTarget;
@@ -225,13 +196,28 @@ async function main() {
     logOut("[dry-run] would execute Steps 0a-9; exiting without changes");
     return exitSoon(0);
   }
-  if (args.landOnly) return landOnly(projectDir, targetBranch, args);
 
-  // Only what a refusal report tells the operator the checkout stayed at; the
-  // shared checkout is never reset now.
+  // Pre-check: refuse if project has staged or unstaged changes
+  const staged = runGit(["diff", "--cached", "--name-only"], projectDir, { check: false }).stdout.trim();
+  if (staged) {
+    logErr(`BLOCKER: project has staged changes — abort to avoid mixing state`);
+    logErr(`  staged files:\n${staged}`);
+    logErr("  Resolve manually (commit or `git restore --staged <files>`) and retry.");
+    return exitSoon(2);
+  }
+  const unstaged = runGit(["diff", "--name-only"], projectDir, { check: false }).stdout.trim();
+  if (unstaged) {
+    logErr(`BLOCKER: project has unstaged changes — abort to protect working tree`);
+    logErr(`  unstaged files:\n${unstaged}`);
+    logErr("  Stash or commit these changes before merging.");
+    return exitSoon(2);
+  }
+
+  // Capture pre-merge HEAD for rollback
   const projectPreSha = runGit(["rev-parse", "HEAD"], projectDir).stdout.trim();
-  const hasOrigin = runGit(["remote", "get-url", "origin"], projectDir, { check: false }).code === 0;
+  const projectPreBranch = runGit(["rev-parse", "--abbrev-ref", "HEAD"], projectDir).stdout.trim();
 
+  // Connect to pipeline DB; enforce qa_pass invariant
   const db = connectUnified();
   try {
     for (const branch of branches) {
@@ -248,53 +234,17 @@ async function main() {
     logErr(`[warn] qa_pass pre-check failed: ${e.message}`);
   }
 
-  // A parked squash is a merge waiting to be landed, not one to redo.
-  const parkedRef = `refs/merge/${targetBranch}`;
-  const parked = runGit(["rev-parse", "--verify", "--quiet", parkedRef], projectDir, { check: false });
-  if (parked.code === 0) {
-    const parkedSha = parked.stdout.trim();
-    const inTarget = runGit(["merge-base", "--is-ancestor", parkedSha, targetBranch], projectDir, { check: false }).code === 0;
-    if (!inTarget) {
-      logErr(`BLOCKER: a parked merge exists at ${parkedRef} (${parkedSha.slice(0, 7)}) and is not in ${targetBranch}`);
-      logErr(`  Land it first: node "${SELF}" --land-only --project-dir "${projectDir}" --target-branch "${targetBranch}"`);
-      close(db); return exitSoon(2);
-    }
-    runGit(["update-ref", "-d", parkedRef], projectDir, { check: false });
-    logOut(`[0] Cleared ${parkedRef} — that squash is already in ${targetBranch}`);
+  function mark(idx, state) {
+    // Progress marks are best-effort — never let them block the merge
+    try { progressMark(db, sessionSlug, idx, state); } catch { /* ignore */ }
   }
-
-  // Base the worktree on what origin holds: the final push must fast-forward
-  // origin, and a base at a local tip behind origin would make every push fail.
-  let baseRef = targetBranch;
-  if (hasOrigin) {
-    const fetched = runGit(["fetch", "origin", targetBranch], projectDir, { check: false, timeoutMs: 30_000 });
-    if (fetched.timedOut) {
-      logErr(`BLOCKER: git fetch origin ${targetBranch} timed out after 30s — origin did not answer`);
-      close(db); return exitSoon(2);
-    }
-    if (runGit(["rev-parse", "--verify", "--quiet", `origin/${targetBranch}`], projectDir, { check: false }).code === 0) {
-      baseRef = `origin/${targetBranch}`;
-    }
-  }
-  const baseSha = runGit(["rev-parse", baseRef], projectDir).stdout.trim();
-
-  let wt;
-  try {
-    wt = createMergeWorktree({ project, projectDir, sessionSlug, sha: baseSha });
-  } catch (e) {
-    logErr(`BLOCKER: ${e.message}`);
-    close(db); return exitSoon(2);
-  }
-  logOut(`[0] Merge worktree: ${wt.path}`);
-
-  // Progress marks are best-effort — never let them block the merge
-  const mark = (idx, state) => { try { progressMark(db, sessionSlug, idx, state); } catch { /* ignore */ } };
 
   let exitCode = 0;
-  let squashed = false;
   try {
+    // Step 0b — create progress entry
     step0bProgress(db, project, sessionSlug, args.parent);
 
+    // Step 0a (idx 0)
     mark(0, "inprogress");
     if (args.noRebase) {
       logOut("[0a] --no-rebase: skipping rebase as requested by operator");
@@ -304,15 +254,16 @@ async function main() {
     }
     mark(0, "done");
 
+    // Step 1 (idx 1)
     mark(1, "inprogress");
-    const planFiles = step1IdentifyPlans(db, project, branches, { plansDir: args.plansDir });
+    const plFiles = step1IdentifyPlans(db, project, branches, { plansDir: args.plansDir });
     mark(1, "done");
 
+    // Step 2 (idx 2)
     mark(2, "inprogress");
-    const blockers = await step2VerifyDone(db, planFiles, projectDir, project, {
+    const blockers = await step2VerifyDone(db, plFiles, projectDir, project, {
       skipTesting: args.skipTesting,
       targetBranch,
-      wtPath: wt.path,
     });
     if (blockers.length) {
       for (const b of blockers) logErr(`BLOCKER: ${b}`);
@@ -320,73 +271,41 @@ async function main() {
     }
     mark(2, "done");
 
-    // Step 4 (idx 4) — doc-impact removed (fragile LLM call, human judgment preferred)
-
-    mark(5, "inprogress");
-    await step5SquashMerge(db, project, projectDir, wt, branches, planFiles, targetBranch, {
-      log: logOut, err: logErr,
-    });
-    squashed = true;
-    mark(5, "done");
-
-    // Steps 3 + 6 + 6b — plan writers, after the squash, in the merge worktree.
-    // A staged plan edit before `git merge --squash` makes git refuse whenever
-    // the branch touches its own plan.
+    // Step 3 (idx 3)
     mark(3, "inprogress");
-    await step3UpdateStatus(planFiles, projectDir, project, { wtPath: wt.path });
+    await step3UpdateStatus(plFiles, projectDir, project);
     mark(3, "done");
 
+    // Step 4 (idx 4) — doc-impact removed (fragile LLM call, human judgment preferred)
+
+    // Step 5 — squash merge (idx 5)
+    mark(5, "inprogress");
+    await step5SquashMerge(db, project, projectDir, branches, plFiles, targetBranch);
+    mark(5, "done");
+
+    // Step 6 — move plans (idx 6)
     mark(6, "inprogress");
-    step6MovePlans(planFiles, { projectDir, wtPath: wt.path });
+    step6MovePlans(plFiles);
+    // Mark plans complete in the DB
     for (const branch of branches) {
-      try { planSetStatus(db, project, branchSlug(branch), "complete"); } catch { /* not in DB */ }
+      const slug = branchSlug(branch);
+      try {
+        planSetStatus(db, project, slug, 'complete');
+      } catch { /* ignore if plan not in DB */ }
     }
     mark(6, "done");
 
-    const plansDirSource = args.plansDir
-      ?? dirname(Object.values(planFiles).find(Boolean) || join(projectDir, "plans"));
-    const plansDirWt = dirInWorktree(projectDir, wt.path, plansDirSource);
-    step6bArchiveOrphanedPlans(db, project, { plansDir: plansDirSource, projectDir, wtPath: wt.path });
+    // Step 6b — archive orphaned done plans (no dedicated progress step)
+    step6bArchiveOrphanedPlans(db, project, { plansDir: args.plansDir });
 
+    // Step 7 — commit project (idx 7)
     mark(7, "inprogress");
-    await step7CommitProject(wt.path, branches, { plansDir: plansDirWt });
-
-    // Step 7b — push, park, then land. The shared checkout is untouched until
-    // the land, and a failed push leaves it untouched.
-    const headSha = runGit(["rev-parse", "HEAD"], wt.path).stdout.trim();
-    if (hasOrigin) {
-      if (!pushTarget(wt.path, targetBranch, { sha: headSha, log: logOut, err: logErr })) {
-        parkSquash(projectDir, targetBranch, headSha);
-        logErr(`[7b] Parked ${headSha.slice(0, 7)} at ${parkedRef} — shared checkout untouched`);
-        throw new MergeAbort(7, "step 7b (push)");
-      }
-    } else {
-      parkSquash(projectDir, targetBranch, headSha);
-      logOut(`[7b] No origin — parked ${headSha.slice(0, 7)} at ${parkedRef}`);
-    }
-
-    const land = landTarget(projectDir, targetBranch, headSha, { log: logOut, err: logErr });
-    if (land.landed) {
-      runGit(["update-ref", "-d", parkedRef], projectDir, { check: false });
-    } else {
-      // A refused land is a completed merge: the work is on origin (or parked),
-      // and someone else is mid-edit in the shared checkout. A guard that blocks
-      // on no file reports its reason instead.
-      const detail = land.paths.length ? `blocking path(s): ${land.paths.join(", ")}` : land.reason;
-      logOut(`[land] the shared checkout is behind; it was not moved (${detail})`);
-      logOut(`[land] it stayed at ${projectPreSha.slice(0, 7)}; land later with:`);
-      logOut(`  node "${SELF}" --land-only --project-dir "${projectDir}" --target-branch "${targetBranch}"`);
-      logOut("[land] smoke skipped — the checkout does not hold the merge");
-    }
+    await step7CommitProject(projectDir, branches, { plansDir: args.plansDir });
+    if (!pushTarget(projectDir, targetBranch, { log: logOut, err: logErr })) throw new MergeAbort(7, "step 7b (push)");
     mark(7, "done");
 
-    // Cleanup after the land, so a later failure has not already deleted the branch.
-    for (const branch of branches) {
-      await cleanupBranch(projectDir, branch, worktreePath(projectDir, branchSlug(branch)), { log: logOut, err: logErr });
-    }
-
-    // Step 8 — smoke tests the real checkout, so it runs only once the merge is there.
-    if (land.landed && !args.skipSmoke) {
+    // Step 8 — smoke check (idx 8)
+    if (!args.skipSmoke) {
       mark(8, "inprogress");
       const smokeCmd = readSmokeCommand(join(projectDir, "CLAUDE.md"));
       if (!step8Smoke(projectDir, smokeCmd)) throw new MergeAbort(5, "step 8 (smoke check)");
@@ -403,13 +322,24 @@ async function main() {
       exitCode = 6;
     }
   } finally {
-    // Rollback becomes worktree removal. The shared checkout is never reset.
-    if (wt) {
-      if (squashed && parkIfUnreachable(projectDir, wt.path, targetBranch, hasOrigin)) {
-        logErr(`[merge] parked the merge worktree's HEAD at ${parkedRef} before removing it`);
+    // Rollback on failure — not smoke (5) or push (7): the merge landed, and they are operator-recoverable
+    if (![0, 5, 7].includes(exitCode)) {
+      logErr(`[rollback] merge failed (exit=${exitCode}); resetting project head`);
+      const curBranch = runGit(["rev-parse", "--abbrev-ref", "HEAD"], projectDir, { check: false }).stdout.trim();
+      if (curBranch !== projectPreBranch) {
+        logErr(`  HEAD on '${curBranch}', not pre-merge '${projectPreBranch}' — checking out first`);
+        const co = runGit(["checkout", projectPreBranch], projectDir, { check: false });
+        if (co.code !== 0) {
+          logErr(`  BLOCKER — could not checkout '${projectPreBranch}': ${co.stderr.trim()}; skipping reset`);
+          close(db);
+          return exitSoon(exitCode);
+        }
       }
-      wt.remove();
+      logErr(`  project (${projectPreBranch}) -> ${projectPreSha.slice(0, 7)}`);
+      runGit(["reset", "--hard", projectPreSha], projectDir, { check: false });
     }
+
+    // Step 9 — cleanup progress (always runs)
     try { step9Cleanup(db, sessionSlug); } catch { /* ignore */ }
     close(db);
   }
