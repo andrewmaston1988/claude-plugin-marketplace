@@ -108,25 +108,45 @@ export async function step7CommitProject(wtDir, branches, { plansDir = null } = 
 // ── Land-only resume: land a merge that already completed, touch nothing else ─
 
 function landOnly(projectDir, targetBranch, args) {
-  const candidates = [`origin/${targetBranch}`, `refs/merge/${targetBranch}`];
-  let sha = null;
-  let source = null;
-  for (const ref of candidates) {
+  const parkRef = `refs/merge/${targetBranch}`;
+  const originRef = `origin/${targetBranch}`;
+  const revParse = (ref) => {
     const r = runGit(["rev-parse", "--verify", "--quiet", ref], projectDir, { check: false });
-    if (r.code === 0) { sha = r.stdout.trim(); source = ref; break; }
-  }
+    return r.code === 0 ? r.stdout.trim() : null;
+  };
+
+  // The park wins over origin/<target>: after a failed push origin still holds
+  // the pre-merge tip, and landing that is a no-op that then drops the squash.
+  const park = revParse(parkRef);
+  const sha = park ?? revParse(originRef);
   if (!sha) {
-    logErr(`BLOCKER: --land-only found neither ${candidates.join(" nor ")} in ${projectDir}`);
+    logErr(`BLOCKER: --land-only found neither ${parkRef} nor ${originRef} in ${projectDir}`);
     return exitSoon(2);
   }
+  const source = park ? parkRef : originRef;
+  const sharedHead = runGit(["rev-parse", "HEAD"], projectDir, { check: false }).stdout.trim();
+  if (sha === sharedHead) {
+    logOut(`[land-only] nothing to land — the shared checkout is already at ${sha.slice(0, 7)}`);
+    return exitSoon(0);
+  }
+
+  const hasOrigin = runGit(["remote", "get-url", "origin"], projectDir, { check: false }).code === 0;
   logOut(`[land-only] landing ${sha.slice(0, 7)} (${source}) onto ${targetBranch}`);
+
+  // A park is the only ref holding the squash. Push it before the land, and
+  // leave it in place whenever origin still lacks it.
+  if (park && hasOrigin && !pushTarget(projectDir, targetBranch, { sha: park, log: logOut, err: logErr })) {
+    logErr(`[land-only] the shared checkout was not moved; the squash is still parked at ${parkRef}`);
+    return exitSoon(7);
+  }
+
   const res = landTarget(projectDir, targetBranch, sha, { log: logOut, err: logErr });
   if (!res.landed) {
     const paths = res.paths.length ? res.paths.join(", ") : "(unknown)";
     logOut(`[land-only] the shared checkout is behind; it was not moved (blocking path(s): ${paths})`);
     return exitSoon(0);
   }
-  runGit(["update-ref", "-d", `refs/merge/${targetBranch}`], projectDir, { check: false });
+  if (park) runGit(["update-ref", "-d", parkRef], projectDir, { check: false });
   if (!args.skipSmoke) {
     const smokeCmd = readSmokeCommand(join(projectDir, "CLAUDE.md"));
     if (!step8Smoke(projectDir, smokeCmd)) return exitSoon(5);
