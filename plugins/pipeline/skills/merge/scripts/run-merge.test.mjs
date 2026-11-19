@@ -232,7 +232,7 @@ test("mutexConflict: no existing entry is never a conflict", () => {
 // resume would have squashed it a second time. observeWorld now falls back to
 // `git cherry`, whose "-" prefix means already-applied-upstream.
 test("observeWorld: detects a landed SQUASH merge, not just a fast-forward", () => {
-  const src = readFileSync(new URL("./run-merge.mjs", import.meta.url), "utf8");
+  const src = readFileSync(new URL("./merge-world.mjs", import.meta.url), "utf8");
   ok(src.includes('"cherry"'), "must probe git cherry, not ancestry alone");
   ok(
     src.indexOf('"cherry"') > src.indexOf('"--is-ancestor"'),
