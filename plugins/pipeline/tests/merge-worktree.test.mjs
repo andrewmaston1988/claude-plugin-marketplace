@@ -122,6 +122,18 @@ function runMerge(repo, home, branches, extraArgs = []) {
   ], { env: homeEnv(home), encoding: "utf8", timeout: 120_000 });
 }
 
+function runLandOnly(repo, home, extraArgs = []) {
+  return spawnSync(process.execPath, [
+    MERGE_MJS, "--land-only", "--project-dir", repo,
+    "--target-branch", "master", "--skip-smoke", ...extraArgs,
+  ], { env: homeEnv(home), encoding: "utf8", timeout: 120_000 });
+}
+
+function parkedSha(repo) {
+  const r = gitMaybe(repo, "rev-parse", "--verify", "--quiet", "refs/merge/master");
+  return r.status === 0 ? r.stdout.trim() : null;
+}
+
 // Same run, but polls `git worktree list` so the row can prove a merge
 // worktree existed while the merge was in flight.
 function runMergeWatched(repo, home, branches, extraArgs = []) {
@@ -331,6 +343,70 @@ test("A14: with no origin a refused land parks the squash, and a land-only run l
 
     equal(resume.status, 0, `land-only must exit 0; stderr=${resume.stderr}`);
     equal(git(repo, "rev-parse", "master"), parked, "land-only must fast-forward to the parked sha");
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+// ── A20 — a park is landed through origin, never dropped on a stale tip ─────
+//
+// After a failed push, origin/<target> still exists at the pre-merge tip. A
+// land-only that picks that ref "lands" a no-op and then deletes the park,
+// destroying the only reference to the squash.
+
+test("A20: land-only prefers the parked squash, pushes it, and drops the park only once origin has it", () => {
+  const { tmp, repo } = makeRepoDir();
+  const home = makeHome();
+  try {
+    makeBaseRepo(repo);
+    const bare = addOrigin(tmp, repo);
+    seedRows(home, repo, ["feat-x"]);
+    const sharedBefore = git(repo, "rev-parse", "master");
+
+    // An unreachable origin makes the push fail and the squash get parked.
+    git(repo, "remote", "set-url", "origin", join(tmp, "unreachable.git"));
+    const failed = runMerge(repo, home, "autonomous/feat-x");
+    equal(failed.status, 7, `a failed push must exit 7; stderr=${failed.stderr}`);
+    const parked = parkedSha(repo);
+    ok(parked, `the squash must be parked; stdout=${failed.stdout} stderr=${failed.stderr}`);
+    equal(git(bare, "rev-parse", "master"), sharedBefore,
+      "a failed push must leave origin at the pre-merge tip");
+
+    // Origin still cannot take it: the park must survive and nothing may land.
+    const stillDown = runLandOnly(repo, home);
+    ok(stillDown.status !== 0, `an unreachable origin must not read as landed; stdout=${stillDown.stdout}`);
+    equal(parkedSha(repo), parked, "the park must survive while origin does not hold it");
+    equal(git(repo, "rev-parse", "master"), sharedBefore, "the shared checkout must not move");
+
+    // Origin is back: the parked sha is pushed, then landed, and only then dropped.
+    git(repo, "remote", "set-url", "origin", bare);
+    const resumed = runLandOnly(repo, home);
+
+    equal(resumed.status, 0, `land-only must exit 0; stdout=${resumed.stdout} stderr=${resumed.stderr}`);
+    equal(git(bare, "rev-parse", "master"), parked, "origin must hold the parked squash");
+    equal(git(repo, "rev-parse", "master"), parked, "the shared checkout must land on the parked sha");
+    equal(parkedSha(repo), null, "the park must be gone once origin holds it");
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("A20b: a land-only run with nothing to land touches no ref, including a park", () => {
+  const { tmp, repo } = makeRepoDir();
+  const home = makeHome();
+  try {
+    makeBaseRepo(repo);
+    seedRows(home, repo, ["feat-x"]);
+    const head = git(repo, "rev-parse", "master");
+    git(repo, "update-ref", "refs/merge/master", head);
+
+    const r = runLandOnly(repo, home);
+
+    equal(r.status, 0, `a no-op land must exit 0; stderr=${r.stderr}`);
+    ok(/nothing to land/i.test(r.stdout), `the run must say there is nothing to land: ${r.stdout}`);
+    equal(parkedSha(repo), head, "a no-op land must never delete the park");
   } finally {
     rmSync(tmp, { recursive: true, force: true });
     rmSync(home, { recursive: true, force: true });
