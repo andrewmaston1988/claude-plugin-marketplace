@@ -123,7 +123,7 @@ export async function runCell(s, { start, end, timing }) {
 
   // A wake taken during the turn is delivered once it has ended: assumed, since the
   // reference says only that an asyncRewake exit 2 "wakes Claude immediately even when the session is idle".
-  if (timing !== "none" && block === null && !cutWaits({ start, end })) {
+  if (timing !== "none" && block === null && !cutWaits({ start, end, timing })) {
     if (await until(() => has(s, "SLACK: msg").length > 0, 6_000)) {
       block = await wokenTurn(s, has(s, "SLACK: msg")[0].text);
     }
@@ -135,7 +135,7 @@ export async function runCell(s, { start, end, timing }) {
   const ticking = s.ticking();
 
   await s.send("ping");
-  const reachable = cutWaits({ start, end }) ? false : await until(() => has(s, "SLACK: ping").length > 0, 8_000);
+  const reachable = cutWaits({ start, end, timing }) ? false : await until(() => has(s, "SLACK: ping").length > 0, 8_000);
 
   const seen = timing === "none" ? null : has(s, "SLACK: msg").length;
   const when = timing === "none" ? null

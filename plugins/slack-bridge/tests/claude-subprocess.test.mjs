@@ -76,7 +76,9 @@ test("a timeout kills the process tree, not just the wrapper", async () => {
 
 const isAlive = (pid) => { try { process.kill(pid, 0); return true; } catch { return false; } };
 
-async function poll(pred, message, ms = 10_000) {
+// Generous: the suite runs every file at once, and cmd.exe plus node can take
+// seconds to start on a loaded box.
+async function poll(pred, message, ms = 30_000) {
   const deadline = Date.now() + ms;
   for (;;) {
     const value = pred();

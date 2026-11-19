@@ -58,11 +58,11 @@ export function buildClaudeInvocation({ prompt, sessionId, addDir, model, proxy 
 export function killProcessTree(child) {
   if (process.platform === "win32") {
     try {
-      spawnSync("taskkill", ["/PID", String(child.pid), "/T", "/F"], { stdio: "ignore", windowsHide: true, timeout: 5000 });
-    } catch { /* best effort: the timeout rejection still reports the failure */ }
-  } else {
-    try { child.kill("SIGTERM"); } catch { /* already gone */ }
+      // A loaded box can take seconds; a timeout here silently leaves the tree up.
+      spawnSync("taskkill", ["/PID", String(child.pid), "/T", "/F"], { stdio: "ignore", windowsHide: true, timeout: 15_000 });
+    } catch { /* fall through: the wrapper kill is still better than nothing */ }
   }
+  try { child.kill("SIGTERM"); } catch { /* already gone */ }
 }
 
 export function runClaude({ cwd, addDir, prompt, sessionId, model, proxy, timeoutMs = 180_000, onStarted, env = {}, _spawn = spawn, _killTree = killProcessTree }) {
