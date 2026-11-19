@@ -413,6 +413,35 @@ test("A20b: a land-only run with nothing to land touches no ref, including a par
   }
 });
 
+// A23 — the worktree HEAD at an abort is not always a squash. `--skip-testing`
+// commits the plan rewrite in step 2, so a squash that then fails leaves a
+// plan-only commit as HEAD; parking it would make the next --land-only land a
+// plan edit in place of the merge.
+test("A23: an abort before the squash parks nothing", () => {
+  const { tmp, repo } = makeRepoDir();
+  const home = makeHome();
+  try {
+    const plan = "# feat\n\n## Goal\n\nLand it.\n\n## Definition of Done\n\n"
+      + "- [ ] behaviour (needs testing)\n\n## Current Status\n\n- in progress\n";
+    makeBaseRepo(repo, { plan });
+    seedRows(home, repo, ["feat-x"]);
+    // Conflict the squash: master also creates feature.txt, with other content.
+    writeFileSync(join(repo, "feature.txt"), "master side\n");
+    git(repo, "add", "-A");
+    git(repo, "commit", "-m", "master takes feature.txt");
+
+    const r = runMerge(repo, home, "autonomous/feat-x", ["--skip-testing"]);
+
+    ok(r.status !== 0, `a conflicting squash must fail; stdout=${r.stdout}`);
+    ok(/autonomous\/feat-x/.test(r.stderr), `the failure must name the branch: ${r.stderr}`);
+    equal(parkedSha(repo), null, "the plan-only rewrite must not be parked as the merge");
+    equal(worktreeCount(repo), 1, "the merge worktree is removed");
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
 // ── A15 — mixed invocation: hook branch then local branch, one push ──────────
 
 test("A15: a hook-merged branch and a locally squash-merged branch both reach origin", () => {
