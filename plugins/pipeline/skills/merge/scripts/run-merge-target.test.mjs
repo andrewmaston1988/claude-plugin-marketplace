@@ -266,8 +266,9 @@ test("main: an annotation naming the source branch is ignored, not merged onto i
 });
 
 // A resumed merge runs after step 6 moved the plan, so complete/ has to be searched. The
-// world probe reads complete/ too, so this run is complete and stops before the resolved
-// block — the target it names there is still the evidence that the plan supplied it.
+// plan move is judged from the target ref, not this checkout's disk, so an uncommitted
+// complete/ copy leaves the move pending — the resolved block still names the target the
+// plan supplied.
 test("main: a plan already moved to complete/ still supplies the target", async () => {
   const dir = tmpRepo();
   try {
@@ -275,7 +276,7 @@ test("main: a plan already moved to complete/ still supplies the target", async 
     addBranch(dir, "staging");
     writePlan(dir, "*Target-Branch:* staging\n", { complete: true });
     const outText = await runMain(dir, { plansDir: "{root}/plans" });
-    match(outText, /already applied to staging/);
+    match(outText, /targetBranch:\s+staging \(tier: plan\)/);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
