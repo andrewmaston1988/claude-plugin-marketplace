@@ -70,7 +70,7 @@ export async function cmdPrune(rest, { usage }) {
     if (go.length) out(formatPrune(go, { dryRun: true }));
     const clearing = go.filter((row) => row.unlinked);
     if (clearing.length) {
-      out(`swarm: would clear ${dirCount(clearing.length)} left behind by a lost worktree link:`);
+      out(`swarm: would clear ${dirCount(clearing.length, "directory", "directories")} left behind by a lost worktree link:`);
       for (const row of clearing) out(`  ${row.path}`);
     }
     if (stay.length) {

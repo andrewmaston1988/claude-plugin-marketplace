@@ -140,3 +140,22 @@ test("A6: --dry-run on an unlinked leftover prints 'would clear' and deletes not
     dropSnapPrune(f);
   }
 });
+
+test("A9: a dry run that would clear two leftovers names them as directories", async () => {
+  const f = pruneFixture();
+  try {
+    const first = unlinkedTree(f, { name: "impl" });
+    const second = unlinkedTree(f, { name: "impl-two", branch: "swarm/impl-two" });
+    writeFinishedRun(f.resultsDir, [
+      { name: "impl", branch: "swarm/impl", path: first },
+      { name: "impl-two", branch: "swarm/impl-two", path: second },
+    ]);
+
+    const r = await runCliInProcess(["prune", f.resultsDir, "--dry-run"], { cwd: f.dir, env: env(f) });
+    equal(r.status, 0, r.stdout + r.stderr);
+    ok(r.stdout.includes("2 directories"), `the plural must read as English: ${r.stdout}`);
+    ok(existsSync(first) && existsSync(second), "dry-run deletes nothing");
+  } finally {
+    dropSnapPrune(f);
+  }
+});
