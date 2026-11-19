@@ -687,12 +687,9 @@ export function spawnMerge(project, row, projectRoot, model, { db, dryRun, logFn
     `target-branch: ${targetBranch}`,
     ``,
     `Steps:`,
-    `1. Working tree may be dirty — stash with git stash --include-untracked if needed; pop after.`,
-    `2. git checkout ${targetBranch}`,
-    `3. Run: node "${mergeScript}" --branches ${branch} --project-dir "${projectRoot}" --session-slug ${sessionSlug} --target-branch ${targetBranch} ${plansDirFlag}`,
-    `4. If exit non-zero, report BLOCKER lines from stderr.`,
-    `5. If exit zero, report: branch merged, plan location, squash commit hash.`,
-    `6. Pop stash if created.`,
+    `1. Run: node "${mergeScript}" --branches ${branch} --project-dir "${projectRoot}" --session-slug ${sessionSlug} --target-branch ${targetBranch} ${plansDirFlag}`,
+    `2. If exit non-zero, report BLOCKER lines from stderr.`,
+    `3. If exit zero, report: branch merged, plan location, squash commit hash.`,
     `Do NOT ask for confirmation. Proceed or emit BLOCKER and exit.`,
   ].join("\n");
 

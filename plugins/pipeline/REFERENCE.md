@@ -320,6 +320,8 @@ Hooks ending in `.mjs` / `.js` are auto-prefixed with `node`; everything else is
 
 Fires at the point of merge — invoked by `merge.mjs` (step 5) for a branch being squash-merged **that has no open PR**. When an open PR exists, `merge.mjs` merges it itself with `gh pr merge <number> --squash --admin` and never consults the hook. With no PR and the hook set, **the hook is the merge authority**: `merge.mjs` skips its local squash-merge and delegates the git operation to the hook. A non-zero exit code aborts the merge with an error.
 
+The hook runs with `cwd` = the **merge worktree** — a throwaway detached worktree `merge.mjs` owns for this run. Any git the hook runs happens there, never in the shared checkout; `git push` and remote access are shared, so a hook can still publish.
+
 ```json
 { "hooks": { "on_merge": "/abs/path/to/hook.mjs" } }
 ```
@@ -335,9 +337,9 @@ The hook receives four environment variables:
 
 **Merge contract:** `merge.mjs` performs exactly one of (a) an open-PR merge, (b) a delegated `on_merge` hook merge, or (c) a local squash-merge — never two. In order:
 
-1. If `gh pr list --head <branch> --state open` finds a PR, `merge.mjs` runs `gh pr merge <number> --squash --admin` and fast-forwards local target to `origin/<target>`. The hook is not consulted.
-2. Otherwise, if `on_merge` is set, it checks whether the branch has any commits ahead of the target. If already integrated (0 ahead), it fast-forwards local target to `origin/<target>` and skips the hook.
-3. If there are commits to merge, `merge.mjs` invokes the hook (which does `gh pr merge --squash` on origin), then fast-forwards local target to `origin/<target>` so `local == origin` and the next merge starts clean.
+1. If `gh pr list --head <branch> --state open` finds a PR, `merge.mjs` runs `gh pr merge <number> --squash --admin` and re-syncs the merge worktree to `origin/<target>`. The hook is not consulted.
+2. Otherwise, if `on_merge` is set, it checks whether the branch has any commits ahead of the target. If already integrated (0 ahead), it re-syncs the merge worktree to `origin/<target>` and skips the hook.
+3. If there are commits to merge, `merge.mjs` invokes the hook (which does `gh pr merge --squash` on origin), then re-syncs the merge worktree to `origin/<target>` so the next branch builds on what origin holds.
 
 This prevents the double-squash problem where a local commit and an origin GitHub commit diverge after the merge.
 
@@ -641,7 +643,7 @@ If a match is found, queueing fails with an error pointing at the offending line
 
 ## Merge layer
 
-`skills/merge/scripts/merge.mjs` runs the squash-merge pipeline: rebase → verify DoD → squash merge → move plans → project commit → smoke check. Invoked by the `/merge` skill:
+`skills/merge/scripts/merge.mjs` runs the squash-merge pipeline: rebase → verify DoD → squash merge → move plans → project commit → push → land → smoke check. Invoked by the `/merge` skill:
 
 ```bash
 node plugins/pipeline/skills/merge/scripts/merge.mjs \
@@ -651,10 +653,24 @@ node plugins/pipeline/skills/merge/scripts/merge.mjs \
   [--target-branch main] \
   [--session-slug merge_20260608-1430] \
   [--parent <umbrella-plan>] \
-  [--skip-smoke] [--skip-testing] [--dry-run] [--no-rebase]
+  [--skip-smoke] [--skip-testing] [--dry-run] [--no-rebase] [--land-only]
 ```
 
-Plan file paths are read from the pipeline DB row (stored at queue time). `--plans-dir` is used only as a fallback for rows that predate DB-stored paths. Default: `<project-dir>/plans/`.
+**Every mutating git call runs in a throwaway merge worktree** at `featureWorktreePath({project, projectRoot, feature: merge_<YYYYMMDD-HHMM>})`, detached at `origin/<target>` (or the local target when no origin exists). The shared checkout is touched exactly once, by `landTarget`'s `git merge --ff-only`, which first checks that HEAD is the target branch, that the squash descends from it, and that no staged path overlaps the merge.
+
+Order inside the worktree: squash each branch (PR, hook or local) → move and rewrite the plans → one **path-scoped** close commit (`git add <plans dir>` + `git commit … -- <plans dir>`) → push `<sha>:refs/heads/<target>` → land → delete branches → smoke. The plan writers therefore run *after* the squash: a staged plan edit before `git merge --squash` makes git refuse whenever the branch edits its own plan.
+
+**Push, park and land.** A push that fails exits 7 and parks the squash on `refs/merge/<target>`. With no origin, the squash is parked unconditionally. `landTarget` then fast-forwards the shared checkout. A refused land (checkout on another branch, or an overlapping staging/edit) is a **completed** merge: it prints the blocking paths and the fact that the shared checkout is behind, skips smoke — smoke tests the real checkout, which does not hold the merge — and exits 0. Worktrees are removed in a `finally`; nothing is rolled back in the shared checkout.
+
+Resume a refused land without re-squashing:
+
+```bash
+node plugins/pipeline/skills/merge/scripts/merge.mjs --land-only --project-dir /path/to/project [--target-branch main]
+```
+
+`--land-only` lands `origin/<target>` when it exists, otherwise the parked `refs/merge/<target>`. A merge run that finds an unlanded parked squash refuses with a BLOCKER pointing at this command rather than merging on top of it.
+
+Plan file paths are read from the pipeline DB row (stored at queue time). `--plans-dir` is used only as a fallback for rows that predate DB-stored paths. Default: `<project-dir>/plans/`. For plan files inside the repo, the paths are mapped into the merge worktree before the writers run; an external `plansDir` is still a plain filesystem operation and is not committed.
 
 **Config:**
 
@@ -710,13 +726,16 @@ The merge continues; the operator is responsible for confirming those files were
 
 ### Merge recovery — orphaned state
 
-The merge runner rolls back on abort. If state persists after a merge failure, recover manually:
+The merge runner no longer rolls back the shared checkout: it removes its own worktree and, if the squash is reachable from neither the target nor origin, parks it on `refs/merge/<target>` first. Recover an interrupted merge by landing it:
 
 ```bash
+# Land a merge whose squash already exists (origin, or the parked ref)
+node plugins/pipeline/skills/merge/scripts/merge.mjs --land-only --project-dir <project-root> --target-branch <target>
+
 # Orphaned progress entry
 pipeline progress-delete <project> <slug>
 
-# Stale worktree
+# Merge worktree left by a killed run (refused, never reclaimed automatically)
 git worktree remove --force <path>
 
 # Stale branch
@@ -726,7 +745,7 @@ git branch -D <branch>
 pipeline stage-set <project> <slug> done
 ```
 
-Re-running `/merge <branch>` after cleanup picks up where it left off — progress entries are idempotent and the runner detects already-integrated branches.
+Re-running `/merge <branch>` after cleanup picks up where it left off — progress entries are idempotent and the runner detects already-integrated branches. If a run finds `refs/merge/<target>` holding a squash the target does not contain, it refuses and prints the `--land-only` command rather than merging on top.
 
 ---
 
