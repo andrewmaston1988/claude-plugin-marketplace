@@ -116,9 +116,9 @@ export async function step5SquashMerge(
     const slug = branchSlug(branch);
 
     // Always check for an open PR first, regardless of whether hooks.on_merge
-    // is configured. Operator hooks are unreliable for PR merges (branch-name
-    // disambiguation in `gh pr merge <branch>` and missing --admin on
-    // branch-protected repos) — see plan merge-skip-hook-for-pr.
+    // is configured. Operator hooks are unreliable for PR merges: `gh pr merge
+    // <branch>` can disambiguate the branch wrongly, and a branch-protected
+    // repo refuses the merge without --admin.
     const pr = findOpenPR(branch, projectDir, { spawn });
     if (pr) {
       log(`[5] Open PR found (#${pr.number}) for ${branch} — using gh pr merge`);
