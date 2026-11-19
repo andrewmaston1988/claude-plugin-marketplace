@@ -132,16 +132,6 @@ export function branchType(branch) {
   return s.includes("/") ? s.split("/")[0] : "";
 }
 
-// The throwaway merge worktree's leaf name: per invocation, not per feature.
-// A per-feature name means one crashed run's leftover directory refuses every
-// later merge for that feature; seconds keep an immediate retry distinct.
-export function mergeSessionSlug(feature, now = new Date()) {
-  const p2 = (n) => String(n).padStart(2, "0");
-  const stamp = `${now.getFullYear()}${p2(now.getMonth() + 1)}${p2(now.getDate())}`
-    + `-${p2(now.getHours())}${p2(now.getMinutes())}${p2(now.getSeconds())}`;
-  return `merge_${feature}_${stamp}`;
-}
-
 // The branch a pipeline row resolves to. A declared `row.branch` is
 // authoritative for ANY name; the "—" placeholder and blank fall back to the
 // conventional default `autonomous/<plan-stem>`. Single source of truth for
