@@ -73,7 +73,18 @@ if (INNER) {
       stdio: "ignore",
       windowsHide: true,
     });
-    const status = await new Promise((resolve) => child.on("exit", resolve));
+    // The suite runs `node --test` with no --test-timeout, so a wedged grandchild
+    // would hang the whole run instead of failing one row.
+    const TIMEOUT = Symbol("timeout");
+    const deadline = new Promise((resolve) => { setTimeout(() => resolve(TIMEOUT), 30_000).unref(); });
+    const status = await Promise.race([
+      new Promise((resolve) => child.once("exit", resolve)),
+      deadline,
+    ]);
+    if (status === TIMEOUT) {
+      try { child.kill("SIGKILL"); } catch {}
+      assert.fail("the inner test run did not exit within 30s — a wedged grandchild cannot prove this row");
+    }
     assert.notEqual(status, 0, "the inner run must fail for this row to mean anything");
     await sleep(300);
     assert.equal(await listening(port), false,
