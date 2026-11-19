@@ -59,6 +59,12 @@ function makeGitRepo(repo, { target = "master", feature = "feat-x" } = {}) {
   spawnSync("git", ["-C", repo, "checkout", target], { encoding: "utf8" });
 }
 
+// These rows pin step 5's routing, not the worktree plumbing: the repo itself
+// stands in for the merge worktree.
+function fakeWt(path) {
+  return { path, resync() {} };
+}
+
 // Override USERPROFILE so loadPipelineConfig reads our fake config.
 // Returns a teardown function that restores the original.
 function withFakeHome(tmp) {
@@ -112,7 +118,7 @@ test("step5: open PR + on_merge hook → uses gh pr merge directly, bypasses hoo
 
     let thrown;
     try {
-      await step5SquashMerge(null, "testproj", repoTmp, ["autonomous/feat-x"], {}, "master", { spawn: fakeSpawn });
+      await step5SquashMerge(null, "testproj", repoTmp, fakeWt(repoTmp), ["autonomous/feat-x"], {}, "master", { spawn: fakeSpawn });
     } catch (e) {
       thrown = e;
     } finally {
@@ -158,7 +164,7 @@ test("step5: no open PR + on_merge hook → hook is invoked (regression guard)",
 
     let thrown;
     try {
-      await step5SquashMerge(null, "testproj", repoTmp, ["autonomous/feat-y"], {}, "master", { spawn: fakeSpawn });
+      await step5SquashMerge(null, "testproj", repoTmp, fakeWt(repoTmp), ["autonomous/feat-y"], {}, "master", { spawn: fakeSpawn });
     } catch (e) {
       thrown = e;
     } finally {
@@ -191,7 +197,7 @@ test("step5: no open PR + no hook → local squash-merge path runs", async () =>
 
     let thrown;
     try {
-      await step5SquashMerge(null, "testproj", repoTmp, ["autonomous/feat-z"], {}, "master", { spawn: fakeSpawn });
+      await step5SquashMerge(null, "testproj", repoTmp, fakeWt(repoTmp), ["autonomous/feat-z"], {}, "master", { spawn: fakeSpawn });
     } catch (e) {
       thrown = e;
     } finally {
@@ -320,18 +326,24 @@ test("merge.mjs: step 0a failure exits non-zero, prints no success line", () => 
   }
 });
 
-test("merge.mjs: step 2 blocker exits non-zero (after rollback), no success line", () => {
+test("merge.mjs: step 2 blocker exits non-zero, no success line, shared checkout untouched", () => {
   const { tmp, repo } = makeRepoDir();
   const home = makeHome();
   try {
     makeMergeRepo(repo, { feature: "feat-x", plan: PLAN_MIN });
     seedRow(home, repo, { stage: "queued" });
+    const before = spawnSync("git", ["-C", repo, "rev-parse", "HEAD"], { encoding: "utf8" }).stdout.trim();
     const r = runMerge(repo, home, "autonomous/feat-x", ["--no-rebase"]);
 
     equal(r.status, 4, `DoD blocker must exit 4; stdout=${r.stdout} stderr=${r.stderr}`);
     ok(!r.stdout.includes(SUCCESS_LINE), `success line printed on a blocked merge: ${r.stdout}`);
     ok(/BLOCKER: autonomous\/feat-x: pipeline stage/.test(r.stderr),
       `blocker not reported on stderr: ${r.stderr}`);
+    // The old rollback reset the shared checkout; nothing may touch it now.
+    const after = spawnSync("git", ["-C", repo, "rev-parse", "HEAD"], { encoding: "utf8" }).stdout.trim();
+    equal(after, before, "a blocked merge must not move the shared checkout");
+    const wts = spawnSync("git", ["-C", repo, "worktree", "list", "--porcelain"], { encoding: "utf8" }).stdout;
+    equal((wts.match(/^worktree /gm) ?? []).length, 1, `merge worktree left behind:\n${wts}`);
   } finally {
     rmSync(tmp, { recursive: true, force: true });
     rmSync(home, { recursive: true, force: true });
@@ -404,7 +416,9 @@ test("merge.mjs: a local merge pushes the target, so origin holds every commit i
   }
 });
 
-test("merge.mjs: a failed push exits 7 and keeps the local merge", () => {
+// A13 — a push that fails must not lose the squash and must not move the shared
+// checkout. The squash lives on in refs/merge/<target> until a land-only resume.
+test("merge.mjs: a failed push exits 7, parks the squash and leaves the shared checkout untouched", () => {
   const { tmp, repo } = makeRepoDir();
   const home = makeHome();
   try {
@@ -417,8 +431,16 @@ test("merge.mjs: a failed push exits 7 and keeps the local merge", () => {
     equal(r.status, 7, `push failure must exit 7; stdout=${r.stdout} stderr=${r.stderr}`);
     ok(!r.stdout.includes(SUCCESS_LINE), `success line printed on an unpushed merge: ${r.stdout}`);
     ok(/BLOCKER: push/.test(r.stderr), `push failure not on stderr: ${r.stderr}`);
+
     const after = spawnSync("git", ["-C", repo, "rev-parse", "HEAD"], { encoding: "utf8" }).stdout.trim();
-    ok(after !== before, "the merge landed locally and must not be rolled back");
+    equal(after, before, "the shared checkout must not move when the push fails");
+
+    const parked = spawnSync("git", ["-C", repo, "rev-parse", "--verify", "--quiet", "refs/merge/master"],
+      { encoding: "utf8" }).stdout.trim();
+    ok(parked, "the squash must be parked at refs/merge/master, not lost with the worktree");
+    const files = spawnSync("git", ["-C", repo, "log", "--name-only", "--format=", `${before}..${parked}`],
+      { encoding: "utf8" }).stdout;
+    ok(files.includes("feature.txt"), `parked ref must hold the squash; files=${files}`);
   } finally {
     rmSync(tmp, { recursive: true, force: true });
     rmSync(home, { recursive: true, force: true });
