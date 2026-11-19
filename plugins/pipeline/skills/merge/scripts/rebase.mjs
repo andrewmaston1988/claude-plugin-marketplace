@@ -158,12 +158,27 @@ async function rebaseIn(cwd, branch, targetBranch) {
   return true;
 }
 
+// The worktree with `branch` checked out, by the only source that knows every
+// path: a row may declare any branch, while the directory stays plan-stem
+// derived, so featureWorktreePath alone misses `anm/<key>_<slug>`.
+function findWorktreeForBranch(projectDir, branch) {
+  const r = runGit(["worktree", "list", "--porcelain"], projectDir, { check: false });
+  if (r.code !== 0) return null;
+  let current = null;
+  for (const line of r.stdout.split(/\r?\n/)) {
+    if (line.startsWith("worktree ")) current = line.slice("worktree ".length).trim();
+    else if (line.trim() === `branch refs/heads/${branch}`) return current;
+  }
+  return null;
+}
+
 export async function step0aRebase(projectDir, branches, targetBranch = "main") {
   const project = basename(projectDir);
 
   for (const branch of branches) {
     const slug = branch.startsWith("autonomous/") ? branch.slice("autonomous/".length) : branch;
-    const wt = featureWorktreePath({ project, projectRoot: projectDir, feature: slug });
+    const wt = findWorktreeForBranch(projectDir, branch)
+      ?? featureWorktreePath({ project, projectRoot: projectDir, feature: slug });
     const headHere = existsSync(wt)
       ? runGit(["rev-parse", "--abbrev-ref", "HEAD"], wt, { check: false })
       : { code: 1, stdout: "" };
