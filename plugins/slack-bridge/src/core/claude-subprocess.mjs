@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 
 const CLAUDE_ALIASES = new Set(["haiku", "sonnet", "opus", "fable"]);
 
@@ -49,7 +49,23 @@ export function buildClaudeInvocation({ prompt, sessionId, addDir, model, proxy 
   return { args, envOverrides };
 }
 
-export function runClaude({ cwd, addDir, prompt, sessionId, model, proxy, timeoutMs = 180_000, onStarted, env = {} }) {
+// A timed-out turn must take the whole tree: on Windows `claude` runs under a
+// cmd.exe wrapper, so child.kill only reaps the wrapper and a grandchild that
+// already booted keeps the test's stdio pipes open. taskkill /T walks the tree.
+// POSIX has no wrapper, so child.kill reaches claude directly — spawning detached
+// to kill a group would put the child outside the terminal's group, where it
+// outlives Ctrl-C.
+export function killProcessTree(child) {
+  if (process.platform === "win32") {
+    try {
+      spawnSync("taskkill", ["/PID", String(child.pid), "/T", "/F"], { stdio: "ignore", windowsHide: true, timeout: 5000 });
+    } catch { /* best effort: the timeout rejection still reports the failure */ }
+  } else {
+    try { child.kill("SIGTERM"); } catch { /* already gone */ }
+  }
+}
+
+export function runClaude({ cwd, addDir, prompt, sessionId, model, proxy, timeoutMs = 180_000, onStarted, env = {}, _spawn = spawn, _killTree = killProcessTree }) {
   return new Promise((resolve, reject) => {
     const { args, envOverrides } = buildClaudeInvocation({ prompt, sessionId, addDir, model, proxy });
 
@@ -66,7 +82,7 @@ export function runClaude({ cwd, addDir, prompt, sessionId, model, proxy, timeou
     const [spawnCmd, spawnArgs, spawnOpts] = process.platform === "win32"
       ? ["cmd.exe", ["/d", "/s", "/c", "claude", ...args], { cwd, env: childEnv, stdio: ["pipe", "pipe", "pipe"], windowsHide: true }]
       : ["claude",  args,                                   { cwd, env: childEnv, stdio: ["pipe", "pipe", "pipe"], windowsHide: true }];
-    const child = spawn(spawnCmd, spawnArgs, spawnOpts);
+    const child = _spawn(spawnCmd, spawnArgs, spawnOpts);
 
     onStarted?.(child);
 
@@ -87,7 +103,7 @@ export function runClaude({ cwd, addDir, prompt, sessionId, model, proxy, timeou
     child.stderr.on("data", c => { stderr += c; });
 
     const timer = setTimeout(() => {
-      child.kill("SIGTERM");
+      _killTree(child);
       reject(new Error(`claude timed out after ${timeoutMs}ms`));
     }, timeoutMs);
 
@@ -98,7 +114,7 @@ export function runClaude({ cwd, addDir, prompt, sessionId, model, proxy, timeou
         // Retry once as a fresh session; the caller persists the returned sessionId,
         // so the store self-heals and subsequent turns resume the fresh one.
         if (sessionId && /No conversation found with session ID/.test(stderr)) {
-          return resolve(runClaude({ cwd, addDir, prompt, sessionId: undefined, model, proxy, timeoutMs, onStarted, env }));
+          return resolve(runClaude({ cwd, addDir, prompt, sessionId: undefined, model, proxy, timeoutMs, onStarted, env, _spawn, _killTree }));
         }
         return reject(new Error(`claude exited ${formatExitCode(code)}: ${stderr.slice(-300)}`));
       }
