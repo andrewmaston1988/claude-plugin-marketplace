@@ -167,7 +167,7 @@ test("A6: --dry-run on an unlinked leftover prints 'would clear' and deletes not
   }
 });
 
-test("A9: a dry run that would clear two leftovers names them as directories", async () => {
+test("A10: a dry run that would clear two leftovers names them as directories", async () => {
   const f = pruneFixture();
   try {
     const first = unlinkedTree(f, { name: "impl" });
