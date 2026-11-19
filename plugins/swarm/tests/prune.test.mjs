@@ -490,3 +490,34 @@ test("row 8: a blocking branch-only row stops the plan, and a passed deadline me
   deepEqual(expired, { rows: [], stopped: true });
   equal(measured(), 0, "a passed deadline measures no branch-only row");
 });
+
+test("row 23: an unlinked row that is held back is never walked for bytes", () => {
+  const walked = [];
+  const fs = {
+    existsSync: (p) => p === "/repo" || p === "/results/wt-held",
+    readdirSync: (p, opts) => {
+      if (p === "/results/wt-held" && !opts) return ["leftover.txt"];
+      walked.push({ p, opts });
+      return [];
+    },
+    statSync: () => ({ size: 0 }),
+  };
+  const git = (args) => {
+    if (args[0] === "rev-parse" && args[1] === "--show-toplevel") return { status: 0, stdout: "/elsewhere", stderr: "" };
+    if (args[0] === "worktree") return { status: 0, stdout: "", stderr: "" };
+    if (args[0] === "show-ref") return { status: 1, stdout: "", stderr: "" };
+    if (args[0] === "for-each-ref") return { status: 0, stdout: "", stderr: "" };
+    return { status: 1, stdout: "", stderr: "" };
+  };
+  const run = {
+    repos: ["/repo"],
+    resultsDir: "/results",
+    worktreesKept: [{ name: "impl", path: "/results/wt-held", branch: "swarm/k/leaf", repo: "/repo" }],
+  };
+  const { rows } = plan(run, git, fs, { extraBases: [], measureBytes: true, stopAtBlocker: false, deadline: Infinity, taken: null });
+  equal(rows.length, 1);
+  equal(rows[0].unlinked, true);
+  equal(rows[0].entries, 1);
+  equal(rows[0].bytes, 0, "a held-back row prints no size, so it measures none");
+  deepEqual(walked, [], "no recursive walk over a directory prune will not clear");
+});

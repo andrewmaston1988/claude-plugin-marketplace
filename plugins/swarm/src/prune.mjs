@@ -204,8 +204,10 @@ export function plan(run, git, fs, { cfg, extraBases, measureBytes, stopAtBlocke
     const key = normalizeForCompare(path);
     if (seen.has(key)) return;
     seen.add(key);
-    // A missing directory holds no bytes to measure.
-    const bytes = measureBytes ? (missing ? 0 : dirSize(fs, path)) : null;
+    // A missing directory holds no bytes to measure, and a held-back leftover is never
+    // cleared or reported as freed — walking it would cost one stat per file for a number
+    // nothing prints.
+    const bytes = measureBytes ? (missing || isHeldBack({ unlinked, entries }) ? 0 : dirSize(fs, path)) : null;
     finishRow(measureRow({
       path, branch, bytes, repo,
       ...(missing && { missing: true, ...(head && { head }) }),
