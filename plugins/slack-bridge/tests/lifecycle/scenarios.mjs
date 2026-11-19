@@ -24,6 +24,20 @@ async function until(pred, ms) {
 
 const has = (s, needle) => s.deliveries.filter((d) => d.text.includes(needle));
 
+// Only a Stop arms the rewake waiter, and in a "slack wake" cell the priming Stop's
+// waiter is consumed by the message that woke the session. A turn ending any other
+// way (stop failure, interrupt) therefore leaves no waiter open: a message sent
+// during it can never land after the turn, and the idle ping can never wake. Both
+// waits can only burn their full timeout, so those cells skip them — and every
+// skipped cell is held to an exact baseline match, not merely "no worse".
+//
+// Mid-tool cells are the exception: the message is queued while a PostToolBatch is
+// still to come, and the inbox hook can hand it over in-turn. That path post-dates
+// the baseline, so those cells no longer match it and their waits stay — a cut has
+// to be provable, not merely harmless.
+const cutWaits = ({ start, end, timing }) =>
+  start === "slack wake" && end !== "stop" && timing !== "mid-tool";
+
 async function tool(s, command) {
   const id = uid();
   const t = { tool_name: "Bash", tool_input: { command }, tool_use_id: "t" + id };
@@ -109,7 +123,7 @@ export async function runCell(s, { start, end, timing }) {
 
   // A wake taken during the turn is delivered once it has ended: assumed, since the
   // reference says only that an asyncRewake exit 2 "wakes Claude immediately even when the session is idle".
-  if (timing !== "none" && block === null) {
+  if (timing !== "none" && block === null && !cutWaits({ start, end })) {
     if (await until(() => has(s, "SLACK: msg").length > 0, 6_000)) {
       block = await wokenTurn(s, has(s, "SLACK: msg")[0].text);
     }
@@ -121,7 +135,7 @@ export async function runCell(s, { start, end, timing }) {
   const ticking = s.ticking();
 
   await s.send("ping");
-  const reachable = await until(() => has(s, "SLACK: ping").length > 0, 8_000);
+  const reachable = cutWaits({ start, end }) ? false : await until(() => has(s, "SLACK: ping").length > 0, 8_000);
 
   const seen = timing === "none" ? null : has(s, "SLACK: msg").length;
   const when = timing === "none" ? null
@@ -132,3 +146,5 @@ export async function runCell(s, { start, end, timing }) {
 
 export const CELLS = STARTS.flatMap((start) => ENDS.flatMap((end) => TIMINGS.map((timing) => ({ start, end, timing }))));
 export const cellName = ({ start, end, timing }) => `${start} · message ${timing} · ends ${end}`;
+// Cells whose always-missed waits are cut. A3b holds each to baseline exactly.
+export const CUT_WAIT_CELLS = CELLS.filter(cutWaits).map(cellName);
