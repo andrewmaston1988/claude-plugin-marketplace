@@ -456,7 +456,12 @@ detach option; push a branch under a name outside `swarm/` to preserve its remot
 kept and named, not refused: every row with unlanded commits or uncommitted changes stays, named on
 stderr with its counts, and the command exits 1; a later prune takes the rest once its work
 lands. `--dry-run` previews which rows would go and which would stay and removes nothing;
-`--discard-unlanded` destroys the blocked work too, whether or not the branch landed. A lane
+`--discard-unlanded` destroys the blocked work too, whether or not the branch landed. A kept
+tree whose directory lost its `.git` link — a prune that failed part-way can leave one — is
+measured by its branch in the repo the run recorded, never by the repo enclosing that directory.
+An empty leftover is cleared with the row in execute, and `--dry-run` says `would clear` and
+removes nothing; a leftover still holding entries is held back and named for removal by hand,
+even under `--discard-unlanded`, because git cannot say whose bytes those are. A lane
 ported into a non-default branch also counts as landed once that branch's work is proved on the
 default branch, even if later review edits rewrote the lane's lines; a pushed but unmerged branch
 does not count. `swarm status --mine`

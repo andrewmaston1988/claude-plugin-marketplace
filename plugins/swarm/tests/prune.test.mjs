@@ -2,9 +2,10 @@ import "./helpers/isolate-home.mjs";
 import { test } from "node:test";
 import { equal, deepEqual, ok } from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { plan, execute, formatPrune, blockers } from "../src/prune.mjs";
+import { discoveredLanes, runScratchDir } from "../src/prune-discover.mjs";
 import { prepareIsolation, runScopeKey, WORKTREE_ADD_TIMEOUT_MS } from "../src/worktree.mjs";
 import { runCliInProcess } from "./helpers/cli.mjs";
 import { commitAll, gitOut } from "./helpers/cli-fixture.mjs";
@@ -159,6 +160,9 @@ test("plan measures unlanded commits and dirty porcelain; blockers include unkno
       return args[1] === "-q" ? { status: 0, stdout: "refs/heads/main", stderr: "" } : { status: 1, stdout: "", stderr: "" };
     }
     if (args[0] === "rev-parse") {
+      // Discovery asks the tree whether it is still its own worktree root before it
+      // measures anything; answering with the tree itself is what a real worktree does.
+      if (args[1] === "--show-toplevel") return { status: 0, stdout: "/tree", stderr: "" };
       return args[1] === "--verify"
         ? { status: 0, stdout: "base-sha", stderr: "" }
         : { status: 0, stdout: "base-tree", stderr: "" };
@@ -429,6 +433,38 @@ test("row 21: a branch row is keyed by repo, so the same branch name in another 
   const orphan = rows.find((row) => row.path == null);
   equal(orphan?.repo, "/repo-b", "repo B's own branch is a row, not suppressed by repo A's tree row");
   equal(orphan?.branch, branch);
+});
+
+test("row 3: one discovery pass asks a directory's toplevel once", () => {
+  const f = pruneFixture();
+  try {
+    const cfg = { treeRoot: join(f.dir, "home", "worktrees") };
+    // A tree no record names: discovery asks it both whether it is unlinked and what its
+    // facts are — two questions, one `rev-parse --show-toplevel`.
+    const stray = join(runScratchDir(f.resultsDir, cfg), "stray");
+    mkdirSync(stray, { recursive: true });
+    const calls = [];
+    const git = (args) => {
+      calls.push(args);
+      if (args[0] === "rev-parse" && args[1] === "--show-toplevel") return { status: 0, stdout: stray, stderr: "" };
+      if (args[0] === "rev-parse" && args[1] === "--git-common-dir") return { status: 0, stdout: join(f.repo, ".git"), stderr: "" };
+      if (args[0] === "rev-parse" && args[1] === "--abbrev-ref") return { status: 0, stdout: "swarm/x", stderr: "" };
+      return { status: 1, stdout: "", stderr: "" };
+    };
+    const toplevels = () => calls.filter((args) => args[0] === "rev-parse" && args[1] === "--show-toplevel").length;
+    const run = { repos: [], resultsDir: f.resultsDir, worktreesKept: [] };
+    const fs = { existsSync };
+
+    const lanes = [...discoveredLanes(run, git, fs, { cfg })];
+    equal(lanes.length, 1, JSON.stringify(lanes));
+    equal(lanes[0].path, stray);
+    equal(toplevels(), 1, "one pass must ask a directory's toplevel once");
+
+    [...discoveredLanes(run, git, fs, { cfg })];
+    equal(toplevels(), 2, "a second pass asks again — the memo is scoped to one pass");
+  } finally {
+    dropSnapPrune(f);
+  }
 });
 
 test("row 8: a blocking branch-only row stops the plan, and a passed deadline measures none", () => {
