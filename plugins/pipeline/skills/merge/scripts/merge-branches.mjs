@@ -160,7 +160,9 @@ export async function step5SquashMerge(
           PIPELINE_BRANCH: branch,
           PIPELINE_TARGET_BRANCH: targetBranch,
         };
-        const result = spawnSync(process.execPath, [onMergeHook], { env, stdio: "inherit", cwd: wt.path });
+        const result = spawnSync(process.execPath, [onMergeHook], {
+          env, stdio: "inherit", cwd: wt.path, windowsHide: true,
+        });
         if (result.status !== 0) {
           throw new GitError(`hooks.on_merge failed for ${branch} (exit ${result.status})`);
         }
