@@ -47,7 +47,7 @@ test("the Windows tree kill leaves no live grandchild", {
     );
     assert.equal(isAlive(grandchild), true, "the grandchild should be running before the kill");
 
-    killProcessTree(wrapper);
+    await killProcessTree(wrapper);
 
     await poll(() => !isAlive(grandchild), "the grandchild outlived the tree kill");
   } finally {

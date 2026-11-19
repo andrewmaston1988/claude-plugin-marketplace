@@ -1,4 +1,4 @@
-import { spawn, spawnSync } from "node:child_process";
+import { spawn } from "node:child_process";
 
 const CLAUDE_ALIASES = new Set(["haiku", "sonnet", "opus", "fable"]);
 
@@ -53,13 +53,38 @@ export function buildClaudeInvocation({ prompt, sessionId, addDir, model, proxy 
 // cmd.exe wrapper, so only taskkill /T reaches the grandchild; POSIX has no
 // wrapper, and a detached group would outlive Ctrl-C, so child.kill is right there.
 export function killProcessTree(child) {
-  if (process.platform === "win32") {
-    try {
-      // A loaded box can take seconds; a timeout here silently leaves the tree up.
-      spawnSync("taskkill", ["/PID", String(child.pid), "/T", "/F"], { stdio: "ignore", windowsHide: true, timeout: 15_000 });
-    } catch { /* fall through: the wrapper kill is still better than nothing */ }
+  if (process.platform !== "win32") {
+    try { child.kill("SIGTERM"); } catch { /* already gone */ }
+    return Promise.resolve();
   }
-  try { child.kill("SIGTERM"); } catch { /* already gone */ }
+  // Async: a timed-out turn must not stall the daemon's event loop for the seconds
+  // taskkill takes under load. A failed, errored or timed-out kill falls back to
+  // reaping the wrapper rather than leaving the whole tree up silently.
+  return new Promise((resolve) => {
+    let done = false;
+    const finish = (problem) => {
+      if (done) return;
+      done = true;
+      if (problem) {
+        console.error(`slack-bridge: tree kill of pid ${child.pid} failed (${problem}); falling back to child.kill`);
+        try { child.kill("SIGTERM"); } catch { /* already gone */ }
+      }
+      resolve();
+    };
+    let killer;
+    try {
+      killer = spawn("taskkill", ["/PID", String(child.pid), "/T", "/F"], { stdio: "ignore", windowsHide: true });
+    } catch (e) {
+      finish(e.message);
+      return;
+    }
+    const timer = setTimeout(() => {
+      try { killer.kill(); } catch { /* already gone */ }
+      finish("taskkill timed out after 15 s");
+    }, 15_000);
+    killer.on("error", (e) => { clearTimeout(timer); finish(e.message); });
+    killer.on("exit", (code) => { clearTimeout(timer); finish(code === 0 ? null : `taskkill exited ${code}`); });
+  });
 }
 
 export function runClaude({ cwd, addDir, prompt, sessionId, model, proxy, timeoutMs = 180_000, onStarted, env = {}, _spawn = spawn, _killTree = killProcessTree }) {
