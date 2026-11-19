@@ -297,6 +297,89 @@ function makeLandedOnOrigin() {
   return { tmp, repo, bare };
 }
 
+// A multi-commit branch squashed onto the target: `git cherry` prefixes every
+// line with "+", because no individual commit's patch is upstream — only the
+// combined diff is. The resume must still read that as merged.
+function makeTwoCommitBranch({ squash }) {
+  const tmp = mkdtempSync(join(tmpdir(), "run-merge-two-"));
+  const repo = join(tmp, "repo");
+  const bare = join(tmp, "origin.git");
+  mkdirSync(join(repo, "plans"), { recursive: true });
+  spawnSync("git", ["init", "--bare", "--initial-branch=master", bare], { encoding: "utf8" });
+
+  gitIn(repo, "init", "--initial-branch=master");
+  gitIn(repo, "config", "user.email", "test@test");
+  gitIn(repo, "config", "user.name", "test");
+  gitIn(repo, "config", "commit.gpgsign", "false");
+  writeFileSync(join(repo, "README.md"), "init\n", "utf8");
+  writeFileSync(join(repo, "plans", "feat-x.md"), PLAN_MIN, "utf8");
+  gitIn(repo, "add", "-A");
+  gitIn(repo, "commit", "-m", "seed");
+
+  gitIn(repo, "checkout", "-b", "autonomous/feat-x");
+  writeFileSync(join(repo, "feat-a.txt"), "a\n", "utf8");
+  gitIn(repo, "add", "-A");
+  gitIn(repo, "commit", "-m", "feat a");
+  writeFileSync(join(repo, "feat-b.txt"), "b\n", "utf8");
+  gitIn(repo, "add", "-A");
+  gitIn(repo, "commit", "-m", "feat b");
+  gitIn(repo, "checkout", "master");
+
+  gitIn(repo, "remote", "add", "origin", bare);
+  gitIn(repo, "push", "origin", "master");
+
+  if (squash) {
+    gitIn(repo, "checkout", "-b", "landed");
+    gitIn(repo, "merge", "--squash", "autonomous/feat-x");
+    gitIn(repo, "commit", "-m", "feat squash");
+    mkdirSync(join(repo, "plans", "complete"), { recursive: true });
+    gitIn(repo, "mv", "plans/feat-x.md", "plans/complete/feat-x.md");
+    gitIn(repo, "commit", "-m", "close feat-x");
+    gitIn(repo, "push", "origin", "HEAD:refs/heads/master");
+    gitIn(repo, "checkout", "master");
+    gitIn(repo, "branch", "-D", "landed");
+  }
+
+  return { tmp, repo, bare };
+}
+
+function runDriver(repo) {
+  return spawnSync(process.execPath, [
+    RUN_MERGE_MJS, "--branches", "autonomous/feat-x", "--project-dir", repo,
+    "--target-branch", "master",
+  ], { encoding: "utf8", timeout: 60_000 });
+}
+
+test("A21: a two-commit branch squash-merged onto the target reads merged and resumes at land", () => {
+  const { tmp, repo } = makeTwoCommitBranch({ squash: true });
+  try {
+    const r = runDriver(repo);
+
+    equal(r.status, 0, `driver must pause cleanly; stdout=${r.stdout} stderr=${r.stderr}`);
+    ok(/resuming at land/.test(r.stdout),
+      `a multi-commit squash must read as merged, not as a pending squash: ${r.stdout}`);
+    ok(r.stdout.includes("--land-only"), `the emitted command must be land-only: ${r.stdout}`);
+    ok(!r.stdout.includes("--branches"), `a completed squash must not be re-emitted: ${r.stdout}`);
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test("A22: a two-commit branch that is not merged stays pending", () => {
+  const { tmp, repo } = makeTwoCommitBranch({ squash: false });
+  try {
+    const r = runDriver(repo);
+
+    equal(r.status, 0, `driver must emit a merge command; stdout=${r.stdout} stderr=${r.stderr}`);
+    ok(!r.stdout.includes("--land-only"), `an unmerged branch must not resume at land: ${r.stdout}`);
+    ok(r.stdout.includes("Spawn a background agent running"),
+      `an unmerged branch must emit the full merge: ${r.stdout}`);
+    ok(r.stdout.includes('--branches "autonomous/feat-x"'), `the merge command must name the branch: ${r.stdout}`);
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
 test("A12: a merge already on origin but not in the shared checkout resumes at land", () => {
   const { tmp, repo } = makeLandedOnOrigin();
   try {
