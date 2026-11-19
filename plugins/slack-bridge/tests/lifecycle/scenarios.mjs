@@ -24,17 +24,9 @@ async function until(pred, ms) {
 
 const has = (s, needle) => s.deliveries.filter((d) => d.text.includes(needle));
 
-// Only a Stop arms the rewake waiter, and in a "slack wake" cell the priming Stop's
-// waiter is consumed by the message that woke the session. A turn ending any other
-// way (stop failure, interrupt) therefore leaves no waiter open: a message sent
-// during it can never land after the turn, and the idle ping can never wake. Both
-// waits can only burn their full timeout, so those cells skip them — and every
-// skipped cell is held to an exact baseline match, not merely "no worse".
-//
-// Mid-tool cells are the exception: the message is queued while a PostToolBatch is
-// still to come, and the inbox hook can hand it over in-turn. That path post-dates
-// the baseline, so those cells no longer match it and their waits stay — a cut has
-// to be provable, not merely harmless.
+// A non-Stop ending leaves no waiter open, so both waits can only time out; skip
+// them there. Mid-tool cells keep theirs (their in-turn path post-dates the
+// baseline), and every skipped cell must match the baseline exactly.
 const cutWaits = ({ start, end, timing }) =>
   start === "slack wake" && end !== "stop" && timing !== "mid-tool";
 
