@@ -241,6 +241,40 @@ test("A3: a foreign staged file stays staged and never reaches the merge commit"
   }
 });
 
+// ── A4 — the plan close lands in the merge's own commits ─────────────────────
+// The branch edits its own plan, so a status write before the squash would be a
+// staged plan edit and `git merge --squash` would refuse.
+
+test("A4: a branch that edits its own plan closes it in the merge, not the shared checkout", () => {
+  const { tmp, repo } = makeRepoDir();
+  const home = makeHome();
+  try {
+    makeBaseRepo(repo);
+    addOrigin(tmp, repo);
+    git(repo, "checkout", "autonomous/feat-x");
+    writeFileSync(join(repo, "plans", "feat-x.md"), PLAN_MIN + "\n## Notes\n\nbranch edit\n");
+    git(repo, "add", "-A");
+    git(repo, "commit", "-m", "branch edits its own plan");
+    git(repo, "checkout", "master");
+    seedRows(home, repo, ["feat-x"]);
+
+    const r = runMerge(repo, home, "autonomous/feat-x");
+
+    equal(r.status, 0, `merge must exit 0; stdout=${r.stdout} stderr=${r.stderr}`);
+    const tree = git(repo, "ls-tree", "-r", "--name-only", "HEAD");
+    ok(tree.includes("feat-x.txt"), `the squash must be in HEAD: ${tree}`);
+    equal(git(repo, "status", "--porcelain"), "", "the shared checkout must be clean");
+
+    const closed = git(repo, "show", "HEAD:plans/complete/feat-x.md");
+    ok(/merged/i.test(closed), `the closed plan must carry the merged status: ${closed}`);
+    ok(!tree.split("\n").includes("plans/feat-x.md"),
+      `the plan must be absent from plans/ in HEAD: ${tree}`);
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
 // ── A9 — a refused land with origin: exit 0, report, no smoke ────────────────
 
 test("A9: an overlapping edit in the shared checkout yields a reported refusal, exit 0, no smoke", () => {

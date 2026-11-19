@@ -20,7 +20,7 @@ import { connectUnified, close, rowGet, progressMark, planSetStatus } from "../.
 import { runGit, detectDefaultBranch, step0aRebase } from "./rebase.mjs";
 import {
   branchSlug, step1IdentifyPlans, step2VerifyDone, step3UpdateStatus,
-  step6MovePlans, step6bArchiveOrphanedPlans,
+  step6MovePlans, step6bArchiveOrphanedPlans, dirInWorktree,
 } from "./plan-files.mjs";
 import { step0bProgress, step9Cleanup } from "./progress.mjs";
 import { readSmokeCommand, step8Smoke } from "./smoke.mjs";
@@ -54,24 +54,6 @@ function worktreePath(projectDir, slug) {
 function isInside(root, candidate) {
   const rel = relative(root, candidate);
   return Boolean(rel) && !rel.startsWith("..") && !isAbsolute(rel);
-}
-
-// The plan writers act on paths and must all point inside the merge worktree,
-// never at the shared checkout. A plan whose repo-relative path is absent from
-// the worktree keeps its absolute path — external plans dirs stay a filesystem
-// op (known limitation).
-function planFilesInWorktree(planFiles, projectDir, wtPath) {
-  const mapped = {};
-  for (const [branch, plan] of Object.entries(planFiles)) {
-    const candidate = plan && isInside(projectDir, plan) ? join(wtPath, relative(projectDir, plan)) : null;
-    mapped[branch] = candidate && existsSync(candidate) ? candidate : plan;
-  }
-  return mapped;
-}
-
-function plansDirInWorktree(plansDir, projectDir, wtPath, planFiles) {
-  const source = plansDir || dirname(Object.values(planFiles).find(Boolean) || join(projectDir, "plans"));
-  return isInside(projectDir, source) ? join(wtPath, relative(projectDir, source)) : source;
 }
 
 // A squash whose worktree is about to be removed must stay reachable from a
@@ -294,16 +276,14 @@ async function main() {
     mark(0, "done");
 
     mark(1, "inprogress");
-    const planFiles = planFilesInWorktree(
-      step1IdentifyPlans(db, project, branches, { plansDir: args.plansDir }),
-      projectDir, wt.path,
-    );
+    const planFiles = step1IdentifyPlans(db, project, branches, { plansDir: args.plansDir });
     mark(1, "done");
 
     mark(2, "inprogress");
-    const blockers = await step2VerifyDone(db, planFiles, wt.path, project, {
+    const blockers = await step2VerifyDone(db, planFiles, projectDir, project, {
       skipTesting: args.skipTesting,
       targetBranch,
+      wtPath: wt.path,
     });
     if (blockers.length) {
       for (const b of blockers) logErr(`BLOCKER: ${b}`);
@@ -323,18 +303,20 @@ async function main() {
     // A staged plan edit before `git merge --squash` makes git refuse whenever
     // the branch touches its own plan.
     mark(3, "inprogress");
-    await step3UpdateStatus(planFiles, wt.path, project);
+    await step3UpdateStatus(planFiles, projectDir, project, { wtPath: wt.path });
     mark(3, "done");
 
     mark(6, "inprogress");
-    step6MovePlans(planFiles);
+    step6MovePlans(planFiles, { projectDir, wtPath: wt.path });
     for (const branch of branches) {
       try { planSetStatus(db, project, branchSlug(branch), "complete"); } catch { /* not in DB */ }
     }
     mark(6, "done");
 
-    const plansDirWt = plansDirInWorktree(args.plansDir, projectDir, wt.path, planFiles);
-    step6bArchiveOrphanedPlans(db, project, { plansDir: plansDirWt });
+    const plansDirSource = args.plansDir
+      ?? dirname(Object.values(planFiles).find(Boolean) || join(projectDir, "plans"));
+    const plansDirWt = dirInWorktree(projectDir, wt.path, plansDirSource);
+    step6bArchiveOrphanedPlans(db, project, { plansDir: plansDirSource, projectDir, wtPath: wt.path });
 
     mark(7, "inprogress");
     await step7CommitProject(wt.path, branches, { plansDir: plansDirWt });
