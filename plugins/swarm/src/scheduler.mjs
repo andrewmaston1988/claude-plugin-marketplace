@@ -362,8 +362,8 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), {
       ctx.wake = () => {};
     }
   }
-  // A failure recorded on the loop's last pass, after the top sweep ran, still blocks
-  // its dependents, so sweep once more before the run ends.
+  // Defensive: the loop only exits on a pass that settled and launched nothing, so no
+  // new failure should be left unswept; this keeps that true if a later exit path breaks it.
   sweepBlocked();
   // A leaf that never got a slot (still pending) or was mid-backoff never runs
   // classifyFailure's stopped branch — say so here, or a stopped run leaves it
