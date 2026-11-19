@@ -75,7 +75,7 @@ lists them. Put it to the user — skip and force through, or stop? Only they ca
 answer. `--skip-testing` rewrites those markers to `(skipped)` and logs a WARNING,
 so the override stays visible; never pass it without being told to.
 
-**Resolved Open Questions** (in the spawn prompt, step 5). Judge whether the branch
+**Resolved Open Questions** (in the spawn prompt, step 3). Judge whether the branch
 actually answered a question, not whether it touched nearby code.
 
 **Squash-merged history.** `step0aRebase` runs `git rebase <target>` on each branch
