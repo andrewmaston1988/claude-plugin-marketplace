@@ -411,3 +411,34 @@ test("quota fail-fast never dooms pending compute steps", async () => {
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+// A leaf whose close falls due while the loop is still seating the batch: the spawn
+// handler blocks a few ms AFTER arming the close, so the timer is already overdue
+// when the loop's own turn comes round and the earlier seats settle before the loop
+// comes back to schedule.
+test("a dependent is seated after its deps settle inside the launch batch", async () => {
+  const dir = tmp();
+  try {
+    // Each leaf closes on its next timer turn, and the spawn blocks long enough for that
+    // turn to fall due before the scheduler moves on.
+    const spawn = fakeSpawnFactory(() => ({ delayMs: 0, blockMs: 20 }));
+    // `guard` fails at its tree prepare, which settles its launch without waiting on
+    // a process — the last seat of the batch can therefore be done by the time the
+    // loop reaches its idle check, the position a real `worktree add` leaves the
+    // batch in when its blocking git calls let every earlier leaf finish.
+    const worktree = fakeWorktree([], { failPrepare: (t) => t.id === "guard" });
+    const p = plan(dir, [
+      task("a"), task("b"),
+      task("guard", { worktreeName: "guard" }),
+      task("gate", { after: ["a", "b"] }),
+    ]);
+    const r = await runPlan(p, CFG, makeIo(spawn, { worktree, repoHead: () => "0".repeat(40) }));
+    const states = Object.fromEntries(r.summary.tasks.map((t) => [t.id, t.state]));
+    equal(states.a, "ok");
+    equal(states.b, "ok");
+    equal(states.gate, "ok", "a dependent whose deps settled inside the launch batch is still run");
+    equal(spawn.calls.length, 3, "gate was dispatched, not left pending");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

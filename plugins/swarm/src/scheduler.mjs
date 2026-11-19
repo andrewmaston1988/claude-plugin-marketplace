@@ -310,6 +310,7 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), {
     sweepBlocked();
 
     let progressed = false;
+    let launched = 0;
     if (!ctx.stopRequested) {
       const seats = settleInline(tasks, {
         pending: (t) => ctx.state.get(t.id) === "pending",
@@ -325,6 +326,7 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), {
         // first leaf of a run must never be gated by the machine's headroom.
         if (ctx.running.size > 0 && ctx.memLow(cfg.minFreeMemMb)) { ctx.parkForMemory(t); continue; }
         ctx.launch(t);
+        launched++;
         // A launch blocks the loop in prepareIsolation (git worktree add is sync), so
         // without a turn between seats a running leaf's armed callbacks starve.
         await new Promise((resume) => setImmediate(resume));
@@ -333,7 +335,10 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), {
         if (ctx.stopRequested) break;
       }
     }
-    if (progressed) continue;
+    // Re-scan once a seat has been spent: a launched leaf can settle inside this batch
+    // (the setImmediate turn between seats lets its callbacks run), and the dependents it
+    // unlocks must be seated, or the idle check below ends the run with them pending.
+    if (progressed || launched) continue;
 
     // Stop wins: whatever is parked or waiting gets swept to failed:stopped below.
     if (ctx.running.size === 0 && (ctx.stopRequested || (ctx.memoryParked.size === 0 && ctx.retryWaiting === 0))) break;
@@ -357,8 +362,8 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), {
       ctx.wake = () => {};
     }
   }
-  // A leaf can fail and give up its slot without the loop coming back round (a
-  // synchronous worktree prepare throw), so the top sweep misses its dependents.
+  // Defensive: the loop only exits on a pass that settled and launched nothing, so no
+  // new failure should be left unswept; this keeps that true if a later exit path breaks it.
   sweepBlocked();
   // A leaf that never got a slot (still pending) or was mid-backoff never runs
   // classifyFailure's stopped branch — say so here, or a stopped run leaves it

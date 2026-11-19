@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { withoutLeafNotices } from "../../src/leaf-notices.mjs";
 import { writeUsageReading } from "../../src/usage-cache.mjs";
 
-// handler(call, index) -> { exit=0, output="", delayMs=1, outputAtMs? } | undefined
+// handler(call, index) -> { exit=0, output="", delayMs=1, outputAtMs?, blockMs? } | undefined
 // outputAtMs emits output early (before close at delayMs) so tests can observe
 // mid-run state like the activity cell.
 export function fakeSpawnFactory(handler = () => ({})) {
@@ -48,6 +48,9 @@ export function fakeSpawnFactory(handler = () => ({})) {
       if (spec.output && !emitted) child.stdout.emit("data", spec.output);
       close(spec.exit ?? 0);
     }, spec.delayMs ?? 1);
+    // blockMs holds the spawn call itself, so the close timer above can fall due before
+    // the caller regains control, as a blocking git call in a real launch allows.
+    if (spec.blockMs) for (const until = Date.now() + spec.blockMs; Date.now() < until;) { /* spin */ }
     return child;
   }
   spawn.calls = calls;
