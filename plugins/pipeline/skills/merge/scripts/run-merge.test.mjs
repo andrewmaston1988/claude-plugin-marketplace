@@ -7,7 +7,7 @@
 // run-merge-target.test.mjs.
 import "../../../tests/helpers/isolate-home.mjs";
 import { test } from "node:test";
-import { equal, deepEqual, ok, match } from "node:assert/strict";
+import { equal, deepEqual, ok, match, throws } from "node:assert/strict";
 import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -24,6 +24,7 @@ import {
   mutexConflict,
   DRIVER_STEPS,
 } from "./run-merge.mjs";
+import { git as worldGit } from "./merge-world.mjs";
 
 // ── Scenario 2 — branch parsing ───────────────────────────────────────────────
 // Step 2 of the old SKILL.md: "Split $ARGUMENTS on whitespace or commas … Each
@@ -377,6 +378,24 @@ test("A22: a two-commit branch that is not merged stays pending", () => {
     ok(r.stdout.includes('--branches "autonomous/feat-x"'), `the merge command must name the branch: ${r.stdout}`);
   } finally {
     rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+// A24 — a fetch that never answers must not read as "nothing there". Untimed,
+// `git()` returns "" and the resume silently reads the pre-fetch world.
+test("A24: a timed-out fetch throws instead of reading as an empty result", () => {
+  const dir = mkdtempSync(join(tmpdir(), "run-merge-fetch-"));
+  try {
+    const hung = () => ({ status: null, signal: "SIGTERM", error: { code: "ETIMEDOUT" } });
+    throws(
+      () => worldGit(["fetch", "origin", "master"], dir, { timeoutMs: 250, spawn: hung }),
+      /fetch origin master.*timed out/i,
+    );
+    // The same path with no timeout error: an empty success is still "".
+    const empty = () => ({ status: 0, stdout: "  \n" });
+    equal(worldGit(["fetch", "origin", "master"], dir, { timeoutMs: 250, spawn: empty }), "");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
   }
 });
 
