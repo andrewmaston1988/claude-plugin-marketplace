@@ -350,8 +350,9 @@ export function createBroker({
     }
     if (req.url === "/shutdown") {
       json(200, { ok: true });
-      // let the response flush, then close; pid-kill-free stop path
-      setTimeout(() => server.close(() => onShutdown?.()), 50);
+      // let the response flush, then close; pid-kill-free stop path. An aborted
+      // long-poll leaves a keep-alive socket that server.close alone idles out.
+      setTimeout(() => { server.closeAllConnections(); server.close(() => onShutdown?.()); }, 50);
       return;
     }
     let buf = "";
@@ -395,7 +396,12 @@ export function createBroker({
       server.once("error", reject);
       server.listen(port, "127.0.0.1", () => resolve(server.address().port));
     }),
-    close: () => new Promise((resolve) => server.close(resolve)),
+    // End the sockets first: a long-poll client aborted mid-window leaves a
+    // keep-alive socket, and server.close alone waits ~4s for it to idle out.
+    close: () => new Promise((resolve) => {
+      server.closeAllConnections();
+      server.close(resolve);
+    }),
     reapDead: () => { reapDead(); persist(); },
   };
 }

@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { buildClaudeInvocation } from "../src/core/claude-subprocess.mjs";
+import { EventEmitter } from "node:events";
+import { buildClaudeInvocation, runClaude } from "../src/core/claude-subprocess.mjs";
 
 const PROXY = { url: "http://localhost:11434", authToken: "ollama" };
 
@@ -40,6 +41,49 @@ test("session resume and addDir survive alongside model", () => {
   });
   assert.equal(args[args.indexOf("--resume") + 1], "s1");
   assert.equal(args[args.indexOf("--add-dir") + 1], "C:/x");
+});
+
+// A child that never exits: the timeout is the only thing that settles the run.
+function fakeChild(pid) {
+  const child = new EventEmitter();
+  child.pid = pid;
+  child.killCalls = 0;
+  child.kill = () => { child.killCalls++; };
+  child.stdin = Object.assign(new EventEmitter(), { end() {} });
+  child.stdout = new EventEmitter();
+  child.stderr = new EventEmitter();
+  return child;
+}
+
+test("a timeout kills the process tree, not just the wrapper", async () => {
+  const child = fakeChild(4242);
+  const killed = [];
+  await assert.rejects(
+    runClaude({
+      cwd: process.cwd(), prompt: "hi", timeoutMs: 20,
+      _spawn: () => child,
+      _killTree: (c) => { killed.push(c.pid); },
+    }),
+    /claude timed out after 20ms/,
+  );
+  assert.deepEqual(killed, [child.pid], "the timeout must tree-kill the spawned child by its PID");
+  assert.equal(child.killCalls, 0, "child.kill only reaches the cmd.exe wrapper; the timeout owns the tree kill");
+});
+
+// A late exit must not start the resume retry: the timeout already settled the run,
+// and a queued "No conversation found" exit would otherwise spawn a second claude.
+test("an exit queued behind a timeout never starts the resume retry", async () => {
+  const child = fakeChild(4243);
+  let spawns = 0;
+  const run = runClaude({
+    cwd: process.cwd(), prompt: "hi", sessionId: "gone", timeoutMs: 20,
+    _spawn: () => { spawns++; return child; },
+    _killTree: () => {},
+  });
+  await assert.rejects(run, /claude timed out after 20ms/);
+  child.stderr.emit("data", "No conversation found with session ID: gone");
+  child.emit("exit", 1);
+  assert.equal(spawns, 1, "a queued exit after the timeout must not start a second claude");
 });
 
 test("multi-line prompt is delivered via stdin, not as a -p argv element", () => {

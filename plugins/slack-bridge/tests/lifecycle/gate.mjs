@@ -19,12 +19,12 @@ const repoRoot = path.resolve(pluginRoot, "../..");
 const args = process.argv.slice(2);
 const against = args.includes("--against") ? args[args.indexOf("--against") + 1] : "origin/master";
 
-async function playAll(root) {
+async function playAll(root, opts) {
   const out = {};
   for (const cell of CELLS) {
     const s = await startSession(root);
     try {
-      out[cellName(cell)] = await runCell(s, cell);
+      out[cellName(cell)] = await runCell(s, cell, opts);
     } catch (e) {
       out[cellName(cell)] = { error: e.message };
     } finally {
@@ -41,8 +41,11 @@ try {
   execFileSync("git", ["archive", "--format=tar", "-o", tar, against, "plugins/slack-bridge"], { cwd: repoRoot, stdio: ["ignore", "ignore", "inherit"] });
   // Relative, from inside tmp: GNU tar reads a `C:` path as a remote host.
   execFileSync("tar", ["-x", "-f", "base.tar"], { cwd: tmp, stdio: ["ignore", "ignore", "inherit"] });
-  const base = await playAll(path.join(tmp, "plugins/slack-bridge"));
-  if (args.includes("--write-baseline")) {
+  // A baseline records the reference's uncut outcomes; recording through the cut
+  // would make A3b's exact-equality guard compare the cut against itself.
+  const writeBaseline = args.includes("--write-baseline");
+  const base = await playAll(path.join(tmp, "plugins/slack-bridge"), writeBaseline ? { cutWaits: false } : undefined);
+  if (writeBaseline) {
     const file = path.join(here, "baseline.json");
     fs.writeFileSync(file, JSON.stringify({ ref: execFileSync("git", ["rev-parse", "--short", against], { cwd: pluginRoot }).toString().trim(), cells: base }, null, 2) + "\n");
     console.log(`baseline written: ${file}`);
