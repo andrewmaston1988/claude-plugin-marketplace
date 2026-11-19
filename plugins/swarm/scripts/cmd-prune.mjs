@@ -56,13 +56,23 @@ export async function cmdPrune(rest, { usage }) {
     return 0;
   }
   // Partial prune: a blocked row is kept and never touched, and never stops the clean ones.
+  // A directory that is no longer a worktree and holds anything at all is held back before
+  // `--discard-unlanded` is even consulted: git cannot say what those bytes are, so the
+  // flag that destroys unlanded work has nothing to claim about them.
   const discard = rest.includes("--discard-unlanded");
-  const blocked = pruneBlockers(rows);
-  const go = discard ? rows : rows.filter((row) => !blocked.includes(row));
-  const stay = discard ? [] : blocked;
+  const heldBack = rows.filter((row) => row.unlinked && row.entries > 0);
+  const prunable = rows.filter((row) => !heldBack.includes(row));
+  const blocked = pruneBlockers(prunable);
+  const go = discard ? prunable : prunable.filter((row) => !blocked.includes(row));
+  const stay = [...(discard ? [] : blocked), ...heldBack];
 
   if (dryRun) {
     if (go.length) out(formatPrune(go, { dryRun: true }));
+    const clearing = go.filter((row) => row.unlinked);
+    if (clearing.length) {
+      out(`swarm: would clear ${dirCount(clearing.length)} left behind by a lost worktree link:`);
+      for (const row of clearing) out(`  ${row.path}`);
+    }
     if (stay.length) {
       out(`swarm: would keep ${rowCount(stay.length)} that still ${stay.length === 1 ? "holds" : "hold"} work:`);
       for (const row of stay) out(`  ${rowLabel(row)}: ${keptDetail(row)}`);
@@ -90,8 +100,13 @@ export async function cmdPrune(rest, { usage }) {
   // take, and `--discard-unlanded` is the word that overrides that. A `refused` row is one
   // git itself would not remove (a locked worktree, say) — retrying with the flag re-runs
   // the same removal, so it is never offered there.
-  if (stay.length) {
-    err(`swarm: kept ${rowCount(stay.length)} that still ${stay.length === 1 ? "holds" : "hold"} work — land or take it and prune again, or pass --discard-unlanded to destroy it`);
+  const discardable = stay.filter((row) => !heldBack.includes(row));
+  if (discardable.length) {
+    err(`swarm: kept ${rowCount(discardable.length)} that still ${discardable.length === 1 ? "holds" : "hold"} work — land or take it and prune again, or pass --discard-unlanded to destroy it`);
+  }
+  // Nothing a flag can do about these: prune will not delete bytes it cannot account for.
+  if (heldBack.length) {
+    err(`swarm: ${rowCount(heldBack.length)} kept with a leftover directory prune will not clear — inspect and remove by hand: ${heldBack.map((row) => row.path).join(", ")}`);
   }
   if (refused.length) {
     err(`swarm: kept ${rowCount(refused.length)} that git refused to remove — clear what git names above and prune again`);
@@ -102,8 +117,13 @@ export async function cmdPrune(rest, { usage }) {
 const rowLabel = (row) => `${row.path ?? "(no tree)"} ${row.branch ?? "(detached)"}`;
 // A kept row's taken reason is the actionable half: the count says how much, the reason
 // says why it stays (the branch it was ported into, and why that is not proved landed).
-const keptDetail = (row) => [workCounts(row).join(", "), row.taken].filter(Boolean).join("; ") || "still present";
+const keptDetail = (row) => [
+  workCounts(row).join(", "),
+  row.unlinked && row.entries > 0 ? `unlinked directory ${row.path} (${dirCount(row.entries, "entry", "entries")})` : null,
+  row.taken,
+].filter(Boolean).join("; ") || "still present";
 const rowCount = (n) => `${n} row${n === 1 ? "" : "s"}`;
+const dirCount = (n, word = "directory", plural = `${word}s`) => `${n} ${n === 1 ? word : plural}`;
 const firstLine = (text) => (text || "").split(/\r?\n/).map((s) => s.trim()).find(Boolean) || "";
 
 // A row is gone when its tree left the disk, or a branch-only row's ref no longer resolves.
