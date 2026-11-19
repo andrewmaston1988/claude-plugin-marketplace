@@ -126,3 +126,11 @@ failure.
 | "The tree is dirty but the merge is simple — Haiku is fine." | The model is computed from three signals, not chosen. Overriding it discards the reason it was raised. |
 | "`rebase_required=1` is stale, I'll merge anyway." | It means a dev session aborted its rebase. Rebase manually, then clear it explicitly with `pipeline rebase-required-set`. |
 | "I'll add `--skip-testing` to get past the pause." | That flag is the user's answer, not yours. It ships untested work and says so in the log. |
+
+## Red Flags — STOP and re-check
+
+- about to type `merge.mjs` yourself instead of pasting the printed command
+- "the printed flags look wrong, I'll adjust them"
+- "the tree is simple, a smaller model will do"
+- "`rebase_required=1` is stale, it'll be fine"
+- reaching for `--skip-testing` because the pause is in the way
