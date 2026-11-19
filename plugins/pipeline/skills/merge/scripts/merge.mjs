@@ -267,7 +267,11 @@ async function main() {
   // origin, and a base at a local tip behind origin would make every push fail.
   let baseRef = targetBranch;
   if (hasOrigin) {
-    runGit(["fetch", "origin", targetBranch], projectDir, { check: false });
+    const fetched = runGit(["fetch", "origin", targetBranch], projectDir, { check: false, timeoutMs: 30_000 });
+    if (fetched.timedOut) {
+      logErr(`BLOCKER: git fetch origin ${targetBranch} timed out after 30s — origin did not answer`);
+      close(db); return exitSoon(2);
+    }
     if (runGit(["rev-parse", "--verify", "--quiet", `origin/${targetBranch}`], projectDir, { check: false }).code === 0) {
       baseRef = `origin/${targetBranch}`;
     }

@@ -12,17 +12,22 @@ export class GitError extends Error {}
 
 // ── Git subprocess ─────────────────────────────────────────────────────────────
 
-export function runGit(args, cwd, { check = true, capture = true } = {}) {
+export function runGit(args, cwd, { check = true, capture = true, timeoutMs = 0 } = {}) {
   const result = spawnSync("git", ["-C", cwd, ...args], {
     encoding: "utf8",
     stdio: capture ? ["pipe", "pipe", "pipe"] : ["inherit", "inherit", "inherit"],
+    ...(timeoutMs ? { timeout: timeoutMs } : {}),
   });
   const stdout = result.stdout ?? "";
   const stderr = result.stderr ?? "";
+  const timedOut = result.error?.code === "ETIMEDOUT";
+  if (check && timedOut) {
+    throw new GitError(`git ${args.join(" ")} timed out after ${timeoutMs}ms in ${cwd}`);
+  }
   if (check && result.status !== 0) {
     throw new GitError(`git ${args.join(" ")} failed in ${cwd}:\n${stderr.trim()}`);
   }
-  return { code: result.status ?? 0, stdout, stderr };
+  return { code: result.status ?? 0, stdout, stderr, timedOut };
 }
 
 // Where git itself puts a per-checkout file. In a linked worktree `.git` is a

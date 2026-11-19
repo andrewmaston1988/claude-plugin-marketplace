@@ -10,9 +10,15 @@ import { queryRow } from "./pipeline-query.mjs";
 // branch names reach here from the caller.
 export const SPAWN = { encoding: "utf8", windowsHide: true };
 
-// Trimmed stdout on success, "" on failure.
-export function git(args, cwd) {
-  const r = spawnSync("git", args, { ...SPAWN, cwd });
+export const FETCH_TIMEOUT_MS = 30_000;
+
+// Trimmed stdout on success, "" on failure. A timeout throws: returning "" would
+// read a hung fetch as "nothing there" and resume from a stale world.
+export function git(args, cwd, { timeoutMs = 0, spawn = spawnSync } = {}) {
+  const r = spawn("git", args, { ...SPAWN, cwd, ...(timeoutMs ? { timeout: timeoutMs } : {}) });
+  if (timeoutMs && r.error?.code === "ETIMEDOUT") {
+    throw new Error(`git ${args.join(" ")} in ${cwd} timed out after ${timeoutMs}ms`);
+  }
   return r.status === 0 ? (r.stdout ?? "").trim() : "";
 }
 
@@ -55,7 +61,7 @@ export function mutexConflict({ existingSubject, requested }) {
 function worldRef(projectDir, targetBranch) {
   const hasOrigin = git(["remote", "get-url", "origin"], projectDir).length > 0;
   if (hasOrigin) {
-    git(["fetch", "origin", targetBranch], projectDir);
+    git(["fetch", "origin", targetBranch], projectDir, { timeoutMs: FETCH_TIMEOUT_MS });
     if (git(["rev-parse", "--verify", "--quiet", `origin/${targetBranch}`], projectDir).length > 0) {
       return `origin/${targetBranch}`;
     }
