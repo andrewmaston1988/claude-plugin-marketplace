@@ -302,12 +302,17 @@ function measureRow(row, git, fs, prefix, extraBases) {
   return { ...row, unlanded, dirty };
 }
 
+// An unlinked directory's contents are nobody's to delete: git cannot say what they are, so
+// the operator decides. Held back even under --discard-unlanded, and the one spelling of
+// that rule — the executor and the CLI both ask this rather than restating the condition.
+export function isHeldBack(row) {
+  return Boolean(row.unlinked && row.entries > 0);
+}
+
 export function blockers(rows) {
   return rows.filter((row) =>
     !Number.isFinite(row.unlanded) || row.unlanded > 0 || !Number.isFinite(row.dirty) || row.dirty > 0
-    // An unlinked directory's contents are nobody's to delete: git cannot say what they
-    // are, so the operator decides. Held back even under --discard-unlanded.
-    || (row.unlinked && row.entries > 0));
+    || isHeldBack(row));
 }
 
 // Clearing a leftover directory that is no longer a worktree: drop git's stale registration

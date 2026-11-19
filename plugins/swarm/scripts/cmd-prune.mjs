@@ -8,7 +8,7 @@ import { getConfig, swarmHome } from "../src/config.mjs";
 import { readTaken } from "../src/taken.mjs";
 import { runLiveness } from "../src/runlog.mjs";
 import { writeSummary } from "../src/results.mjs";
-import { plan as planPrune, execute as executePrune, formatPrune, workCounts, blockers as pruneBlockers, makeGit, runForPrune, checkoutBase } from "../src/prune.mjs";
+import { plan as planPrune, execute as executePrune, formatPrune, workCounts, blockers as pruneBlockers, isHeldBack, makeGit, runForPrune, checkoutBase } from "../src/prune.mjs";
 import { out, err } from "../src/ui.mjs";
 
 export async function cmdPrune(rest, { usage }) {
@@ -60,7 +60,7 @@ export async function cmdPrune(rest, { usage }) {
   // `--discard-unlanded` is even consulted: git cannot say what those bytes are, so the
   // flag that destroys unlanded work has nothing to claim about them.
   const discard = rest.includes("--discard-unlanded");
-  const heldBack = rows.filter((row) => row.unlinked && row.entries > 0);
+  const heldBack = rows.filter(isHeldBack);
   const prunable = rows.filter((row) => !heldBack.includes(row));
   const blocked = pruneBlockers(prunable);
   const go = discard ? prunable : prunable.filter((row) => !blocked.includes(row));
@@ -119,7 +119,7 @@ const rowLabel = (row) => `${row.path ?? "(no tree)"} ${row.branch ?? "(detached
 // says why it stays (the branch it was ported into, and why that is not proved landed).
 const keptDetail = (row) => [
   workCounts(row).join(", "),
-  row.unlinked && row.entries > 0 ? `unlinked directory ${row.path} (${dirCount(row.entries, "entry", "entries")})` : null,
+  isHeldBack(row) ? `unlinked directory ${row.path} (${dirCount(row.entries, "entry", "entries")})` : null,
   row.taken,
 ].filter(Boolean).join("; ") || "still present";
 const rowCount = (n) => `${n} row${n === 1 ? "" : "s"}`;

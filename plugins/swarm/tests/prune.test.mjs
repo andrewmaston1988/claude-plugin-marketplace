@@ -4,7 +4,7 @@ import { equal, deepEqual, ok } from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { plan, execute, formatPrune, blockers } from "../src/prune.mjs";
+import { plan, execute, formatPrune, blockers, isHeldBack } from "../src/prune.mjs";
 import { prepareIsolation, runScopeKey, WORKTREE_ADD_TIMEOUT_MS } from "../src/worktree.mjs";
 import { runCliInProcess } from "./helpers/cli.mjs";
 import { commitAll, gitOut } from "./helpers/cli-fixture.mjs";
@@ -112,6 +112,15 @@ test("execute never rm's anything outside the rows it was given — run.log, sum
   deepEqual(rmCalls, ["/run/wt-gone"], "rmSync must be called only for the repo-missing row's own worktree path");
   const forbidden = ["/run/run.log", "/run/summary.json", "/run/results", "/run/digest.md", "/run/report.md", "/run/manifest.json"];
   for (const f of forbidden) ok(!rmCalls.includes(f), `execute must never rm ${f}`);
+});
+
+test("isHeldBack: one predicate for the leftover directory prune will not clear, and blockers agrees with it", () => {
+  equal(isHeldBack({ unlinked: true, entries: 1 }), true);
+  equal(isHeldBack({ unlinked: true, entries: 0 }), false);
+  equal(isHeldBack({ unlinked: false, entries: 3 }), false);
+  equal(isHeldBack({ path: "/r/wt", entries: 0 }), false);
+  const held = { path: "/r/wt", unlinked: true, entries: 1, unlanded: 0, dirty: 0 };
+  deepEqual(blockers([held]), [held], "blockers must hold back exactly what isHeldBack names");
 });
 
 test("execute: an unlinked leftover already gone is cleared, not a failure; a refusal reports its own code", () => {
