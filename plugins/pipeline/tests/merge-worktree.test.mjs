@@ -318,6 +318,36 @@ test("A9: an overlapping edit in the shared checkout yields a reported refusal, 
   }
 });
 
+// A25 — a guard that reports no paths must still say what refused. Guard 1 (the
+// shared checkout is on another branch) blocks on no file at all, and
+// "(blocking path(s): unknown)" told the operator nothing.
+test("A25: a refusal with no blocking path names the guard's reason", () => {
+  const { tmp, repo } = makeRepoDir();
+  const home = makeHome();
+  try {
+    makeBaseRepo(repo);
+    seedRows(home, repo, ["feat-x"]);
+    git(repo, "checkout", "-b", "other");
+
+    const r = runMerge(repo, home, "autonomous/feat-x");
+
+    equal(r.status, 0, `a refused land must exit 0; stderr=${r.stderr}`);
+    ok(/shared checkout is on 'other', not 'master'/.test(r.stdout),
+      `the refusal must carry guard 1's reason: ${r.stdout}`);
+    ok(!r.stdout.includes("(unknown)"), `no placeholder may stand in for the reason: ${r.stdout}`);
+
+    const land = runLandOnly(repo, home);
+
+    equal(land.status, 0, `land-only must exit 0; stderr=${land.stderr}`);
+    ok(/shared checkout is on 'other', not 'master'/.test(land.stdout),
+      `land-only's refusal must carry the reason too: ${land.stdout}`);
+    ok(!land.stdout.includes("(unknown)"), `land-only must not print a placeholder: ${land.stdout}`);
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
 // ── A14 — no origin: park on refusal, land on resume ─────────────────────────
 
 test("A14: with no origin a refused land parks the squash, and a land-only run lands it", () => {
