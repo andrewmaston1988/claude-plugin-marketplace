@@ -59,6 +59,9 @@ function isInside(root, candidate) {
 
 // A squash whose worktree is about to be removed must stay reachable from a
 // ref. Skip the park when the commit already lives in the target or origin.
+// Only a commit that carries a squash may be parked: an abort before step 5
+// leaves the plan-only --skip-testing rewrite as HEAD, and parking that would
+// make the next --land-only land a plan edit in place of the merge.
 function parkIfUnreachable(projectDir, wtPath, targetBranch, hasOrigin) {
   const head = runGit(["rev-parse", "HEAD"], wtPath, { check: false });
   if (head.code !== 0) return false;
@@ -284,6 +287,7 @@ async function main() {
   const mark = (idx, state) => { try { progressMark(db, sessionSlug, idx, state); } catch { /* ignore */ } };
 
   let exitCode = 0;
+  let squashed = false;
   try {
     step0bProgress(db, project, sessionSlug, args.parent);
 
@@ -318,6 +322,7 @@ async function main() {
     await step5SquashMerge(db, project, projectDir, wt, branches, planFiles, targetBranch, {
       log: logOut, err: logErr,
     });
+    squashed = true;
     mark(5, "done");
 
     // Steps 3 + 6 + 6b — plan writers, after the squash, in the merge worktree.
@@ -395,7 +400,7 @@ async function main() {
   } finally {
     // Rollback becomes worktree removal. The shared checkout is never reset.
     if (wt) {
-      if (parkIfUnreachable(projectDir, wt.path, targetBranch, hasOrigin)) {
+      if (squashed && parkIfUnreachable(projectDir, wt.path, targetBranch, hasOrigin)) {
         logErr(`[merge] parked the merge worktree's HEAD at ${parkedRef} before removing it`);
       }
       wt.remove();
