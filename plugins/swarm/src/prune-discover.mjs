@@ -100,14 +100,19 @@ function canonicalPath(path) {
 // the spelling swarm derived — so both sides are canonicalised, then compared through the
 // one path normaliser. "unlinked" needs git to have ANSWERED with a different directory;
 // a git that cannot answer is "unknown" and its row fails closed in the ordinary measurement.
-export function worktreeLink(git, path) {
+export function worktreeLink(git, path, memo = null) {
+  const key = normalizeForCompare(path);
+  if (memo?.has(key)) return memo.get(key);
   const top = git(["rev-parse", "--show-toplevel"], path);
-  if (top.status !== 0 || !top.stdout) return "unknown";
-  return normalizeForCompare(canonicalPath(top.stdout)) === normalizeForCompare(canonicalPath(path)) ? "linked" : "unlinked";
+  const verdict = top.status !== 0 || !top.stdout
+    ? "unknown"
+    : normalizeForCompare(canonicalPath(top.stdout)) === normalizeForCompare(canonicalPath(path)) ? "linked" : "unlinked";
+  memo?.set(key, verdict);
+  return verdict;
 }
 
-export const isWorktreeRoot = (git, path) => worktreeLink(git, path) === "linked";
-export const isUnlinked = (git, path) => worktreeLink(git, path) === "unlinked";
+export const isWorktreeRoot = (git, path, memo = null) => worktreeLink(git, path, memo) === "linked";
+export const isUnlinked = (git, path, memo = null) => worktreeLink(git, path, memo) === "unlinked";
 
 // How many entries a leftover directory holds. `Infinity` when it cannot be read: an
 // unreadable directory is never "empty", so it is never removed.
@@ -137,8 +142,8 @@ export function repoFromRecords(resultsDir, name, fs) {
 // git cannot answer, which is how a stray directory is told apart from a real worktree — a
 // row prune cannot resolve is not one it may destroy. A directory that is no longer a
 // worktree root is classified by the caller and never measured by walking up out of it.
-export function treeFacts(git, path) {
-  if (!isWorktreeRoot(git, path)) return null;
+export function treeFacts(git, path, memo = null) {
+  if (!isWorktreeRoot(git, path, memo)) return null;
   const common = git(["rev-parse", "--git-common-dir"], path);
   if (common.status !== 0 || !common.stdout) return null;
   const head = git(["rev-parse", "--abbrev-ref", "HEAD"], path);
@@ -156,6 +161,9 @@ export function* discoveredLanes(run, git, fs, { cfg } = {}) {
   const prefix = cfg?.worktreeBranchPrefix || "swarm/";
   const trees = new Set();
   const lanes = new Set();
+  // One verdict per directory for this pass: discovery and the facts probe ask the same
+  // tree, and the answer cannot change mid-pass.
+  const linkMemo = new Map();
   const laneKey = (repo, branch) => `${normalizeForCompare(repo)}\n${branch}`;
   const freshTree = (path) => {
     const key = normalizeForCompare(path);
@@ -184,7 +192,7 @@ export function* discoveredLanes(run, git, fs, { cfg } = {}) {
   for (const wt of run.worktreesKept || []) {
     const onDisk = fs.existsSync(wt.path);
     if (onDisk && !freshTree(wt.path)) continue;
-    if (onDisk && worthProbing(wt.repo) && isUnlinked(git, wt.path)) {
+    if (onDisk && worthProbing(wt.repo) && isUnlinked(git, wt.path, linkMemo)) {
       yield unlinkedLane(wt.path, wt.branch ?? null, repoFor(wt.repo, wt.name));
       continue;
     }
@@ -194,11 +202,11 @@ export function* discoveredLanes(run, git, fs, { cfg } = {}) {
   if (run.resultsDir) {
     for (const t of heldTrees(run.resultsDir, { cfg })) {
       if (!fs.existsSync(t.path) || !freshTree(t.path)) continue;
-      if (worthProbing(t.repo) && isUnlinked(git, t.path)) {
+      if (worthProbing(t.repo) && isUnlinked(git, t.path, linkMemo)) {
         yield unlinkedLane(t.path, t.branch ?? null, repoFor(t.repo, t.name ?? basename(t.path)));
         continue;
       }
-      const facts = t.repo && t.branch ? t : treeFacts(git, t.path);
+      const facts = t.repo && t.branch ? t : treeFacts(git, t.path, linkMemo);
       if (!facts?.repo) continue; // not a worktree git can speak for — never a row to destroy
       yield lane({ path: t.path, branch: t.branch ?? facts.branch ?? null, repo: facts.repo });
     }
@@ -213,7 +221,7 @@ export function* discoveredLanes(run, git, fs, { cfg } = {}) {
         yield lane({ path: reg.path, branch: reg.branch, repo, missing: true, head: reg.head });
         continue;
       }
-      if (isUnlinked(git, reg.path)) {
+      if (isUnlinked(git, reg.path, linkMemo)) {
         yield unlinkedLane(reg.path, reg.branch, repo);
         continue;
       }
