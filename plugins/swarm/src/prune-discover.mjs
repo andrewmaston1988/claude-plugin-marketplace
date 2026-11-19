@@ -3,7 +3,7 @@
 // destroys what this finds. Every name is re-exported from prune.mjs, so the public
 // surface and every existing call site stay unchanged.
 import { basename, dirname, join, resolve } from "node:path";
-import { existsSync, readdirSync } from "node:fs";
+import { existsSync, readdirSync, realpathSync } from "node:fs";
 import { getConfig } from "./config.mjs";
 import { normalizeForCompare } from "./roots.mjs";
 import { legacyTreeDirs, listTreeRecords, runOfTree, runScopeKey, treeDirFor } from "./worktree.mjs";
@@ -89,17 +89,21 @@ export function registeredForRun(git, repo, resultsDir, { cfg } = {}) {
   return rows.filter((row) => key(runOfTree(row.path, root, { runsRoot })) === want);
 }
 
+// git resolves a junction or symlink on the way to its toplevel; a recorded path keeps the
+// spelling swarm created it under. A path that no longer exists keeps its own spelling.
+function canonicalPath(path) {
+  try { return realpathSync.native(path); } catch { return path; }
+}
+
 // Whether a directory is its own worktree root. Git prints its toplevel with forward
-// slashes and the filesystem's own case, while a recorded tree path carries backslashes
-// and the case swarm derived — a raw `===` calls every real worktree unlinked. Compare
-// through the one path normaliser instead.
-// "unlinked" needs git to have ANSWERED and named a different directory: a git that
-// cannot answer says nothing about the link, and its row falls through to the ordinary
-// measurement, which fails closed and blocks.
+// slashes, the filesystem's case and any junction resolved, while a recorded path carries
+// the spelling swarm derived — so both sides are canonicalised, then compared through the
+// one path normaliser. "unlinked" needs git to have ANSWERED with a different directory;
+// a git that cannot answer is "unknown" and its row fails closed in the ordinary measurement.
 export function worktreeLink(git, path) {
   const top = git(["rev-parse", "--show-toplevel"], path);
   if (top.status !== 0 || !top.stdout) return "unknown";
-  return normalizeForCompare(top.stdout) === normalizeForCompare(path) ? "linked" : "unlinked";
+  return normalizeForCompare(canonicalPath(top.stdout)) === normalizeForCompare(canonicalPath(path)) ? "linked" : "unlinked";
 }
 
 export const isWorktreeRoot = (git, path) => worktreeLink(git, path) === "linked";
