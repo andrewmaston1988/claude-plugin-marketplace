@@ -6,7 +6,7 @@
 // gratuitously strict: a non-overlapping foreign edit must survive.
 import "../../../tests/helpers/isolate-home.mjs";
 import { test } from "node:test";
-import { equal, ok } from "node:assert/strict";
+import { deepEqual, equal, ok } from "node:assert/strict";
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -104,6 +104,31 @@ test("landTarget: refuses when the shared checkout is not on the target branch",
     equal(res.landed, false, "a checkout on another branch must refuse");
     equal(git(repo, "rev-parse", target), mainBefore, "target must not move");
     equal(git(repo, "rev-parse", "other"), otherBefore, "the checked-out branch must not move");
+  } finally { rmSync(tmp, { recursive: true, force: true }); }
+});
+
+// A7b — guard 2: the sha is not a descendant of what the target holds, so the
+// "fast-forward" would be a merge. paths is empty: no file is blocking it.
+test("landTarget: refuses a sha that is not a descendant of the target", () => {
+  const { tmp, repo, target } = makeRepo();
+  try {
+    const sha = landingSha(repo, target, () => writeFileSync(join(repo, "src", "a.txt"), "a2\n", "utf8"));
+    // Move the target on, so the landing sha and the target have diverged.
+    writeFileSync(join(repo, "target.txt"), "moved\n", "utf8");
+    git(repo, "add", "-A");
+    git(repo, "commit", "-m", "target moves on");
+    const before = git(repo, "rev-parse", target);
+
+    const l = logs();
+    const res = landTarget(repo, target, sha, l);
+
+    equal(res.landed, false, "a non-descendant sha must refuse");
+    // Guard 2's own refusal, not guard 4's: `--ff-only` also refuses a
+    // non-descendant, so `landed === false` alone does not pin this guard.
+    ok(/not a descendant/i.test(String(res.reason)),
+      `guard 2 must be the one that refuses: ${res.reason}`);
+    deepEqual(res.paths, [], "guard 2 has no blocking file to report");
+    equal(git(repo, "rev-parse", target), before, "target ref must not move");
   } finally { rmSync(tmp, { recursive: true, force: true }); }
 });
 
