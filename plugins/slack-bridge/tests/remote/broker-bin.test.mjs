@@ -1,5 +1,5 @@
 // `broker run` is what remote-mcp and the bridge both self-heal against, so an
-// instant bin death takes remote control down with it — no other test spawns the real bin.
+// instant bin death takes remote control down with it.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
@@ -11,10 +11,11 @@ import path from "node:path";
 const binPath = fileURLToPath(new URL("../../bin/claude-slack.mjs", import.meta.url));
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-// This test is the only one that starts the real bin, and the broker it starts
-// is a child of the test process: nothing else will ever reap it, so every exit
-// path has to, and has to wait for the exit rather than assume the kill landed.
+// The broker this test starts is its own child: nothing else will ever reap it,
+// so every exit path has to, and has to wait for the exit rather than assume the
+// kill landed. A child that already exited has no event left to wait on.
 async function reap(child) {
+  if (child.exitCode !== null || child.signalCode !== null) return;
   try { child.kill(); } catch {}
   const exited = await Promise.race([
     new Promise((resolve) => child.once("exit", () => resolve(true))),
