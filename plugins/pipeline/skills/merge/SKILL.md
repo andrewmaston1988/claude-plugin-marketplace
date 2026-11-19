@@ -48,14 +48,12 @@ Agent(
 
       <the command the driver printed>
 
-    1. If the working tree is dirty, `git stash --include-untracked` first and pop it at the end.
-    2. Ensure you are on the target branch before running.
-    3. Non-zero exit → report the BLOCKER lines from stderr and stop.
-    4. Zero exit → report branch(es) merged, plan location(s), and the squash commit hash.
-    5. For each merged branch, prune resolved bullets from the completed plan's
+    1. Non-zero exit → report the BLOCKER lines from stderr and stop.
+    2. Zero exit → report branch(es) merged, plan location(s), and the squash commit hash.
+    3. For each merged branch, prune resolved bullets from the completed plan's
        `## Open Questions` — those the branch demonstrably answered. Leave genuinely
        open ones. This is judgement; read the plan, do not pattern-match.
-    6. Clean up stale progress entries:
+    4. Clean up stale progress entries:
          pipeline progress-list-active <PROJECT>
        and for each slug containing the feature stem: `pipeline progress-delete <PROJECT> <slug>`.
 
@@ -84,10 +82,15 @@ conflicts against content that is already present. Git cannot infer the fork-poi
 so this one is yours:
 
 ```bash
-git checkout <branch>
-git rebase --onto <target_branch> <fork-point> <branch>   # fork-point = last commit predating the upstream squash
+wt="$(mktemp -d)/wt"
+git worktree add --detach "$wt" <branch>
+git -C "$wt" rebase --onto <target_branch> <fork-point>   # fork-point = last commit predating the upstream squash
+git update-ref "refs/heads/<branch>" "$(git -C "$wt" rev-parse HEAD)"
+git worktree remove --force "$wt"
 ```
 
+The replay runs in a throwaway detached worktree, never in the shared checkout —
+a `git checkout <branch>` there is what wiped live sessions' work on 2026-11-19.
 Then re-run the driver's printed command with `--no-rebase` appended, which skips
 `step0aRebase` and goes straight to the 3-way squash merge. Operator-only — the
 default path must keep rebasing for every branch that has not hit this exact

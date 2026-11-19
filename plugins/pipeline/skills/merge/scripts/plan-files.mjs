@@ -2,25 +2,14 @@
 // Mirrors merge.py: step_1_identify_plans, step_2_verify_done, step_3_update_status,
 // step_6_move_plans, step_6b_archive_orphaned_plans, and shared path helpers.
 import { existsSync, readFileSync, writeFileSync, mkdirSync, renameSync, readdirSync } from "node:fs";
-import { join, basename, relative, dirname } from "node:path";
+import { join, basename, relative, dirname, isAbsolute } from "node:path";
 import { runGit, gitAddWithRetry, gitCommitWithRetry } from "./rebase.mjs";
 import { rowGet, rowsList, rowUpdate } from "../../../src/db/index.mjs";
-import { orchestratorWorktreePath } from "../../../src/worktree-paths.mjs";
 
 // ── Path helpers ───────────────────────────────────────────────────────────────
 
 export function branchSlug(branch) {
   return branch.startsWith("autonomous/") ? branch.slice("autonomous/".length) : branch;
-}
-
-// Worktree the orchestrator created for the autonomous/<slug> branch. Internal
-// to the merge layer — public worktree resolution lives in worktree-paths.mjs.
-function planWorktree(projectDir, slug) {
-  return orchestratorWorktreePath({
-    project:     basename(projectDir),
-    projectRoot: projectDir,
-    branch:      `autonomous/${slug}`,
-  });
 }
 
 // Per-row plan path lookup. After queue-plan started storing absolute paths,
@@ -39,18 +28,31 @@ export function sessionsDir(projectRoot) {
   return join(projectRoot, "sessions");
 }
 
-// Return the plan file path inside the rebased branch's worktree, or null.
-// `plan_file` is the absolute path stored on the row; `slug` is the row key.
-export function branchPlanPath(projectDir, slug, planFile) {
-  const wt = planWorktree(projectDir, slug);
-  if (!existsSync(wt)) return null;
-  // Try the same relative location as on the operator's tree.
-  const rel = planFile ? relative(dirname(planFile).split("plans")[0] || "/", planFile) : `plans/${slug}.md`;
-  const candidate = join(wt, rel);
-  if (existsSync(candidate)) return candidate;
-  // Fallback: plans/<slug>.md inside the worktree.
-  const fallback = join(wt, "plans", `${slug}.md`);
-  return existsSync(fallback) ? fallback : null;
+// The row's absolute `plan_file` at its repo-relative location inside the merge
+// worktree this run owns. A path outside the project tree is returned as-is: an
+// external plans dir stays a plain filesystem operation with nothing to commit.
+// A repo path the branch does not carry resolves to null — the shared checkout
+// is never a fallback for a write.
+export function planPathInWorktree(projectDir, wtPath, planFile) {
+  const mapped = dirInWorktree(projectDir, wtPath, planFile);
+  if (mapped === planFile) return mapped;
+  return mapped && existsSync(mapped) ? mapped : null;
+}
+
+// Same mapping for a directory. Also exported so merge.mjs's close commit
+// resolves the plans dir exactly as the writers did.
+export function dirInWorktree(projectDir, wtPath, dir) {
+  if (!dir) return null;
+  const rel = relative(projectDir, dir);
+  if (!rel || rel.startsWith("..") || isAbsolute(rel)) return dir;
+  return join(wtPath, rel);
+}
+
+// Whether `candidate` really sits inside `wtPath` — an external plan is written
+// but never staged, since git cannot commit a path outside this worktree.
+function insideWorktree(wtPath, candidate) {
+  const rel = relative(wtPath, candidate);
+  return Boolean(rel) && !rel.startsWith("..") && !isAbsolute(rel);
 }
 
 // ── Regex helpers ──────────────────────────────────────────────────────────────
@@ -185,34 +187,39 @@ function verifyPlanFilesInDiff(planText, branch, projectDir, targetBranch, proje
 
 // ── Step 2 — Verify definition of done ────────────────────────────────────────
 
-export async function step2VerifyDone(db, planFiles, projectDir, project, { skipTesting = false, targetBranch = "main" } = {}) {
+export async function step2VerifyDone(db, planFiles, projectDir, project, { skipTesting = false, targetBranch = "main", wtPath = projectDir } = {}) {
   const blockers = [];
   const rows = db ? rowsList(db, project) : [];
   const rowMap = Object.fromEntries(rows.map(r => [r.feature, r]));
 
   for (const [branch, plan] of Object.entries(planFiles)) {
     const slug = branchSlug(branch);
-    const bp = branchPlanPath(projectDir, slug, plan);
+    const bp = planPathInWorktree(projectDir, wtPath, plan);
+    // Reading the shared checkout's copy is harmless; writing it is not.
     const planToRead = bp || plan;
 
     if (planToRead && existsSync(planToRead)) {
       const text = readFileSync(planToRead, "utf8");
 
-      const verifyBlockers = verifyPlanFilesInDiff(text, branch, projectDir, targetBranch, project);
+      const verifyBlockers = verifyPlanFilesInDiff(text, branch, wtPath, targetBranch, project);
       blockers.push(...verifyBlockers);
 
       const needsTestingRe = /^\s*[-*]\s+.*\(needs testing\)/gim;
       if (needsTestingRe.test(text)) {
         if (skipTesting) {
-          const newText = text.replace(/(\(needs testing\))/gi, "(skipped)");
-          writeFileSync(planToRead, newText, "utf8");
           const count = (text.match(/^\s*[-*]\s+.*\(needs testing\)/gim) || []).length;
-          if (bp && planToRead === bp) {
-            const wt = planWorktree(projectDir, slug);
-            await gitAddWithRetry(wt, relative(wt, planToRead));
-            await gitCommitWithRetry(wt, "-m", `[merge --skip-testing] mark (needs testing) -> (skipped) in ${slug} plan`);
+          if (!bp) {
+            blockers.push(`${branch}: plan is not in the merge worktree — cannot apply --skip-testing to ${plan}`);
+          } else {
+            const newText = text.replace(/(\(needs testing\))/gi, "(skipped)");
+            writeFileSync(bp, newText, "utf8");
+            if (insideWorktree(wtPath, bp)) {
+              const rel = relative(wtPath, bp);
+              await gitAddWithRetry(wtPath, rel);
+              await gitCommitWithRetry(wtPath, "-m", `[merge --skip-testing] mark (needs testing) -> (skipped) in ${slug} plan`, "--", rel);
+            }
+            process.stdout.write(`[2] WARNING: ${branch}: ${count} (needs testing) item(s) marked (skipped) — operator override\n`);
           }
-          process.stdout.write(`[2] WARNING: ${branch}: ${count} (needs testing) item(s) marked (skipped) — operator override\n`);
         } else {
           blockers.push(`${branch}: plan has (needs testing) items — finish or mark with explicit note`);
         }
@@ -287,44 +294,49 @@ export function applyPlanStatusEdit(planPath, newStatusLine, oqRemovals = []) {
   writeFileSync(planPath, text, "utf8");
 }
 
-export async function step3UpdateStatus(planFiles, projectDir, project, { testRefs = {}, mergeDate = null } = {}) {
+export async function step3UpdateStatus(planFiles, projectDir, project, { testRefs = {}, mergeDate = null, wtPath = projectDir } = {}) {
   const today = mergeDate || new Date().toISOString().slice(0, 10);
 
   for (const [branch, plan] of Object.entries(planFiles)) {
     if (!plan) continue;
     const slug = branchSlug(branch);
-    const bp = branchPlanPath(projectDir, slug, plan);
-    const planToEdit = bp || plan;
+    const bp = planPathInWorktree(projectDir, wtPath, plan);
 
     process.stdout.write(`[3] Updating Current Status for ${branch}\n`);
+    if (!bp) {
+      process.stdout.write(`[3] WARN: ${plan} is not in the merge worktree — status not written (the shared checkout is never edited)\n`);
+      continue;
+    }
+
     const testRef = testRefs[branch] || "";
     const statusLine = testRef && testRef !== "(no test report)"
       ? `✓ Merged ${today}. Test: ${testRef}.`
       : `✓ Merged ${today}.`;
 
-    applyPlanStatusEdit(planToEdit, statusLine, []);
+    applyPlanStatusEdit(bp, statusLine, []);
 
-    if (bp && planToEdit === bp) {
-      const wt = planWorktree(projectDir, slug);
-      await gitAddWithRetry(wt, relative(wt, planToEdit));
-      await gitCommitWithRetry(wt, "-m", `[merge] update ${slug} Current Status post-test`);
+    if (insideWorktree(wtPath, bp)) {
+      const rel = relative(wtPath, bp);
+      await gitAddWithRetry(wtPath, rel);
+      await gitCommitWithRetry(wtPath, "-m", `[merge] update ${slug} Current Status post-test`, "--", rel);
     }
   }
 }
 
 // ── Step 6 — Move plans to complete/ ──────────────────────────────────────────
 
-export function step6MovePlans(planFiles) {
+export function step6MovePlans(planFiles, { projectDir = null, wtPath = null } = {}) {
   for (const [_branch, plan] of Object.entries(planFiles)) {
-    if (!plan || !existsSync(plan)) continue;
-    const completeDir = join(dirname(plan), "complete");
+    const target = projectDir && wtPath ? planPathInWorktree(projectDir, wtPath, plan) : plan;
+    if (!target || !existsSync(target)) continue;
+    const completeDir = join(dirname(target), "complete");
     mkdirSync(completeDir, { recursive: true });
-    const dest = join(completeDir, basename(plan));
-    renameSync(plan, dest);
-    process.stdout.write(`[5] Moved ${basename(plan)} -> complete/\n`);
+    const dest = join(completeDir, basename(target));
+    renameSync(target, dest);
+    process.stdout.write(`[5] Moved ${basename(target)} -> complete/\n`);
 
-    const stem = basename(plan, ".md");
-    const testPlan = join(dirname(plan), `${stem}-test-plan.md`);
+    const stem = basename(target, ".md");
+    const testPlan = join(dirname(target), `${stem}-test-plan.md`);
     if (existsSync(testPlan)) {
       renameSync(testPlan, join(completeDir, basename(testPlan)));
       process.stdout.write(`[5] Moved ${basename(testPlan)} -> complete/\n`);
@@ -336,7 +348,7 @@ export function step6MovePlans(planFiles) {
 
 // Walk distinct plan dirs from done-rows' plan_files. Within each dir, move
 // any .md file matching a done-slug into <dir>/complete/ if not already there.
-export function step6bArchiveOrphanedPlans(db, project, { plansDir } = {}) {
+export function step6bArchiveOrphanedPlans(db, project, { plansDir, projectDir = null, wtPath = null } = {}) {
   if (!db || !project) return;
   const rows = rowsList(db, project);
   const doneRows = rows.filter(r => r.stage === "done" && r.plan_file);
@@ -348,7 +360,8 @@ export function step6bArchiveOrphanedPlans(db, project, { plansDir } = {}) {
     : new Set(doneRows.map(r => dirname(r.plan_file)).filter(d => basename(d) !== "complete"));
 
   const archived = [];
-  for (const plansDir of plansDirs) {
+  for (const dir of plansDirs) {
+    const plansDir = projectDir && wtPath ? dirInWorktree(projectDir, wtPath, dir) : dir;
     if (!existsSync(plansDir)) continue;
     const completeDir = join(plansDir, "complete");
     mkdirSync(completeDir, { recursive: true });

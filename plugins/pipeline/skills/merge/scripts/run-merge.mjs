@@ -26,6 +26,13 @@ import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 import { queryRow } from "./pipeline-query.mjs";
+import {
+  SPAWN, git, featureOf, DRIVER_STEPS, stepDone, resumeFrom, mutexConflict, observeWorld,
+} from "./merge-world.mjs";
+
+// The resume contract lives in merge-world.mjs; re-exported so every call site
+// and test keeps importing this driver.
+export { DRIVER_STEPS, stepDone, resumeFrom, mutexConflict, observeWorld };
 import { planTargetBranch } from "../../../src/plans/target-branch.mjs";
 import { resolvePlansDir, PLANS_DIR_KEYS } from "../../../src/plans-resolver.mjs";
 import { unresolvedPlaceholders } from "../../../src/worktree-paths.mjs";
@@ -34,10 +41,6 @@ import { connectUnified, close, projectGetByName } from "../../../src/db/index.m
 // merge.mjs is our sibling in the PLUGIN tree. Deriving it from projectDir would
 // point into the repo being merged, which does not contain the plugin.
 const MERGE_MJS = fileURLToPath(new URL("./merge.mjs", import.meta.url));
-
-// No `shell: true`: with an args array it concatenates unescaped (DEP0190), and
-// branch names reach here from the caller.
-const SPAWN = { encoding: "utf8", windowsHide: true };
 
 // Emitted commands are copied and run by a human or an agent; mixed separators
 // in one line are a readability trap on Windows.
@@ -94,11 +97,6 @@ export function chooseModel({ diverged, needsTesting, dirty }) {
 
 // ── Resolution helpers (Steps 1, 1.5) ─────────────────────────────────────────
 
-function git(args, cwd) {
-  const r = spawnSync("git", args, { ...SPAWN, cwd });
-  return r.status === 0 ? (r.stdout ?? "").trim() : "";
-}
-
 // The plan's annotation, read from the file the row points at (else <feature>.md), in the
 // plans dir and then complete/ — a resumed merge runs after the archival move. Null when
 // there is no plans dir, no plan file, or no annotation.
@@ -139,10 +137,6 @@ export function resolveTarget(project, feature, projectDir, explicit, opts = {})
 // The branch alone, for callers with no use for the tier.
 export function resolveTargetBranch(project, feature, projectDir, explicit, opts) {
   return resolveTarget(project, feature, projectDir, explicit, opts).branch;
-}
-
-export function featureOf(branch) {
-  return String(branch).replace(/^autonomous\//, "");
 }
 
 // ── Pre-checks (Steps 2.4, 2.5) ───────────────────────────────────────────────
@@ -200,67 +194,6 @@ export function collectSignals(project, branches, projectDir, targetBranch) {
 
   const dirty = git(["status", "--short"], projectDir).length > 0;
   return { diverged, needsTesting, dirty, untested, missing };
-}
-
-// ── Resume — guards on observable reality ────────────────────────────────────
-
-// The driver's own step list, distinct from merge.mjs's ten internal steps.
-export const DRIVER_STEPS = ["squash", "move-plans"];
-
-// Is this step already done? Answered by inspecting the WORLD, never the progress
-// marker. A merge half-completes routinely — the squash lands and the plan move
-// fails — and branching on the marker re-runs a step whose effect already exists.
-export function stepDone(step, world) {
-  if (step === "squash") return world.merged === true;
-  if (step === "move-plans") return world.planMoved === true;
-  return false; // an unrecognised step is never assumed done
-}
-
-// First step the world says is still outstanding; null when nothing remains.
-export function resumeFrom(world) {
-  for (const step of DRIVER_STEPS) {
-    if (!stepDone(step, world)) return step;
-  }
-  return null;
-}
-
-// A progress entry for a different subject means another merge is mid-flight over
-// the same repo. Refuse rather than interleave.
-export function mutexConflict({ existingSubject, requested }) {
-  if (!existingSubject) return false;
-  return existingSubject !== requested;
-}
-
-// Read the world for each guarded step.
-export function observeWorld(projectDir, branches, targetBranch, plansDir, project) {
-  // Two probes, in the order the orchestrator uses: `ancestor` is fast but blind to
-  // squashes, and a squash merge is the normal case here — it rewrites the commits,
-  // so the branch never becomes an ancestor. `git cherry` compares patch-ids and
-  // prefixes an already-applied commit with "-", which is what actually detects a
-  // landed squash. Checking ancestry alone reports a completed merge as pending and
-  // the resume re-squashes it.
-  const merged = branches.every((b) => {
-    const anc = spawnSync("git", ["merge-base", "--is-ancestor", b, targetBranch],
-      { ...SPAWN, cwd: projectDir });
-    if (anc.status === 0) return true;
-
-    const cherry = spawnSync("git", ["cherry", targetBranch, b],
-      { ...SPAWN, cwd: projectDir });
-    if (cherry.status !== 0) return false;
-    const lines = (cherry.stdout ?? "").trim().split(/\r?\n/).filter(Boolean);
-    // Every commit accounted for upstream, and there was something to account for.
-    return lines.length > 0 && lines.every((l) => l.startsWith("-"));
-  });
-
-  let planMoved = false;
-  if (plansDir) {
-    planMoved = branches.every((b) => {
-      const planFile = queryRow(project, featureOf(b), "plan_file");
-      const stem = planFile ? planFile.split(/[/\\]/).pop() : `${featureOf(b)}.md`;
-      return existsSync(join(plansDir, "complete", stem));
-    });
-  }
-  return { merged, planMoved };
 }
 
 // ── main ──────────────────────────────────────────────────────────────────────
@@ -404,8 +337,23 @@ export async function main({ _argv, _config, _projectRow } = {}) {
   if (next === null) {
     out(
       `Nothing to do — this merge is already complete.\n` +
-        `  squash:     landed (${branches.join(", ")} already applied to ${targetBranch})\n` +
-        `  move-plans: done (plan(s) already in complete/)\n`,
+        `  squash:     landed (${branches.join(", ")} already applied to ${world.ref})\n` +
+        `  move-plans: done (plan(s) already in complete/)\n` +
+        `  land:       done (${targetBranch} already contains ${world.ref})\n`,
+    );
+    return 0;
+  }
+  // The merge is complete on origin (or parked) and only the shared checkout
+  // lags. Re-squashing would double the work; emit the land-only resume.
+  if (next === "land") {
+    const landCmd =
+      `node "${posix(MERGE_MJS)}" --land-only --project-dir "${projectDir}" ` +
+      `--target-branch "${targetBranch}"`;
+    out(
+      `resuming at land — the squash and the plan move are on ${world.ref};\n` +
+        `the shared checkout's ${targetBranch} is behind it.\n\n` +
+        `Spawn a background agent running:\n` +
+        `  ${landCmd}\n\n`,
     );
     return 0;
   }
@@ -413,7 +361,8 @@ export async function main({ _argv, _config, _projectRow } = {}) {
     out(
       `Resuming at "${next}" — earlier steps already landed:\n` +
         `  squash:     ${world.merged ? "landed" : "pending"}\n` +
-        `  move-plans: ${world.planMoved ? "done" : "pending"}\n\n`,
+        `  move-plans: ${world.planMoved ? "done" : "pending"}\n` +
+        `  land:       ${world.landed ? "done" : "pending"}\n\n`,
     );
   }
 
