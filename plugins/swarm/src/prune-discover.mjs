@@ -169,24 +169,18 @@ export function* discoveredLanes(run, git, fs, { cfg } = {}) {
     if (!over.orphan && over.repo && over.branch) lanes.add(laneKey(over.repo, over.branch));
     return { path: null, branch: null, repo: null, missing: false, head: null, orphan: false, ...over };
   };
-  // summary.json's own list: how the run reported what it left, and the only source that
-  // carries a shared chain's taskIds. It is not authoritative for what EXISTS — a killed
-  // run wrote no summary, a summary entry can name a path already moved — so the two
-  // scans below add to it rather than replacing it.
-  // A row whose directory is on disk but is not its own toplevel has lost its `.git`
-  // link: `unlinked`, measured by branch in the repo the run recorded, never by a cwd
-  // inside it. `entries` decides whether the leftover directory may be cleared at all.
-  // The run's own records name a tree's repo; when they cannot, a run that dispatched into
-  // exactly one repo has only one answer left.
+  // The run's own records name a tree's repo; a single dispatched-into repo is the only answer left.
   const repoFor = (repo, name) =>
     repo ?? repoFromRecords(run.resultsDir, name, fs)
       ?? (run.repos?.length === 1 ? resolve(run.repos[0]) : null);
+  // On disk but not its own toplevel: it lost its `.git` link; `entries` gates clearing it.
   const unlinkedLane = (path, branch, repo) =>
     lane({ path, branch, repo, unlinked: true, entries: entryCount(fs, path) });
   // A row whose repo is gone is measured as unmeasurable whatever its directory is, so it
   // is never worth a git call — and a git call against a missing repo is exactly what the
   // caller promised not to make.
   const worthProbing = (repo) => !repo || fs.existsSync(repo);
+  // summary.json's own list is what the run reported, not proof of what EXISTS.
   for (const wt of run.worktreesKept || []) {
     const onDisk = fs.existsSync(wt.path);
     if (onDisk && !freshTree(wt.path)) continue;
