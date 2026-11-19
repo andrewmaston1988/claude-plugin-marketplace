@@ -1,10 +1,6 @@
-// broker.close() must tear connections down, not idle past them. The daemon reply
-// loop talks to this broker over a pooled keep-alive HTTP connection; abort it
-// mid-/wait and a bare server.close() idles until the socket's keep-alive timer
-// expires (~4s). Every startSession teardown in the lifecycle suite is in exactly
-// this shape — loop aborted mid-window, then broker.close() — so the suite paid a
-// ~3s tail on each failed/interrupted ending. close() must end the sockets itself,
-// and the /shutdown route is the same bare server.close.
+// broker.close() and /shutdown must end their sockets, not idle them out: a
+// client's pooled keep-alive connection otherwise holds the close for the
+// socket's idle timeout.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createBroker } from "../../src/remote/broker.mjs";

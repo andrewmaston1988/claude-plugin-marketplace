@@ -50,11 +50,8 @@ export function buildClaudeInvocation({ prompt, sessionId, addDir, model, proxy 
 }
 
 // A timed-out turn must take the whole tree: on Windows `claude` runs under a
-// cmd.exe wrapper, so child.kill only reaps the wrapper and a grandchild that
-// already booted keeps the test's stdio pipes open. taskkill /T walks the tree.
-// POSIX has no wrapper, so child.kill reaches claude directly — spawning detached
-// to kill a group would put the child outside the terminal's group, where it
-// outlives Ctrl-C.
+// cmd.exe wrapper, so only taskkill /T reaches the grandchild; POSIX has no
+// wrapper, and a detached group would outlive Ctrl-C, so child.kill is right there.
 export function killProcessTree(child) {
   if (process.platform === "win32") {
     try {
