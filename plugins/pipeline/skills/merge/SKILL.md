@@ -21,7 +21,7 @@ node "$(pipeline plugin-root)/skills/merge/scripts/run-merge.mjs" --branches <b1
 
 ## The loop
 
-Each run ends one of five ways. Branch on which:
+Each run ends one of six ways. Branch on which:
 
 | Driver output | You do |
 |---|---|
@@ -29,14 +29,17 @@ Each run ends one of five ways. Branch on which:
 | `PAUSE: <what>` banner | The judgement it names, then re-run the printed `RE-RUN EXACTLY` command |
 | Non-zero exit | Surface the message verbatim; do not retry blindly |
 | `resolved:` block + `Spawn a background agent running:` | Spawn it (below) |
+| `resuming at land —` + `Spawn a background agent running:` | Run the printed `--land-only` command in this session and relay its output; no subagent, no model |
 | `Nothing to do — this merge is already complete.` | Report it; nothing to spawn |
 
 The driver re-reads reality on every run, so re-running is always safe.
 
 ## Spawning
 
-The driver prints a fully-resolved command and the model to run it on. Spawn a
-background agent with **exactly** that command — do not reconstruct it:
+For a full merge the driver prints a fully-resolved command and the model to run
+it on. A land-only resume prints no model — run that one in this session (see the
+loop table above). Spawn a background agent with **exactly** the printed command —
+do not reconstruct it:
 
 ```
 Agent(
