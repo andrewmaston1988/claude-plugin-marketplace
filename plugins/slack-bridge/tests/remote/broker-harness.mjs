@@ -5,9 +5,17 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { createBroker } from "../../src/remote/broker.mjs";
+import { createBrokerClient } from "../../src/remote/broker-client.mjs";
 
 export function tmpState() {
   return path.join(fs.mkdtempSync(path.join(os.tmpdir(), "slack-remote-broker-")), "state.json");
+}
+
+// The client a test builds against its own broker. Any test that reaches the
+// self-heal on a dead port would otherwise spawn a real broker detached, which
+// outlives the test process and holds the checkout.
+export function testBrokerClient(port, opts = {}) {
+  return createBrokerClient({ port, ...opts });
 }
 
 export const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
