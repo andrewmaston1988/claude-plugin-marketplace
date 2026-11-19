@@ -3,7 +3,8 @@
 // mid-/wait and a bare server.close() idles until the socket's keep-alive timer
 // expires (~4s). Every startSession teardown in the lifecycle suite is in exactly
 // this shape — loop aborted mid-window, then broker.close() — so the suite paid a
-// ~3s tail on each failed/interrupted ending. close() must end the sockets itself.
+// ~3s tail on each failed/interrupted ending. close() must end the sockets itself,
+// and the /shutdown route is the same bare server.close.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createBroker } from "../../src/remote/broker.mjs";
@@ -16,18 +17,38 @@ function silentLog() {
   return log;
 }
 
-test("broker — close() ends promptly with an aborted long-poll client attached", async () => {
-  const broker = createBroker({ stateFile: tmpState() });
+// The shape every per-session teardown is in: one /wait window in flight on the
+// client's pooled socket, then aborted mid-window.
+async function abortedLongPoll(opts = {}) {
+  const broker = createBroker({ stateFile: tmpState(), ...opts });
   const port = await broker.listen(0);
   const client = createBrokerClient({ port });
   const loop = startReplyLoop({ broker: client, claims: { all: () => ({}) }, web: {}, config: {}, log: silentLog() });
-  await sleep(100); // one /wait window in flight; the client's pooled socket is open
-  loop.stop();      // abort mid-window — the shape every per-session teardown is in
+  await sleep(100);
+  loop.stop();
   await loop.done;
+  return { broker, port };
+}
+
+test("broker — close() ends promptly with an aborted long-poll client attached", async () => {
+  const { broker } = await abortedLongPoll();
 
   const t0 = Date.now();
   await broker.close();
   const took = Date.now() - t0;
   assert.ok(took < 1000,
     `broker.close() took ${took} ms with the long-poll client attached — it idled out a keep-alive socket instead of tearing it down`);
+});
+
+test("broker — /shutdown ends promptly with an aborted long-poll client attached", async () => {
+  let closed;
+  const shutdownDone = new Promise((resolve) => { closed = resolve; });
+  const { port } = await abortedLongPoll({ onShutdown: closed });
+
+  const t0 = Date.now();
+  await fetch(`http://127.0.0.1:${port}/shutdown`, { method: "POST" });
+  await shutdownDone;
+  const took = Date.now() - t0;
+  assert.ok(took < 1000,
+    `the /shutdown route took ${took} ms to close with the long-poll client attached — it idled out a keep-alive socket instead of tearing it down`);
 });
