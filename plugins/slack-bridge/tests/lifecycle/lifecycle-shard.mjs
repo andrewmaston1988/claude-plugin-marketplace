@@ -22,6 +22,20 @@ export function shardCells(shard) {
   return CELLS.filter((_, i) => i % SHARD_COUNT === shard);
 }
 
+const SHARD_FILE = /^lifecycle-\d+\.test\.mjs$/;
+
+// Each shard file's registered index. Reading the files, not the selector, is what
+// lets the partition check notice a deleted, duplicated or misnumbered shard.
+function shardsOnDisk() {
+  return fs.readdirSync(here)
+    .filter((file) => SHARD_FILE.test(file))
+    .map((file) => {
+      const match = /registerShard\((\d+)\)/.exec(fs.readFileSync(path.join(here, file), "utf8"));
+      assert.ok(match, `${file} must call registerShard(<index>)`);
+      return { file, shard: Number(match[1]) };
+    });
+}
+
 // Once-only rows, registered by shard 0. A split that drops or doubles a cell would
 // otherwise pass silently: each shard can only see its own slice.
 function registerPartitionChecks() {
@@ -29,15 +43,18 @@ function registerPartitionChecks() {
     assert.deepEqual(Object.keys(baseline.cells).sort(), CELLS.map(cellName).sort());
   });
 
-  test("every cell lands in exactly one shard", () => {
-    const counts = new Map();
-    for (let shard = 0; shard < SHARD_COUNT; shard++) {
-      for (const cell of shardCells(shard)) counts.set(cell, (counts.get(cell) ?? 0) + 1);
-    }
+  test("every cell lands in exactly one shard file", () => {
+    const files = shardsOnDisk();
+    assert.equal(files.length, SHARD_COUNT,
+      `expected ${SHARD_COUNT} shard files, found ${files.map((f) => f.file).join(", ") || "none"}`);
+    const landing = CELLS.map((cell, i) => ({
+      cell: cellName(cell),
+      owners: files.filter((f) => i % SHARD_COUNT === f.shard).map((f) => f.file),
+    }));
     assert.deepEqual(
       {
-        missing: CELLS.filter((cell) => !counts.has(cell)).map(cellName),
-        doubled: CELLS.filter((cell) => counts.get(cell) > 1).map(cellName),
+        missing: landing.filter((l) => l.owners.length === 0).map((l) => l.cell),
+        doubled: landing.filter((l) => l.owners.length > 1).map((l) => l.cell),
       },
       { missing: [], doubled: [] },
     );
