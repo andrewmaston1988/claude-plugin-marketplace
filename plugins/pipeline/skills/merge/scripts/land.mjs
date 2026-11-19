@@ -66,13 +66,9 @@ function uncommittedPaths(projectDir) {
   ];
 }
 
-// The only code left that mutates the shared checkout. Four guards, in order;
-// the first that fires returns without moving anything. Each guard names the
-// input that makes it refuse:
-//   1. HEAD is not the target            -> `git merge --ff-only` would move the wrong branch (case 8)
-//   2. the sha is not a descendant of HEAD -> not a fast-forward
-//   3. a staged path overlaps the merge   -> --ff-only does NOT refuse staged overlap (case 5)
-//   4. the fast-forward itself            -> unstaged/untracked overlap (cases 2, 3, 6)
+// The only code left that mutates the shared checkout. Four guards in order;
+// the first to fire returns without moving anything. Guards 1 and 3 catch what
+// `--ff-only` does not (wrong branch, staged overlap); 2 and 4 refuse the rest.
 export function landTarget(projectDir, targetBranch, sha, { log = () => {}, err = () => {} } = {}) {
   const head = runGit(["symbolic-ref", "--short", "HEAD"], projectDir, { check: false });
   const onBranch = head.code === 0 ? head.stdout.trim() : "(detached HEAD)";

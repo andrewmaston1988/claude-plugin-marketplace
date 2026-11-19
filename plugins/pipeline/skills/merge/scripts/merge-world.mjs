@@ -1,9 +1,6 @@
 // merge-world.mjs — the resume contract: what the merge has already done.
-//
-// Every guard answers from the repository (or origin, or a parked ref), never
-// from the progress marker. A merge half-completes routinely — the squash lands
-// and the plan move fails — and branching on the marker re-runs a step whose
-// effect already exists.
+// Every guard answers from the repository, never from the progress marker:
+// a merge half-completes routinely, so the marker re-runs landable steps.
 import { existsSync } from "node:fs";
 import { join, relative, isAbsolute } from "node:path";
 import { spawnSync } from "node:child_process";
