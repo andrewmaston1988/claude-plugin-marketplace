@@ -2,7 +2,7 @@
 // registrations and its own branches. Split out of prune.mjs, which measures and
 // destroys what this finds. Every name is re-exported from prune.mjs, so the public
 // surface and every existing call site stay unchanged.
-import { dirname, join, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import { existsSync, readdirSync } from "node:fs";
 import { getConfig } from "./config.mjs";
 import { normalizeForCompare } from "./roots.mjs";
@@ -89,10 +89,52 @@ export function registeredForRun(git, repo, resultsDir, { cfg } = {}) {
   return rows.filter((row) => key(runOfTree(row.path, root, { runsRoot })) === want);
 }
 
+// Whether a directory is its own worktree root. Git prints its toplevel with forward
+// slashes and the filesystem's own case, while a recorded tree path carries backslashes
+// and the case swarm derived — a raw `===` calls every real worktree unlinked. Compare
+// through the one path normaliser instead.
+// "unlinked" needs git to have ANSWERED and named a different directory: a git that
+// cannot answer says nothing about the link, and its row falls through to the ordinary
+// measurement, which fails closed and blocks.
+export function worktreeLink(git, path) {
+  const top = git(["rev-parse", "--show-toplevel"], path);
+  if (top.status !== 0 || !top.stdout) return "unknown";
+  return normalizeForCompare(top.stdout) === normalizeForCompare(path) ? "linked" : "unlinked";
+}
+
+export const isWorktreeRoot = (git, path) => worktreeLink(git, path) === "linked";
+export const isUnlinked = (git, path) => worktreeLink(git, path) === "unlinked";
+
+// How many entries a leftover directory holds. `Infinity` when it cannot be read: an
+// unreadable directory is never "empty", so it is never removed.
+export function entryCount(fs, path) {
+  try { return fs.readdirSync(path).length; } catch { return Infinity; }
+}
+
+// The repo a row belongs to, taken from the run's OWN records — never from git walking up
+// out of the row's directory, which lands on whichever repo happens to enclose it (in the
+// field, the repo that tracks ~/.swarm). The per-tree record names where the tree was cut
+// from; bases.json maps every repo the run dispatched into to its pinned commit.
+export function repoFromRecords(resultsDir, name, fs) {
+  if (name) {
+    const rec = listTreeRecords(resultsDir).find((r) => r.name === name);
+    if (rec?.repo) return resolve(rec.repo);
+  }
+  try {
+    const bases = JSON.parse(fs.readFileSync(join(resolve(resultsDir), "bases.json"), "utf8"));
+    const repos = Object.keys(bases || {}).filter((p) => typeof p === "string" && p);
+    // Several repos and no record naming this tree: nothing singles one out.
+    if (repos.length === 1) return resolve(repos[0]);
+  } catch { /* no bases record: the run left no way to name a repo */ }
+  return null;
+}
+
 // A tree found by scanning carries no repo or branch of its own: ask the tree. Null when
 // git cannot answer, which is how a stray directory is told apart from a real worktree — a
-// row prune cannot resolve is not one it may destroy.
+// row prune cannot resolve is not one it may destroy. A directory that is no longer a
+// worktree root is classified by the caller and never measured by walking up out of it.
 export function treeFacts(git, path) {
+  if (!isWorktreeRoot(git, path)) return null;
   const common = git(["rev-parse", "--git-common-dir"], path);
   if (common.status !== 0 || !common.stdout) return null;
   const head = git(["rev-parse", "--abbrev-ref", "HEAD"], path);
@@ -127,15 +169,37 @@ export function* discoveredLanes(run, git, fs, { cfg } = {}) {
   // carries a shared chain's taskIds. It is not authoritative for what EXISTS — a killed
   // run wrote no summary, a summary entry can name a path already moved — so the two
   // scans below add to it rather than replacing it.
+  // A row whose directory is on disk but is not its own toplevel has lost its `.git`
+  // link: `unlinked`, measured by branch in the repo the run recorded, never by a cwd
+  // inside it. `entries` decides whether the leftover directory may be cleared at all.
+  // The run's own records name a tree's repo; when they cannot, a run that dispatched into
+  // exactly one repo has only one answer left.
+  const repoFor = (repo, name) =>
+    repo ?? repoFromRecords(run.resultsDir, name, fs)
+      ?? (run.repos?.length === 1 ? resolve(run.repos[0]) : null);
+  const unlinkedLane = (path, branch, repo) =>
+    lane({ path, branch, repo, unlinked: true, entries: entryCount(fs, path) });
+  // A row whose repo is gone is measured as unmeasurable whatever its directory is, so it
+  // is never worth a git call — and a git call against a missing repo is exactly what the
+  // caller promised not to make.
+  const worthProbing = (repo) => !repo || fs.existsSync(repo);
   for (const wt of run.worktreesKept || []) {
     const onDisk = fs.existsSync(wt.path);
     if (onDisk && !freshTree(wt.path)) continue;
+    if (onDisk && worthProbing(wt.repo) && isUnlinked(git, wt.path)) {
+      yield unlinkedLane(wt.path, wt.branch ?? null, repoFor(wt.repo, wt.name));
+      continue;
+    }
     yield lane({ path: onDisk ? wt.path : null, branch: wt.branch ?? null, repo: wt.repo ?? null, orphan: !onDisk });
   }
   // Everything else on disk that belongs to the run, wherever the resolver put it.
   if (run.resultsDir) {
     for (const t of heldTrees(run.resultsDir, { cfg })) {
       if (!fs.existsSync(t.path) || !freshTree(t.path)) continue;
+      if (worthProbing(t.repo) && isUnlinked(git, t.path)) {
+        yield unlinkedLane(t.path, t.branch ?? null, repoFor(t.repo, t.name ?? basename(t.path)));
+        continue;
+      }
       const facts = t.repo && t.branch ? t : treeFacts(git, t.path);
       if (!facts?.repo) continue; // not a worktree git can speak for — never a row to destroy
       yield lane({ path: t.path, branch: t.branch ?? facts.branch ?? null, repo: facts.repo });
@@ -147,7 +211,15 @@ export function* discoveredLanes(run, git, fs, { cfg } = {}) {
       if (!freshTree(reg.path)) continue;
       // Registered but gone from disk: a missing directory holds no uncommitted work,
       // and its registration must go before `branch -D` can take the branch.
-      yield lane({ path: reg.path, branch: reg.branch, repo, missing: !fs.existsSync(reg.path), head: reg.head });
+      if (!fs.existsSync(reg.path)) {
+        yield lane({ path: reg.path, branch: reg.branch, repo, missing: true, head: reg.head });
+        continue;
+      }
+      if (isUnlinked(git, reg.path)) {
+        yield unlinkedLane(reg.path, reg.branch, repo);
+        continue;
+      }
+      yield lane({ path: reg.path, branch: reg.branch, repo, head: reg.head });
     }
   }
   // The run's OWN branches, whether or not a tree still holds one. An explicitly named

@@ -3,11 +3,14 @@ import { unlandedCount, isSwarmRef, defaultCommits } from "./landed.mjs";
 import { takenKey, takenVerdict } from "./taken.mjs";
 import { listTreeRecords, treeRecordPath, treeRootFor } from "./worktree.mjs";
 import { isUnderRoot, normalizeForCompare } from "./roots.mjs";
-import { discoveredLanes, runScratchDir, treeCfg } from "./prune-discover.mjs";
+import { discoveredLanes, isWorktreeRoot, repoFromRecords, runScratchDir, treeCfg } from "./prune-discover.mjs";
 
 // Discovery moved to prune-discover.mjs; re-exported so every existing import of these
 // names from prune.mjs keeps working.
-export { discoveredLanes, heldTrees, registeredForRun, runScratchDir, treeCfg, treeFacts, worktreeList } from "./prune-discover.mjs";
+export {
+  discoveredLanes, entryCount, heldTrees, isUnlinked, isWorktreeRoot, registeredForRun,
+  repoFromRecords, runScratchDir, treeCfg, treeFacts, worktreeLink, worktreeList,
+} from "./prune-discover.mjs";
 
 // Every byte under `path`, walked with the injected `fs` — real `node:fs` in
 // production, a scripted stand-in in tests. Missing/unreadable entries count as
@@ -43,6 +46,15 @@ export function repoOfWorktree(spawnSync, worktreePath) {
   const r = spawnSync("git", ["rev-parse", "--git-common-dir"], { cwd: worktreePath, encoding: "utf8", windowsHide: true });
   if (r.status !== 0) return null;
   return dirname(resolve(worktreePath, (r.stdout || "").trim()));
+}
+
+// The repo a kept tree belongs to. `repoOfWorktree` asks git INSIDE the directory, and a
+// tree that lost its `.git` link makes that walk up to whichever repo encloses it — in the
+// field the repo that tracks ~/.swarm, whose files then read as the row's own work. Only a
+// confirmed worktree root may answer; anything else comes from the run's own records.
+function repoForKeptTree(git, spawnSync, resultsDir, wt, fs) {
+  if (wt.path && isWorktreeRoot(git, wt.path)) return repoOfWorktree(spawnSync, wt.path);
+  return repoFromRecords(resultsDir, wt.name ?? basename(wt.path ?? ""), fs);
 }
 
 // Every tree still sitting in the run dir, asked for its repo — the summary may
@@ -102,7 +114,8 @@ export function runForPrune(dir, { fs, spawnSync }) {
   const worktreesKept = Array.isArray(summary?.worktreesKept) ? summary.worktreesKept : [];
   // Resolve each tree's own repo: one scalar attributed a second repo's tree to the
   // first and `git worktree remove` then silently failed against the wrong cwd.
-  const keptWithRepo = worktreesKept.map((wt) => ({ ...wt, repo: wt.repo || repoOfWorktree(spawnSync, wt.path) }));
+  const git = makeGit(spawnSync);
+  const keptWithRepo = worktreesKept.map((wt) => ({ ...wt, repo: wt.repo || repoForKeptTree(git, spawnSync, target, wt, fs) }));
   const repos = [...new Set([...keptWithRepo.map((wt) => wt.repo), ...reposFromManifest(fs, target), ...reposOfTrees(fs, target, spawnSync)].filter(Boolean))];
   if (!repos.length) {
     return { error: `could not resolve the repo for ${target} — no kept worktree survives and manifest.json has no cwd.` };
@@ -186,14 +199,18 @@ export function plan(run, git, fs, { cfg, extraBases, measureBytes, stopAtBlocke
   // The path is kept AS GIVEN — the injected `fs` keys on it, and a summary's own
   // spelling is what the report prints. Only the dedupe key is normalised, so the three
   // sources agree about a path however each of them spelled it.
-  const addRow = (path, branch, repo, { missing = false, head = null } = {}) => {
+  const addRow = (path, branch, repo, { missing = false, head = null, unlinked = false, entries = 0 } = {}) => {
     if (!beginRow()) return;
     const key = normalizeForCompare(path);
     if (seen.has(key)) return;
     seen.add(key);
     // A missing directory holds no bytes to measure.
     const bytes = measureBytes ? (missing ? 0 : dirSize(fs, path)) : null;
-    finishRow(measureRow({ path, branch, bytes, repo, ...(missing && { missing: true, ...(head && { head }) }) }, git, fs, prefix, extraBases));
+    finishRow(measureRow({
+      path, branch, bytes, repo,
+      ...(missing && { missing: true, ...(head && { head }) }),
+      ...(unlinked && { unlinked: true, entries }),
+    }, git, fs, prefix, extraBases));
   };
   // Deduped on repo + branch, never on a path: there is none.
   const addBranchRow = (branch, repo) => {
@@ -213,7 +230,10 @@ export function plan(run, git, fs, { cfg, extraBases, measureBytes, stopAtBlocke
   for (const found of discoveredLanes(run, git, fs, { cfg })) {
     if (stopped) break;
     if (found.path) {
-      addRow(found.path, found.branch, found.repo, { ...(found.missing && { missing: true, ...(found.head && { head: found.head }) }) });
+      addRow(found.path, found.branch, found.repo, {
+        ...(found.missing && { missing: true, ...(found.head && { head: found.head }) }),
+        ...(found.unlinked && { unlinked: true, entries: found.entries }),
+      });
     } else if (!found.orphan && found.branch && found.repo) {
       addBranchRow(found.branch, found.repo);
     }
@@ -244,7 +264,27 @@ function headUnlanded(git, repo, head) {
   return Number.isFinite(n) ? n : Infinity;
 }
 
+// Whether a branch still exists: `show-ref --verify` exiting 1 is positive evidence it is
+// gone, which is how a deleted branch stops reading as "unmeasurable". Any other failure
+// fails closed — a lookup that could not run proves nothing.
+function branchState(git, repo, branch) {
+  const r = git(["show-ref", "--verify", "--quiet", `refs/heads/${branch}`], repo);
+  if (r.status === 0) return "present";
+  if (r.status === 1) return "absent";
+  return "unknown";
+}
+
 function measureRow(row, git, fs, prefix, extraBases) {
+  if (row.unlinked) {
+    // Never ask git about this directory: it is not a worktree, and a cwd inside it walks
+    // up to whichever repo encloses it. Measure the branch in the repo the run recorded.
+    if (!row.repo) return { ...row, unlanded: Infinity, dirty: Infinity };
+    const state = row.branch ? branchState(git, row.repo, row.branch) : "none";
+    const unlanded = state === "present"
+      ? unlandedCount(row.branch, row.repo, { prefix, gitRunner: git, extraBases })
+      : state === "unknown" ? Infinity : 0;
+    return { ...row, unlanded, dirty: 0 };
+  }
   if (!fs.existsSync(row.repo)) return { ...row, unlanded: Infinity, dirty: Infinity };
   if (row.missing) {
     const unlanded = row.branch
@@ -263,7 +303,40 @@ function measureRow(row, git, fs, prefix, extraBases) {
 }
 
 export function blockers(rows) {
-  return rows.filter((row) => !Number.isFinite(row.unlanded) || row.unlanded > 0 || !Number.isFinite(row.dirty) || row.dirty > 0);
+  return rows.filter((row) =>
+    !Number.isFinite(row.unlanded) || row.unlanded > 0 || !Number.isFinite(row.dirty) || row.dirty > 0
+    // An unlinked directory's contents are nobody's to delete: git cannot say what they
+    // are, so the operator decides. Held back even under --discard-unlanded.
+    || (row.unlinked && row.entries > 0));
+}
+
+// Clearing a leftover directory that is no longer a worktree: drop git's stale registration
+// (only `worktree prune` can, and `branch -D` refuses while it stands), remove the directory
+// — NON-recursively, so a file that appeared since the plan survives instead of being
+// destroyed unmeasured — then the branch, but only once git confirms it exists.
+function clearUnlinked(row, git, fs) {
+  const failed = [];
+  const fail = (reason) => failed.push({ row, reason });
+  if (fs.existsSync(row.repo)) {
+    const pruned = git(["worktree", "prune"], row.repo);
+    if (pruned.status !== 0) fail(pruned.stderr || pruned.stdout || `git exited ${pruned.status}`);
+  }
+  try {
+    fs.rmdirSync(row.path, { force: true });
+  } catch {
+    // The directory holds something: it is not this row's to delete after all.
+    fail(`${row.path} is not an empty directory`);
+    return failed;
+  }
+  if (!row.branch || !fs.existsSync(row.repo)) return failed;
+  const state = branchState(git, row.repo, row.branch);
+  // A branch that is already gone is the expected half-finished prune; one whose state
+  // could not be read proves nothing, so it is reported rather than forced.
+  if (state === "absent") return failed;
+  if (state === "unknown") { fail(`could not read the state of branch ${row.branch}`); return failed; }
+  const del = git(["branch", "-D", row.branch], row.repo);
+  if (del.status !== 0) fail(del.stderr || del.stdout || `git exited ${del.status}`);
+  return failed;
 }
 
 // Destroy in order: the worktree directory, then the branch it sat on — a row
@@ -274,7 +347,21 @@ export function execute(rows, git, fs, { resultsDir, cfg } = {}) {
   const records = resultsDir ? listTreeRecords(resultsDir) : [];
   const failed = [];
   const fail = (row, r) => failed.push({ row, reason: r.stderr || r.stdout || `git exited ${r.status}` });
+  // A tree record naming a path now gone records nothing.
+  const dropRecord = (path) => {
+    if (!resultsDir || fs.existsSync(path)) return;
+    for (const record of records) {
+      if (normalizeForCompare(record.path) === normalizeForCompare(path)) {
+        fs.rmSync(treeRecordPath(resultsDir, record.name), { force: true });
+      }
+    }
+  };
   for (const row of rows) {
+    if (row.path != null && row.unlinked) {
+      failed.push(...clearUnlinked(row, git, fs));
+      dropRecord(row.path);
+      continue;
+    }
     // A branch-only row has nothing on disk: its repo's own ref is the whole row.
     if (row.path == null) {
       if (!fs.existsSync(row.repo)) continue;
@@ -305,13 +392,7 @@ export function execute(rows, git, fs, { resultsDir, cfg } = {}) {
         if (rm.status !== 0) fail(row, rm);
       }
     }
-    if (resultsDir && !fs.existsSync(row.path)) {
-      for (const record of records) {
-        if (normalizeForCompare(record.path) === normalizeForCompare(row.path)) {
-          fs.rmSync(treeRecordPath(resultsDir, record.name), { force: true });
-        }
-      }
-    }
+    dropRecord(row.path);
   }
   if (resultsDir) removeEmptyTreeParents(resultsDir, cfg, fs);
   return { failed };
