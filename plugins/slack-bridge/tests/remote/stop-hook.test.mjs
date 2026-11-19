@@ -57,7 +57,9 @@ test("non-default configPath in the remote-sessions file → hook authenticates 
   const out = await runHook({
     raw: JSON.stringify({ session_id: SID, transcript_path: env.transcript, hook_event_name: "Stop" }),
     stateDir: env.stateDir,
-    _createClient: (opts) => createBrokerClient({ ...opts, _fetch }),
+    _createClient: (opts) => createBrokerClient({
+      ...opts, _fetch, _spawn: () => { throw new Error("test tried to spawn a broker"); },
+    }),
     _sleep: async () => {},
   });
   assert.equal(out, null);
