@@ -264,3 +264,58 @@ test("headroom: one allowance line however many :cloud seats and fallbacks, and 
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+// ── a defended :cloud seat passes an exhausted meter ─────────────────────────
+// The leaf parks in `quota` on its first spawn and the scheduler switches it to
+// its fallback, so refusing the run would stop work that is certain to move.
+const exhaustedLive = () => liveHeadroom({ state: "exhausted", weeklyPctUsed: 100, resetsAt: "2026-09-07T00:00:00Z" });
+const defendedCfg = (dir) => ({
+  ...CFG,
+  provider: { allowedRoots: [dir], cloud: { ollama: { enabled: true } } },
+  providers: { ...CFG.providers, codex: { enabled: true, allowedRoots: [dir] } },
+});
+const seat = (cwd, over = {}) => ({ id: "fix", prompt: "p", provider: "ollama", model: "glm-5.3:cloud", cwd, ...over });
+
+// Red input: a live-exhausted ollama primary carrying a non-Ollama fallback.
+for (const [provider, model] of [["claude", "claude-haiku-4-5-20251001"], ["codex", "gpt-6.2-sol"]]) {
+  test(`headroom: M-defended a live exhausted :cloud seat with a ${provider} fallback loads and warns, naming the leaf and fallback`, () => {
+    const dir = tmp();
+    try {
+      const p = writeManifest(dir, { tasks: [seat(dir, { fallbackModel: model, fallbackProvider: provider })] });
+      const plan = loadManifest(p, defendedCfg(dir), dir, { headroom: exhaustedLive() });
+      equal(plan.tasks.length, 1);
+      const line = plan.warnings?.find((w) => w.includes("fix") && w.includes(`${provider}/${model}`));
+      ok(line, JSON.stringify(plan.warnings));
+      ok(line.includes("exhausted"), line);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+}
+
+// Red input: the same seat one manifest level down — loadChild gets no reading today.
+test("headroom: M-defended-child a defended exhausted seat inside a child manifest warns the same way", () => {
+  const dir = tmp();
+  try {
+    writeManifest(dir, { tasks: [seat(dir, { fallbackModel: "claude-haiku-4-5-20251001", fallbackProvider: "claude" })] }, "child.json");
+    const p = writeManifest(dir, { resultsDir: "out", tasks: [{ id: "outer", manifest: "child.json" }] });
+    const plan = loadManifest(p, defendedCfg(dir), dir, { headroom: exhaustedLive() });
+    const line = plan.warnings?.find((w) => w.includes("fix") && w.includes("claude/claude-haiku-4-5-20251001"));
+    ok(line, JSON.stringify(plan.warnings));
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// Red input: an undefended live-exhausted seat in a child manifest.
+test("headroom: M-undefended-child an undefended exhausted seat inside a child manifest is refused", () => {
+  const dir = tmp();
+  try {
+    writeManifest(dir, { tasks: [seat(dir)] }, "child.json");
+    const p = writeManifest(dir, { resultsDir: "out", tasks: [{ id: "outer", manifest: "child.json" }] });
+    const errs = errorsOf(() => loadManifest(p, defendedCfg(dir), dir, { headroom: exhaustedLive() }));
+    ok(errs.some((e) => e.includes("fix") && e.includes("weekly allowance is exhausted")), errs.join("|"));
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

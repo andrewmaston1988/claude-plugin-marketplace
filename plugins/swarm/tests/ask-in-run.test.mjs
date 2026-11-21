@@ -1,18 +1,19 @@
 import "./helpers/isolate-home.mjs";
 import { test } from "node:test";
 import { equal, ok, match } from "node:assert/strict";
-import { mkdtempSync, rmSync, readFileSync, writeFileSync, existsSync } from "node:fs";
+import { mkdtempSync, mkdirSync, rmSync, readFileSync, writeFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { spawnSync } from "node:child_process";
 import { runPlan } from "../src/scheduler.mjs";
+import { askLeaf } from "../src/ask.mjs";
 import { treeDirFor } from "../src/worktree.mjs";
 import { worktreeNameFromCwd } from "../src/manifest-task-policy.mjs";
 import {
-  writeResult, readResult, heartbeatPath,
+  writeResult, readResult, heartbeatPath, initResultsDir, writeManifestSnapshot,
 } from "../src/results.mjs";
 import { runLiveness, readRun } from "../src/runlog.mjs";
-import { DIGEST_ID } from "../src/digest.mjs";
+import { DIGEST_ID, scratchPath } from "../src/digest.mjs";
 import * as defaultWorktree from "../src/worktree.mjs";
 import { fakeSpawnFactory, makeIo, promptOf, STREAM } from "./helpers/fake-io.mjs";
 
@@ -115,6 +116,34 @@ test("Q3: only the asked leaf spawns; dependents and __digest keep their finishe
     // relabel them, since nothing about them re-ran.
     equal(r.summary.tasks.find((t) => t.id === "b").state, "ok");
     equal(r.summary.tasks.find((t) => t.id === DIGEST_ID).state, "ok");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// The digest's cwd is engine scratch, outside every tree, so an ask on it must not
+// derive one. Deriving from the id was worse than deriving nothing: it named
+// `wt-__digest`, a tree that never existed, denying every write in the scratch dir.
+test("askLeaf: an ask on the report digest gets no worktree root", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "swarm-ask-digest-"));
+  const cfg = {
+    provider: SCHED_CFG.provider,
+    timeoutMs: SCHED_CFG.timeoutMs,
+    providers: { claude: { enabled: true, allowedRoots: [tmpdir()] }, codex: { enabled: true, path: "codex", allowedRoots: [tmpdir()] } },
+  };
+  try {
+    initResultsDir(dir);
+    const scratch = scratchPath(dir);
+    mkdirSync(scratch, { recursive: true });
+    writeManifestSnapshot(dir, { cwd: tmpdir(), resultsDir: dir, digest: { provider: "codex", model: "gpt-5-codex" }, tasks: [{ id: "a", provider: "codex", model: "gpt-5-codex" }] });
+    writeResult(dir, DIGEST_ID, {
+      id: DIGEST_ID, provider: "codex", model: "gpt-5-codex", ok: true, exit: 0, durationMs: 5,
+      output: "the report", sessionId: "s-digest", cwd: scratch, originalCwd: tmpdir(), allowedTools: "Read,Write,Edit",
+    });
+    const spawn = fakeSpawnFactory(() => ({ output: STREAM }));
+    await askLeaf({ resultsDir: dir, taskId: DIGEST_ID, question: "why though?", cfg, io: makeIo(spawn) });
+    equal(spawn.calls.length, 1, "the digest ask dispatches");
+    equal(spawn.calls[0].opts.env.SWARM_WRITE_GUARD_ROOTS, "", "no tree, so no root — never a derived `wt-__digest`");
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

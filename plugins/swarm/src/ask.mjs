@@ -100,13 +100,13 @@ export async function askLeaf({ resultsDir, taskId, question, model, provider, c
     : recordedTools;
   const tasks = isTopLevel
     ? manifest.tasks.map((t) => (t.id === taskId
-        ? { ...t, ...(treeName !== undefined && { worktreeName: treeName }), after: t.after || [], provider: identity.provider, allowedTools: askTools, timeoutMs: cfg.timeoutMs ?? DEFAULT_TIMEOUT_MS, ...(mcpOff.length && { mcpOff }) }
+        ? { ...t, ...(treeName !== undefined && { worktreeName: treeName }), after: t.after || [], model: askModel, provider: identity.provider, allowedTools: askTools, timeoutMs: cfg.timeoutMs ?? DEFAULT_TIMEOUT_MS, ...(mcpOff.length && { mcpOff }) }
         : { ...t, after: t.after || [] }))
     : [
         ...manifest.tasks.map((t) => ({ ...t, after: t.after || [] })),
         {
           id: taskId,
-          model: prior.model,
+          model: askModel,
           provider: identity.provider,
           cwd: prior.cwd,
           originalCwd: prior.originalCwd || prior.cwd,

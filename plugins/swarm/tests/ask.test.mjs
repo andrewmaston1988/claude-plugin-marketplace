@@ -6,13 +6,13 @@ import { execFileSync } from "node:child_process";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { askLeaf } from "../src/ask.mjs";
-import { DIGEST_ID, scratchPath } from "../src/digest.mjs";
 import { treeDirFor } from "../src/worktree.mjs";
 import {
   initResultsDir, writeResult, readResult, writeManifestSnapshot, appendRunLog, writeSummary, readSummary,
 } from "../src/results.mjs";
 import { readRun } from "../src/runlog.mjs";
 import { fakeSpawnFactory, makeIo, promptOf, STREAM } from "./helpers/fake-io.mjs";
+import { transcript } from "./helpers/codex-events.mjs";
 import * as leafGuard from "../src/manifest-leaf-guard.mjs";
 
 const CFG = {
@@ -141,6 +141,59 @@ test("askLeaf: an unmodified Codex leaf reuses the provider persisted in the man
     const spawn = fakeSpawnFactory(() => ({ output: STREAM }));
     await askLeaf({ resultsDir: dir, taskId: "leaf", question: "why?", cfg, io: makeIo(spawn) });
     equal(spawn.calls[0].cmd, "codex");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("ask-after-fallback: a top-level leaf seats its fallback model for the ask", async () => {
+  const model = "gpt-6.2-sol";
+  const provider = "codex";
+  const dir = setup({ model, provider, sessionId: "t-1" });
+  try {
+    writeManifestSnapshot(dir, {
+      cwd: tmpdir(), resultsDir: dir,
+      tasks: [{ id: "leaf", model: "deepseek-v4.1-flash:1017-cloud", provider: "ollama", fallbackModel: model, fallbackProvider: provider }],
+    });
+    const cfg = {
+      ...CFG,
+      quotaPreflight: false,
+      providers: { ...CFG.providers, codex: { enabled: true, path: "codex", allowedRoots: [tmpdir()] } },
+    };
+    const output = transcript(
+      JSON.stringify({ type: "item.completed", item: { type: "agent_message", text: "the follow-up answer" } }),
+      JSON.stringify({ type: "turn.completed" }),
+    );
+    const spawn = fakeSpawnFactory(() => ({ output }));
+    const answer = await askLeaf({ resultsDir: dir, taskId: "leaf", question: "why?", cfg, io: makeIo(spawn), _mcpTools: () => [] });
+    equal(answer.ok, true);
+    const [{ cmd, args }] = spawn.calls;
+    equal(cmd, "codex");
+    equal(args[args.indexOf("--model") + 1], model);
+    const [row] = readRun(dir).tasks;
+    equal(row.model, model);
+    equal(row.provider, provider);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("askLeaf: a forEach clone dispatches the explicit model override", async () => {
+  const dir = setup();
+  try {
+    const prior = readResult(dir, "leaf");
+    writeManifestSnapshot(dir, {
+      cwd: tmpdir(), resultsDir: dir,
+      tasks: [{ id: "leaf", provider: prior.provider, model: prior.model, forEach: { over: "{{x}}" } }],
+    });
+    const taskId = "leaf[0]";
+    writeResult(dir, taskId, { ...prior, id: taskId });
+    const model = "claude-sonnet-4-6";
+    const spawn = fakeSpawnFactory(() => ({ output: STREAM }));
+    await askLeaf({ resultsDir: dir, taskId, question: "why?", model, provider: prior.provider, cfg: CFG, io: makeIo(spawn) });
+    const [{ args }] = spawn.calls;
+    equal(args[args.indexOf("--model") + 1], model);
+    equal(readRun(dir).tasks.find((task) => task.id === taskId).model, model);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -299,33 +352,6 @@ test("askLeaf: a forEach clone's ask is guarded by its REAL tree, not its id —
     const args = spawn2.calls[0].args;
     const settings = JSON.parse(args[args.indexOf("--settings") + 1]);
     ok(settings.hooks.PreToolUse[0].hooks[0].command.includes(`"${claudeTree}"`), settings.hooks.PreToolUse[0].hooks[0].command);
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-  }
-});
-
-// The digest's cwd is engine scratch, outside every tree, so an ask on it must not
-// derive one. Deriving from the id was worse than deriving nothing: it named
-// `wt-__digest`, a tree that never existed, denying every write in the scratch dir.
-test("askLeaf: an ask on the report digest gets no worktree root", async () => {
-  const dir = mkdtempSync(join(tmpdir(), "swarm-ask-digest-"));
-  const cfg = {
-    ...CFG,
-    providers: { claude: { enabled: true, allowedRoots: [tmpdir()] }, codex: { enabled: true, path: "codex", allowedRoots: [tmpdir()] } },
-  };
-  try {
-    initResultsDir(dir);
-    const scratch = scratchPath(dir);
-    mkdirSync(scratch, { recursive: true });
-    writeManifestSnapshot(dir, { cwd: tmpdir(), resultsDir: dir, digest: { provider: "codex", model: "gpt-5-codex" }, tasks: [{ id: "a", provider: "codex", model: "gpt-5-codex" }] });
-    writeResult(dir, DIGEST_ID, {
-      id: DIGEST_ID, provider: "codex", model: "gpt-5-codex", ok: true, exit: 0, durationMs: 5,
-      output: "the report", sessionId: "s-digest", cwd: scratch, originalCwd: tmpdir(), allowedTools: "Read,Write,Edit",
-    });
-    const spawn = fakeSpawnFactory(() => ({ output: STREAM }));
-    await askLeaf({ resultsDir: dir, taskId: DIGEST_ID, question: "why though?", cfg, io: makeIo(spawn) });
-    equal(spawn.calls.length, 1, "the digest ask dispatches");
-    equal(spawn.calls[0].opts.env.SWARM_WRITE_GUARD_ROOTS, "", "no tree, so no root — never a derived `wt-__digest`");
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
