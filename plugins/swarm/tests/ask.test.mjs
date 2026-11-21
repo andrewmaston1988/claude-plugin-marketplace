@@ -179,6 +179,27 @@ test("ask-after-fallback: a top-level leaf seats its fallback model for the ask"
   }
 });
 
+test("askLeaf: a forEach clone dispatches the explicit model override", async () => {
+  const dir = setup();
+  try {
+    const prior = readResult(dir, "leaf");
+    writeManifestSnapshot(dir, {
+      cwd: tmpdir(), resultsDir: dir,
+      tasks: [{ id: "leaf", provider: prior.provider, model: prior.model, forEach: { over: "{{x}}" } }],
+    });
+    const taskId = "leaf[0]";
+    writeResult(dir, taskId, { ...prior, id: taskId });
+    const model = "claude-sonnet-4-6";
+    const spawn = fakeSpawnFactory(() => ({ output: STREAM }));
+    await askLeaf({ resultsDir: dir, taskId, question: "why?", model, provider: prior.provider, cfg: CFG, io: makeIo(spawn) });
+    const [{ args }] = spawn.calls;
+    equal(args[args.indexOf("--model") + 1], model);
+    equal(readRun(dir).tasks.find((task) => task.id === taskId).model, model);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("askLeaf: disabled provider override fails before any spawn", async () => {
   const dir = setup();
   try {
