@@ -8,7 +8,7 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { validateConfig } from "test-runner/src/config.mjs";
+import { validateConfig } from "@andrewmaston1988/test-runner";
 
 import config from "../test-runner.config.mjs";
 
