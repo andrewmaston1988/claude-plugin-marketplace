@@ -107,6 +107,15 @@ export function readRunLog(content, { now = Date.now() } = {}) {
     if (!entry.id) continue;
     const row = roster.find((item) => item.id === entry.id);
     if (row) {
+      if (entry.event === "fallback") {
+        const fallbackModel = entry.toModel ?? entry.to;
+        if (fallbackModel) {
+          row.model = fallbackModel;
+          if (entry.toProvider) row.provider = entry.toProvider;
+          delete row.providerInferred;
+          delete row.runnerInferred;
+        }
+      }
       if (entry.provider) { row.provider = entry.provider; delete row.providerInferred; }
       if (entry.runner) { row.runner = entry.runner; delete row.runnerInferred; }
       const inferred = inferStoredIdentity(row.model);
