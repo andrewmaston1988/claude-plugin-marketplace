@@ -57,7 +57,8 @@ where it came from. A failed live fetch (expired cookie, network, timeout) still
 last cached reading, but never bare — every render prefixes a `/!\ Cookie Expired` /
 `Network Error` / `Fetch Timed Out` / `No Cookie` banner with an absolute UTC
 `last seen` timestamp. `validate` only fails on a *live* exhausted reading; a cached 100%
-warns instead, since the window may have since reset.
+warns instead, since the window may have since reset. `validate` and `run` refuse a live exhausted `:cloud` seat only
+when it has no non-Ollama `fallbackModel`; a seat with one warns and runs on its fallback.
 
 ### Per-repo leaf guard (`projects`)
 

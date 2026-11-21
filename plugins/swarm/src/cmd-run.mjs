@@ -41,6 +41,7 @@ export async function cmdRun(rest, { parseArgsFlag, resolveManifestRef, usageHea
   const ref = resolveManifestRef(rest[0]);
   const fromRegistry = ref.source !== "path";
   const plan = loadManifest(ref.path, cfg, process.cwd(), { args, fromRegistry, headroom: await usageHeadroom(cfg), cache: modelRoster({ config: cfg, env: process.env, registry: defaultProviderRegistry() }).models, ...(fromRegistry && { ref: rest[0] }) });
+  for (const warning of plan.warnings || []) out(`warning: ${warning}`);
   // Shared by the end-of-run status and the scheduler's single-shot cost warn.
   const { createNotifier } = await import("./notify.mjs");
   const notify = createNotifier({ notifyCmd: cfg.notifyCmd });

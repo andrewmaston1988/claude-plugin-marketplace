@@ -124,8 +124,8 @@ test("row 13: `swarm run` loads the same manifest and says nothing about a resum
     equal(r.status, 1, r.stdout + r.stderr);
     ok(r.stderr.includes("has not been validated as written"), `the load happened: ${r.stderr}`);
     ok(!`${r.stdout}${r.stderr}`.includes("holds an earlier run"), "the preview is validate's alone");
-    // `run` never prints plan.warnings, so the wiring it must not do is invisible
-    // from outside: pin the boundary it relies on — the preview is opt-in.
+    // `run` prints plan.warnings, so a computed preview would reach its output:
+    // pin the boundary it relies on — the preview is opt-in.
     const loaded = loadManifest(w.path, CFG, w.dir);
     ok(!(loaded.warnings || []).some((x) => x.includes("holds an earlier run")), "a plain load computes no preview");
   } finally {

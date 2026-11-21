@@ -89,7 +89,6 @@ export function normalizeTasks(rawTasks, { cwd, resultsDir, cfg, defaultTimeoutM
       }
       if (provider) checkGovernance(provider, t.model, originalCwd, l, cfg, errors, io);
       checkDenylist(t.model, l, cfg, errors);
-      if (provider) checkHeadroom(provider, t.model, l, headroom, errors, warnings);
       if (t.seatReason !== undefined && (typeof t.seatReason !== "string" || !t.seatReason.trim())) {
         errors.push(`${l}: seatReason must say why this seat is used, as a non-empty string — e.g. "seatReason": "cross-family verifier"`);
       }
@@ -120,6 +119,11 @@ export function normalizeTasks(rawTasks, { cwd, resultsDir, cfg, defaultTimeoutM
         }
       } else if (t.fallbackProvider !== undefined) {
         errors.push(`${l}: fallbackProvider without fallbackModel — remove it, or add the "fallbackModel" it belongs to`);
+      }
+      // After the fallback resolves: a defended primary only warns on an exhausted meter.
+      if (provider) {
+        checkHeadroom(provider, t.model, l, headroom, errors, warnings,
+          { defendedBy: fallbackProvider ? { provider: fallbackProvider, model: t.fallbackModel } : undefined });
       }
     }
     // compute/manifest/integrate spawn no leaf, so no guard applies. An opted-out

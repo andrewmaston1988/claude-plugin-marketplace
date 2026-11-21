@@ -37,10 +37,22 @@ export function checkDenylist(model, l, cfg, errors) {
 // warns only when `provenanceBanner` flags it: that function is the one place
 // that decides a figure is untrustworthy, and a fresh in-TTL cache is not.
 // Nothing on `unknown` without provenance (the provider is off).
-export function checkHeadroom(provider, model, l, headroom, errors, warnings) {
+//
+// `defendedBy` is the leaf's resolved fallback: the scheduler moves a `quota` leaf
+// onto it, so a non-Ollama one turns the refusal into a warning. An Ollama fallback
+// draws on the same exhausted allowance and does not defend.
+export function checkHeadroom(provider, model, l, headroom, errors, warnings, { defendedBy } = {}) {
   if (provider !== "ollama") return;
   if (headroom?.state === "exhausted" && headroom?.provenance === "live") {
     const resets = formatResetTime(headroom.resetsAt) ?? headroom.resetsAt;
+    // Goes red on: a live-exhausted ollama primary whose fallback is claude/codex.
+    if (defendedBy && defendedBy.provider !== "ollama") {
+      warnings?.push(
+        `${l}: ':cloud' weekly allowance is exhausted (${headroom.weeklyPctUsed}%, resets ${resets}) — ` +
+        `runs on its fallback ${defendedBy.provider}/${defendedBy.model}`
+      );
+      return;
+    }
     errors.push(
       `${l}: seats ':cloud' model '${model}', but the weekly allowance is exhausted ` +
       `(${headroom.weeklyPctUsed}%, resets ${resets}) — every :cloud leaf will park in ` +

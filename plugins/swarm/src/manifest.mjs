@@ -119,7 +119,7 @@ export function readManifestJson(path) {
 // into the run by the scheduler. The child inherits the parent run's cwd and
 // resultsDir; it may not steer the run itself.
 
-function loadChild(node, parentPath, cwd, cfg, resultsDir, errors, warnings, { args, usedArgs, fromRegistry, cache = [], catalogFetchedAt, io, probedGuards, providerRegistry = PROVIDERS } = {}) {
+function loadChild(node, parentPath, cwd, cfg, resultsDir, errors, warnings, { args, usedArgs, fromRegistry, cache = [], headroom, catalogFetchedAt, io, probedGuards, providerRegistry = PROVIDERS } = {}) {
   const nodeLabel = `task '${node.id}'`;
   // A registry-resolved parent references its children relative to itself — a
   // saved manifest must work from any cwd. Plain-path parents keep cwd
@@ -160,7 +160,7 @@ function loadChild(node, parentPath, cwd, cfg, resultsDir, errors, warnings, { a
   const cycle = detectCycle(raw.tasks.filter((t) => t.id));
   if (cycle) errors.push(`${nodeLabel}: dependency cycle in child manifest: ${cycle.join(" -> ")}`);
   const tasks = normalizeTasks(raw.tasks, {
-    cwd, resultsDir, cfg, errors, warnings, label, cache, catalogFetchedAt, io, probedGuards,
+    cwd, resultsDir, cfg, errors, warnings, label, cache, headroom, catalogFetchedAt, io, probedGuards,
     providerRegistry,
     defaultTimeoutMs: node.timeoutMs ?? raw.timeoutMs ?? cfg.timeoutMs ?? DEFAULT_TIMEOUT_MS,
   });
@@ -281,7 +281,7 @@ export function loadManifest(path, cfg, cwd = process.cwd(), { args, fromRegistr
   const manifestFiles = [manifestPath];
   for (const t of raw.tasks) {
     if (t && typeof t === "object" && typeof t.manifest === "string" && t.manifest) {
-      const child = loadChild(t, manifestPath, cwd, cfg, resultsDir, errors, warnings, { args, usedArgs, fromRegistry, cache, catalogFetchedAt, io: resolvedIo, probedGuards, providerRegistry });
+      const child = loadChild(t, manifestPath, cwd, cfg, resultsDir, errors, warnings, { args, usedArgs, fromRegistry, cache, headroom, catalogFetchedAt, io: resolvedIo, probedGuards, providerRegistry });
       if (child) {
         childPlans.set(t.id, { tasks: child.tasks });
         manifestFiles.push(child.path);
