@@ -106,7 +106,7 @@ export async function askLeaf({ resultsDir, taskId, question, model, provider, c
         ...manifest.tasks.map((t) => ({ ...t, after: t.after || [] })),
         {
           id: taskId,
-          model: prior.model,
+          model: askModel,
           provider: identity.provider,
           cwd: prior.cwd,
           originalCwd: prior.originalCwd || prior.cwd,
