@@ -13,6 +13,7 @@ import {
 } from "../src/results.mjs";
 import { readRun } from "../src/runlog.mjs";
 import { fakeSpawnFactory, makeIo, promptOf, STREAM } from "./helpers/fake-io.mjs";
+import { transcript } from "./helpers/codex-events.mjs";
 import * as leafGuard from "../src/manifest-leaf-guard.mjs";
 
 const CFG = {
@@ -141,6 +142,38 @@ test("askLeaf: an unmodified Codex leaf reuses the provider persisted in the man
     const spawn = fakeSpawnFactory(() => ({ output: STREAM }));
     await askLeaf({ resultsDir: dir, taskId: "leaf", question: "why?", cfg, io: makeIo(spawn) });
     equal(spawn.calls[0].cmd, "codex");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("ask-after-fallback: a top-level leaf seats its fallback model for the ask", async () => {
+  const model = "gpt-6.2-sol";
+  const provider = "codex";
+  const dir = setup({ model, provider, sessionId: "t-1" });
+  try {
+    writeManifestSnapshot(dir, {
+      cwd: tmpdir(), resultsDir: dir,
+      tasks: [{ id: "leaf", model: "deepseek-v4.1-flash:1017-cloud", provider: "ollama", fallbackModel: model, fallbackProvider: provider }],
+    });
+    const cfg = {
+      ...CFG,
+      quotaPreflight: false,
+      providers: { ...CFG.providers, codex: { enabled: true, path: "codex", allowedRoots: [tmpdir()] } },
+    };
+    const output = transcript(
+      JSON.stringify({ type: "item.completed", item: { type: "agent_message", text: "the follow-up answer" } }),
+      JSON.stringify({ type: "turn.completed" }),
+    );
+    const spawn = fakeSpawnFactory(() => ({ output }));
+    const answer = await askLeaf({ resultsDir: dir, taskId: "leaf", question: "why?", cfg, io: makeIo(spawn), _mcpTools: () => [] });
+    equal(answer.ok, true);
+    const [{ cmd, args }] = spawn.calls;
+    equal(cmd, "codex");
+    equal(args[args.indexOf("--model") + 1], model);
+    const [row] = readRun(dir).tasks;
+    equal(row.model, model);
+    equal(row.provider, provider);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
