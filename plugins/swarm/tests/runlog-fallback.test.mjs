@@ -6,7 +6,7 @@ import { readRunLog } from "../src/runlog.mjs";
 
 test("fallback-identity: the running row uses the recorded fallback identity", () => {
   const lines = [
-    { event: "run-start", tasks: [{ id: "fix", model: "deepseek-v4.1-flash:1017-cloud", provider: "ollama" }] },
+    { event: "run-start", tasks: [{ id: "fix", model: "deepseek-v4.1-flash:1017-cloud", provider: "ollama", runner: "claude" }] },
     { id: "fix", event: "fallback", fromProvider: "ollama", toProvider: "codex", fromModel: "deepseek-v4.1-flash:1017-cloud", toModel: "gpt-6.2-sol" },
     { id: "fix", state: "running", provider: "codex", runner: "codex" },
   ].map((entry) => JSON.stringify(entry));
@@ -19,16 +19,18 @@ test("fallback-identity: the running row uses the recorded fallback identity", (
 
   const [atFallback] = readRunLog(lines.slice(0, 2).join("\n")).tasks;
   assert.equal(atFallback.provider, "codex");
+  assert.notEqual(atFallback.runner, "claude");
   assert.equal(Object.hasOwn(atFallback, "runnerInferred"), false);
 });
 
 test("fallback-identity-legacy: a fallback with only from/to updates the model", () => {
   const log = [
-    { event: "run-start", tasks: [{ id: "fix", model: "deepseek-v4.1-flash:1017-cloud" }] },
+    { event: "run-start", tasks: [{ id: "fix", model: "deepseek-v4.1-flash:1017-cloud", provider: "ollama" }] },
     { id: "fix", event: "fallback", from: "deepseek-v4.1-flash:1017-cloud", to: "gpt-6.2-sol" },
   ].map((entry) => JSON.stringify(entry)).join("\n");
   const [row] = readRunLog(log).tasks;
   assert.equal(row.model, "gpt-6.2-sol");
+  assert.notEqual(row.provider, "ollama");
 });
 
 test("fallback-rejected: the roster row retains the primary identity", () => {
