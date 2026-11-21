@@ -112,6 +112,8 @@ export function readRunLog(content, { now = Date.now() } = {}) {
         if (fallbackModel) {
           row.model = fallbackModel;
           if (entry.toProvider) row.provider = entry.toProvider;
+          else delete row.provider;
+          delete row.runner;
           delete row.providerInferred;
           delete row.runnerInferred;
         }
