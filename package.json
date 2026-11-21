@@ -5,6 +5,7 @@
   "description": "Marketplace for Claude Code plugins. Lint config + dev tooling only — no runtime dependencies.",
   "type": "module",
   "scripts": {
+    "test": "test-runr",
     "lint": "eslint plugins/",
     "check:file-size": "node scripts/check-file-size.mjs"
   },
