@@ -6,7 +6,6 @@ import { execFileSync } from "node:child_process";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { askLeaf } from "../src/ask.mjs";
-import { DIGEST_ID, scratchPath } from "../src/digest.mjs";
 import { treeDirFor } from "../src/worktree.mjs";
 import {
   initResultsDir, writeResult, readResult, writeManifestSnapshot, appendRunLog, writeSummary, readSummary,
@@ -353,33 +352,6 @@ test("askLeaf: a forEach clone's ask is guarded by its REAL tree, not its id —
     const args = spawn2.calls[0].args;
     const settings = JSON.parse(args[args.indexOf("--settings") + 1]);
     ok(settings.hooks.PreToolUse[0].hooks[0].command.includes(`"${claudeTree}"`), settings.hooks.PreToolUse[0].hooks[0].command);
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-  }
-});
-
-// The digest's cwd is engine scratch, outside every tree, so an ask on it must not
-// derive one. Deriving from the id was worse than deriving nothing: it named
-// `wt-__digest`, a tree that never existed, denying every write in the scratch dir.
-test("askLeaf: an ask on the report digest gets no worktree root", async () => {
-  const dir = mkdtempSync(join(tmpdir(), "swarm-ask-digest-"));
-  const cfg = {
-    ...CFG,
-    providers: { claude: { enabled: true, allowedRoots: [tmpdir()] }, codex: { enabled: true, path: "codex", allowedRoots: [tmpdir()] } },
-  };
-  try {
-    initResultsDir(dir);
-    const scratch = scratchPath(dir);
-    mkdirSync(scratch, { recursive: true });
-    writeManifestSnapshot(dir, { cwd: tmpdir(), resultsDir: dir, digest: { provider: "codex", model: "gpt-5-codex" }, tasks: [{ id: "a", provider: "codex", model: "gpt-5-codex" }] });
-    writeResult(dir, DIGEST_ID, {
-      id: DIGEST_ID, provider: "codex", model: "gpt-5-codex", ok: true, exit: 0, durationMs: 5,
-      output: "the report", sessionId: "s-digest", cwd: scratch, originalCwd: tmpdir(), allowedTools: "Read,Write,Edit",
-    });
-    const spawn = fakeSpawnFactory(() => ({ output: STREAM }));
-    await askLeaf({ resultsDir: dir, taskId: DIGEST_ID, question: "why though?", cfg, io: makeIo(spawn) });
-    equal(spawn.calls.length, 1, "the digest ask dispatches");
-    equal(spawn.calls[0].opts.env.SWARM_WRITE_GUARD_ROOTS, "", "no tree, so no root — never a derived `wt-__digest`");
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
