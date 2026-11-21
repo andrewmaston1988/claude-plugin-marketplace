@@ -166,3 +166,16 @@ test("row 13: an Ollama model missing from a non-empty banked roster warns and s
     cleanup(w);
   }
 });
+
+// Red input: `run` loading a manifest that carries a warning. The unvalidated-bytes
+// refusal fires after the load, so the warning is the only thing proving the print.
+test("run: prints each manifest warning as `warning: …` before any refusal", async () => {
+  const w = world([leaf({ id: "verify-x", allowedTools: "Read,Edit,Bash" })]);
+  try {
+    const r = await cli(w, ["run", w.path]);
+    const line = r.stdout.split("\n").find((l) => l.startsWith("warning:") && l.includes("looks like a verifier"));
+    ok(line, `stdout:\n${r.stdout}\nstderr:\n${r.stderr}`);
+  } finally {
+    cleanup(w);
+  }
+});
