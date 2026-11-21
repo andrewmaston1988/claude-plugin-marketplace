@@ -1,4 +1,4 @@
-// Self-installing shim into the test-runner package. A fresh worktree has no
+// Self-installing shim into the @andrewmaston1988/test-runner package. A fresh worktree has no
 // root `npm ci`, and TESTING.md and every leaf brief name this file.
 
 import { spawnSync } from "node:child_process";
@@ -13,7 +13,7 @@ const ROOT = fileURLToPath(new URL("..", import.meta.url));
 // Same record path and hash the package's own installIfNeeded uses, so the
 // shim and a mirror-side `--mirror` install share one gate.
 const RECORD = "node_modules/.test-install-hash";
-const PACKAGE = "node_modules/test-runner/package.json";
+const PACKAGE = "node_modules/@andrewmaston1988/test-runner/package.json";
 
 function readRecord(path, _fs) {
   try {
@@ -71,7 +71,17 @@ if (isEntryPoint()) {
     process.stderr.write(`[test] ${error}\n`);
     process.exitCode = 2;
   } else {
-    if (installed) process.stderr.write("[test] installed test-runner (lockfile changed)\n");
-    await import("test-runner/bin/test-runner.mjs"); // the CLI reads process.argv itself
+    if (installed) process.stderr.write("[test] installed @andrewmaston1988/test-runner (lockfile changed)\n");
+    const { main } = await import("@andrewmaston1988/test-runner");
+    // `exitCode` rather than `exit()`: async pipes on Windows would truncate output.
+    await main().then(
+      (code) => {
+        process.exitCode = code;
+      },
+      (err) => {
+        process.stderr.write(`[test] ${err && err.stack ? err.stack : err}\n`);
+        process.exitCode = 1;
+      },
+    );
   }
 }

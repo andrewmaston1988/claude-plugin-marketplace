@@ -14,7 +14,7 @@ const LOCK = "{ \"lockfileVersion\": 3 }";
 const LOCKFILE = join(tmpdir(), "test-shim-fixture", "package-lock.json");
 const ROOT = join(tmpdir(), "test-shim-fixture");
 
-const PACKAGE = join(ROOT, "node_modules", "test-runner", "package.json");
+const PACKAGE = join(ROOT, "node_modules", "@andrewmaston1988", "test-runner", "package.json");
 const RECORD = join(ROOT, "node_modules", ".test-install-hash");
 
 const hashOf = (bytes) => createHash("sha256").update(bytes).digest("hex");

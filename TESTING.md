@@ -10,7 +10,7 @@ Use Node.js 22 and Git. Run commands from the repository root.
 
 ## Test runner
 
-For flags, output, agent mode, orphan checks, diff selection and the WSL mirror, see the [test-runner README](https://github.com/andrewmaston1988/test-runner#readme) or the [local copy](node_modules/test-runner/README.md).
+For flags, output, agent mode, orphan checks, diff selection and the WSL mirror, see the [test-runner README](https://github.com/andrewmaston1988/test-runner#readme) or the [local copy](node_modules/@andrewmaston1988/test-runner/README.md).
 
 `node scripts/test.mjs` is a shim that runs `npm ci` at the repository root on the first run in a tree and whenever the root lockfile changes. Changes to `test-runner.config.mjs`, the root `package-lock.json`, `.github/workflows/test.yml` or `scripts/test.mjs` select every suite. Record deliberately excluded tests and their reasons in the config's `notRun`.
 
