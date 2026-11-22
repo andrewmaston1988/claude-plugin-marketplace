@@ -196,7 +196,7 @@ Written to `~/.pipeline/config.json` by `pipeline setup`. All keys are optional 
 | `notifications.pipeline_channel` | string \| null | `null` | Separate channel for per-row orchestrator events; falls back to `governance_channel` if null |
 | `hooks.on_notification` | string \| null | `null` | Path to forwarder script — called once per envelope with the JSON file path as its only argv |
 | `hooks.on_merge_ready` | string \| null | `null` | Path to hook script — called when a row reaches `stage=merge`; receives env vars (no argv) |
-| `hooks.on_merge` | string \| null | `null` | Path to hook script — delegates the squash merge to the hook when the branch has no open PR; receives four env vars (no argv); hook owns the git operation |
+| `hooks.on_merge` | string \| null | `null` | Path to the hook that owns the merge when no open PR is detected. See the [hook contract](#on_merge-hook) for cwd and environment variables. |
 | `hooks.merge_check` | string \| null | `null` | Path to hook script — invoked per `merge`-stage row each poll; exit 0 = "branch's PR is merged on the remote" → row advances to `done`. Sole mechanism for UI-merge detection (platform-agnostic) |
 | `autoMerge` | boolean | `false` | When `true`, the orchestrator automatically spawns the merge agent for rows at `stage=merge` |
 | `review.skill` | string | `"/code-review"` | Slash-command invoked by review sessions |

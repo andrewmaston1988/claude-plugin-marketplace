@@ -137,36 +137,13 @@ Pass the hook path as `--merge-hook <abs-path>` (or omit to leave unset).
 
 ### Question 3c — on_merge hook
 
-**Always ASK this question** — pairs with Q3b. If the user wired up `on_merge_ready` to open a PR, they almost certainly want `on_merge` to merge that PR via the platform's API rather than fall back to a local squash. Asking the two as a related cluster keeps the merge workflow coherent.
+Ask whether the user has a custom script for branches without an open GitHub PR. The merge runner handles open GitHub PRs directly.
 
-**What this does**: replaces the pipeline's local squash merge with a custom script. The hook receives four env vars (`PIPELINE_PROJECT`, `PIPELINE_FEATURE`, `PIPELINE_BRANCH`, `PIPELINE_TARGET_BRANCH`) and is responsible for performing the actual merge. When unset, the pipeline squash-merges locally as usual.
+The custom script owns the merge when invoked. See the [hook contract](../../REFERENCE.md#on_merge-hook) for its working directory, environment variables and follow-up steps.
 
-**Default**: disabled (local squash merge used).
-
-**If you skip**: the pipeline squash-merges the branch to the target branch locally and pushes. GitHub/Bitbucket won't show the PR as "merged" — the PR will close when the branch is deleted.
-
-**If you set it**: the hook fully owns the merge step. A common hook for GitHub repos:
-
-```js
-// ~/.pipeline/hooks/on-merge.mjs
-import { spawnSync } from "node:child_process";
-import { join } from "node:path";
-import { homedir } from "node:os";
-const gh = join(homedir(), ".local", "bin", process.platform === "win32" ? "gh.exe" : "gh");
-const branch = process.env.PIPELINE_BRANCH;
-const result = spawnSync(gh, ["pr", "merge", branch, "--squash", "--delete-branch", "--auto"], {
-  stdio: "inherit",
-  env: { ...process.env, PATH: `${join(homedir(), ".local", "bin")};${process.env.PATH}` },
-});
-process.exit(result.status ?? 1);
-```
+The hook is disabled by default. With no hook and no open GitHub PR, the runner squashes locally and pushes the target.
 
 **Before asking**: check whether `~/.pipeline/hooks/on-merge.mjs` already exists. If it does and `hooks.on_merge` is not already set in config, say: "Found existing hook at `~/.pipeline/hooks/on-merge.mjs` — wire this into config? [Y/n]". On yes, use that path directly and skip the question below. On no, proceed with the normal question.
-
-**Ask the user** whether they want to use a GitHub PR merge or keep the local squash. Common answers:
-- **"GitHub PR merge"** — write the above hook to `~/.pipeline/hooks/on-merge.mjs` and pass `--on-merge <path>`.
-- **"Keep local squash"** — omit `--on-merge`.
-- **"I have a script already"** — ask for the path and use it directly.
 
 Pass the hook path as `--on-merge <abs-path>` (or omit to keep local squash).
 
