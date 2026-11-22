@@ -21,7 +21,7 @@
  *                      [--skip-testing] [--dry-run]
  */
 import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
@@ -314,7 +314,7 @@ export async function main({ _argv, _config, _projectRow } = {}) {
     return 1;
   }
   const { project, projectRoot, projectPlansDir } = resolved;
-  const projectDir = explicitDir ? posix(explicitDir) : projectRoot;
+  const projectDir = explicitDir ? posix(resolve(explicitDir)) : projectRoot;
   const skipTesting = argv.includes("--skip-testing");
   const dryRun = argv.includes("--dry-run");
 

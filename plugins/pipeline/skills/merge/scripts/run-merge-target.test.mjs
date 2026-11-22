@@ -129,18 +129,21 @@ test("main: running from the main checkout keeps its root and repo plans directo
   }
 });
 
-test("main: an explicit project directory overrides the default main root", async () => {
+test("main: a relative project directory overrides the default main root and becomes absolute", async () => {
   const dir = tmpRepo();
   const worktree = join(dir, "explicit-checkout").replaceAll("\\", "/");
+  const cwd = process.cwd();
   try {
     const add = spawnSync("git", ["worktree", "add", "--detach", worktree], { cwd: dir, encoding: "utf8" });
     equal(add.status, 0, add.stderr);
-    const out = await runMain(worktree, { plansDir: "{root}/plans" }, {
+    process.chdir(dir);
+    const out = await runMain("explicit-checkout", { plansDir: "{root}/plans" }, {
       projectRow: { name: "registered-project", root_path: dir },
     });
     ok(out.includes(`--project-dir "${worktree}"`), out);
     ok(out.includes(`--plans-dir "${worktree}/plans"`), out);
   } finally {
+    process.chdir(cwd);
     rmSync(dir, { recursive: true, force: true });
   }
 });

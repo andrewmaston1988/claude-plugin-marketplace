@@ -18,7 +18,7 @@
  *                  [--target-branch <branch>] [--parent <slug>]
  */
 import { existsSync } from "node:fs";
-import { join, relative, isAbsolute } from "node:path";
+import { join, relative, isAbsolute, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import {
@@ -169,7 +169,7 @@ async function main() {
     const rows = Array.from(listEnabledProjects(registry), ([name, root_path]) => ({ name, root_path }));
     const resolved = resolveProjectFromPath(args.projectDir ?? process.cwd(), { rows });
     project = resolved.project;
-    projectRoot = args.projectDir ?? resolved.projectRoot;
+    projectRoot = args.projectDir == null ? resolved.projectRoot : resolve(args.projectDir).replaceAll("\\", "/");
 
     // Resolve target branch: CLI > DB > auto-detected default.
     if (!targetBranch) {

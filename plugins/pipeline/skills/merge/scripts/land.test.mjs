@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { pushTarget } from "./land.mjs";
+import { runGit } from "./rebase.mjs";
 
 function git(cwd, ...args) {
   return execFileSync("git", args, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
@@ -62,4 +63,18 @@ test("pushTarget accepts a newer origin commit that contains HEAD", (t) => {
 
   equal(pushTarget(repo, "main", logger), true);
   equal(errors.length, 0);
+});
+
+test("pushTarget verifies the pushed commit even when local HEAD moves during fetch", (t) => {
+  const { repo, origin, logger } = fixture(t);
+  const pushed = git(repo, "rev-parse", "HEAD");
+
+  equal(pushTarget(repo, "main", {
+    ...logger,
+    git(args, cwd, opts) {
+      if (args[0] === "fetch") git(cwd, "commit", "--allow-empty", "-m", "Move local HEAD");
+      return runGit(args, cwd, opts);
+    },
+  }), true);
+  equal(git(origin, "rev-parse", "main"), pushed);
 });

@@ -18,30 +18,35 @@ export async function cleanupBranch(projectDir, branch, wt, { log, err }) {
 }
 
 // The push is complete only once origin contains the merged HEAD.
-export function pushTarget(projectRoot, targetBranch, { log, err }) {
-  if (runGit(["remote", "get-url", "origin"], projectRoot, { check: false }).code !== 0) {
+export function pushTarget(projectRoot, targetBranch, { log, err, git = runGit }) {
+  if (git(["remote", "get-url", "origin"], projectRoot, { check: false }).code !== 0) {
     log("[7b] No origin remote — nothing to push");
     return true;
   }
   const targetRef = `refs/heads/${targetBranch}`;
   const trackingRef = `refs/remotes/origin/${targetBranch}`;
-  const push = runGit(["push", "origin", `HEAD:${targetRef}`], projectRoot, { check: false });
+  const head = git(["rev-parse", "--verify", "HEAD"], projectRoot, { check: false });
+  if (head.code !== 0) {
+    err(`BLOCKER: could not resolve HEAD before pushing ${targetBranch}: ${head.stderr.trim()}`);
+    return false;
+  }
+  const commit = head.stdout.trim();
+  const push = git(["push", "origin", `${commit}:${targetRef}`], projectRoot, { check: false });
   if (push.code !== 0) {
     err(`BLOCKER: push of ${targetBranch} to origin failed — the merge is local only; push it by hand: ${push.stderr.trim()}`);
     return false;
   }
   // Refresh the tracking ref from the fetch URL even when push used a different URL.
-  const fetch = runGit(["fetch", "origin", `+${targetRef}:${trackingRef}`], projectRoot, { check: false });
+  const fetch = git(["fetch", "origin", `+${targetRef}:${trackingRef}`], projectRoot, { check: false });
   if (fetch.code !== 0) {
     err(`BLOCKER: push verification for ${targetBranch} could not fetch origin: ${fetch.stderr.trim()}`);
     return false;
   }
-  const landed = runGit(["merge-base", "--is-ancestor", "HEAD", trackingRef], projectRoot, { check: false });
+  const landed = git(["merge-base", "--is-ancestor", commit, trackingRef], projectRoot, { check: false });
   if (landed.code !== 0) {
-    err(`BLOCKER: push verification failed for ${targetBranch}: HEAD was not confirmed on origin/${targetBranch}. ${landed.stderr.trim()}`.trimEnd());
+    err(`BLOCKER: push verification failed for ${targetBranch}: ${commit} was not confirmed on origin/${targetBranch}. ${landed.stderr.trim()}`.trimEnd());
     return false;
   }
-  const head = runGit(["rev-parse", "--short", "HEAD"], projectRoot, { check: false }).stdout.trim();
-  log(`[7b] Pushed ${targetBranch} to origin (${head})`);
+  log(`[7b] Pushed ${targetBranch} to origin (${commit.slice(0, 7)})`);
   return true;
 }
