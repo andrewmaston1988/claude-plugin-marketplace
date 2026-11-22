@@ -16,11 +16,8 @@ The first word is the plan file path (absolute, a cwd-relative path, or a bare f
 
 ## Step 1 — Resolve the project
 
-```bash
-git rev-parse --path-format=absolute --git-common-dir
-```
-
-The **project** is the registered project whose `root_path` is the main working tree — the parent of that common dir. A linked worktree resolves to its main tree, so the folder name is not the project. Find it in `pipeline project-list`; no match means the checkout is unregistered. Verify it's a registered project:
+Use the [project lookup rules](../../REFERENCE.md#project-lookup-from-a-git-working-tree)
+to match your checkout against the registered project list.
 
 ```bash
 pipeline project-list --format json

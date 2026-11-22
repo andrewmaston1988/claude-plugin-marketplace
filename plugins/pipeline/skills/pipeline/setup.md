@@ -43,7 +43,10 @@ Most users want defaults for almost everything. Ask only what's genuinely a per-
 
 **What this does**: registers a git repo as a pipeline project. The orchestrator spawns sessions per registered project, and `/queue` / `/pipeline` commands default to the project derived from your current git repo.
 
-**Default**: register the project you're currently in (register the main working tree — the parent of `git rev-parse --path-format=absolute --git-common-dir` — never a linked worktree; its basename is the suggested project name).
+**Default**: register the root of the project you're currently in. Use the main
+working tree when Git reports a common `/.git` directory, and the worktree root
+otherwise. See the [project lookup rules](../../REFERENCE.md#project-lookup-from-a-git-working-tree).
+Suggest the root directory's basename as the registration name.
 
 **If you skip**: the orchestrator has nothing to do — you can register projects later with `pipeline project-add <name> <abs-path>`. Without at least one registered project, `/queue` will refuse with "not a registered project".
 

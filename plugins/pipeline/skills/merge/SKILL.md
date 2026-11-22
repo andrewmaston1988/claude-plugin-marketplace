@@ -10,10 +10,10 @@ run tests.
 
 **Branches to merge:** $ARGUMENTS
 
-Run it from the project checkout or any linked worktree of it: the project is the
-registered project of the repo's main working tree, not the folder name. The merge
-and the `on_merge` hook run in that main root; every push is checked to have landed
-HEAD on `origin/<target>`. A checkout matching no registered project is refused.
+Run it from the project checkout or a linked worktree. The driver resolves the
+project root, which is where the merge and its `on_merge` hook run by default.
+See the [merge reference](../../REFERENCE.md#merge-layer) for project lookup,
+the directory override and push verification.
 
 `scripts/run-merge.mjs` owns the mechanics: root and branch resolution, the
 target-branch lookup, the `rebase_required` and `(needs testing)` pre-checks,
@@ -98,7 +98,7 @@ Then re-run the driver's printed command with `--no-rebase` appended, which skip
 default path must keep rebasing for every branch that has not hit this exact
 failure.
 
-## Rationalisations — all rejected
+## Common merge mistakes
 
 | Excuse | Reality |
 |---|---|
