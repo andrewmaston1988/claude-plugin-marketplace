@@ -98,7 +98,7 @@ Then re-run the driver's printed command with `--no-rebase` appended, which skip
 default path must keep rebasing for every branch that has not hit this exact
 failure.
 
-## Common merge mistakes
+## Rationalisations — all rejected
 
 | Excuse | Reality |
 |---|---|
