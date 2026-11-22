@@ -18,11 +18,11 @@
  *                  [--target-branch <branch>] [--parent <slug>]
  */
 import { existsSync } from "node:fs";
-import { join, basename, relative, isAbsolute } from "node:path";
+import { join, relative, isAbsolute } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import {
-  connectUnified, close,
+  connectUnified, close, listEnabledProjects,
   rowGet,
   progressMark,
   planSetStatus,
@@ -45,7 +45,7 @@ import {
 import { step0bProgress, step9Cleanup } from "./progress.mjs";
 import { readSmokeCommand, step8Smoke } from "./smoke.mjs";
 import { pushTarget } from "./land.mjs";
-import { loadPipelineConfig } from "../../../src/pipeline-config.mjs";
+import { resolveProjectFromPath } from "../../../src/project-from-path.mjs";
 import { logOut, logErr, step5SquashMerge } from "./merge-step5.mjs";
 
 export { findOpenPR, verifyAlreadyIntegrated, step5SquashMerge } from "./merge-step5.mjs";
@@ -64,12 +64,6 @@ class MergeAbort extends Error {
     super(message);
     this.exitCode = code;
   }
-}
-
-// ── Path helpers ──────────────────────────────────────────────────────────────
-
-function projectName(projectDir) {
-  return basename(projectDir);
 }
 
 // ── Step 0a — Rebase ──────────────────────────────────────────────────────────
@@ -160,9 +154,6 @@ async function main() {
 
   if (!args.branches) { logErr("BLOCKER: --branches required"); return exitSoon(2); }
 
-  const projectDir = args.projectDir ?? process.cwd();
-  const project = projectName(projectDir);
-  const cfg = loadPipelineConfig();
   const now = new Date();
   const sessionSlug = args.sessionSlug
     ?? `merge_${now.getFullYear()}${String(now.getMonth()+1).padStart(2,"0")}${String(now.getDate()).padStart(2,"0")}-${String(now.getHours()).padStart(2,"0")}${String(now.getMinutes()).padStart(2,"0")}`;
@@ -170,26 +161,35 @@ async function main() {
   const branches = args.branches.split(",").map(b => b.trim()).filter(Boolean);
   if (!branches.length) { logErr("BLOCKER: no branches given"); return exitSoon(2); }
 
-  // Resolve target branch: CLI > DB > auto-detected default
+  const registry = connectUnified();
+  let project;
+  let projectRoot;
   let targetBranch = args.targetBranch;
-  if (!targetBranch) {
-    const db0 = connectUnified();
-    try {
-      const slug0 = branchSlug(branches[0]);
-      const row0 = rowGet(db0, project, slug0);
-      const dbTarget = row0?.target_branch;
-      if (dbTarget && !dbTarget.startsWith("autonomous/") && !branches.includes(dbTarget)) {
-        targetBranch = dbTarget;
-      }
-    } catch { /* ignore */ } finally { close(db0); }
+  try {
+    const rows = Array.from(listEnabledProjects(registry), ([name, root_path]) => ({ name, root_path }));
+    const resolved = resolveProjectFromPath(args.projectDir ?? process.cwd(), { rows });
+    project = resolved.project;
+    projectRoot = args.projectDir ?? resolved.projectRoot;
+
+    // Resolve target branch: CLI > DB > auto-detected default.
+    if (!targetBranch) {
+      try {
+        const dbTarget = rowGet(registry, project, branchSlug(branches[0]))?.target_branch;
+        if (dbTarget && !dbTarget.startsWith("autonomous/") && !branches.includes(dbTarget)) {
+          targetBranch = dbTarget;
+        }
+      } catch { /* ignore */ }
+    }
+  } finally {
+    close(registry);
   }
   if (!targetBranch) {
-    try { targetBranch = detectDefaultBranch(projectDir); }
+    try { targetBranch = detectDefaultBranch(projectRoot); }
     catch { targetBranch = "main"; }
   }
 
   logOut(`merge.mjs — project=${project} branches=${branches.join(",")}`);
-  logOut(`  projectDir=${projectDir}`);
+  logOut(`  projectDir=${projectRoot}`);
   logOut(`  targetBranch=${targetBranch}`);
 
   if (args.dryRun) {
@@ -198,14 +198,14 @@ async function main() {
   }
 
   // Pre-check: refuse if project has staged or unstaged changes
-  const staged = runGit(["diff", "--cached", "--name-only"], projectDir, { check: false }).stdout.trim();
+  const staged = runGit(["diff", "--cached", "--name-only"], projectRoot, { check: false }).stdout.trim();
   if (staged) {
     logErr(`BLOCKER: project has staged changes — abort to avoid mixing state`);
     logErr(`  staged files:\n${staged}`);
     logErr("  Resolve manually (commit or `git restore --staged <files>`) and retry.");
     return exitSoon(2);
   }
-  const unstaged = runGit(["diff", "--name-only"], projectDir, { check: false }).stdout.trim();
+  const unstaged = runGit(["diff", "--name-only"], projectRoot, { check: false }).stdout.trim();
   if (unstaged) {
     logErr(`BLOCKER: project has unstaged changes — abort to protect working tree`);
     logErr(`  unstaged files:\n${unstaged}`);
@@ -214,8 +214,8 @@ async function main() {
   }
 
   // Capture pre-merge HEAD for rollback
-  const projectPreSha = runGit(["rev-parse", "HEAD"], projectDir).stdout.trim();
-  const projectPreBranch = runGit(["rev-parse", "--abbrev-ref", "HEAD"], projectDir).stdout.trim();
+  const projectPreSha = runGit(["rev-parse", "HEAD"], projectRoot).stdout.trim();
+  const projectPreBranch = runGit(["rev-parse", "--abbrev-ref", "HEAD"], projectRoot).stdout.trim();
 
   // Connect to pipeline DB; enforce qa_pass invariant
   const db = connectUnified();
@@ -249,7 +249,7 @@ async function main() {
     if (args.noRebase) {
       logOut("[0a] --no-rebase: skipping rebase as requested by operator");
     } else {
-      const rebaseOk = await step0aRebase(projectDir, branches, targetBranch);
+      const rebaseOk = await step0aRebase(projectRoot, project, branches, targetBranch);
       if (!rebaseOk) throw new MergeAbort(3, "step 0a (rebase)");
     }
     mark(0, "done");
@@ -261,7 +261,7 @@ async function main() {
 
     // Step 2 (idx 2)
     mark(2, "inprogress");
-    const blockers = await step2VerifyDone(db, plFiles, projectDir, project, {
+    const blockers = await step2VerifyDone(db, plFiles, projectRoot, project, {
       skipTesting: args.skipTesting,
       targetBranch,
     });
@@ -273,14 +273,14 @@ async function main() {
 
     // Step 3 (idx 3)
     mark(3, "inprogress");
-    await step3UpdateStatus(plFiles, projectDir, project);
+    await step3UpdateStatus(plFiles, projectRoot, project);
     mark(3, "done");
 
     // Step 4 (idx 4) — doc-impact removed (fragile LLM call, human judgment preferred)
 
     // Step 5 — squash merge (idx 5)
     mark(5, "inprogress");
-    await step5SquashMerge(db, project, projectDir, branches, plFiles, targetBranch);
+    await step5SquashMerge(db, project, projectRoot, branches, plFiles, targetBranch);
     mark(5, "done");
 
     // Step 6 — move plans (idx 6)
@@ -300,15 +300,15 @@ async function main() {
 
     // Step 7 — commit project (idx 7)
     mark(7, "inprogress");
-    await step7CommitProject(projectDir, branches, { plansDir: args.plansDir });
-    if (!pushTarget(projectDir, targetBranch, { log: logOut, err: logErr })) throw new MergeAbort(7, "step 7b (push)");
+    await step7CommitProject(projectRoot, branches, { plansDir: args.plansDir });
+    if (!pushTarget(projectRoot, targetBranch, { log: logOut, err: logErr })) throw new MergeAbort(7, "step 7b (push)");
     mark(7, "done");
 
     // Step 8 — smoke check (idx 8)
     if (!args.skipSmoke) {
       mark(8, "inprogress");
-      const smokeCmd = readSmokeCommand(join(projectDir, "CLAUDE.md"));
-      if (!step8Smoke(projectDir, smokeCmd)) throw new MergeAbort(5, "step 8 (smoke check)");
+      const smokeCmd = readSmokeCommand(join(projectRoot, "CLAUDE.md"));
+      if (!step8Smoke(projectRoot, smokeCmd)) throw new MergeAbort(5, "step 8 (smoke check)");
       mark(8, "done");
     }
 
@@ -325,10 +325,10 @@ async function main() {
     // Rollback on failure — not smoke (5) or push (7): the merge landed, and they are operator-recoverable
     if (![0, 5, 7].includes(exitCode)) {
       logErr(`[rollback] merge failed (exit=${exitCode}); resetting project head`);
-      const curBranch = runGit(["rev-parse", "--abbrev-ref", "HEAD"], projectDir, { check: false }).stdout.trim();
+      const curBranch = runGit(["rev-parse", "--abbrev-ref", "HEAD"], projectRoot, { check: false }).stdout.trim();
       if (curBranch !== projectPreBranch) {
         logErr(`  HEAD on '${curBranch}', not pre-merge '${projectPreBranch}' — checking out first`);
-        const co = runGit(["checkout", projectPreBranch], projectDir, { check: false });
+        const co = runGit(["checkout", projectPreBranch], projectRoot, { check: false });
         if (co.code !== 0) {
           logErr(`  BLOCKER — could not checkout '${projectPreBranch}': ${co.stderr.trim()}; skipping reset`);
           close(db);
@@ -336,7 +336,7 @@ async function main() {
         }
       }
       logErr(`  project (${projectPreBranch}) -> ${projectPreSha.slice(0, 7)}`);
-      runGit(["reset", "--hard", projectPreSha], projectDir, { check: false });
+      runGit(["reset", "--hard", projectPreSha], projectRoot, { check: false });
     }
 
     // Step 9 — cleanup progress (always runs)

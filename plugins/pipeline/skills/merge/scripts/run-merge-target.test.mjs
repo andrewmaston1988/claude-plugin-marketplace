@@ -5,7 +5,7 @@ import "../../../tests/helpers/isolate-home.mjs";
 import { test } from "node:test";
 import { equal, ok, match } from "node:assert/strict";
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync } from "node:fs";
-import { join, delimiter } from "node:path";
+import { basename, join, delimiter } from "node:path";
 import { tmpdir } from "node:os";
 import { spawnSync } from "node:child_process";
 import { main, resolveTargetBranch } from "./run-merge.mjs";
@@ -82,7 +82,7 @@ async function runMain(dir, config, { branch = "autonomous/feat-x", projectRow =
   process.stderr.write = (s) => { buf += s; return true; };
   try {
     await main({
-      _argv:       ["--branches", branch, "--project-dir", dir, "--dry-run", ...extraArgs],
+      _argv:       ["--branches", branch, "--dry-run", ...(dir ? ["--project-dir", dir] : []), ...extraArgs],
       _config:     config,
       _projectRow: projectRow,
     });
@@ -92,6 +92,58 @@ async function runMain(dir, config, { branch = "autonomous/feat-x", projectRow =
   }
   return buf;
 }
+
+test("main: linked worktree resolves the registered name, root and plans directory", async () => {
+  const dir = tmpRepo();
+  const worktree = join(dir, "linked-checkout");
+  const cwd = process.cwd();
+  try {
+    const add = spawnSync("git", ["worktree", "add", "--detach", worktree], { cwd: dir, encoding: "utf8" });
+    equal(add.status, 0, add.stderr);
+    const plansDir = `${dir}/registered-project`;
+    const projectRow = { name: "registered-project", root_path: dir };
+    process.chdir(worktree);
+    const out = await runMain(null, { plansDir: "{root}/{project}" }, { projectRow });
+    ok(out.includes("project:       registered-project"), out);
+    ok(out.includes(`--project-dir "${dir}"`), out);
+    ok(out.includes(`--plans-dir "${plansDir}"`), out);
+  } finally {
+    process.chdir(cwd);
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("main: running from the main checkout keeps its root and repo plans directory", async () => {
+  const dir = tmpRepo();
+  const cwd = process.cwd();
+  try {
+    mkdirSync(join(dir, "plans"));
+    process.chdir(dir);
+    const out = await runMain(null, { plansDir: "{root}/plans" });
+    ok(out.includes(`project:       ${basename(dir)}`), out);
+    ok(out.includes(`--project-dir "${dir}"`), out);
+    ok(out.includes(`--plans-dir "${dir}/plans"`), out);
+  } finally {
+    process.chdir(cwd);
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("main: an explicit project directory overrides the default main root", async () => {
+  const dir = tmpRepo();
+  const worktree = join(dir, "explicit-checkout").replaceAll("\\", "/");
+  try {
+    const add = spawnSync("git", ["worktree", "add", "--detach", worktree], { cwd: dir, encoding: "utf8" });
+    equal(add.status, 0, add.stderr);
+    const out = await runMain(worktree, { plansDir: "{root}/plans" }, {
+      projectRow: { name: "registered-project", root_path: dir },
+    });
+    ok(out.includes(`--project-dir "${worktree}"`), out);
+    ok(out.includes(`--plans-dir "${worktree}/plans"`), out);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
 
 test("main: explicit target is reported and carried into the merge command", async () => {
   const dir = tmpRepo();

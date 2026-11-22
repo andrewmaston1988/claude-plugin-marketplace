@@ -29,7 +29,8 @@ import { queryRow } from "./pipeline-query.mjs";
 import { planTargetBranch } from "../../../src/plans/target-branch.mjs";
 import { resolvePlansDir, PLANS_DIR_KEYS } from "../../../src/plans-resolver.mjs";
 import { unresolvedPlaceholders } from "../../../src/worktree-paths.mjs";
-import { connectUnified, close, projectGetByName } from "../../../src/db/index.mjs";
+import { connectUnified, close, listEnabledProjects, projectGetByName } from "../../../src/db/index.mjs";
+import { resolveProjectFromPath } from "../../../src/project-from-path.mjs";
 
 // merge.mjs is our sibling in the PLUGIN tree. Deriving it from projectDir would
 // point into the repo being merged, which does not contain the plugin.
@@ -270,6 +271,23 @@ function getFlag(name, argv) {
   return i >= 0 ? argv[i + 1] : null;
 }
 
+function resolveMergeProject(dir, projectRow) {
+  if (projectRow !== undefined) {
+    const rows = projectRow?.name && projectRow.root_path ? [projectRow] : [];
+    return { ...resolveProjectFromPath(dir, { rows }), projectPlansDir: projectRow?.plans_dir ?? null };
+  }
+
+  const db = connectUnified();
+  try {
+    const rows = Array.from(listEnabledProjects(db), ([name, root_path]) => ({ name, root_path }));
+    const resolved = resolveProjectFromPath(dir, { rows });
+    const projectRow = resolved.registered ? projectGetByName(db, resolved.project) : null;
+    return { ...resolved, projectPlansDir: projectRow?.plans_dir ?? null };
+  } finally {
+    close(db);
+  }
+}
+
 // Exported with a dependency seam so the resolution and PAUSE paths are testable: they
 // depend on live config and the project row, neither of which a test can otherwise supply.
 export async function main({ _argv, _config, _projectRow } = {}) {
@@ -287,13 +305,16 @@ export async function main({ _argv, _config, _projectRow } = {}) {
     return 0;
   }
 
-  const projectDir = (getFlag("project-dir", argv) || git(["rev-parse", "--show-toplevel"], process.cwd()))
-    .replace(/\\/g, "/");
-  if (!projectDir) {
-    process.stderr.write("FAILED: not inside a git repository and --project-dir not given\n");
+  const explicitDir = getFlag("project-dir", argv);
+  let resolved;
+  try {
+    resolved = resolveMergeProject(explicitDir || process.cwd(), _projectRow);
+  } catch (err) {
+    process.stderr.write(`FAILED: ${err.message}\n`);
     return 1;
   }
-  const project = projectDir.split("/").filter(Boolean).pop();
+  const { project, projectRoot, projectPlansDir } = resolved;
+  const projectDir = explicitDir ? posix(explicitDir) : projectRoot;
   const skipTesting = argv.includes("--skip-testing");
   const dryRun = argv.includes("--dry-run");
 
@@ -308,17 +329,6 @@ export async function main({ _argv, _config, _projectRow } = {}) {
     return 1;
   }
 
-  // One resolver, four precedence tiers — see REFERENCE.md. The driver used to hand-roll a
-  // {project}-only substitution here, which saw neither plansDirs[<project>] nor the project
-  // row's plans_dir column.
-  const projectPlansDir = _projectRow !== undefined
-    ? (_projectRow?.plans_dir ?? null)
-    : (() => {
-        const db = connectUnified();
-        try { return projectGetByName(db, project)?.plans_dir ?? null; }
-        catch { return null; }
-        finally { close(db); }
-      })();
   let plansDir = resolvePlansDir({
     project,
     projectRoot: projectDir,
