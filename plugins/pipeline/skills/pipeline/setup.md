@@ -43,7 +43,10 @@ Most users want defaults for almost everything. Ask only what's genuinely a per-
 
 **What this does**: registers a git repo as a pipeline project. The orchestrator spawns sessions per registered project, and `/queue` / `/pipeline` commands default to the project derived from your current git repo.
 
-**Default**: register the project you're currently in (`git rev-parse --show-toplevel`; basename → project name).
+**Default**: register the root of the project you're currently in. Use the main
+working tree when Git reports a common `/.git` directory, and the worktree root
+otherwise. See the [project lookup rules](../../REFERENCE.md#project-lookup-from-a-git-working-tree).
+Suggest the root directory's basename as the registration name.
 
 **If you skip**: the orchestrator has nothing to do — you can register projects later with `pipeline project-add <name> <abs-path>`. Without at least one registered project, `/queue` will refuse with "not a registered project".
 
@@ -134,36 +137,13 @@ Pass the hook path as `--merge-hook <abs-path>` (or omit to leave unset).
 
 ### Question 3c — on_merge hook
 
-**Always ASK this question** — pairs with Q3b. If the user wired up `on_merge_ready` to open a PR, they almost certainly want `on_merge` to merge that PR via the platform's API rather than fall back to a local squash. Asking the two as a related cluster keeps the merge workflow coherent.
+Ask whether the user has a custom script for branches without an open GitHub PR. The merge runner handles open GitHub PRs directly.
 
-**What this does**: replaces the pipeline's local squash merge with a custom script. The hook receives four env vars (`PIPELINE_PROJECT`, `PIPELINE_FEATURE`, `PIPELINE_BRANCH`, `PIPELINE_TARGET_BRANCH`) and is responsible for performing the actual merge. When unset, the pipeline squash-merges locally as usual.
+The custom script owns the merge when invoked. See the [hook contract](../../REFERENCE.md#on_merge-hook) for its working directory, environment variables and follow-up steps.
 
-**Default**: disabled (local squash merge used).
-
-**If you skip**: the pipeline squash-merges the branch to the target branch locally and pushes. GitHub/Bitbucket won't show the PR as "merged" — the PR will close when the branch is deleted.
-
-**If you set it**: the hook fully owns the merge step. A common hook for GitHub repos:
-
-```js
-// ~/.pipeline/hooks/on-merge.mjs
-import { spawnSync } from "node:child_process";
-import { join } from "node:path";
-import { homedir } from "node:os";
-const gh = join(homedir(), ".local", "bin", process.platform === "win32" ? "gh.exe" : "gh");
-const branch = process.env.PIPELINE_BRANCH;
-const result = spawnSync(gh, ["pr", "merge", branch, "--squash", "--delete-branch", "--auto"], {
-  stdio: "inherit",
-  env: { ...process.env, PATH: `${join(homedir(), ".local", "bin")};${process.env.PATH}` },
-});
-process.exit(result.status ?? 1);
-```
+The hook is disabled by default. With no hook and no open GitHub PR, the runner squashes locally and pushes the target.
 
 **Before asking**: check whether `~/.pipeline/hooks/on-merge.mjs` already exists. If it does and `hooks.on_merge` is not already set in config, say: "Found existing hook at `~/.pipeline/hooks/on-merge.mjs` — wire this into config? [Y/n]". On yes, use that path directly and skip the question below. On no, proceed with the normal question.
-
-**Ask the user** whether they want to use a GitHub PR merge or keep the local squash. Common answers:
-- **"GitHub PR merge"** — write the above hook to `~/.pipeline/hooks/on-merge.mjs` and pass `--on-merge <path>`.
-- **"Keep local squash"** — omit `--on-merge`.
-- **"I have a script already"** — ask for the path and use it directly.
 
 Pass the hook path as `--on-merge <abs-path>` (or omit to keep local squash).
 
@@ -436,69 +416,6 @@ Options:
 - "PATH alias only — I'll start the orchestrator myself"
 - "Neither — I'll wire it all up by hand"
 
-## Step 2 — Build the command
+## Run and verify setup
 
-Assemble flags from answers. Show the user **the full command including the flags they didn't choose** so they see the defaults that are about to be applied:
-
-```
-pipeline setup --non-interactive
-  [--register-project <name>:<absolute-path>]
-  [--worktree-layout 1|2] [--worktree-base "<template>"]
-  [--slack <channel>]
-  [--pipeline-channel <channel>]
-  [--governance-channel <channel>]
-  [--models dev_default=...,review_default=...,governor=...]
-  [--review-skill <name>]
-  [--review-deep-flag <flag>]
-  [--plans-dir <template>]
-  [--merge-hook <abs-path>]
-  [--on-merge <abs-path>]
-  [--merge-check <abs-path>]
-  [--recognised-branch-types <list>]
-  [--no-deps]
-  [--no-autostart]
-  [--no-path-alias]
-  [--continue-on-failed-prechecks]
-```
-
-Wait for confirmation before running. The setup writes to `~/.pipeline/config.json` and your shell profile — the user must see what's about to happen.
-
-## Step 3 — Run it
-
-```bash
-node "$PIPELINE_BIN" setup --non-interactive <flags>
-```
-
-Stream the output (it walks the 11 wizard steps). It should end with:
-
-> All checks passed.
-> Setup complete!
-
-If a check fails, surface it and offer either to re-run with `--continue-on-failed-prechecks` (proceed despite warnings) or to fix the underlying issue first. The most common failures:
-
-- **No git on PATH** — install Git.
-- **Node < 22** — pipeline needs `node:sqlite` which is 22+. Upgrade or use `nvm use 22`.
-- **Already-registered project's root_path is missing** — earlier demo crash leftover; `pipeline project-remove <name> --purge` clears it.
-
-## Step 4 — Tell them what's next
-
-After success, summarise what just changed and what they can do now:
-
-- `~/.pipeline/config.json` written (models, Slack channels, project list)
-- `~/.pipeline/pipeline.db` is the SQLite DB the orchestrator + dashboards read
-- Orchestrator autostart entry installed (if they chose)
-- `pipeline` PATH alias added to shell profile (if they chose) — **restart their shell** for the interactive alias to take effect; the `~/.local/bin` shim works immediately
-- At least one project registered (if they chose)
-
-Suggested next moves:
-
-- `pipeline doctor` to confirm everything's wired (works without shell restart via the shim)
-- `/pipeline demo` to see the full lifecycle end-to-end with narration
-- `/queue <plan-file> dev` to queue real work in a registered project
-
-## Anti-patterns
-
-- **Don't run the wizard directly.** It hangs without a TTY. Always pass `--non-interactive`.
-- **Don't ask every question with no context.** Every question gets the what/default/implication trio so the user knows what they're agreeing to.
-- **Don't ask about every single model.** Defaults are good; only ask when the user has a reason.
-- **Don't proceed without showing the assembled command.** Setup writes to `~/.pipeline/config.json` and shell profile — the user must see what's about to happen.
+After collecting the setup choices, follow [the setup command and verification steps](setup-run.md).

@@ -196,7 +196,7 @@ Written to `~/.pipeline/config.json` by `pipeline setup`. All keys are optional 
 | `notifications.pipeline_channel` | string \| null | `null` | Separate channel for per-row orchestrator events; falls back to `governance_channel` if null |
 | `hooks.on_notification` | string \| null | `null` | Path to forwarder script — called once per envelope with the JSON file path as its only argv |
 | `hooks.on_merge_ready` | string \| null | `null` | Path to hook script — called when a row reaches `stage=merge`; receives env vars (no argv) |
-| `hooks.on_merge` | string \| null | `null` | Path to hook script — delegates the squash merge to the hook when the branch has no open PR; receives four env vars (no argv); hook owns the git operation |
+| `hooks.on_merge` | string \| null | `null` | Path to the hook that owns the merge when no open PR is detected. See the [hook contract](#on_merge-hook) for cwd and environment variables. |
 | `hooks.merge_check` | string \| null | `null` | Path to hook script — invoked per `merge`-stage row each poll; exit 0 = "branch's PR is merged on the remote" → row advances to `done`. Sole mechanism for UI-merge detection (platform-agnostic) |
 | `autoMerge` | boolean | `false` | When `true`, the orchestrator automatically spawns the merge agent for rows at `stage=merge` |
 | `review.skill` | string | `"/code-review"` | Slash-command invoked by review sessions |
@@ -324,11 +324,12 @@ Fires at the point of merge — invoked by `merge.mjs` (step 5) for a branch bei
 { "hooks": { "on_merge": "/abs/path/to/hook.mjs" } }
 ```
 
-The hook receives four environment variables:
+The hook receives these environment variables:
 
 | Variable | Value |
 |----------|-------|
 | `PIPELINE_PROJECT` | Project name |
+| `PIPELINE_PROJECT_ROOT` | The absolute merge directory, also used as the hook's cwd |
 | `PIPELINE_FEATURE` | Feature slug |
 | `PIPELINE_BRANCH` | Full branch name (e.g. `autonomous/fix-login-bug`) |
 | `PIPELINE_TARGET_BRANCH` | Merge target |
@@ -337,7 +338,7 @@ The hook receives four environment variables:
 
 1. If `gh pr list --head <branch> --state open` finds a PR, `merge.mjs` runs `gh pr merge <number> --squash --admin` and fast-forwards local target to `origin/<target>`. The hook is not consulted.
 2. Otherwise, if `on_merge` is set, it checks whether the branch has any commits ahead of the target. If already integrated (0 ahead), it fast-forwards local target to `origin/<target>` and skips the hook.
-3. If there are commits to merge, `merge.mjs` invokes the hook (which does `gh pr merge --squash` on origin), then fast-forwards local target to `origin/<target>` so `local == origin` and the next merge starts clean.
+3. If there are commits to merge, `merge.mjs` invokes the hook. The hook can merge locally or on origin. The runner then attempts to fast-forward the local target to `origin/<target>` and pushes the resulting local commit in step 7b.
 
 This prevents the double-squash problem where a local commit and an origin GitHub commit diverge after the merge.
 
@@ -428,6 +429,12 @@ Every config-driven path key in the plugin is resolved through one helper:
 
 Hook values are command strings — only the first whitespace-separated token is routed through `resolveTemplate`; trailing argv passes through unchanged.
 
+### Project lookup from a Git working tree
+
+`resolveProjectFromPath(dir, { rows })` in `src/project-from-path.mjs` accepts a directory inside a Git working tree and optional enabled project rows shaped as `{ name, root_path }`. It returns `{ project, projectRoot, worktreeRoot, registered }` and throws outside a working tree.
+
+When `git rev-parse --path-format=absolute --git-common-dir` ends in `/.git`, look up its parent first. If there is no match, look up `git rev-parse --show-toplevel`, which also supports a registered linked worktree. Compare paths after normalising separators and trailing slashes and folding case on Windows. With no matching row, the resolver returns the main root when available, otherwise the worktree root, and uses its basename as `project` with `registered: false`.
+
 ### Placeholder vocabulary
 
 | Placeholder | Source |
@@ -435,7 +442,7 @@ Hook values are command strings — only the first whitespace-separated token is
 | `{root}`             | `projectRoot` |
 | `{root_parent}`      | `dirname(projectRoot)` |
 | `{root_grandparent}` | `dirname(dirname(projectRoot))` |
-| `{project}`          | project name (or `basename(projectRoot)`) |
+| `{project}`          | project name supplied by the caller, with a path basename fallback when omitted |
 | `{feature}`          | row feature / plan stem |
 | `{kind}`             | `code-review` / `qa-test` |
 | `{branch}`           | full branch name |
@@ -452,7 +459,7 @@ The canonical exported list is `PLACEHOLDER_KEYS` in `src/worktree-paths.mjs`; a
 | Helper | Template key | Default | Notes |
 |---|---|---|---|
 | `featureWorktreePath({ project, projectRoot, feature })` | `cfg.worktree_base` | `{root_parent}/.worktrees/{project}/{feature}` | Phase 3b canonical per-feature worktree — one worktree shared across dev / research / review / test / merge. Branch-context placeholders substitute to `""` when called without one. |
-| `orchestratorWorktreePath({ project, projectRoot, branch })` | `cfg.orchestrator_worktree_base` | `{root_parent}/{project}-wt/{branch_type}-{branch_local}` | Deprecated compat wrapper (emits one-shot `console.warn`). Retained only so `tests/worktree-paths.test.mjs` can pin pre-3b parity; production callers must use `featureWorktreePath`. |
+| `orchestratorWorktreePath({ project, projectRoot, branch })` | `cfg.orchestrator_worktree_base` | `{root_parent}/{project}-wt/{branch_type}-{branch_local}` | Deprecated compatibility wrapper (emits one-shot `console.warn`). Use `featureWorktreePath` for current feature worktrees. |
 | `handlerWorktreePath({ project, projectRoot, kind, feature })` | `cfg.handler_worktree_base` | `{root_parent}/.worktrees/{kind}-{feature}` | Deprecated compat wrapper (emits one-shot `console.warn`). Retained for the same reason; do not introduce new call sites. |
 
 All three flow through `resolveTemplate` with `resolveBase = projectRoot`, so the placeholder vocabulary, `~/` expansion, and absolute-vs-relative classification are identical across them.
@@ -465,7 +472,7 @@ Resolution chains for external binaries (e.g. claude-slack) live under `src/loca
 
 ## Worktree paths
 
-The orchestrator creates one worktree per feature, shared by every pipeline-managed session for that feature (dev, research, review, test, merge). `pipeline review-complete` and `pipeline test-complete` write their reports into that same worktree and publish them to side-branches — there are no separate handler worktrees any more. The path is template-driven via config:
+The orchestrator creates one worktree per feature, shared by its dev, research, review and test sessions. See the [merge layer](#merge-layer) for the checkout used by the merge itself. `pipeline review-complete` and `pipeline test-complete` write their reports into that same worktree and publish them to side-branches. The path is template-driven via config:
 
 | Config key | Default | What it resolves to |
 |---|---|---|
@@ -479,7 +486,7 @@ Placeholders:
 |---|---|
 | `{root}` | Registered project's `root_path` (absolute) |
 | `{root_parent}` | `dirname(root_path)` |
-| `{project}` | Registered project name (falls back to `basename(root_path)` if unset) |
+| `{project}` | Project name supplied by the caller, with a path basename fallback when omitted |
 | `{branch}` | Full branch name (branch-context templates only — `worktree_base` substitutes `""`), e.g. `autonomous/foo` |
 | `{branch_type}` | First slash-segment of branch (branch-context templates only), e.g. `autonomous` |
 | `{branch_local}` | Branch name with first slash-segment stripped (branch-context templates only), e.g. `foo` |
@@ -506,8 +513,8 @@ A **plan** is a markdown file describing what to build. The pipeline doesn't car
 ```
 
 This invokes the `/queue` skill, which:
-1. Resolves the project from your current git repo (`git rev-parse --show-toplevel` → basename → project name).
-2. Verifies the project is registered (`pipeline project-list`).
+1. Finds the registered project for your current checkout using the [project lookup rules](#project-lookup-from-a-git-working-tree).
+2. Requires a matching row from `pipeline project-list`.
 3. Resolves the plan-file path (see resolution rules below).
 4. Runs `pipeline queue-plan <project> <abs-path> --type dev` for you.
 5. Reports the row + tells you where to watch.
@@ -653,6 +660,12 @@ node plugins/pipeline/skills/merge/scripts/merge.mjs \
   [--parent <umbrella-plan>] \
   [--skip-smoke] [--skip-testing] [--dry-run] [--no-rebase]
 ```
+
+**Project resolution.** `run-merge.mjs` uses the [project resolver](#project-lookup-from-a-git-working-tree) for the project name and default merge directory. It uses a matching registry row's plans directory when configured, along with the usual target branch precedence.
+
+**Where it runs.** The driver passes the resolved project root as `--project-dir`. An explicit flag supplies the merge directory and resolves relative paths against the invoking directory. The merge and its `on_merge` hook use that directory, with the hook receiving it as both `cwd` and `PIPELINE_PROJECT_ROOT`. When the target branch is checked out in another worktree, the checkout failure names that worktree.
+
+**Push verification.** Step 7b captures the current `HEAD` commit and pushes that SHA to the target branch on `origin`. It fetches the target from origin's fetch URL and verifies that the pushed commit is an ancestor of the updated tracking ref. A newer remote commit passes if it contains the pushed commit. With no origin configured, step 7b skips the push.
 
 Plan file paths are read from the pipeline DB row (stored at queue time). `--plans-dir` is used only as a fallback for rows that predate DB-stored paths. Default: `<project-dir>/plans/`.
 

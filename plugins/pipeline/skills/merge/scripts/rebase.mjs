@@ -3,8 +3,9 @@
 // _git_*_with_retry, _detect_default_branch, step_0a_rebase.
 import { spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
-import { join, dirname, basename } from "node:path";
+import { join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
+import { featureWorktreePath } from "../../../src/worktree-paths.mjs";
 
 export class GitError extends Error {}
 
@@ -16,11 +17,11 @@ export function runGit(args, cwd, { check = true, capture = true } = {}) {
     stdio: capture ? ["pipe", "pipe", "pipe"] : ["inherit", "inherit", "inherit"],
   });
   const stdout = result.stdout ?? "";
-  const stderr = result.stderr ?? "";
+  const stderr = result.stderr ?? result.error?.message ?? "";
   if (check && result.status !== 0) {
     throw new GitError(`git ${args.join(" ")} failed in ${cwd}:\n${stderr.trim()}`);
   }
-  return { code: result.status ?? 0, stdout, stderr };
+  return { code: result.status ?? 1, stdout, stderr };
 }
 
 // ── Lock retry ─────────────────────────────────────────────────────────────────
@@ -129,11 +130,11 @@ export function detectDefaultBranch(projectDir) {
 
 // ── Step 0a ────────────────────────────────────────────────────────────────────
 
-export async function step0aRebase(projectDir, branches, targetBranch = "main") {
+export async function step0aRebase(projectRoot, project, branches, targetBranch) {
   for (const branch of branches) {
     const slug = branch.startsWith("autonomous/") ? branch.slice("autonomous/".length) : branch;
-    const wt = join(dirname(projectDir), `${basename(projectDir)}-wt`, `autonomous-${slug}`);
-    const target = existsSync(wt) ? wt : projectDir;
+    const wt = featureWorktreePath({ project, projectRoot, feature: slug });
+    const target = existsSync(wt) ? wt : projectRoot;
 
     process.stdout.write(`[0a] Rebasing ${branch} on ${targetBranch} (in ${target})\n`);
 

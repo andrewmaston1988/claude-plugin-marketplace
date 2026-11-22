@@ -3,7 +3,7 @@
 export function mergeSessionPrompt({ branch, pluginRoot, projectRoot, targetBranch, mergeScript, sessionSlug, plansDirFlag }) {
   return [
     `Run the merge for ${branch}.`,
-    `plugin-root: ${pluginRoot}. project-dir: ${projectRoot}.`,
+    `plugin-root: ${pluginRoot}. project-dir: ${projectRoot} (the registered project root, where the merge and its on_merge hook run).`,
     `branches: ${branch}`,
     `target-branch: ${targetBranch}`,
     ``,

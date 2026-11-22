@@ -1,6 +1,6 @@
 // Step 5 of merge.mjs — squash-merge each branch: an open PR via gh, else the on_merge hook, else a local squash.
 import { existsSync, readFileSync } from "node:fs";
-import { join, basename } from "node:path";
+import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 
 import { rowUpdate } from "../../../src/db/index.mjs";
@@ -15,17 +15,19 @@ import { branchSlug } from "./plan-files.mjs";
 import { cleanupBranch } from "./land.mjs";
 import { loadPipelineConfig } from "../../../src/pipeline-config.mjs";
 import { getPaths } from "../../../src/paths.mjs";
-import { orchestratorWorktreePath, resolveHookFirstToken } from "../../../src/worktree-paths.mjs";
+import { featureWorktreePath, resolveHookFirstToken } from "../../../src/worktree-paths.mjs";
 
 export function logOut(msg) { process.stdout.write(msg + "\n"); }
 export function logErr(msg) { process.stderr.write(msg + "\n"); }
 
-function worktreePath(projectDir, slug) {
-  return orchestratorWorktreePath({
-    project: basename(projectDir),
-    projectRoot: projectDir,
-    branch: `autonomous/${slug}`,
-  });
+function worktreeHoldingBranch(projectRoot, branch) {
+  const { stdout } = runGit(["worktree", "list", "--porcelain", "-z"], projectRoot, { check: false });
+  let worktree = null;
+  for (const field of stdout.split("\0")) {
+    if (field.startsWith("worktree ")) worktree = field.slice("worktree ".length);
+    else if (field === `branch refs/heads/${branch}`) return worktree;
+  }
+  return null;
 }
 
 // ── Step 5 — Squash merge each branch ────────────────────────────────────────
@@ -85,10 +87,14 @@ export function verifyAlreadyIntegrated(planPath, projectDir) {
 // the imported spawnSync.
 const _defaultSpawn = (...args) => spawnSync(...args);
 
-export async function step5SquashMerge(db, project, projectDir, branches, planFiles, targetBranch = "main", { spawn = _defaultSpawn } = {}) {
-  const co = await gitCheckoutWithRetry(projectDir, targetBranch);
+export async function step5SquashMerge(db, project, projectRoot, branches, planFiles, targetBranch = "main", { spawn = _defaultSpawn } = {}) {
+  const co = await gitCheckoutWithRetry(projectRoot, targetBranch);
   if (co.code !== 0) {
-    process.stderr.write(`BLOCKER: target branch '${targetBranch}' not found\n`);
+    const worktree = worktreeHoldingBranch(projectRoot, targetBranch);
+    const reason = worktree
+      ? `'${targetBranch}' is checked out in '${worktree}'`
+      : `cannot checkout target branch '${targetBranch}'`;
+    process.stderr.write(`BLOCKER: ${reason}\n`);
     process.stderr.write((co.stderr || "").trim() + "\n");
     throw new GitError(`checkout ${targetBranch} failed`);
   }
@@ -105,11 +111,11 @@ export async function step5SquashMerge(db, project, projectDir, branches, planFi
     // disambiguation in `gh pr merge <branch>` and missing --admin on
     // branch-protected repos) — see plan merge-skip-hook-for-pr. PR merges
     // always go through `gh pr merge <number> --squash --admin`.
-    const pr = findOpenPR(branch, projectDir, { spawn });
+    const pr = findOpenPR(branch, projectRoot, { spawn });
     if (pr) {
       logOut(`[5] Open PR found (#${pr.number}) for ${branch} — using gh pr merge`);
       const mergeResult = spawn("gh", ["pr", "merge", String(pr.number), "--squash", "--admin"], {
-        cwd: projectDir,
+        cwd: projectRoot,
         stdio: "inherit",
         windowsHide: true,
       });
@@ -118,8 +124,8 @@ export async function step5SquashMerge(db, project, projectDir, branches, planFi
       }
       logOut(`[5] PR #${pr.number} merged via gh pr merge`);
       // Fast-forward local target to origin — the PR merge happened on remote
-      runGit(["fetch", "origin", targetBranch], projectDir, { check: false });
-      const ffPost = runGit(["merge", "--ff-only", `origin/${targetBranch}`], projectDir, { check: false });
+      runGit(["fetch", "origin", targetBranch], projectRoot, { check: false });
+      const ffPost = runGit(["merge", "--ff-only", `origin/${targetBranch}`], projectRoot, { check: false });
       if (ffPost.code !== 0) logErr(`[5] WARN: ff-sync failed after gh pr merge: ${ffPost.stderr.trim()}`);
     } else if (onMergeHook) {
       // No PR — fall through to the operator hook for local-merge handling.
@@ -128,7 +134,7 @@ export async function step5SquashMerge(db, project, projectDir, branches, planFi
       // double-merge that leaves local and origin in diverging states.
       const aheadResult = runGit(
         ["rev-list", "--left-right", "--count", `${targetBranch}...${branch}`],
-        projectDir, { check: false },
+        projectRoot, { check: false },
       );
       const aheadCount = aheadResult.code === 0
         ? parseInt(aheadResult.stdout.trim().split(/\s+/)[1] ?? "0", 10)
@@ -136,34 +142,33 @@ export async function step5SquashMerge(db, project, projectDir, branches, planFi
 
       if (aheadCount === 0) {
         logOut(`[5] ${branch} has 0 commits ahead of ${targetBranch} — already integrated, skipping hook`);
-        runGit(["fetch", "origin", targetBranch], projectDir, { check: false });
-        const ffSkip = runGit(["merge", "--ff-only", `origin/${targetBranch}`], projectDir, { check: false });
+        runGit(["fetch", "origin", targetBranch], projectRoot, { check: false });
+        const ffSkip = runGit(["merge", "--ff-only", `origin/${targetBranch}`], projectRoot, { check: false });
         if (ffSkip.code !== 0) logErr(`[5] WARN: ff-sync failed after already-integrated skip: ${ffSkip.stderr.trim()}`);
       } else {
         // Delegate the merge to hooks.on_merge — it owns the git operation.
         // Env vars match the on_merge_ready pattern for consistency.
-        // Before changing where or how the hook runs, read a real installed hook,
-        // e.g. the one `hooks.on_merge` in ~/.pipeline/config.json points at. Client
-        // hooks rely on this exact contract: the operator's one squash-commits into
-        // its cwd on main without pushing and deletes the branch, trusting step 7b to
-        // push. Moving its cwd off main (#485, reverted) silently dropped that commit.
+        // Client hooks rely on this contract: the hook may squash-commit into its cwd
+        // (the project root, on the target) without pushing, trusting step 7b to push.
+        // Running it anywhere else silently drops that commit (#485, reverted in #488).
         logOut(`[5] Invoking hooks.on_merge for ${branch}`);
         const env = {
           ...process.env,
           PIPELINE_PROJECT: project,
+          PIPELINE_PROJECT_ROOT: projectRoot,
           PIPELINE_FEATURE: slug,
           PIPELINE_BRANCH: branch,
           PIPELINE_TARGET_BRANCH: targetBranch,
         };
-        const result = spawnSync(process.execPath, [onMergeHook], { env, stdio: "inherit" });
+        const result = spawn(process.execPath, [onMergeHook], { cwd: projectRoot, env, stdio: "inherit" });
         if (result.status !== 0) {
           throw new GitError(`hooks.on_merge failed for ${branch} (exit ${result.status})`);
         }
         logOut(`[5] hooks.on_merge completed for ${branch}`);
         // Fast-forward local target to origin — the hook merged via gh pr merge on
         // origin, so local master is now behind by one squash commit.
-        runGit(["fetch", "origin", targetBranch], projectDir, { check: false });
-        const ffPost = runGit(["merge", "--ff-only", `origin/${targetBranch}`], projectDir, { check: false });
+        runGit(["fetch", "origin", targetBranch], projectRoot, { check: false });
+        const ffPost = runGit(["merge", "--ff-only", `origin/${targetBranch}`], projectRoot, { check: false });
         if (ffPost.code !== 0) logErr(`[5] WARN: ff-sync failed after hook merge: ${ffPost.stderr.trim()}`);
       }
     } else {
@@ -171,7 +176,7 @@ export async function step5SquashMerge(db, project, projectDir, branches, planFi
 
       const aheadBehind = runGit(
         ["rev-list", "--left-right", "--count", `${targetBranch}...${branch}`],
-        projectDir, { check: false },
+        projectRoot, { check: false },
       );
       const ahead = aheadBehind.code === 0
         ? parseInt(aheadBehind.stdout.trim().split(/\s+/)[1], 10)
@@ -181,7 +186,7 @@ export async function step5SquashMerge(db, project, projectDir, branches, planFi
       if (ahead === 0) {
         logOut(`[5] ${branch} is already integrated into ${targetBranch} — verifying`);
         const planPath = planFiles[branch];
-        const guardBlockers = verifyAlreadyIntegrated(planPath, projectDir);
+        const guardBlockers = verifyAlreadyIntegrated(planPath, projectRoot);
         if (guardBlockers.length) {
           for (const b of guardBlockers) logErr(`BLOCKER: ${b}`);
           throw new GitError(
@@ -192,7 +197,7 @@ export async function step5SquashMerge(db, project, projectDir, branches, planFi
         logOut(`[5] ${branch} verified as integrated — skipping squash merge, running cleanup`);
         alreadyIntegrated = true;
       } else {
-        const mergeResult = await gitMergeSquashWithRetry(projectDir, branch);
+        const mergeResult = await gitMergeSquashWithRetry(projectRoot, branch);
         if (mergeResult.code !== 0) {
           const combined = (mergeResult.stdout + mergeResult.stderr).toLowerCase();
           if (combined.includes("already up to date") || combined.includes("nothing to commit")) {
@@ -205,12 +210,12 @@ export async function step5SquashMerge(db, project, projectDir, branches, planFi
       }
 
       if (!alreadyIntegrated) {
-        const message = _writeCommitMessage(projectDir, branch, planFiles[branch], targetBranch);
-        await gitCommitWithRetry(projectDir, "-m", message);
-        const commitHash = runGit(["rev-parse", "--short", "HEAD"], projectDir).stdout.trim();
+        const message = _writeCommitMessage(projectRoot, branch, planFiles[branch], targetBranch);
+        await gitCommitWithRetry(projectRoot, "-m", message);
+        const commitHash = runGit(["rev-parse", "--short", "HEAD"], projectRoot).stdout.trim();
         logOut(`[5] Committed ${commitHash}`);
       } else {
-        const commitHash = runGit(["rev-parse", "--short", "HEAD"], projectDir, { check: false }).stdout.trim();
+        const commitHash = runGit(["rev-parse", "--short", "HEAD"], projectRoot, { check: false }).stdout.trim();
         logOut(`[5] ${branch} cleanup path — head at ${commitHash}, no new commit`);
       }
     }
@@ -225,6 +230,7 @@ export async function step5SquashMerge(db, project, projectDir, branches, planFi
     }
 
     // Cleanup worktree and local branch — shared regardless of merge path.
-    await cleanupBranch(projectDir, branch, worktreePath(projectDir, slug), { log: logOut, err: logErr });
+    const worktree = featureWorktreePath({ project, projectRoot, feature: slug, _config: cfg });
+    await cleanupBranch(projectRoot, branch, worktree, { log: logOut, err: logErr });
   }
 }

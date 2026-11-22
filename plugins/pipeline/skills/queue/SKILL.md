@@ -16,11 +16,8 @@ The first word is the plan file path (absolute, a cwd-relative path, or a bare f
 
 ## Step 1 — Resolve the project
 
-```bash
-git rev-parse --show-toplevel
-```
-
-Use the resulting path's last segment as the **project name**. Verify it's a registered project:
+Use the [project lookup rules](../../REFERENCE.md#project-lookup-from-a-git-working-tree)
+to match your checkout against the registered project list.
 
 ```bash
 pipeline project-list --format json

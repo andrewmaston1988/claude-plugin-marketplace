@@ -10,6 +10,11 @@ run tests.
 
 **Branches to merge:** $ARGUMENTS
 
+Run it from the project checkout or a linked worktree. The driver resolves the
+project root, which is where the merge and its `on_merge` hook run by default.
+See the [merge reference](../../REFERENCE.md#merge-layer) for project lookup,
+the directory override and push verification.
+
 `scripts/run-merge.mjs` owns the mechanics: root and branch resolution, the
 target-branch lookup, the `rebase_required` and `(needs testing)` pre-checks,
 model selection, and building the merge invocation. Your job is a loop — run it,

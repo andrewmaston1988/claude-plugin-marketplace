@@ -9,9 +9,9 @@
 // reads a fake config.
 import "./helpers/isolate-home.mjs";
 import { test } from "node:test";
-import { ok, equal } from "node:assert/strict";
+import { ok, equal, deepEqual, rejects } from "node:assert/strict";
 import {
-  mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync,
+  mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync, readFileSync,
 } from "node:fs";
 import { join, basename, dirname } from "node:path";
 import { tmpdir } from "node:os";
@@ -19,9 +19,7 @@ import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
 import { connectPath, close, projectAdd, rowAdd, rowUpdate } from "../src/db/index.mjs";
 
-// Capture every gh-related spawn call; let everything else (git) fall
-// through to real spawnSync. The caller provides a PR list response that
-// `findOpenPR` will receive.
+// Record GH calls without running the CLI. Other commands still run locally.
 function makeFakeSpawn({ prList = [], failMerge = false } = {}) {
   const calls = [];
   function fakeSpawn(cmd, args, opts) {
@@ -32,11 +30,7 @@ function makeFakeSpawn({ prList = [], failMerge = false } = {}) {
     if (cmd === "gh" && args[0] === "pr" && args[1] === "merge") {
       return { status: failMerge ? 1 : 0, stdout: "", stderr: failMerge ? "boom" : "" };
     }
-    if (cmd === "gh") {
-      // unknown gh subcommand — let real gh handle it (uncommon in step5)
-      return spawnSync(cmd, args, { ...opts, encoding: opts?.encoding ?? "utf8" });
-    }
-    // git or anything else — real spawnSync
+    if (cmd === "gh") throw new Error(`Unexpected gh command: ${args.join(" ")}`);
     return spawnSync(cmd, args, { ...opts, encoding: opts?.encoding ?? "utf8" });
   }
   fakeSpawn.calls = calls;
@@ -135,7 +129,7 @@ test("step5: open PR + on_merge hook → uses gh pr merge directly, bypasses hoo
 });
 
 // ── Test 2: no PR + hook configured → hook IS called (existing local path). ──
-test("step5: no open PR + on_merge hook → hook is invoked (regression guard)", async () => {
+test("step5 runs the on_merge hook with the project root as cwd and in its environment", async () => {
   const repoTmp = mkdtempSync(join(tmpdir(), "merge-step5-repo-"));
   const cfgTmp = mkdtempSync(join(tmpdir(), "merge-step5-cfg-"));
   let hookCalledPath;
@@ -146,7 +140,7 @@ test("step5: no open PR + on_merge hook → hook is invoked (regression guard)",
     const hookPath = join(cfgTmp, "fake-hook.mjs");
     writeFileSync(hookPath, [
       "import { writeFileSync } from 'node:fs';",
-      `writeFileSync(${JSON.stringify(hookCalledPath)}, 'called', 'utf8');`,
+      `writeFileSync(${JSON.stringify(hookCalledPath)}, JSON.stringify({ cwd: process.cwd(), root: process.env.PIPELINE_PROJECT_ROOT }));`,
     ].join("\n"), "utf8");
 
     const home = withFakeHome(cfgTmp);
@@ -166,7 +160,7 @@ test("step5: no open PR + on_merge hook → hook is invoked (regression guard)",
     }
 
     equal(thrown, undefined, `step5 should not throw; stderr=${thrown?.message}`);
-    ok(existsSync(hookCalledPath), "operator hook SHOULD have been called when no PR exists");
+    deepEqual(JSON.parse(readFileSync(hookCalledPath, "utf8")), { cwd: repoTmp, root: repoTmp });
     const ghCalls = fakeSpawn.calls.filter(c => c.cmd === "gh");
     const mergeCalls = ghCalls.filter(c => c.args[0] === "pr" && c.args[1] === "merge");
     equal(mergeCalls.length, 0, "no gh pr merge call expected when no PR exists");
@@ -211,6 +205,51 @@ test("step5: no open PR + no hook → local squash-merge path runs", async () =>
   }
 });
 
+test("step5 identifies the worktree holding the target branch", async (t) => {
+  const { tmp, repo } = makeRepoDir();
+  t.after(() => rmSync(tmp, { recursive: true, force: true }));
+  makeGitRepo(repo);
+  const other = join(tmp, "other checkout").replaceAll("\\", "/");
+  gitFixture(repo, "checkout", "--detach");
+  gitFixture(repo, "worktree", "add", other, "master");
+  const { step5SquashMerge } = await import("../skills/merge/scripts/merge.mjs");
+  const stderr = t.mock.method(process.stderr, "write", () => true);
+  await rejects(step5SquashMerge(null, "registered-project", repo, [], {}, "master"));
+  const blocker = stderr.mock.calls[0].arguments[0];
+  stderr.mock.restore();
+
+  ok(blocker.includes(`'master' is checked out in '${other}'`), blocker);
+});
+
+test("step5 cleans up the registered project's feature worktree", async (t) => {
+  const { tmp, repo } = makeRepoDir();
+  const home = makeHome();
+  t.after(() => {
+    rmSync(tmp, { recursive: true, force: true });
+    rmSync(home, { recursive: true, force: true });
+  });
+  const config = withFakeHome(home);
+  t.after(() => config.restore());
+  config.writeConfig({ worktree_base: "{root_parent}/trees/{project}/{feature}" });
+  makeGitRepo(repo);
+  const worktree = join(tmp, "trees", "registered-project", "feat-x");
+  gitFixture(repo, "worktree", "add", worktree, "autonomous/feat-x");
+
+  const { step5SquashMerge } = await import("../skills/merge/scripts/merge.mjs");
+  await step5SquashMerge(null, "registered-project", repo, ["autonomous/feat-x"], {}, "master", {
+    spawn: makeFakeSpawn(),
+  });
+
+  ok(!existsSync(worktree), "feature worktree should be removed");
+  equal(gitFixture(repo, "branch", "--list", "autonomous/feat-x"), "");
+});
+
+function gitFixture(repo, ...args) {
+  const r = spawnSync("git", ["-C", repo, ...args], { encoding: "utf8" });
+  equal(r.status, 0, r.stderr || r.error?.message);
+  return r.stdout.trim();
+}
+
 // ── Exit-code contract: a failed merge must never exit 0 ──────────────────────
 //
 // Callers branch on merge.mjs's exit code — run-merge.mjs hands the invocation to
@@ -245,9 +284,7 @@ function makeHome() {
   return home;
 }
 
-// merge.mjs takes the project name from basename(projectDir), and project names
-// are validated as [a-z0-9][a-z0-9_-]* — so the repo dir must be a fixed,
-// lowercase name inside the tmpdir, not the mkdtemp basename.
+// Unregistered checkouts use their directory name, which must be a valid project name.
 function makeRepoDir() {
   const tmp = mkdtempSync(join(tmpdir(), "merge-exit-"));
   const repo = join(tmp, "repo");
@@ -290,10 +327,9 @@ function runMerge(repo, home, branches, extraArgs = []) {
   });
 }
 
-function seedRow(home, repo, { feature = "feat-x", stage, qaPass = null } = {}) {
+function seedRow(home, repo, { project = basename(repo), feature = "feat-x", stage, qaPass = null } = {}) {
   const db = connectPath(dbFile(home));
   try {
-    const project = basename(repo);
     projectAdd(db, { name: project, rootPath: repo });
     rowAdd(db, project, {
       feature,
@@ -303,6 +339,26 @@ function seedRow(home, repo, { feature = "feat-x", stage, qaPass = null } = {}) 
     if (qaPass !== null) rowUpdate(db, project, feature, { qa_pass: qaPass });
   } finally { close(db); }
 }
+
+test("step0a rebases in the registered project's feature worktree", (t) => {
+  const { tmp, repo } = makeRepoDir();
+  const home = makeHome();
+  t.after(() => {
+    rmSync(tmp, { recursive: true, force: true });
+    rmSync(home, { recursive: true, force: true });
+  });
+  makeMergeRepo(repo, { plan: PLAN_MIN });
+  const project = "registered-project";
+  seedRow(home, repo, { project, stage: "queued" });
+  const worktree = join(tmp, ".worktrees", project, "feat-x");
+  gitFixture(repo, "worktree", "add", worktree, "autonomous/feat-x");
+  gitFixture(repo, "commit", "--allow-empty", "-m", "Advance master");
+  const r = runMerge(repo, home, "autonomous/feat-x");
+
+  equal(r.status, 4, `expected rebase success followed by the DoD blocker: ${r.stdout}\n${r.stderr}`);
+  ok(r.stderr.includes("pipeline stage is 'queued'"), r.stderr);
+  equal(gitFixture(worktree, "rev-parse", "HEAD^"), gitFixture(repo, "rev-parse", "HEAD"));
+});
 
 test("merge.mjs: step 0a failure exits non-zero, prints no success line", () => {
   const { tmp, repo } = makeRepoDir();

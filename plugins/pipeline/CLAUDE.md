@@ -36,7 +36,7 @@ All keys live in `~/.pipeline/config.json` and are deep-merged over `PIPELINE_DE
 
 ## Worktree layout
 
-**One worktree per feature.** As of phase 3b, every pipeline-managed session for a feature — dev, research, review, test, merge — operates inside a single git worktree at:
+**One worktree per feature.** As of phase 3b, every pipeline-managed dev, research, review and test session for a feature operates inside a single git worktree at:
 
 ```
 {root_parent}/.worktrees/{project}/{feature}

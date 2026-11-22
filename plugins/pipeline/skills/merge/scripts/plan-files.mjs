@@ -5,7 +5,7 @@ import { existsSync, readFileSync, writeFileSync, mkdirSync, renameSync, readdir
 import { join, basename, relative, dirname } from "node:path";
 import { runGit, gitAddWithRetry, gitCommitWithRetry } from "./rebase.mjs";
 import { rowGet, rowsList, rowUpdate } from "../../../src/db/index.mjs";
-import { orchestratorWorktreePath } from "../../../src/worktree-paths.mjs";
+import { featureWorktreePath } from "../../../src/worktree-paths.mjs";
 
 // ── Path helpers ───────────────────────────────────────────────────────────────
 
@@ -15,12 +15,8 @@ export function branchSlug(branch) {
 
 // Worktree the orchestrator created for the autonomous/<slug> branch. Internal
 // to the merge layer — public worktree resolution lives in worktree-paths.mjs.
-function planWorktree(projectDir, slug) {
-  return orchestratorWorktreePath({
-    project:     basename(projectDir),
-    projectRoot: projectDir,
-    branch:      `autonomous/${slug}`,
-  });
+function planWorktree(projectRoot, project, slug) {
+  return featureWorktreePath({ project, projectRoot, feature: slug });
 }
 
 // Per-row plan path lookup. After queue-plan started storing absolute paths,
@@ -41,8 +37,8 @@ export function sessionsDir(projectRoot) {
 
 // Return the plan file path inside the rebased branch's worktree, or null.
 // `plan_file` is the absolute path stored on the row; `slug` is the row key.
-export function branchPlanPath(projectDir, slug, planFile) {
-  const wt = planWorktree(projectDir, slug);
+export function branchPlanPath(projectRoot, project, slug, planFile) {
+  const wt = planWorktree(projectRoot, project, slug);
   if (!existsSync(wt)) return null;
   // Try the same relative location as on the operator's tree.
   const rel = planFile ? relative(dirname(planFile).split("plans")[0] || "/", planFile) : `plans/${slug}.md`;
@@ -148,11 +144,11 @@ function extractPlanFiles(planText) {
   return out;
 }
 
-function verifyPlanFilesInDiff(planText, branch, projectDir, targetBranch, project) {
+function verifyPlanFilesInDiff(planText, branch, projectRoot, targetBranch, project) {
   const claimed = extractPlanFiles(planText);
   if (!claimed.length) return [];
 
-  const result = runGit(["diff", "--name-only", `${targetBranch}...${branch}`], projectDir, { check: false });
+  const result = runGit(["diff", "--name-only", `${targetBranch}...${branch}`], projectRoot, { check: false });
   if (result.code !== 0) {
     return [`${branch}: content-verification: \`git diff\` failed (${result.stderr.trim() || "unknown error"})`];
   }
@@ -185,20 +181,20 @@ function verifyPlanFilesInDiff(planText, branch, projectDir, targetBranch, proje
 
 // ── Step 2 — Verify definition of done ────────────────────────────────────────
 
-export async function step2VerifyDone(db, planFiles, projectDir, project, { skipTesting = false, targetBranch = "main" } = {}) {
+export async function step2VerifyDone(db, planFiles, projectRoot, project, { skipTesting = false, targetBranch = "main" } = {}) {
   const blockers = [];
   const rows = db ? rowsList(db, project) : [];
   const rowMap = Object.fromEntries(rows.map(r => [r.feature, r]));
 
   for (const [branch, plan] of Object.entries(planFiles)) {
     const slug = branchSlug(branch);
-    const bp = branchPlanPath(projectDir, slug, plan);
+    const bp = branchPlanPath(projectRoot, project, slug, plan);
     const planToRead = bp || plan;
 
     if (planToRead && existsSync(planToRead)) {
       const text = readFileSync(planToRead, "utf8");
 
-      const verifyBlockers = verifyPlanFilesInDiff(text, branch, projectDir, targetBranch, project);
+      const verifyBlockers = verifyPlanFilesInDiff(text, branch, projectRoot, targetBranch, project);
       blockers.push(...verifyBlockers);
 
       const needsTestingRe = /^\s*[-*]\s+.*\(needs testing\)/gim;
@@ -208,7 +204,7 @@ export async function step2VerifyDone(db, planFiles, projectDir, project, { skip
           writeFileSync(planToRead, newText, "utf8");
           const count = (text.match(/^\s*[-*]\s+.*\(needs testing\)/gim) || []).length;
           if (bp && planToRead === bp) {
-            const wt = planWorktree(projectDir, slug);
+            const wt = planWorktree(projectRoot, project, slug);
             await gitAddWithRetry(wt, relative(wt, planToRead));
             await gitCommitWithRetry(wt, "-m", `[merge --skip-testing] mark (needs testing) -> (skipped) in ${slug} plan`);
           }
@@ -287,13 +283,13 @@ export function applyPlanStatusEdit(planPath, newStatusLine, oqRemovals = []) {
   writeFileSync(planPath, text, "utf8");
 }
 
-export async function step3UpdateStatus(planFiles, projectDir, project, { testRefs = {}, mergeDate = null } = {}) {
+export async function step3UpdateStatus(planFiles, projectRoot, project, { testRefs = {}, mergeDate = null } = {}) {
   const today = mergeDate || new Date().toISOString().slice(0, 10);
 
   for (const [branch, plan] of Object.entries(planFiles)) {
     if (!plan) continue;
     const slug = branchSlug(branch);
-    const bp = branchPlanPath(projectDir, slug, plan);
+    const bp = branchPlanPath(projectRoot, project, slug, plan);
     const planToEdit = bp || plan;
 
     process.stdout.write(`[3] Updating Current Status for ${branch}\n`);
@@ -305,7 +301,7 @@ export async function step3UpdateStatus(planFiles, projectDir, project, { testRe
     applyPlanStatusEdit(planToEdit, statusLine, []);
 
     if (bp && planToEdit === bp) {
-      const wt = planWorktree(projectDir, slug);
+      const wt = planWorktree(projectRoot, project, slug);
       await gitAddWithRetry(wt, relative(wt, planToEdit));
       await gitCommitWithRetry(wt, "-m", `[merge] update ${slug} Current Status post-test`);
     }

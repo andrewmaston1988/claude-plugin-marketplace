@@ -1,7 +1,8 @@
 ---
 name: pipeline
-description: Use when the user wants to inspect or manage a project's pipeline, or run plugin onboarding (setup, demo). Triggers — "show pipeline status", "what's in flight", "is anything blocked", "rows in manual", "restore pipeline row", "/pipeline-setup", "/pipeline-demo". Subcommands: `/pipeline setup`, `/pipeline demo`, `/pipeline [<project>]`. SKIP for — queueing new work (use /queue).
-argument-hint: [setup | demo | <project>]
+description: >-
+  Use when the user wants to inspect or manage a project's pipeline, or run plugin onboarding (setup, demo). Triggers — "show pipeline status", "what's in flight", "is anything blocked", "rows in manual", "restore pipeline row", "/pipeline-setup", "/pipeline-demo". Subcommands: `/pipeline setup`, `/pipeline demo`, `/pipeline [<project>]`. SKIP for — queueing new work (use /queue).
+argument-hint: "[setup | demo | <project>]"
 ---
 
 Show the pipeline rows for a project, or run onboarding flows. Without an argument, derives the project from the current git repo.
@@ -26,13 +27,8 @@ Route based on the first token:
 
 ## Step 1 — Pick the project
 
-If `$ARGUMENTS` is empty:
-
-```bash
-git rev-parse --show-toplevel
-```
-
-Use the last path segment as the project name.
+If `$ARGUMENTS` is empty, match the current checkout to a registered project
+using the [project lookup rules](../../REFERENCE.md#project-lookup-from-a-git-working-tree).
 
 If `$ARGUMENTS` is present, use it as the project name.
 

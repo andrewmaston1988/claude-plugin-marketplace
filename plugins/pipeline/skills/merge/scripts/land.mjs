@@ -17,20 +17,36 @@ export async function cleanupBranch(projectDir, branch, wt, { log, err }) {
   else log(`[5] Deleted branch: ${branch}`);
 }
 
-// A merged target that stays local is discarded by the next sync to origin.
-// Returns false only when a push was owed and origin did not end up at HEAD.
-export function pushTarget(projectDir, targetBranch, { log, err }) {
-  if (runGit(["remote", "get-url", "origin"], projectDir, { check: false }).code !== 0) {
+// The push is complete only once origin contains the merged HEAD.
+export function pushTarget(projectRoot, targetBranch, { log, err, git = runGit }) {
+  if (git(["remote", "get-url", "origin"], projectRoot, { check: false }).code !== 0) {
     log("[7b] No origin remote — nothing to push");
     return true;
   }
-  const push = runGit(["push", "origin", targetBranch], projectDir, { check: false });
-  const local = runGit(["rev-parse", targetBranch], projectDir, { check: false }).stdout.trim();
-  const remote = runGit(["ls-remote", "origin", `refs/heads/${targetBranch}`], projectDir, { check: false }).stdout.split(/\s/)[0];
-  if (push.code !== 0 || remote !== local) {
+  const targetRef = `refs/heads/${targetBranch}`;
+  const trackingRef = `refs/remotes/origin/${targetBranch}`;
+  const head = git(["rev-parse", "--verify", "HEAD"], projectRoot, { check: false });
+  if (head.code !== 0) {
+    err(`BLOCKER: could not resolve HEAD before pushing ${targetBranch}: ${head.stderr.trim()}`);
+    return false;
+  }
+  const commit = head.stdout.trim();
+  const push = git(["push", "origin", `${commit}:${targetRef}`], projectRoot, { check: false });
+  if (push.code !== 0) {
     err(`BLOCKER: push of ${targetBranch} to origin failed — the merge is local only; push it by hand: ${push.stderr.trim()}`);
     return false;
   }
-  log(`[7b] Pushed ${targetBranch} to origin (${local.slice(0, 7)})`);
+  // Refresh the tracking ref from the fetch URL even when push used a different URL.
+  const fetch = git(["fetch", "origin", `+${targetRef}:${trackingRef}`], projectRoot, { check: false });
+  if (fetch.code !== 0) {
+    err(`BLOCKER: push verification for ${targetBranch} could not fetch origin: ${fetch.stderr.trim()}`);
+    return false;
+  }
+  const landed = git(["merge-base", "--is-ancestor", commit, trackingRef], projectRoot, { check: false });
+  if (landed.code !== 0) {
+    err(`BLOCKER: push verification failed for ${targetBranch}: ${commit} was not confirmed on origin/${targetBranch}. ${landed.stderr.trim()}`.trimEnd());
+    return false;
+  }
+  log(`[7b] Pushed ${targetBranch} to origin (${commit.slice(0, 7)})`);
   return true;
 }
