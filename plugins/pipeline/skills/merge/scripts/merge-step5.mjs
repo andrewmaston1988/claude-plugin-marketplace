@@ -148,6 +148,9 @@ export async function step5SquashMerge(db, project, projectRoot, branches, planF
       } else {
         // Delegate the merge to hooks.on_merge — it owns the git operation.
         // Env vars match the on_merge_ready pattern for consistency.
+        // Client hooks rely on this contract: the hook may squash-commit into its cwd
+        // (the project root, on the target) without pushing, trusting step 7b to push.
+        // Running it anywhere else silently drops that commit (#485, reverted in #488).
         logOut(`[5] Invoking hooks.on_merge for ${branch}`);
         const env = {
           ...process.env,
