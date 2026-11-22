@@ -10,6 +10,11 @@ run tests.
 
 **Branches to merge:** $ARGUMENTS
 
+Run it from the project checkout or any linked worktree of it: the project is the
+registered project of the repo's main working tree, not the folder name. The merge
+and the `on_merge` hook run in that main root; every push is checked to have landed
+HEAD on `origin/<target>`. A checkout matching no registered project is refused.
+
 `scripts/run-merge.mjs` owns the mechanics: root and branch resolution, the
 target-branch lookup, the `rebase_required` and `(needs testing)` pre-checks,
 model selection, and building the merge invocation. Your job is a loop — run it,

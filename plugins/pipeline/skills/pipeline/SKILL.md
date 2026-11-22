@@ -32,7 +32,7 @@ If `$ARGUMENTS` is empty:
 git rev-parse --show-toplevel
 ```
 
-Use the last path segment as the project name.
+The project is the registered project whose `root_path` is the main working tree (the parent of `git rev-parse --path-format=absolute --git-common-dir`), found in `pipeline project-list` — not the last path segment, which is wrong inside a linked worktree.
 
 If `$ARGUMENTS` is present, use it as the project name.
 
