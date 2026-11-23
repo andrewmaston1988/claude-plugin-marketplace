@@ -34,15 +34,38 @@ const cli = (w, args, cwd = w.dir) => runCliInProcess(args, { cwd, env: w.env, c
 const cleanup = (w) => rmSync(w.dir, { recursive: true, force: true });
 
 test("row 13: the verifier incident shape is refused, naming the edit tools and the shared tree", async () => {
-  const w = world([leaf({ id: "verify-a", role: "verifier", allowedTools: "Read,Edit,Write,Bash", workspace: "feat" })]);
+  const w = world([
+    leaf({ id: "build", allowedTools: "Read,Edit,Bash", workspace: "feat" }),
+    leaf({ id: "verify-a", role: "verifier", allowedTools: "Read,Edit,Write,Bash", workspace: "feat", after: ["build"] }),
+  ]);
   try {
     const r = await cli(w, ["validate", w.path]);
     equal(r.status, 1, r.stdout + r.stderr);
     ok(!r.stdout.includes("manifest OK"), `a refusal is never approved above it:\n${r.stdout}`);
     ok(r.stderr.includes("manifest validation failed:"), r.stderr);
     ok(r.stderr.includes('task \'verify-a\': role "verifier" may not hold edit tools'), r.stderr);
-    ok(r.stderr.includes("may not name a workspace"), r.stderr);
-    ok(r.stderr.includes('Drop "workspace"'), `the fix rides the message: ${r.stderr}`);
+    ok(r.stderr.includes("may not name a writers' tree"), r.stderr);
+    ok(r.stderr.includes('"id": "seed-verify-x"'), `the fix rides the message: ${r.stderr}`);
+  } finally {
+    cleanup(w);
+  }
+});
+
+test("row 1: a private seeded verifier tree validates with no role error and no role warning", async () => {
+  const w = world([
+    leaf({ id: "build", allowedTools: "Read,Edit,Bash" }),
+    { id: "seed-verify-x", after: ["build"], integrate: { into: "verify-x", from: ["build"] } },
+    leaf({
+      id: "verify-x", role: "verifier", allowedTools: "Read,Grep,Glob,Bash",
+      workspace: "verify-x", after: ["build", "seed-verify-x"],
+    }),
+  ]);
+  try {
+    const r = await cli(w, ["validate", w.path]);
+    equal(r.status, 0, r.stdout + r.stderr);
+    ok(r.stdout.includes("manifest OK"), r.stdout);
+    ok(!r.stdout.includes("looks like a verifier"), `no role warning:\n${r.stdout}`);
+    ok(!r.stderr.includes("may not name"), `no role error:\n${r.stderr}`);
   } finally {
     cleanup(w);
   }

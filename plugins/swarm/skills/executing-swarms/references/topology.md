@@ -108,9 +108,24 @@ commits HEAD does not have, so a previous run's phases cannot be silently discar
 ## How a verifier link works
 
 Set `"role": "verifier"` on a reporting leaf so `swarm validate` enforces the verifier
-contract: it cannot hold `Edit`, `Write` or `NotebookEdit`, and it cannot name any
-`workspace`. `Bash` is allowed for inspecting commits, and a verifier holding it runs in its
-own private tree; a read-only one gets no tree and reads the live repo it was pointed at.
+contract: it cannot hold `Edit`, `Write` or `NotebookEdit`, and it cannot name a `workspace`
+that a writer also occupies — including the tree a writer derives from its own id. `Bash` is
+allowed for inspecting commits, and a verifier holding it runs in its own private tree; a
+read-only one gets no tree and reads the live repo it was pointed at.
+
+A verifier that must start from another task's commits names its OWN tree, seeded exactly as
+a writer's is — it is the one `workspace` the contract allows, because no writer names it:
+
+```json
+{ "id": "seed-verify-x", "after": ["build"], "integrate": { "into": "verify-x", "from": ["build"] } },
+{ "id": "verify-x", "after": ["build", "seed-verify-x"], "workspace": "verify-x", "role": "verifier",
+  "allowedTools": "Read,Grep,Glob,Bash", "prompt": "Review the commits on the build branch: …" }
+```
+
+`into` is the verifier's workspace and `from` is the task whose commits it must see. List the
+seed in `after` too: `validate` refuses a verifier that may run before its tree is seeded.
+Naming the source's tree (`"workspace": "build"`) is still refused: that is a tree the writer
+uses.
 
 A verifier needs no `Write` tool to report, because its findings do not travel
 through files:
@@ -119,9 +134,10 @@ through files:
   `results/<id>.json`; the next link reads it via `{{result:<reviewer-id>}}`. A reviewer never
   needs `Write` to report — it needs `Write` only to *change* things, which is the one thing it
   must not do.
-- **It can inspect the chain's commits.** The verifier's private tree is cut from the run's
+- **It can inspect the chain's commits.** An unseeded verifier's tree is cut from the run's
   pinned dispatch commit, while the repository refs are shared, so `git log` and `git diff`
-  can reach the chain's branch. Its own worktree is swept at collect if it remains unchanged.
+  can reach the chain's branch; that tree is swept at collect if it remains unchanged. A
+  seeded verifier's tree starts from the merged commits instead, and is kept.
 - **It never ends the chain's tree.** Collection is deferred to the group's last link, so a
   reviewer changing nothing cannot trigger the empty-tree cleanup that would delete the work its
   successor needs.
