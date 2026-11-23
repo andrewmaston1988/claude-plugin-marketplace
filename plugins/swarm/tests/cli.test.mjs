@@ -331,7 +331,7 @@ test("run: quota-blocked leaf -> re-run-after names the reset in the reader's ow
     };
     const r = await runValidated(["run", manifest], { inProcess: true, cwd: dir, env, quotaPreflight: false });
     equal(r.status, 1);
-    ok(r.stdout.includes("quota: 1 leaf(s) blocked by Anthropic usage limits"), r.stdout);
+    ok(r.stdout.includes("quota: 1 leaf(s) blocked by claude usage limits"), r.stdout);
     ok(r.stdout.includes("re-run after Sat 12 Sep, 09:00"), r.stdout);
   } finally {
     rmSync(dir, { recursive: true, force: true });

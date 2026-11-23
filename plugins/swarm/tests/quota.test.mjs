@@ -10,6 +10,7 @@ import {
 } from "../src/quota.mjs";
 import { runCliInProcess } from "./helpers/cli.mjs";
 import { createCodexProviderAdapter } from "../src/codex.mjs";
+import { CODEX_QUOTA_MESSAGE, CODEX_QUOTA_JSONL } from "./helpers/codex-quota.mjs";
 
 // Trimmed from a live probe of the OAuth usage endpoint (2026-07-11).
 const USAGE_FIXTURE = {
@@ -21,11 +22,11 @@ const USAGE_FIXTURE = {
 };
 
 test("matchQuota: recognises Anthropic limit messages, not rate limits", () => {
-  ok(matchQuota("Claude AI usage limit reached|1751210400", DEFAULT_QUOTA_PATTERNS));
-  ok(matchQuota("You've hit your limit. Your limit will reset at 3pm", DEFAULT_QUOTA_PATTERNS));
-  ok(matchQuota("out of extra usage credits", DEFAULT_QUOTA_PATTERNS));
-  ok(!matchQuota("429 Too Many Requests: rate limit exceeded", DEFAULT_QUOTA_PATTERNS));
-  ok(!matchQuota("segfault", DEFAULT_QUOTA_PATTERNS));
+  ok(matchQuota("Claude AI usage limit reached|1751210400", { patterns: DEFAULT_QUOTA_PATTERNS }));
+  ok(matchQuota("You've hit your limit. Your limit will reset at 3pm", { patterns: DEFAULT_QUOTA_PATTERNS }));
+  ok(matchQuota("out of extra usage credits", { patterns: DEFAULT_QUOTA_PATTERNS }));
+  ok(!matchQuota("429 Too Many Requests: rate limit exceeded", { patterns: DEFAULT_QUOTA_PATTERNS }));
+  ok(!matchQuota("segfault", { patterns: DEFAULT_QUOTA_PATTERNS }));
 });
 
 test("parseQuotaReset: epoch suffix, human phrasing, or null", () => {
@@ -33,6 +34,34 @@ test("parseQuotaReset: epoch suffix, human phrasing, or null", () => {
   equal(parseQuotaReset("Your limit will reset at 3pm (Europe/London)."), "3pm (Europe/London)");
   equal(parseQuotaReset("usage limit reached, resets at 2026-07-11T12:19:59Z"), "2026-07-11T12:19:59Z");
   equal(parseQuotaReset("segfault"), null);
+});
+
+test("matchQuota: recognises Codex's usage-limit message on a Codex leaf", () => {
+  ok(matchQuota(CODEX_QUOTA_MESSAGE, { provider: "codex" }));
+  ok(matchQuota(CODEX_QUOTA_JSONL, { provider: "codex" }));
+  // Provider phrasings are never in the operator-tunable list, so narrowing it must not lose them.
+  ok(matchQuota(CODEX_QUOTA_MESSAGE, { patterns: ["something else"], provider: "codex" }));
+});
+
+// A leaf that merely quotes another provider's message — a Codex review of this file,
+// a Claude leaf reading the fixture — must not be classed quota: the run would then
+// pre-fail every pending leaf on that provider.
+test("matchQuota: a provider's phrasing counts only on that provider's own leaf", () => {
+  ok(!matchQuota(CODEX_QUOTA_MESSAGE, { provider: "claude" }));
+  ok(!matchQuota(CODEX_QUOTA_MESSAGE));
+  const ollama = "you (someone) have reached your weekly usage limit, add extra usage: https://ollama.com/settings";
+  ok(matchQuota(ollama, { provider: "ollama" }));
+  ok(!matchQuota(ollama, { provider: "codex" }));
+});
+
+// The raw line ends `PM."}`, so only the unanchored fallback regex can read it; the
+// bare sentence ends `PM.` and matches the anchored one. Both must give the same time.
+test("parseQuotaReset: reads Codex's 'try again at' reset from the raw JSONL and the bare sentence", () => {
+  equal(parseQuotaReset(CODEX_QUOTA_JSONL), "9:58 PM");
+  equal(parseQuotaReset(CODEX_QUOTA_MESSAGE), "9:58 PM");
+  equal(parseQuotaReset("You’ve hit your usage limit. Try again later."), null);
+  // No trailing period: the JSON quote sits hard against the time, and must not ride along.
+  equal(parseQuotaReset('{"type":"error","message":"You’ve hit your usage limit. Try again at 9:58 PM"}'), "9:58 PM");
 });
 
 test("parseUsageLimits: extracts limits with worst-by-percent", () => {

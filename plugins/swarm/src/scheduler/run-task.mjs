@@ -88,10 +88,10 @@ export function substituteItems(prompt, item, index) {
 // message can mention both; exhaustion is temporal — hours — while rate limits
 // clear in seconds and are worth in-run retries). The only error-classification
 // logic in the engine.
-export function classifyFailure({ timedOut, output, stopped }, quotaPatterns = DEFAULT_QUOTA_PATTERNS) {
+export function classifyFailure({ timedOut, output, stopped, provider }, quotaPatterns = DEFAULT_QUOTA_PATTERNS) {
   if (stopped) return "failed:stopped";
   if (timedOut) return "failed:timeout";
-  if (matchQuota(output, quotaPatterns)) return "quota";
+  if (matchQuota(output, { patterns: quotaPatterns, provider })) return "quota";
   if (RATE_LIMIT_RE.test(output || "")) return "rate-limited";
   return "failed";
 }

@@ -150,12 +150,29 @@ export async function cmdRun(rest, { parseArgsFlag, resolveManifestRef, usageHea
     out(`FAILED tasks: ${bad.map((t) => `${t.id} [${t.state}]`).join(", ")}`);
     const quotaBad = bad.filter((t) => t.state === "quota");
     if (quotaBad.length) {
-      const resets = quotaBad.map((t) => readResult(plan.resultsDir, t.id)?.quotaResetsAt).find(Boolean);
+      const results = quotaBad.map((t) => readResult(plan.resultsDir, t.id));
+      // The summary row carries the provider for every normalized manifest task, a
+      // pre-failed leaf included — it writes no result. The result file is the fallback
+      // for hand-built plans, which carry no durable identity.
+      const providerOf = (t, i) => t.provider || results[i]?.provider || null;
+      const providerList = [...new Set(quotaBad.map(providerOf).filter(Boolean))];
+      const providers = providerList.join(", ") || "provider";
+      // Each provider's meter resets on its own clock, so a reset is shown beside the
+      // provider it belongs to and never beside one it does not.
+      const resets = new Map();
+      quotaBad.forEach((t, i) => {
+        const provider = providerOf(t, i);
+        const reset = results[i]?.quotaResetsAt;
+        if (provider && reset && !resets.has(provider)) resets.set(provider, reset);
+      });
       // quotaResetsAt is either a real ISO instant (parseQuotaReset's epoch path) or a
       // human-text fragment like "3pm" — format the former, pass the latter through.
       const { formatResetTime } = await import("./usage.mjs");
-      const shown = resets ? (formatResetTime(resets) ?? resets) : null;
-      out(`quota: ${quotaBad.length} leaf(s) blocked by Anthropic usage limits${shown ? ` — re-run after ${shown}` : ""}`);
+      const shown = [...resets].map(([provider, reset]) => {
+        const text = formatResetTime(reset) ?? reset;
+        return providerList.length > 1 ? `${text} (${provider})` : text;
+      }).join(", ");
+      out(`quota: ${quotaBad.length} leaf(s) blocked by ${providers} usage limits${shown ? ` — re-run after ${shown}` : ""}`);
     }
     out("resume: re-run the same command — ok results are skipped, failed/blocked work re-executes.");
     return 1;

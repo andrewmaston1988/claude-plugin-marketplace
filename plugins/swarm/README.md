@@ -567,9 +567,11 @@ Transient failures recover in-run; temporal ones fail fast with the recovery nam
   against `allowedRoots` like any dispatch target. Quota switches to it immediately; rate
   limits switch after retries exhaust. Logged (`↯ fallback → glm-5.2:cloud`).
 - **Quota (`⏳`) is distinct from rate limits** — temporal (hours), so instead of retrying
-  the run parses the reset time and the first Claude leaf to hit the wall pre-emptively
-  marks every still-pending undefended Claude leaf `quota`. Re-running after reset skips
-  `ok` work.
+  the run parses the reset time. The first leaf to hit its provider's wall pre-emptively
+  marks every still-pending undefended leaf in that same scope `quota` — any provider
+  (Anthropic, Ollama, Codex), and on Claude only the model family the transcript names.
+  A provider's meter wording counts only on its own leaves, so a leaf quoting another
+  provider's message cannot start a sweep. Re-running after reset skips `ok` work.
 - **Quota preflight**: with Claude leaves present, the engine queries Anthropic's usage
   endpoint first (free, local credentials, cached `quotaCacheSecs`). Exhausted quota with
   undefended leaves aborts before dispatch; ≥`quotaWarnPct` (80) warns and proceeds. A **stale**
