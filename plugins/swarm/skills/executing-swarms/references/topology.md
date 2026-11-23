@@ -67,9 +67,12 @@ named task's branch into `into`:
 Every id in `from` must be a task that WRITES, and for the obvious reason: a
 read-only task has no branch to merge. The one exception is a `forEach` parent — see below.
 
-**A conflict is not a failure.** The merge stops with markers in the tree, the node stays `ok`,
-and the conflicting paths land in its result — pass `{{result:join-migrations}}` to the next leaf and tell
-it to resolve them. Without an integrate node that merge is the next leaf's job.
+**A conflict is not a failure.** The merge stops at the first conflict: markers stay in the tree,
+the node stays `ok`, and the conflicted branch and its paths land in its result as `conflict`.
+Pass `{{result:join-migrations}}` to the next leaf and tell it to resolve them — it needs Bash to
+commit the resolution, then `git merge --no-edit` each branch the result lists under `pending`, in
+order. `merged` names only the branches genuinely in the tree, never the ones the conflict blocked.
+Without an integrate node that merge is the next leaf's job.
 
 ## Folding a `forEach` fan-out back — `integrate.from` naming the parent
 
@@ -84,8 +87,9 @@ performs, applied one step later:
 { "id": "join-fixes", "after": ["fix-sites"], "integrate": { "into": "feat", "from": ["fix-sites"] } }
 ```
 
-Nothing about `integrate` itself changes: the merge is still sequential, a conflict still leaves
-markers with the node `ok`. Everything else follows from that:
+Nothing about `integrate` itself changes: the merge is still sequential, and a conflict still leaves
+markers with the node `ok` — it stops the merge there, and the clones after it are listed in
+`pending`. Everything else follows from that:
 
 - A `maxItems` cap means capped items never became clones — there is nothing of theirs to merge.
 - A failed clone is handled exactly as a failed hand-listed source is today.

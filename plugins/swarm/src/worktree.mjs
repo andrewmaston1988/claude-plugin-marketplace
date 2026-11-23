@@ -347,33 +347,60 @@ function measureUncommitted(wt, runner) {
 // and resolve. Failing the node instead would turn an ordinary conflict — the
 // thing merges do — into a dead run needing operator rescue.
 //
+// The merge STOPS at the first conflict. A tree mid-merge rejects every later
+// `git merge` at once, so carrying on would report branches that never landed.
+// `pending` names what the next leaf must still merge once it resolves.
+//
 // The node owns the target tree: it creates it (or re-enters a kept one) rather
 // than borrowing a tree a leaf is using, so nothing races.
-export function integrate(task, cfg, resultsDir, { repo: repoOverride, base } = {}) {
+export function integrate(task, cfg, resultsDir, { repo: repoOverride, base, _git = git } = {}) {
   const repo = repoOverride || task.originalCwd || task.cwd;
   const wt = prepareIsolation({ ...task, originalCwd: repo }, cfg, resultsDir, { addTimeoutMs: WORKTREE_ADD_TIMEOUT_MS, base });
 
-  const merged = [];
-  const conflicts = [];
-  for (const src of task.sources || []) {
-    const m = git(["merge", "--no-edit", src], wt.path, { timeout: 60000 });
-    if (m.status === 0) { merged.push(src); continue; }
-    // Conflicted: keep the markers, record the paths, move on. `git merge` has
-    // already staged what it could and left the rest marked.
-    const conflicted = git(["diff", "--name-only", "--diff-filter=U"], wt.path, { timeout: 60000 });
+  // A tree re-entered mid-merge would pin the earlier attempt's conflict paths on
+  // the first source below, so refuse it rather than report a merge it never made.
+  const inProgress = _git(["rev-parse", "-q", "--verify", "MERGE_HEAD"], wt.path, { timeout: 60000 });
+  if (inProgress.status === 0) {
+    throw new Error(`integrate '${task.id}': tree ${wt.path} has an unfinished merge from an earlier attempt — resolve and commit it, or abort it, before integrating`);
+  }
+
+  const sources = task.sources || [];
+  const attempted = [];
+  let conflict = null;
+  let pending = [];
+  for (let i = 0; i < sources.length; i++) {
+    const src = sources[i];
+    const m = _git(["merge", "--no-edit", src], wt.path, { timeout: 60000 });
+    if (m.status === 0) { attempted.push(src); continue; }
+    // Conflicted: keep the markers and the paths for the next leaf, and stop.
+    // `git merge` has already staged what it could and left the rest marked.
+    const conflicted = _git(["diff", "--name-only", "--diff-filter=U"], wt.path, { timeout: 60000 });
     const paths = conflicted.stdout
       ? conflicted.stdout.split(/\r?\n/).map((s) => s.trim()).filter(Boolean) : [];
     if (!paths.length) {
       // Failed for a reason other than content conflict (missing ref, unrelated
       // histories) — surface it rather than pretending it merged.
-      git(["merge", "--abort"], wt.path, { timeout: 60000 });
+      _git(["merge", "--abort"], wt.path, { timeout: 60000 });
       throw new Error(`integrate '${task.id}': cannot merge ${src}: ${m.stderr || m.stdout}`);
     }
-    for (const p of paths) if (!conflicts.includes(p)) conflicts.push(p);
-    merged.push(src);
+    conflict = { branch: src, paths };
+    pending = sources.slice(i + 1);
+    break;
   }
 
-  return { path: wt.path, branch: wt.branch, name: wt.name, repo, merged, conflicts };
+  // Ancestry, not the input list: a fast-forward, an already-merged branch and a
+  // real merge all read as merged; a conflicted one is not committed, so it does not.
+  const merged = attempted.filter((src) => {
+    const r = _git(["merge-base", "--is-ancestor", src, "HEAD"], wt.path, { timeout: 60000 });
+    if (r.status === 0) return true;
+    if (r.status === 1) return false;
+    throw new Error(`integrate '${task.id}': cannot tell whether ${src} merged: ${r.stderr || r.stdout}`);
+  });
+
+  return {
+    path: wt.path, branch: wt.branch, name: wt.name, repo,
+    merged, conflicts: conflict ? conflict.paths : [], conflict, pending,
+  };
 }
 
 // ---- Run scoping and cwd depth: what survives the snapshot tree's removal.
