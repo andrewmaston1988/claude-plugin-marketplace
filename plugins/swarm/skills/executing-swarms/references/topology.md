@@ -108,9 +108,22 @@ commits HEAD does not have, so a previous run's phases cannot be silently discar
 ## How a verifier link works
 
 Set `"role": "verifier"` on a reporting leaf so `swarm validate` enforces the verifier
-contract: it cannot hold `Edit`, `Write` or `NotebookEdit`, and it cannot name any
-`workspace`. `Bash` is allowed for inspecting commits, and a verifier holding it runs in its
-own private tree; a read-only one gets no tree and reads the live repo it was pointed at.
+contract: it cannot hold `Edit`, `Write` or `NotebookEdit`, and it cannot name a `workspace`
+that a writer also names. `Bash` is allowed for inspecting commits, and a verifier holding it
+runs in its own private tree; a read-only one gets no tree and reads the live repo it was
+pointed at.
+
+A verifier that must start from another task's commits names its OWN tree, seeded exactly as
+a writer's is — it is the one `workspace` the contract allows, because no writer names it:
+
+```json
+{ "id": "seed-verify-x", "after": ["build"], "integrate": { "into": "verify-x", "from": ["build"] } },
+{ "id": "verify-x", "after": ["build", "seed-verify-x"], "workspace": "verify-x", "role": "verifier",
+  "allowedTools": "Read,Grep,Glob,Bash", "prompt": "Review the commits on the build branch: …" }
+```
+
+`into` is the verifier's workspace and `from` is the task whose commits it must see. Naming
+the source's tree (`"workspace": "build"`) is still refused: that is a tree the writer uses.
 
 A verifier needs no `Write` tool to report, because its findings do not travel
 through files:
