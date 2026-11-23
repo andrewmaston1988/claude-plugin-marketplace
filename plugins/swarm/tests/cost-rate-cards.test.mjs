@@ -132,7 +132,6 @@ test("rate cards: each price is the published columns, so a column change update
   deepEqual(CODEX_RATE_CARD_SEED.prices["gpt-6-astra"], { input: 10, cachedInput: 1, cacheWrite: 12.5, output: 50 });
   deepEqual(CODEX_RATE_CARD_SEED.prices["gpt-6-sol"], { input: 2, cachedInput: 0.2, cacheWrite: 2.5, output: 10 });
   deepEqual(CODEX_RATE_CARD_SEED.prices["gpt-6-luna"], { input: 0.1, cachedInput: 0.01, cacheWrite: 0.125, output: 0.5 });
-  deepEqual(CODEX_RATE_CARD_SEED.prices["gpt-5.6-cyber"], { input: 12.5, cachedInput: 1.25, cacheWrite: 15.625, output: 75 });
   deepEqual(CODEX_RATE_CARD_SEED.prices["gpt-5.6-sol"], { input: 4, cachedInput: 0.4, cacheWrite: 5, output: 20 });
   deepEqual(CODEX_RATE_CARD_SEED.prices["gpt-5.6-terra"], { input: 2, cachedInput: 0.2, cacheWrite: 2.5, output: 12 });
   deepEqual(CODEX_RATE_CARD_SEED.prices["gpt-5.6-luna"], { input: 0.2, cachedInput: 0.02, cacheWrite: 0.25, output: 1.2 });
@@ -164,7 +163,6 @@ test("costRowsFor: a rate-card multiplier is the input column over the card's na
   equal(mult("gpt-5.6-sol"), 20, "RED: sol is $4.00 input against luna's $0.20 — 16.67x means an output basis");
   equal(mult("gpt-5.5"), 25, "RED: 5.5 is $5.00 input against luna's $0.20");
   equal(mult("gpt-6-astra"), 50, "RED: astra is $10.00 input against luna's $0.20 — 41.67x means an output basis");
-  equal(mult("gpt-5.6-cyber"), 62.5, "RED: cyber is $12.50 input against luna's $0.20");
   // The base is pinned, not derived. gpt-6-luna is cheaper than it, and the day
   // the base follows the cheapest row every banked codex multiplier restates.
   equal(rateCards().codex.baseModel, "gpt-5.6-luna",
@@ -234,8 +232,9 @@ test("rate cards: an inferred price is marked as one, a directly published price
 // guessed price and a permanent mis-rank.
 test("rate cards: no price is invented — every key traces to a published table", () => {
   deepEqual(Object.keys(CODEX_RATE_CARD_SEED.prices).sort(), [
-    "gpt-5.5", "gpt-5.6-cyber", "gpt-5.6-luna", "gpt-5.6-sol", "gpt-5.6-terra",
+    "gpt-5.5", "gpt-5.6-luna", "gpt-5.6-sol", "gpt-5.6-terra",
     "gpt-6-astra", "gpt-6-luna", "gpt-6-sol",
+    "gpt-6.1-sol", "gpt-6.1-terra", "gpt-6.2-astra", "gpt-6.2-sol",
   ], "RED: a Codex price was added or removed without updating the published set");
   deepEqual(Object.keys(CLAUDE_RATE_CARD_SEED.prices).sort(), [
     "claude-fable-5", "claude-fable-5-1", "claude-haiku-4-5-20251001",

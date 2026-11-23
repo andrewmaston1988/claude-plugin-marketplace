@@ -119,8 +119,27 @@ test("anthropic: columns are resolved by header, so a shuffled table reads corre
     { input: 2, cachedInput: 0.2, cacheWrite: 2.5, output: 10 });
 });
 
+test("openai: the Standard section's legacy four-column table is read too", () => {
+  // The section republishes older models without a short/long split and without a
+  // write column. Skipping it left every one of them unpriced for ever.
+  deepEqual(openai["gpt-5"], { input: 1.25, cachedInput: 0.125, output: 10 });
+  deepEqual(openai["gpt-4o"], { input: 2.5, cachedInput: 1.25, output: 10 });
+});
+
+test("openai: a Modality or Category table is never read as a standard per-token rate", () => {
+  // `gpt-image-2` publishes an Image row and a Text row at different prices; a
+  // prefix match on the legacy header would take whichever came first.
+  const page = [
+    "### Grouped Pricing Table data",
+    "| Model | Modality | Input | Output | Cached input |",
+    "| --- | --- | --- | --- | --- |",
+    "| gpt-image-2 | Image | $8.00 | $30.00 | $2.00 |",
+  ].join("\n");
+  throws(() => parseOpenAiPricing(page), /no openai price table found/);
+});
+
 test("both parses are whole — every row has a usable, plausible price", () => {
-  for (const [label, parsed, min] of [["openai", openai, 12], ["anthropic", anthropic, 15]]) {
+  for (const [label, parsed, min] of [["openai", openai, 25], ["anthropic", anthropic, 15]]) {
     ok(Object.keys(parsed).length >= min, `RED: ${label} parsed only ${Object.keys(parsed).length} rows — the table shape moved`);
     for (const [id, p] of Object.entries(parsed)) {
       ok(id.length > 2 && !/[|$()]/.test(id), `RED: ${label} produced a junk id: ${JSON.stringify(id)}`);

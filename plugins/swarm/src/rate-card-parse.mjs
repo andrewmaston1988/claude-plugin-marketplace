@@ -16,17 +16,9 @@ function money(cell) {
   return match ? Number(match[1]) : null;
 }
 
-/**
- * Every table whose column header matches AND whose enclosing `#` heading passes
- * `sectionTest`, as `{ header, rows }` — each with its own header, because the
- * vendors reshuffle columns between tables and one table's order applied to
- * another silently shifts every field. Both filters are needed: OpenAI repeats one
- * identical column header across five tables that are *service tiers*, not model
- * families, so matching on columns alone silently overwrites standard rates with
- * batch or fast ones — and matching on the first table alone just as silently drops
- * the models that only appear in a later one. Where a model appears twice the first
- * table wins.
- */
+// Every matching table with its own header: the vendors reshuffle columns between
+// tables, so one table's order applied to another silently shifts every field.
+// Both filters matter — one header is repeated across OpenAI's service tiers.
 function tableRows(md, headerTest, sectionTest = () => true) {
   const lines = md.split(/\r?\n/);
   const tables = [];
@@ -63,6 +55,12 @@ function price(input, cachedInput, output, cacheWrite) {
 // someone looks at it, instead of quietly overwriting the standard rates.
 const OPENAI_STANDARD_SECTIONS = /^(standard|grouped)\b/i;
 
+// The Standard section also republishes older models in a four-column table with no
+// context split and no write column. Whole-line matched on purpose: the Grouped
+// tables share this prefix but add a Category or Modality column, and their rows are
+// not standard per-token rates.
+const OPENAI_LEGACY_HEADER = /^\|\s*Model\s*\|\s*Input\s*\|\s*Output\s*\|\s*Cached input\s*\|\s*$/i;
+
 /**
  * developers.openai.com/api/docs/pricing.md.
  * Columns: model, short input, short output, short cached input, short 30m write,
@@ -70,17 +68,23 @@ const OPENAI_STANDARD_SECTIONS = /^(standard|grouped)\b/i;
  * tier; the long columns are the >272k breakpoint and are deliberately dropped,
  * because a leaf billed at the breakpoint is a leaf that has already gone wrong.
  * The write column is the 30m tier and optional: a `-` cell already means no price.
+ * The section's four-column legacy table is read too, with the same column names
+ * minus the `Short context` prefix and with no write column.
  */
 export function parseOpenAiPricing(md) {
   const out = {};
-  const tables = tableRows(md, (l) => /short context input/i.test(l), (s) => OPENAI_STANDARD_SECTIONS.test(s));
+  const inStandard = (s) => OPENAI_STANDARD_SECTIONS.test(s);
+  const tables = [
+    ...tableRows(md, (l) => /short context input/i.test(l), inStandard),
+    ...tableRows(md, (l) => OPENAI_LEGACY_HEADER.test(l), inStandard),
+  ];
   if (!tables.length) throw new Error("no openai price table found");
   for (const { header, rows } of tables) {
     const i = col(header, /^model\b/i, "model", "openai");
-    const input = col(header, /^short context input\b/i, "input", "openai");
-    const output = col(header, /^short context output\b/i, "output", "openai");
-    const cachedInput = col(header, /^short context cached input\b/i, "cached input", "openai");
-    const write = header.findIndex((cell) => /^short context (30m write|cache writes?)\b/i.test(cell));
+    const input = col(header, /^(?:short context )?input\b/i, "input", "openai");
+    const output = col(header, /^(?:short context )?output\b/i, "output", "openai");
+    const cachedInput = col(header, /^(?:short context )?cached input\b/i, "cached input", "openai");
+    const write = header.findIndex((cell) => /^(?:short context )?(?:30m write|cache writes?)\b/i.test(cell));
     for (const cells of rows) {
       // `gpt-5.5 (<272K context length)` — the qualifier is prose, not part of the id.
       const model = String(cells[i] ?? "").replace(/\s*\(.*$/, "").trim();
