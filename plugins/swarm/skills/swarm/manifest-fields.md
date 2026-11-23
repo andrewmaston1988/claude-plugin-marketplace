@@ -235,7 +235,8 @@ as if the author had listed the clones by hand, which is impossible at authoring
 clone ids are minted at run time from the source array's length. `integrate()` itself is
 unchanged: it still merges named branches sequentially into the `into` worktree, a content
 conflict still stops the merge with markers left in the tree, the node `ok`, the conflicted branch
-and its paths in `conflict`, and the clones still to merge in `pending`. A capped or empty
+and its paths in `conflict` (`conflicts` is the older alias carrying the same paths), and the clones
+still to merge in `pending`. A capped or empty
 `forEach` source leaves nothing to merge; a failed clone is handled exactly as a failed
 hand-listed source is today. `validate`'s preview line reuses the `forEach`'s own cap:
 `join ≤ 30 branches (fix forEach)`. See the README's "Folding a forEach fan-out back" for the

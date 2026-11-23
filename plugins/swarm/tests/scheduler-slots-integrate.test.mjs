@@ -354,7 +354,8 @@ const writeAndCommit = (cwd, file, text, msg) => {
   commitAllInRepo(cwd, msg);
 };
 
-test("IS6: a middle conflict stops the merge and the result names what is pending", { timeout: 30000 }, async () => {
+// Real git on a loaded machine has run these past 30 s; the cap only guards a hang.
+test("IS6: a middle conflict stops the merge and the result names what is pending", { timeout: 120000 }, async () => {
   const repo = initGitRepo();
   const dir = tmp();
   try {
@@ -400,7 +401,7 @@ test("IS6: a middle conflict stops the merge and the result names what is pendin
   }
 });
 
-test("IS7: a first-source conflict reads 'merged nothing into'", { timeout: 30000 }, async () => {
+test("IS7: a first-source conflict reads 'merged nothing into'", { timeout: 120000 }, async () => {
   const repo = initGitRepo();
   const dir = tmp();
   try {
@@ -437,7 +438,7 @@ test("IS7: a first-source conflict reads 'merged nothing into'", { timeout: 3000
   }
 });
 
-test("IS8: a last-source conflict drops the 'still to merge' clause", { timeout: 30000 }, async () => {
+test("IS8: a last-source conflict drops the 'still to merge' clause", { timeout: 120000 }, async () => {
   const repo = initGitRepo();
   const dir = tmp();
   try {

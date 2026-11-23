@@ -371,7 +371,9 @@ holding `helper`'s commit, then `join` merges both into `feat`, and `cleanup` ca
   tree, the node stays `ok`, and the conflicted branch and its paths land in its result as
   `conflict` — pass `{{result:join}}` to the next leaf to resolve them. It needs Bash to commit the
   resolution, then merges each branch listed under `pending`, in order. `merged` names only the
-  branches genuinely in the tree.
+  branches genuinely in the tree, and `conflicts` still carries the conflicted paths for older
+  consumers. The one exception to `ok`: re-entering a kept tree that is still mid-merge fails the
+  node, naming the tree and telling you to resolve and commit, or abort, before integrating again.
 
 ### Folding a `forEach` fan-out back — `integrate.from` naming the parent
 

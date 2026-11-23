@@ -788,6 +788,34 @@ test("integrate fails when git cannot answer whether a source merged", () => {
   } finally { cleanup(repo, results); }
 });
 
+test("integrate reports merged from ancestry, not from a merge that exited 0", () => {
+  const repo = initRepo();
+  const results = mkdtempSync(join(tmpdir(), "swarm-wt-int9-"));
+  try {
+    prepareIsolation({ id: "feat", originalCwd: repo, worktreeName: "feat" }, CFG, results, ADD(repo));
+    for (const id of ["x", "y"]) {
+      const wt = prepareIsolation({ id, originalCwd: repo, worktreeName: id }, CFG, results, ADD(repo));
+      writeFileSync(join(wt.path, `${id}.txt`), `${id} work\n`);
+      commitAll(wt.path, `${id} work`);
+    }
+    // Both merges succeed; only the ancestry verdict is forced, so the list must follow it.
+    const realGit = (args, cwd, opts) => {
+      const r = spawnSync("git", args, { cwd, encoding: "utf8", windowsHide: true, timeout: opts?.timeout });
+      return { status: r.status, stdout: (r.stdout || "").trim(), stderr: (r.stderr || "").trim() };
+    };
+    const deniesX = (args, cwd, opts) => (args[0] === "merge-base" && args.includes("swarm/x")
+      ? { status: 1, stdout: "", stderr: "" }
+      : realGit(args, cwd, opts));
+
+    const out = integrate(
+      { id: "join", worktreeName: "feat", sources: ["swarm/x", "swarm/y"] }, CFG, results,
+      { repo, ...ADD(repo), _git: deniesX });
+
+    ok(existsSync(join(out.path, "x.txt")), "precondition: swarm/x did merge into the tree");
+    deepEqual(out.merged, ["swarm/y"], "a source git's ancestry check denies is never reported merged");
+  } finally { cleanup(repo, results); }
+});
+
 test("scheduler integration: an integrate node merges sibling branches into the target tree", async () => {
   const repo = initRepo();
   const dir = mkdtempSync(join(tmpdir(), "swarm-wt-intsched-"));
