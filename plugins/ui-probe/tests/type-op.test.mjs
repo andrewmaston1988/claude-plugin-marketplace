@@ -151,3 +151,43 @@ test("row 7: gapMs spaces the gaps between characters, so three characters wait 
   assert.deepEqual(cdp.sent("Input.insertText").map((call) => call.params.text), ["a", "b", "c"]);
   assert.equal(result.steps[0].measured, "abc");
 });
+
+test("type falls back to char key events where Input.insertText is refused (the set's Chromium 69)", async () => {
+  const cdp = stubCdp({
+    replies: [
+      { match: (expression) => expression.includes("isContentEditable"), value: { editable: true, value: "" } },
+      { match: (expression) => expression.includes("isContentEditable"), value: { editable: true, value: "se" } },
+    ],
+    onSend: (method) => {
+      if (method === "Input.insertText") throw new Error("'Input.insertText' wasn't found");
+      return undefined;
+    },
+  });
+  const guard = { blocked: [], uninstall: async () => {} };
+  const result = await run({ id: "type", steps: [{ type: { text: "se" } }] },
+    { cdp, guard, requireAssertion: false, _sleep: async () => {} });
+
+  assert.equal(result.outcome, "passed", JSON.stringify(result.steps));
+  assert.equal(cdp.sent("Input.insertText").length, 1, "insertText is tried once, then the connection types by char");
+  assert.deepEqual(cdp.sent("Input.dispatchKeyEvent").map((call) => [call.params.type, call.params.text]),
+    [["char", "s"], ["char", "e"]]);
+  assert.equal(result.steps[0].measured, "se");
+});
+
+test("type fails naming both refusals when the char fallback is refused too", async () => {
+  const cdp = stubCdp({
+    replies: [{ match: (expression) => expression.includes("isContentEditable"), value: { editable: true, value: "" } }],
+    onSend: (method) => {
+      if (method === "Input.insertText") throw new Error("no insertText");
+      if (method === "Input.dispatchKeyEvent") throw new Error("no keys");
+      return undefined;
+    },
+  });
+  const guard = { blocked: [], uninstall: async () => {} };
+  const result = await run({ id: "type", steps: [{ type: { text: "s" } }] },
+    { cdp, guard, requireAssertion: false, _sleep: async () => {} });
+
+  assert.equal(result.outcome, "failed");
+  assert.equal(result.steps[0].failure, "insert_failed");
+  assert.equal(cdp.sent("Input.dispatchKeyEvent").length, 1, "the fallback was tried before failing");
+});
