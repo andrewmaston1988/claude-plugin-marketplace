@@ -73,6 +73,10 @@ test("row 3: a verifier naming a workspace a non-verifier writer also names is r
   // "integrate" alone proves nothing — the old message said it too.
   ok(errors[0].includes('"id": "seed-verify-x"'), `the fix is spelled: ${errors[0]}`);
   ok(errors[0].includes('"after"'), `the seed names its source in after: ${errors[0]}`);
+  // Following the message must reach green: a verifier with no Bash gets no tree,
+  // and a verifier ordered before its seed reviews an unseeded one.
+  ok(errors[0].includes('"allowedTools": "Read,Grep,Glob,Bash"'), `the verifier keeps Bash: ${errors[0]}`);
+  ok(errors[0].includes('"seed-verify-x"'), `the verifier waits for the seed: ${errors[0]}`);
 
   // roleWarnings keeps its set: the same shared tree still warns an id-pattern task
   // that never declared a role.
@@ -83,6 +87,38 @@ test("row 3: a verifier naming a workspace a non-verifier writer also names is r
   const warnings = roleWarnings(noRole, label);
   equal(warnings.length, 1, warnings.join("\n"));
   ok(warnings[0].includes(`names the writers' workspace "feat"`), warnings[0]);
+});
+
+test("row 3: a verifier naming a writer's derived tree is refused, like naming its workspace", () => {
+  // `build` declares no workspace, so its tree is derived from its id — the same
+  // directory a verifier naming "build" would join.
+  const derived = [
+    task({ id: "build", allowedTools: "Read,Edit,Bash" }),
+    task({ id: "verify-x", role: "verifier", allowedTools: "Read,Bash", workspace: "build" }),
+  ];
+  const errors = roleErrors(derived, label);
+  equal(errors.length, 1, errors.join("\n"));
+  ok(errors[0].includes("may not name a writers' tree"), errors[0]);
+  ok(errors[0].includes('"build"'), errors[0]);
+  ok(errors[0].includes('"id": "seed-verify-x"'), `the private-tree fix is spelled: ${errors[0]}`);
+});
+
+test("row 3: a verifier naming a seeded tree must be ordered after its seed", () => {
+  const unseeded = (after) => [
+    task({ id: "build", allowedTools: "Read,Edit,Bash" }),
+    { id: "seed-verify-x", after: ["build"], integrate: { into: "verify-x", from: ["build"] } },
+    task({ id: "verify-x", role: "verifier", allowedTools: "Read,Grep,Glob,Bash", workspace: "verify-x", after }),
+  ];
+  // Both tasks ready together means the review can read the tree before the merge.
+  const errors = roleErrors(unseeded(["build"]), label);
+  equal(errors.length, 1, errors.join("\n"));
+  ok(errors[0].includes("seed-verify-x"), `the missing edge is named: ${errors[0]}`);
+  ok(errors[0].includes("after"), `the fix is spelled: ${errors[0]}`);
+  // Either edge clears it: direct, or through a task that already waits for the seed.
+  deepEqual(roleErrors(unseeded(["build", "seed-verify-x"]), label), []);
+  const through = unseeded(["build", "read-spec"]);
+  through.push(task({ id: "read-spec", allowedTools: "Read,Grep,Glob", after: ["seed-verify-x"] }));
+  deepEqual(roleErrors(through, label), []);
 });
 
 test("row 2c: a reporting verifier is still a legitimate integrate.from source", () => {

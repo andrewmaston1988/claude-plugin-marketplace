@@ -3,21 +3,23 @@
 // its own tree, seeded by an agentless integrate node, is the one shape it may name.
 // Pure questions over a task list — the caller owns the error and warning channels.
 
-import { hasWriteTools, holdsEditTools } from "./manifest-task-policy.mjs";
+import { holdsEditTools, resolveWorktreeName } from "./manifest-task-policy.mjs";
+import { makeReaches } from "./manifest-relations.mjs";
 
 const VERIFIER = "verifier";
 const VERIFIER_ID_RE = /^(verify|review|judge)[-_]/;
 
 const defaultLabel = (t) => `task '${t?.id ?? "with missing id"}'`;
 
-// The trees that write-tool tasks name. `excludeVerifiers` is the difference between
-// the two callers: a verifier holds Bash like a writer but its own seeded tree is not
-// a writers' tree, so the refusals must not see it.
+// The trees write-tool tasks occupy, derived exactly as the scheduler derives them: a
+// writer with no `workspace` still owns `<id>`, so a verifier naming that id names a
+// writers' tree. `excludeVerifiers` is the difference between the two callers: a
+// verifier holds Bash like a writer but its own seeded tree is not a writers' tree.
 const writerWorkspaces = (tasks, excludeVerifiers) => new Set(
   tasks
     .filter((t) => !(excludeVerifiers && t?.role === VERIFIER))
-    .filter((t) => hasWriteTools(t?.allowedTools) && typeof t.workspace === "string" && t.workspace)
-    .map((t) => t.workspace)
+    .map(resolveWorktreeName)
+    .filter((n) => typeof n === "string" && n)
 );
 
 // The refusals the field carries. Each message names the field the fix touches and
@@ -25,6 +27,7 @@ const writerWorkspaces = (tasks, excludeVerifiers) => new Set(
 export function roleErrors(tasks, label = defaultLabel) {
   const list = tasks || [];
   const writers = writerWorkspaces(list, true);
+  const reaches = makeReaches(list);
   const errors = [];
   for (const t of list) {
     if (t?.role !== VERIFIER) continue;
@@ -34,10 +37,23 @@ export function roleErrors(tasks, label = defaultLabel) {
         `${l}: role "verifier" may not hold edit tools — allowedTools is ${JSON.stringify(t.allowedTools)}; a verifier reports and never edits.\n` +
         `    Drop Edit/Write/NotebookEdit. Bash stays allowed: to read the writers' commits, keep it and the verifier runs in its own tree.`);
     }
-    if (typeof t.workspace === "string" && writers.has(t.workspace)) {
+    const names = typeof t.workspace === "string" && t.workspace ? t.workspace : undefined;
+    if (names && writers.has(names)) {
       errors.push(
-        `${l}: role "verifier" may not name a writers' tree — "${t.workspace}" is named by a task that writes; a verifier runs in its own.\n` +
-        `    Give it a private workspace seeded by an integrate node, e.g. { "id": "seed-verify-x", "after": ["build"], "integrate": { "into": "verify-x", "from": ["build"] } }, and name "verify-x" here.`);
+        `${l}: role "verifier" may not name a writers' tree — "${names}" is named by a task that writes; a verifier runs in its own.\n` +
+        `    Give it a private workspace seeded by an integrate node, and list that node in after:\n` +
+        `        { "id": "seed-verify-x", "after": ["build"], "integrate": { "into": "verify-x", "from": ["build"] } }\n` +
+        `        { "id": "verify-x", "role": "verifier", "allowedTools": "Read,Grep,Glob,Bash", "workspace": "verify-x", "after": ["build", "seed-verify-x"] }`);
+    } else if (names) {
+      // A seed fills this tree; run before it lands and the verifier reads the pinned
+      // base with none of the commits it was told to review.
+      const late = list.filter((o) => o?.integrate?.into === names && !reaches(t.id, o.id));
+      if (late.length) {
+        const ids = late.map((o) => `'${o.id}'`).join(", ");
+        errors.push(
+          `${l}: tree "${names}" is seeded by ${ids}, which may run after the verifier — both are ready together.\n` +
+          `    Add ${ids} to this task's after so the merge lands before the review starts.`);
+      }
     }
   }
   return errors;

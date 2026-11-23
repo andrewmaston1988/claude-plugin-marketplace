@@ -65,12 +65,15 @@ run-scoped like a writer's.
 ### Verifier role — `role`
 
 `"role": "verifier"` marks a leaf whose job is to report on another leaf's work. `swarm validate`
-refuses a verifier that holds `Edit`, `Write` or `NotebookEdit`, or names any `workspace`;
-a verifier with `Bash` can inspect commits, but it runs in its own private tree. The only
-accepted role value is the string `"verifier"`; any other value is refused. A task without
-`role` whose id starts with `verify-`, `review-` or `judge-` warns when it holds edit tools
-or names a workspace also named by a writer. Add the role and remove edit tools, or rename
-the task if it is meant to write.
+refuses a verifier that holds `Edit`, `Write` or `NotebookEdit`, or names a `workspace` a task
+with write tools also occupies. The one tree it may name is its own, seeded by an agentless
+`integrate` node — the verifier must be ordered after that node. A verifier holding `Bash` can
+inspect commits, but it runs in that private tree; a read-only one gets no tree at all and reads
+the live repo it was pointed at. The shape is spelled out in *How a verifier link works* in
+`swarm:executing-swarms`. The only accepted role value is the string `"verifier"`; any other
+value is refused. A task without `role` whose id starts with `verify-`, `review-` or `judge-`
+warns when it holds edit tools or names a workspace also named by a writer. Add the role and
+remove edit tools, or rename the task if it is meant to write.
 
 ### Provider identity
 
