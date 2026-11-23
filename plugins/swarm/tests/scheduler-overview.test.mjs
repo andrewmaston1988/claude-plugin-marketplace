@@ -6,6 +6,7 @@ import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawn as nodeSpawn } from "node:child_process";
 import { oracleSnapKey } from "./helpers/snap-key.mjs";
+import { CODEX_QUOTA_JSONL } from "./helpers/codex-quota.mjs";
 import { runPlan, classifyFailure, pickNewestRunning } from "../src/scheduler.mjs";
 import { writeResult, readResult } from "../src/results.mjs";
 import { CFG, tmp, task, plan, computeTask, childPlanOf, fakeSpawnFactory, makeIo, promptOf, sentPrompt, usageEnv, codexReading, SHIM, streamOut, gitInRepo, initGitRepo, commitAllInRepo, fakeWorktree, buildStrandPlan, integrateLeaf, forEachFixLeaf, fixCloneTasks } from "./helpers/scheduler-fixtures.mjs";
@@ -201,15 +202,6 @@ test("rate-limit-shaped failure classified 'rate-limited'", async () => {
   }
 });
 
-// Verbatim from find-maintainability.log (a real Codex subscription-limit run),
-// with the thread id fixed so nothing else in the line can classify it.
-const CODEX_QUOTA_JSONL = [
-  JSON.stringify({ type: "thread.started", thread_id: "01a20000-8978-72f1-98a1-84edb751af3a" }),
-  JSON.stringify({ type: "turn.started" }),
-  JSON.stringify({ type: "error", message: "You’ve hit your usage limit. Upgrade to Pro (https://chatgpt.com/explore/pro), visit https://chatgpt.com/settings/usage to purchase more credits or try again at 9:58 PM." }),
-  JSON.stringify({ type: "turn.failed", error: { message: "You’ve hit your usage limit. Upgrade to Pro (https://chatgpt.com/explore/pro), visit https://chatgpt.com/settings/usage to purchase more credits or try again at 9:58 PM." } }),
-].join("\n") + "\n";
-
 test("classifyFailure matrix", () => {
   equal(classifyFailure({ timedOut: true, output: "" }), "failed:timeout");
   equal(classifyFailure({ timedOut: false, output: "HTTP 429" }), "rate-limited");
@@ -220,7 +212,10 @@ test("classifyFailure matrix", () => {
   equal(classifyFailure({ timedOut: false, output: "Claude AI usage limit reached|1751210400" }), "quota");
   equal(classifyFailure({ timedOut: false, output: "You've hit your limit; rate limit? no — resets at 3pm" }), "quota");
   // A Codex subscription limit must outrank the 429-shaped noise it may carry too.
-  equal(classifyFailure({ timedOut: false, output: CODEX_QUOTA_JSONL }), "quota");
+  equal(classifyFailure({ timedOut: false, output: CODEX_QUOTA_JSONL, provider: "codex" }), "quota");
+  // ...but only on a Codex leaf: a Claude leaf quoting the message is a plain failure,
+  // or the run pre-fails every pending Codex leaf on a transcript that never hit a meter.
+  equal(classifyFailure({ timedOut: false, output: CODEX_QUOTA_JSONL, provider: "claude" }), "failed");
 });
 
 // Verbatim from land-two-plans-1/results/review-turn.log, 2026-09-06. The 429 makes
@@ -230,8 +225,10 @@ const OLLAMA_WEEKLY_429 = "API Error: Request rejected (429) · you (someone) ha
 const OLLAMA_SESSION_429 = "API Error: Request rejected (429) · you (someone) have reached your session usage limit, add extra usage: https://ollama.com/settings";
 
 test("classifyFailure: an ollama meter 429 is quota, not rate-limited", () => {
-  equal(classifyFailure({ timedOut: false, output: OLLAMA_WEEKLY_429 }), "quota");
-  equal(classifyFailure({ timedOut: false, output: OLLAMA_SESSION_429 }), "quota");
+  equal(classifyFailure({ timedOut: false, output: OLLAMA_WEEKLY_429, provider: "ollama" }), "quota");
+  equal(classifyFailure({ timedOut: false, output: OLLAMA_SESSION_429, provider: "ollama" }), "quota");
+  // Ollama's phrasing on another provider's leaf is just a 429.
+  equal(classifyFailure({ timedOut: false, output: OLLAMA_WEEKLY_429, provider: "claude" }), "rate-limited");
 });
 
 test("classifyFailure: ollama detection survives an overridden quotaPatterns", () => {
@@ -239,7 +236,7 @@ test("classifyFailure: ollama detection survives an overridden quotaPatterns", (
   // account must not silently lose provider detection — which is also what reaches an
   // install whose config.json already holds the old four patterns, since `config init`
   // never overwrites a value that is already set.
-  equal(classifyFailure({ timedOut: false, output: OLLAMA_WEEKLY_429 }, ["something else"]), "quota");
+  equal(classifyFailure({ timedOut: false, output: OLLAMA_WEEKLY_429, provider: "ollama" }, ["something else"]), "quota");
 });
 
 // SIGNOFF-1: the valve's reduce() had no initial value — an empty filter result

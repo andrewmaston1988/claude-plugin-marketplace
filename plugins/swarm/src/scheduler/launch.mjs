@@ -273,7 +273,9 @@ export function createLaunch(ctx) {
       const st = isMemoryStop ? "memory"
         : r.ok ? "ok"
         : r.schemaErrors || r.coverageFailed || r.errorCode === "schema_error" || r.errorCode === UNCOMMITTED_WORK ? "failed"
-        : classifyFailure({ timedOut: r.timedOut, output: r.raw, stopped: ctx.stopRequested }, cfg.quotaPatterns);
+        // The authored provider, not a registry resolve: a leaf whose dispatch failed
+        // must classify without throwing a second time.
+        : classifyFailure({ timedOut: r.timedOut, output: r.raw, stopped: ctx.stopRequested, provider: String(task.provider || "").toLowerCase() }, cfg.quotaPatterns);
       if (isMemoryStop) {
         // runTask's generic mid-stream message tells a reader not to kill or
         // diff-hunt — exactly backwards here, where the kill was deliberate.
