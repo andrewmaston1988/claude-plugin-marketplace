@@ -425,24 +425,18 @@ test("refreshPrices banks the roster, so a manual refresh never wipes what the a
 });
 
 test("refreshPrices --dry-run: a throwing parser names the provider, continues, and returns 1", async () => {
-  // The dry run is the check run before a page is allowed to replace a working
-  // card, so a page the parser refuses has to be reported — not thrown raw, and
-  // not allowed to hide the next vendor's read.
-  const path = storePath();
-  const out = [];
-  const err = [];
+  // The dry run is the check run before a page replaces a working card: a page
+  // the parser refuses is reported, and the next vendor is still read.
+  const out = []; const err = [];
   const code = await refreshPrices({
-    enabled: ALL, path, dryRun: true,
+    enabled: ALL, path: storePath(), dryRun: true,
     out: (line) => out.push(line), err: (line) => err.push(line),
-    _fetch: async (url) => url.includes("openai")
-      ? { ok: true, text: async () => "# Pricing\n\nSee our plans page.\n" }
-      : { ok: true, text: async () => fixture("anthropic-pricing.md") },
+    _fetch: async (url) => ({ ok: true, text: async () =>
+      (url.includes("openai") ? "# Pricing\n\nSee our plans page.\n" : fixture("anthropic-pricing.md")) }),
   });
   equal(code, 1, "RED: a vendor the parser refused to read must fail the run");
-  ok(err.some((line) => /^codex: .*no openai price table found/.test(line)),
-    `RED: the parse failure did not name the provider: ${JSON.stringify(err)}`);
-  ok(out.some((line) => /^── claude — \d+ models/.test(line)),
-    `RED: the vendor after the failure was not reported: ${JSON.stringify(out)}`);
+  ok(err.some((line) => /^codex: .*no openai price table found/.test(line)), `RED: the failure did not name the provider: ${JSON.stringify(err)}`);
+  ok(out.some((line) => /^── claude — \d+ models/.test(line)), `RED: the vendor after the failure was not read: ${JSON.stringify(out)}`);
 });
 
 test("diffPrices: says what moved, which is the point of running a refresh", () => {
