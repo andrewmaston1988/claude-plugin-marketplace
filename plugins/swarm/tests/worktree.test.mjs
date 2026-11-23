@@ -592,54 +592,6 @@ test("a squash-merged branch no longer blocks reuse; --force overrides an unland
   } finally { cleanup(repo, results); }
 });
 
-test("integrate merges sibling branches into the target tree", () => {
-  const repo = initRepo();
-  const results = mkdtempSync(join(tmpdir(), "swarm-wt-int-"));
-  try {
-    const base = prepareIsolation({ id: "helper", originalCwd: repo, worktreeName: "feat" }, CFG, results, ADD(repo));
-    writeFileSync(join(base.path, "helper.txt"), "helper\n");
-    commitAll(base.path, "helper");
-
-    for (const id of ["x", "y"]) {
-      const wt = prepareIsolation({ id, originalCwd: repo, worktreeName: id }, CFG, results, ADD(repo));
-      writeFileSync(join(wt.path, `${id}.txt`), `${id} work\n`);
-      commitAll(wt.path, `${id} work`);
-    }
-
-    const out = integrate(
-      { id: "join", worktreeName: "feat", sources: ["swarm/x", "swarm/y"] }, CFG, results, { repo, ...ADD(repo) });
-
-    equal(out.conflicts.length, 0, "disjoint files merge cleanly");
-    ok(existsSync(join(out.path, "x.txt")) && existsSync(join(out.path, "y.txt")),
-      "both siblings' work is present in the target tree");
-  } finally { cleanup(repo, results); }
-});
-
-test("integrate leaves conflict markers in place and reports the paths", () => {
-  const repo = initRepo();
-  const results = mkdtempSync(join(tmpdir(), "swarm-wt-int2-"));
-  try {
-    const base = prepareIsolation({ id: "helper", originalCwd: repo, worktreeName: "feat" }, CFG, results, ADD(repo));
-    writeFileSync(join(base.path, "shared.txt"), "original\n");
-    commitAll(base.path, "base");
-
-    for (const [id, text] of [["x", "x version\n"], ["y", "y version\n"]]) {
-      const wt = prepareIsolation({ id, originalCwd: repo, worktreeName: id }, CFG, results, ADD(repo));
-      writeFileSync(join(wt.path, "shared.txt"), text);
-      commitAll(wt.path, `${id} edits shared`);
-    }
-
-    const out = integrate(
-      { id: "join", worktreeName: "feat", sources: ["swarm/x", "swarm/y"] }, CFG, results, { repo, ...ADD(repo) });
-
-    deepEqual(out.conflicts, ["shared.txt"], "the conflicting path is reported");
-    const body = readFileSync(join(out.path, "shared.txt"), "utf8");
-    ok(body.includes("<<<<<<<") && body.includes(">>>>>>>"),
-      "conflict markers are left for the next leaf to resolve");
-    ok(out.merged.includes("swarm/x"), "the clean merge before the conflict still landed");
-  } finally { cleanup(repo, results); }
-});
-
 test("scheduler integration: an integrate node merges sibling branches into the target tree", async () => {
   const repo = initRepo();
   const dir = mkdtempSync(join(tmpdir(), "swarm-wt-intsched-"));

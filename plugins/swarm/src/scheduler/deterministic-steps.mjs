@@ -104,17 +104,26 @@ export function createDeterministicSteps(ctx) {
       const out = ctx.worktree.integrate(
         { ...task, worktreeName: task.integrate.into, sources }, cfg, plan.resultsDir,
         { repo: task.originalCwd || plan.cwd, base: ctx.baseFor(task.originalCwd || plan.cwd) });
-      const payload = { into: task.integrate.into, branch: out.branch, merged: out.merged, conflicts: out.conflicts };
+      // A conflict stops the merge at that source; `pending` is what the next
+      // leaf must still merge once it has resolved and committed.
+      const mergedList = out.merged.length ? out.merged.join(", ") : "nothing";
+      const where = `merged ${mergedList} into ${out.branch}`;
+      const still = out.pending.length ? `; still to merge after resolving, in order: ${out.pending.join(", ")}` : "";
+      const payload = {
+        into: task.integrate.into, branch: out.branch, merged: out.merged, conflicts: out.conflicts,
+        conflict: out.conflict, pending: out.pending,
+      };
       result = {
         id: task.id, model: task.model, ...ctx.durableIdentity(task), ok: true, exit: 0, durationMs: io.now() - t0,
-        output: out.conflicts.length
-          ? `merged ${out.merged.join(", ")} into ${out.branch}; conflicts left in the tree for the next leaf to resolve: ${out.conflicts.join(", ")}`
-          : `merged ${out.merged.join(", ")} into ${out.branch} cleanly`,
+        output: out.conflict
+          ? `${where}; conflict on ${out.conflict.branch}: ${out.conflict.paths.join(", ")}, left in the tree${still}`
+          : `${where} cleanly`,
         outputJson: payload,
       };
       appendRunLog(plan.resultsDir, {
         ts: new Date().toISOString(), event: "integrate", id: task.id,
         into: task.integrate.into, merged: out.merged.length, conflicts: out.conflicts.length,
+        pending: out.pending.length,
       });
     } catch (e) {
       result = { id: task.id, model: task.model, ...ctx.durableIdentity(task), ok: false, exit: null, durationMs: io.now() - t0, output: `integrate failed: ${e.message}` };

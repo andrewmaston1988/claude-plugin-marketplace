@@ -345,3 +345,132 @@ test("IS5: two runs of one manifest seeding the same `into` do not collide on th
     rmSync(repo, { recursive: true, force: true });
   }
 });
+
+// A conflict stops the merge. Every source after it would fail against the merge
+// still in progress, so the node must say which branches are STILL to merge rather
+// than report them merged.
+const writeAndCommit = (cwd, file, text, msg) => {
+  writeFileSync(join(cwd, file), text);
+  commitAllInRepo(cwd, msg);
+};
+
+// Real git on a loaded machine has run these past 30 s; the cap only guards a hang.
+test("IS6: a middle conflict stops the merge and the result names what is pending", { timeout: 120000 }, async () => {
+  const repo = initGitRepo();
+  const dir = tmp();
+  try {
+    writeAndCommit(repo, "shared.txt", "original\n", "shared base");
+    const spawn = fakeSpawnFactory((call) => {
+      const cwd = call.opts.cwd;
+      if (cwd.endsWith("x")) writeAndCommit(cwd, "shared.txt", "x version\n", "x edits shared");
+      else if (cwd.endsWith("y")) writeAndCommit(cwd, "shared.txt", "y version\n", "y edits shared");
+      else if (cwd.endsWith("z")) writeAndCommit(cwd, "other.txt", "z work\n", "z adds other");
+      return { output: "done" };
+    });
+    const io = makeIo(spawn);
+    const p = {
+      cwd: repo, resultsDir: join(dir, "run"), concurrency: 1, goal: "",
+      tasks: [
+        integrateLeaf("x", { cwd: repo, originalCwd: repo, worktreeName: "x" }),
+        integrateLeaf("y", { cwd: repo, originalCwd: repo, worktreeName: "y" }),
+        integrateLeaf("z", { cwd: repo, originalCwd: repo, worktreeName: "z" }),
+        { id: "join", model: "integrate", prompt: "", allowedTools: "", cwd: repo, originalCwd: repo,
+          timeoutMs: 5000, after: ["x", "y", "z"], worktreeName: "feat",
+          integrate: { into: "feat", from: ["x", "y", "z"] } },
+      ],
+    };
+    const r = await runPlan(p, CFG, io);
+
+    equal(r.summary.tasks.find((t) => t.id === "join").state, "ok", "a conflict leaves the node ok");
+    const res = JSON.parse(readFileSync(join(p.resultsDir, "results", "join.json"), "utf8"));
+    equal(res.ok, true);
+    deepEqual(res.outputJson.merged, ["swarm/x"], "only what genuinely merged is reported");
+    deepEqual(res.outputJson.pending, ["swarm/z"], "the source after the conflict is still to merge");
+    equal(res.outputJson.conflict.branch, "swarm/y");
+    ok(/conflict on swarm\/y: shared\.txt/.test(res.output), `the output names the conflicted branch: ${res.output}`);
+    ok(/still to merge after resolving, in order: swarm\/z/.test(res.output), `the output names what is pending: ${res.output}`);
+
+    const event = readFileSync(join(p.resultsDir, "run.log"), "utf8").trim().split("\n")
+      .map((l) => JSON.parse(l)).find((l) => l.event === "integrate");
+    equal(event.merged, 1, "run.log counts what merged, not how many sources were named");
+    equal(event.conflicts, 1);
+    equal(event.pending, 1);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+    rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test("IS7: a first-source conflict reads 'merged nothing into'", { timeout: 120000 }, async () => {
+  const repo = initGitRepo();
+  const dir = tmp();
+  try {
+    writeAndCommit(repo, "shared.txt", "original\n", "shared base");
+    const spawn = fakeSpawnFactory((call) => {
+      const cwd = call.opts.cwd;
+      if (cwd.endsWith("feat")) writeAndCommit(cwd, "shared.txt", "feat version\n", "feat edits shared");
+      else if (cwd.endsWith("x")) writeAndCommit(cwd, "shared.txt", "x version\n", "x edits shared");
+      else if (cwd.endsWith("y")) writeAndCommit(cwd, "other.txt", "y work\n", "y adds other");
+      return { output: "done" };
+    });
+    const io = makeIo(spawn);
+    const p = {
+      cwd: repo, resultsDir: join(dir, "run"), concurrency: 1, goal: "",
+      tasks: [
+        integrateLeaf("feat", { cwd: repo, originalCwd: repo, worktreeName: "feat" }),
+        integrateLeaf("x", { cwd: repo, originalCwd: repo, worktreeName: "x" }),
+        integrateLeaf("y", { cwd: repo, originalCwd: repo, worktreeName: "y" }),
+        { id: "join", model: "integrate", prompt: "", allowedTools: "", cwd: repo, originalCwd: repo,
+          timeoutMs: 5000, after: ["feat", "x", "y"], worktreeName: "feat",
+          integrate: { into: "feat", from: ["x", "y"] } },
+      ],
+    };
+    await runPlan(p, CFG, io);
+
+    const res = JSON.parse(readFileSync(join(p.resultsDir, "results", "join.json"), "utf8"));
+    ok(res.output.startsWith("merged nothing into swarm/feat;"), `expected an empty merged list, got: ${res.output}`);
+    ok(/conflict on swarm\/x/.test(res.output), res.output);
+    ok(/in order: swarm\/y/.test(res.output), res.output);
+    deepEqual(res.outputJson.merged, []);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+    rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test("IS8: a last-source conflict drops the 'still to merge' clause", { timeout: 120000 }, async () => {
+  const repo = initGitRepo();
+  const dir = tmp();
+  try {
+    writeAndCommit(repo, "shared.txt", "original\n", "shared base");
+    const spawn = fakeSpawnFactory((call) => {
+      const cwd = call.opts.cwd;
+      if (cwd.endsWith("feat")) writeAndCommit(cwd, "shared.txt", "feat version\n", "feat edits shared");
+      else if (cwd.endsWith("x")) writeAndCommit(cwd, "x.txt", "x work\n", "x adds x");
+      else if (cwd.endsWith("y")) writeAndCommit(cwd, "shared.txt", "y version\n", "y edits shared");
+      return { output: "done" };
+    });
+    const io = makeIo(spawn);
+    const p = {
+      cwd: repo, resultsDir: join(dir, "run"), concurrency: 1, goal: "",
+      tasks: [
+        integrateLeaf("feat", { cwd: repo, originalCwd: repo, worktreeName: "feat" }),
+        integrateLeaf("x", { cwd: repo, originalCwd: repo, worktreeName: "x" }),
+        integrateLeaf("y", { cwd: repo, originalCwd: repo, worktreeName: "y" }),
+        { id: "join", model: "integrate", prompt: "", allowedTools: "", cwd: repo, originalCwd: repo,
+          timeoutMs: 5000, after: ["feat", "x", "y"], worktreeName: "feat",
+          integrate: { into: "feat", from: ["x", "y"] } },
+      ],
+    };
+    await runPlan(p, CFG, io);
+
+    const res = JSON.parse(readFileSync(join(p.resultsDir, "results", "join.json"), "utf8"));
+    deepEqual(res.outputJson.merged, ["swarm/x"]);
+    deepEqual(res.outputJson.pending, []);
+    ok(/conflict on swarm\/y/.test(res.output), res.output);
+    ok(!/still to merge/.test(res.output), `nothing is pending, so the clause must be absent: ${res.output}`);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+    rmSync(repo, { recursive: true, force: true });
+  }
+});
