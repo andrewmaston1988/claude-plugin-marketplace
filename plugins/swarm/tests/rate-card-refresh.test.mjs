@@ -76,7 +76,7 @@ test("overlay: a fresh read does not inherit the seed's hand-noted expiry", () =
   // ever, and an always-stale card re-fetches on every cost query.
   const card = overlayRateCard(CODEX_RATE_CARD_SEED, { asOf: "2026-10-01T12:00:00Z", prices: { "gpt-6-luna": { input: 1, output: 2 } } });
   equal(card.staleAfter, undefined, "RED: the seed's promo floor rode onto a freshly read card");
-  equal(CODEX_RATE_CARD_SEED.staleAfter, "2026-11-21", "the seed itself still carries it");
+  equal(CODEX_RATE_CARD_SEED.staleAfter, "2026-11-30", "the seed itself still carries it");
 });
 
 test("overlay: the back-off marker stays in the store, never on the card", () => {
@@ -176,11 +176,11 @@ test("a parse that comes back broken is refused, not banked", async () => {
   await refreshRateCards({ providers: RATE_CARD_SOURCES, path, _fetch: servePages(), now: new Date("2026-10-01T12:00:00Z") });
   const good = readRateCardStore(path);
 
-  // A page that still returns 200 but no longer holds the table swallows the
-  // parse silently; the refresh must leave the last good bank exactly as it was.
+  // A page that still returns 200 but no longer holds the table is refused by the
+  // parse itself; the refresh must leave the last good bank exactly as it was.
   await rejects(
     refreshRateCards({ providers: RATE_CARD_SOURCES, path, _fetch: async () => ({ ok: true, text: async () => "# Pricing\n\nSee our plans page.\n" }), now }),
-    /the page shape moved/,
+    /no openai price table found/,
   );
   const afterShape = readRateCardStore(path);
   deepEqual(afterShape.claude.prices, good.claude.prices, "RED: a failed refresh clobbered the banked prices");
@@ -422,6 +422,21 @@ test("refreshPrices banks the roster, so a manual refresh never wipes what the a
   deepEqual(card.rosterIds, rosterIds.claude, "RED: the manual refresh wiped the banked roster");
   equal(isRateCardStale(card, { rosterIds: rosterIds.claude }), false,
     "RED: with no roster banked, every cost query re-fetches both vendor pages");
+});
+
+test("refreshPrices --dry-run: a throwing parser names the provider, continues, and returns 1", async () => {
+  // The dry run is the check run before a page replaces a working card: a page
+  // the parser refuses is reported, and the next vendor is still read.
+  const out = []; const err = [];
+  const code = await refreshPrices({
+    enabled: ALL, path: storePath(), dryRun: true,
+    out: (line) => out.push(line), err: (line) => err.push(line),
+    _fetch: async (url) => ({ ok: true, text: async () =>
+      (url.includes("openai") ? "# Pricing\n\nSee our plans page.\n" : fixture("anthropic-pricing.md")) }),
+  });
+  equal(code, 1, "RED: a vendor the parser refused to read must fail the run");
+  ok(err.some((line) => /^codex: .*no openai price table found/.test(line)), `RED: the failure did not name the provider: ${JSON.stringify(err)}`);
+  ok(out.some((line) => /^── claude — \d+ models/.test(line)), `RED: the vendor after the failure was not read: ${JSON.stringify(out)}`);
 });
 
 test("diffPrices: says what moved, which is the point of running a refresh", () => {

@@ -11,7 +11,7 @@ import { join } from "node:path";
 import http from "node:http";
 import { enabledProviderIds } from "../src/providers.mjs";
 import { defaultProviderRegistry } from "../src/default-providers.mjs";
-import { refreshRateCards } from "../src/rate-card.mjs";
+import { refreshRateCards, CODEX_RATE_CARD_SEED, CLAUDE_RATE_CARD_SEED, RATE_CARD_REFRESH_HOURS } from "../src/rate-card.mjs";
 import { refreshPrices, refreshStaleRateCards } from "../src/rate-card-cli.mjs";
 import { costSections } from "../src/cost.mjs";
 import { createServer } from "../src/serve/server.mjs";
@@ -92,10 +92,14 @@ test("the stale-card refresh (what `swarm cost` and the dashboard run) fetches o
     { enabled: ["codex"], has: [/openai\.com/], lacks: [CLAUDE_HOSTS] },
     { enabled: ["ollama"], has: [], lacks: [/openai\.com/, CLAUDE_HOSTS] },
   ];
+  // Derived from the seeds rather than typed: a `now` picked by hand goes stale the
+  // moment a seed is re-read, and the seed then looks fresh and is never fetched.
+  const now = Math.max(Date.parse(CODEX_RATE_CARD_SEED.asOf), Date.parse(CLAUDE_RATE_CARD_SEED.asOf))
+    + (RATE_CARD_REFRESH_HOURS + 1) * 3600e3;
   for (const { enabled, has, lacks } of cases) {
     const { urls, _fetch } = recorder();
-    // No banked store: the seeds are past their window, so every enabled card is stale.
-    await refreshStaleRateCards({ out: sink(), err: sink(), path: storePath(), _fetch, now: Date.parse("2026-10-05T00:00:00Z"), enabled });
+    // No banked store: both seeds are past their window at `now`.
+    await refreshStaleRateCards({ out: sink(), err: sink(), path: storePath(), _fetch, now, enabled });
     for (const re of has) ok(urls.some((u) => re.test(u)), `${enabled}: expected ${re}, saw ${urls}`);
     for (const re of lacks) ok(!urls.some((u) => re.test(u)), `${enabled}: ${re} is disabled, saw ${urls}`);
   }

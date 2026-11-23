@@ -31,8 +31,9 @@ export const RATE_CARD_REFRESH_HOURS = 12;
 export const RATE_CARD_FAILED_BACKOFF_HOURS = 1;
 
 // Standard-tier columns only: the batch, flex and fast tables republish the same
-// models at multiples of these and swarm dispatches none of them. Astra's figures
-// are its sub-272k tier — it is the one row with breakpoint pricing ($20/$75 above).
+// models at multiples of these and swarm dispatches none of them. The figures are
+// the short-context tier — every row publishes a dearer long-context repeat above
+// 272k, which is not read.
 export const CODEX_RATE_CARD_SEED = {
   provider: "codex",
   // Pinned deliberately: gpt-6-luna is now the cheapest row, but moving the base
@@ -40,17 +41,21 @@ export const CODEX_RATE_CARD_SEED = {
   baseModel: "gpt-5.6-luna",
   unit: "published-price-relative",
   source: "codex-rate-card",
-  asOf: "2026-09-23",
-  staleAfter: "2026-11-21", // Sol's $4.00 promo floor, not the default window.
+  asOf: "2026-11-22",
+  // "GPT-5.6 Sol's promotional pricing is available until November 30, 2026."
+  staleAfter: "2026-11-30",
   prices: {
     "gpt-6-luna": { input: 0.1, cachedInput: 0.01, cacheWrite: 0.125, output: 0.5 },
     "gpt-5.6-luna": { input: 0.2, cachedInput: 0.02, cacheWrite: 0.25, output: 1.2 },
+    "gpt-6.1-terra": { input: 1, cachedInput: 0.05, cacheWrite: 1.25, output: 5 },
     "gpt-6-sol": { input: 2, cachedInput: 0.2, cacheWrite: 2.5, output: 10 },
+    "gpt-6.2-sol": { input: 2, cachedInput: 0.1, cacheWrite: 2.5, output: 10 },
+    "gpt-6.1-sol": { input: 2, cachedInput: 0.1, cacheWrite: 2.5, output: 10 },
     "gpt-5.6-terra": { input: 2, cachedInput: 0.2, cacheWrite: 2.5, output: 12 },
     "gpt-5.6-sol": { input: 4, cachedInput: 0.4, cacheWrite: 5, output: 20 },
     "gpt-5.5": { input: 5, cachedInput: 0.5, output: 30 },
+    "gpt-6.2-astra": { input: 8, cachedInput: 0.4, cacheWrite: 10, output: 40 },
     "gpt-6-astra": { input: 10, cachedInput: 1, cacheWrite: 12.5, output: 50 },
-    "gpt-5.6-cyber": { input: 12.5, cachedInput: 1.25, cacheWrite: 15.625, output: 75 },
   },
 };
 

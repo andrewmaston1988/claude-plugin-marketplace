@@ -24,14 +24,22 @@ export async function refreshPrices({ out, err, dryRun = false, path = rateCardS
   if (!providers.length) { out("no enabled provider publishes a price table — nothing to refresh"); return 0; }
   if (dryRun) {
     const before = loadRateCards(path);
+    let failed = false;
     for (const { provider, url, parse } of providers) {
-      const res = await _fetch(url);
-      if (!res.ok) { err(`${provider}: ${url} -> ${res.status}`); return 1; }
-      const prices = parse(await res.text());
-      reportCardChanges(out, { provider, url, rows: Object.keys(prices).length, changes: diffPrices(before[provider].prices, prices) });
+      try {
+        const res = await _fetch(url);
+        if (!res.ok) { err(`${provider}: ${url} -> ${res.status}`); failed = true; continue; }
+        const prices = parse(await res.text());
+        reportCardChanges(out, { provider, url, rows: Object.keys(prices).length, changes: diffPrices(before[provider].prices, prices) });
+      } catch (e) {
+        // A parser refusing the page is the finding a dry run exists to show,
+        // so it names the vendor and lets the next one be read.
+        err(`${provider}: ${e.message}`);
+        failed = true;
+      }
     }
     out("dry run — nothing written");
-    return 0;
+    return failed ? 1 : 0;
   }
   for (const summary of await refreshRateCards({ path, _fetch, rosterIds, providers })) reportCardChanges(out, summary);
   out(`banked at ${path} — \`swarm cost\` now ranks on these`);
