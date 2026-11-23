@@ -109,9 +109,9 @@ commits HEAD does not have, so a previous run's phases cannot be silently discar
 
 Set `"role": "verifier"` on a reporting leaf so `swarm validate` enforces the verifier
 contract: it cannot hold `Edit`, `Write` or `NotebookEdit`, and it cannot name a `workspace`
-that a writer also names. `Bash` is allowed for inspecting commits, and a verifier holding it
-runs in its own private tree; a read-only one gets no tree and reads the live repo it was
-pointed at.
+that a writer also occupies — including the tree a writer derives from its own id. `Bash` is
+allowed for inspecting commits, and a verifier holding it runs in its own private tree; a
+read-only one gets no tree and reads the live repo it was pointed at.
 
 A verifier that must start from another task's commits names its OWN tree, seeded exactly as
 a writer's is — it is the one `workspace` the contract allows, because no writer names it:
