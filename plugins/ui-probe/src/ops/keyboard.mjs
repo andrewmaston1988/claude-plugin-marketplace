@@ -41,6 +41,26 @@ export async function pressKey(args, state) {
   return { measured: args.key };
 }
 
+// One character into the focused field. The set's Chromium 69 rejects `Input.insertText`, so the
+// first refusal switches this connection to a `char` key event, which inserts the character and
+// fires the same `input` event; a refusal of both is the step's failure, naming each.
+async function insertChar(state, char) {
+  if (!state._typeByChar) {
+    try {
+      await state.cdp.send("Input.insertText", { text: char });
+      return;
+    } catch (error) {
+      state._typeByChar = { insertError: error.message };
+    }
+  }
+  try {
+    await state.cdp.send("Input.dispatchKeyEvent", { type: "char", text: char, unmodifiedText: char });
+  } catch (error) {
+    throw new StepFailure("failed", "insert_failed",
+      `Input.insertText: ${state._typeByChar.insertError}; char key event: ${error.message}`);
+  }
+}
+
 /**
  * Type `text` into the page, one `Input.insertText` per character so each fires its own `input`
  * event — the path an IME commit takes. With `target` the element is focused first.
@@ -62,11 +82,7 @@ export async function typeText(args, state) {
   const gapMs = args.gapMs ?? 0;
   for (const [index, char] of Array.from(args.text).entries()) {
     if (index > 0 && gapMs > 0) await state._sleep(gapMs);
-    try {
-      await state.cdp.send("Input.insertText", { text: char });
-    } catch (error) {
-      throw new StepFailure("failed", "insert_failed", error.message);
-    }
+    await insertChar(state, char);
   }
   const active = await evaluate(state.cdp, ACTIVE_JS);
   return { measured: active ? active.value : null };
