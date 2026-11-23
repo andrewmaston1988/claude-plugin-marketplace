@@ -150,12 +150,16 @@ export async function cmdRun(rest, { parseArgsFlag, resolveManifestRef, usageHea
     out(`FAILED tasks: ${bad.map((t) => `${t.id} [${t.state}]`).join(", ")}`);
     const quotaBad = bad.filter((t) => t.state === "quota");
     if (quotaBad.length) {
-      const resets = quotaBad.map((t) => readResult(plan.resultsDir, t.id)?.quotaResetsAt).find(Boolean);
+      const results = quotaBad.map((t) => readResult(plan.resultsDir, t.id));
+      const resets = results.map((res) => res?.quotaResetsAt).find(Boolean);
+      // The meter that ran out is the leaf's own provider; a pre-failed leaf has no
+      // result to read, so the line says "provider" rather than guessing one.
+      const providers = [...new Set(results.map((res) => res?.provider).filter(Boolean))].join(", ") || "provider";
       // quotaResetsAt is either a real ISO instant (parseQuotaReset's epoch path) or a
       // human-text fragment like "3pm" — format the former, pass the latter through.
       const { formatResetTime } = await import("./usage.mjs");
       const shown = resets ? (formatResetTime(resets) ?? resets) : null;
-      out(`quota: ${quotaBad.length} leaf(s) blocked by Anthropic usage limits${shown ? ` — re-run after ${shown}` : ""}`);
+      out(`quota: ${quotaBad.length} leaf(s) blocked by ${providers} usage limits${shown ? ` — re-run after ${shown}` : ""}`);
     }
     out("resume: re-run the same command — ok results are skipped, failed/blocked work re-executes.");
     return 1;

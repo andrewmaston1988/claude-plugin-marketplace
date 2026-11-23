@@ -201,6 +201,15 @@ test("rate-limit-shaped failure classified 'rate-limited'", async () => {
   }
 });
 
+// Verbatim from find-maintainability.log (a real Codex subscription-limit run),
+// with the thread id fixed so nothing else in the line can classify it.
+const CODEX_QUOTA_JSONL = [
+  JSON.stringify({ type: "thread.started", thread_id: "01a20000-8978-72f1-98a1-84edb751af3a" }),
+  JSON.stringify({ type: "turn.started" }),
+  JSON.stringify({ type: "error", message: "You’ve hit your usage limit. Upgrade to Pro (https://chatgpt.com/explore/pro), visit https://chatgpt.com/settings/usage to purchase more credits or try again at 9:58 PM." }),
+  JSON.stringify({ type: "turn.failed", error: { message: "You’ve hit your usage limit. Upgrade to Pro (https://chatgpt.com/explore/pro), visit https://chatgpt.com/settings/usage to purchase more credits or try again at 9:58 PM." } }),
+].join("\n") + "\n";
+
 test("classifyFailure matrix", () => {
   equal(classifyFailure({ timedOut: true, output: "" }), "failed:timeout");
   equal(classifyFailure({ timedOut: false, output: "HTTP 429" }), "rate-limited");
@@ -210,6 +219,8 @@ test("classifyFailure matrix", () => {
   // quota outranks rate-limit: exhaustion is temporal, not transient
   equal(classifyFailure({ timedOut: false, output: "Claude AI usage limit reached|1751210400" }), "quota");
   equal(classifyFailure({ timedOut: false, output: "You've hit your limit; rate limit? no — resets at 3pm" }), "quota");
+  // A Codex subscription limit must outrank the 429-shaped noise it may carry too.
+  equal(classifyFailure({ timedOut: false, output: CODEX_QUOTA_JSONL }), "quota");
 });
 
 // Verbatim from land-two-plans-1/results/review-turn.log, 2026-09-06. The 429 makes

@@ -331,8 +331,33 @@ test("run: quota-blocked leaf -> re-run-after names the reset in the reader's ow
     };
     const r = await runValidated(["run", manifest], { inProcess: true, cwd: dir, env, quotaPreflight: false });
     equal(r.status, 1);
-    ok(r.stdout.includes("quota: 1 leaf(s) blocked by Anthropic usage limits"), r.stdout);
+    ok(r.stdout.includes("quota: 1 leaf(s) blocked by claude usage limits"), r.stdout);
     ok(r.stdout.includes("re-run after Sat 12 Sep, 09:00"), r.stdout);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// The quota line names the provider whose meter ran out — "Anthropic" was hard-coded
+// and every Codex quota read as a Claude one.
+test("run: a Codex quota leaf -> the summary line names codex", async () => {
+  const dir = tmp();
+  try {
+    const manifest = join(dir, "plan.json");
+    writeFileSync(manifest, JSON.stringify({
+      resultsDir: "out",
+      tasks: [{ id: "a", prompt: "x", provider: "codex", model: "gpt-6-luna" }],
+    }));
+    const env = {
+      SWARM_HOME: join(dir, "home"),
+      SWARM_SHIM_EXIT: "1",
+      SWARM_CODEX_SHIM_FAIL: "You’ve hit your usage limit. Upgrade to Pro (https://chatgpt.com/explore/pro), visit https://chatgpt.com/settings/usage to purchase more credits or try again at 9:58 PM.",
+    };
+    const config = { providers: { codex: { enabled: true, allowedRoots: [dir] } } };
+    const r = await runValidated(["run", manifest], { inProcess: true, cwd: dir, env, quotaPreflight: false, config });
+    equal(r.status, 1, r.stdout + r.stderr);
+    ok(r.stdout.includes("quota: 1 leaf(s) blocked by codex usage limits"), r.stdout);
+    ok(r.stdout.includes("re-run after 9:58 PM"), r.stdout);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

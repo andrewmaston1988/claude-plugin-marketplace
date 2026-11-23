@@ -195,6 +195,47 @@ test("quota: a quota-killed leaf's result records failureClass quota", async () 
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
+// Verbatim from find-maintainability.log (a real Codex subscription-limit run),
+// with the thread id fixed so nothing else in the line can classify it.
+const CODEX_QUOTA_JSONL = [
+  JSON.stringify({ type: "thread.started", thread_id: "01a20000-8978-72f1-98a1-84edb751af3a" }),
+  JSON.stringify({ type: "turn.started" }),
+  JSON.stringify({ type: "error", message: "You’ve hit your usage limit. Upgrade to Pro (https://chatgpt.com/explore/pro), visit https://chatgpt.com/settings/usage to purchase more credits or try again at 9:58 PM." }),
+  JSON.stringify({ type: "turn.failed", error: { message: "You’ve hit your usage limit. Upgrade to Pro (https://chatgpt.com/explore/pro), visit https://chatgpt.com/settings/usage to purchase more credits or try again at 9:58 PM." } }),
+].join("\n") + "\n";
+
+test("quota: a Codex usage limit pre-fails pending Codex leaves, and one with a fallback hops to it", async () => {
+  const dir = tmp();
+  try {
+    const spawn = fakeSpawnFactory(() => ({ exit: 1, output: CODEX_QUOTA_JSONL }));
+    const io = makeIo(spawn);
+    const codexCfg = { ...CFG, providers: { codex: { enabled: true, path: "codex", allowedRoots: [dir] } } };
+    const p = plan(dir, [
+      task("first", { provider: "codex", model: "gpt-6-luna", cwd: dir }),
+      task("second", { provider: "codex", model: "gpt-6-luna", cwd: dir }),
+      task("saved", { provider: "codex", model: "gpt-6-luna", cwd: dir, fallbackProvider: "claude", fallbackModel: "claude-haiku-4-5-20251001" }),
+    ], { concurrency: 1 });
+    const r = await runPlan(p, codexCfg, io);
+    const states = Object.fromEntries(r.summary.tasks.map((t) => [t.id, t.state]));
+    equal(states.first, "quota");
+    equal(states.second, "quota", "a pending Codex leaf must be pre-failed, never dispatched");
+    equal(states.saved, "quota");
+    // first on Codex, saved on Codex, saved on its fallback — second never launched.
+    equal(spawn.calls.length, 3);
+    equal(spawn.calls[2].args[spawn.calls[2].args.indexOf("--model") + 1], "claude-haiku-4-5-20251001");
+    const res = readResult(p.resultsDir, "first");
+    equal(res.failureClass, "quota");
+    equal(res.quotaResetsAt, "9:58 PM");
+    // The fallback died on the same wall, so the class survives on its result too.
+    equal(readResult(p.resultsDir, "saved").quotaResetsAt, "9:58 PM");
+    const logLines = readFileSync(join(p.resultsDir, "run.log"), "utf8").trim().split("\n").map((l) => JSON.parse(l));
+    const fb = logLines.find((l) => l.event === "fallback");
+    deepEqual({ from: fb.fromProvider, to: fb.toProvider }, { from: "codex", to: "claude" });
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("rate-limited: a leaf past its retry budget records failureClass rate-limited", async () => {
   const dir = tmp();
   try {

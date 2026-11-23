@@ -17,23 +17,31 @@ export const DEFAULT_QUOTA_PATTERNS = [
 
 export const DEFAULT_USAGE_URL = "https://api.anthropic.com/api/oauth/usage";
 
-// "…reached your <weekly|session> usage limit, add extra usage: ollama.com/settings" —
-// keyed on the suffix so a later meter needs no edit. Deliberately NOT in `quotaPatterns`:
+// Provider-specific meter wordings, keyed on the part a later message is least likely
+// to change: Ollama's "…usage limit, add extra usage: ollama.com/settings" and Codex's
+// "You've hit your usage limit. Upgrade to Pro…". Deliberately NOT in `quotaPatterns`:
 // that list is the operator's to narrow, and `config init` never adds to an already-set key.
-const PROVIDER_QUOTA_PATTERNS = ["usage limit, add extra usage"];
+const PROVIDER_QUOTA_PATTERNS = ["usage limit, add extra usage", "hit your usage limit"];
 
 export function matchQuota(text, patterns = DEFAULT_QUOTA_PATTERNS) {
   const t = String(text || "").toLowerCase();
   return [...patterns, ...PROVIDER_QUOTA_PATTERNS].some((p) => t.includes(p.toLowerCase()));
 }
 
+// The phrasings that introduce a reset time. One constant, so the anchored and the
+// fallback regex below can never drift apart.
+const RESET_LEAD = "(?:will reset|resets?|try again) at ";
+
 // "…limit reached|1751210400" -> ISO; "…will reset at 3pm (X)." -> "3pm (X)";
-// "…resets at <ts>" -> "<ts>"; otherwise null.
+// "…resets at <ts>" -> "<ts>"; "…try again at 9:58 PM." -> "9:58 PM"; otherwise null.
+// The anchored pattern needs the phrase to end the line; a JSONL transcript follows it
+// with `."}`, so the unanchored fallback is what reads a raw transcript.
 export function parseQuotaReset(text) {
   const s = String(text || "");
   const epoch = s.match(/\|(\d{10})\b/);
   if (epoch) return new Date(Number(epoch[1]) * 1000).toISOString();
-  const human = s.match(/(?:will reset|resets?) at ([^\n.]+?)[.\s]*(?:$|\n)/i) || s.match(/(?:will reset|resets?) at ([^\n.]+)/i);
+  const human = s.match(new RegExp(`${RESET_LEAD}([^\\n.]+?)[.\\s]*(?:$|\\n)`, "i"))
+    || s.match(new RegExp(`${RESET_LEAD}([^\\n.]+)`, "i"));
   if (human) return human[1].trim();
   return null;
 }

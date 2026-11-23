@@ -35,6 +35,31 @@ test("parseQuotaReset: epoch suffix, human phrasing, or null", () => {
   equal(parseQuotaReset("segfault"), null);
 });
 
+// Verbatim from a real Codex run — the message arrives once as an `error` event and
+// again inside `turn.failed`; the apostrophe is curly, so the pattern starts at "hit".
+const CODEX_QUOTA_MESSAGE = "You’ve hit your usage limit. Upgrade to Pro (https://chatgpt.com/explore/pro), visit https://chatgpt.com/settings/usage to purchase more credits or try again at 9:58 PM.";
+const CODEX_QUOTA_JSONL = [
+  JSON.stringify({ type: "thread.started", thread_id: "01a20000-8978-72f1-98a1-84edb751af3a" }),
+  JSON.stringify({ type: "turn.started" }),
+  JSON.stringify({ type: "error", message: CODEX_QUOTA_MESSAGE }),
+  JSON.stringify({ type: "turn.failed", error: { message: CODEX_QUOTA_MESSAGE } }),
+].join("\n") + "\n";
+
+test("matchQuota: recognises Codex's usage-limit message", () => {
+  ok(matchQuota(CODEX_QUOTA_MESSAGE));
+  ok(matchQuota(CODEX_QUOTA_JSONL));
+  // Provider phrasings are never in the operator-tunable list, so narrowing it must not lose them.
+  ok(matchQuota(CODEX_QUOTA_MESSAGE, ["something else"]));
+});
+
+// The raw line ends `PM."}`, so only the unanchored fallback regex can read it; the
+// bare sentence ends `PM.` and matches the anchored one. Both must give the same time.
+test("parseQuotaReset: reads Codex's 'try again at' reset from the raw JSONL and the bare sentence", () => {
+  equal(parseQuotaReset(CODEX_QUOTA_JSONL), "9:58 PM");
+  equal(parseQuotaReset(CODEX_QUOTA_MESSAGE), "9:58 PM");
+  equal(parseQuotaReset("You’ve hit your usage limit. Try again later."), null);
+});
+
 test("parseUsageLimits: extracts limits with worst-by-percent", () => {
   const p = parseUsageLimits(USAGE_FIXTURE);
   equal(p.limits.length, 3);
