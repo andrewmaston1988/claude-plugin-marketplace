@@ -1,4 +1,4 @@
-import { mkdirSync, writeFileSync, appendFileSync, readFileSync, existsSync, statSync } from "node:fs";
+import { mkdirSync, writeFileSync, readFileSync, existsSync, statSync } from "node:fs";
 import { join, basename, resolve } from "node:path";
 import { tokenTotal } from "./stream.mjs";
 import { inferStoredIdentity } from "./contracts.mjs";
@@ -6,6 +6,9 @@ import { listLeavesFrom } from "./leaf-list.mjs";
 import { gradeFooter, renderStatus as renderRunStatus, formatKeptWorktrees } from "./results-render.mjs";
 import { runLiveness } from "./runlog.mjs";
 import { enginePath } from "./config.mjs";
+import { appendRunLog } from "./runlog-append.mjs";
+
+export { appendRunLog };
 
 // Results layout under <resultsDir>:
 //   .gitignore          '*' — runs never pollute the repo
@@ -160,10 +163,6 @@ export function writeDigestMd(dir, text, gradeable) {
   }
   writeFileSync(p, out);
   return p;
-}
-
-export function appendRunLog(dir, obj) {
-  appendFileSync(join(dir, "run.log"), JSON.stringify(obj) + "\n");
 }
 
 // id -> the last provider/session identity run.log recorded for it, across every generation.

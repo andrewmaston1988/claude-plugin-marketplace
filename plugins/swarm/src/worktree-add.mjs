@@ -4,7 +4,7 @@ import { spawn } from "node:child_process";
 import { existsSync, rmSync, statSync } from "node:fs";
 import { resolve } from "node:path";
 import { unlandedCount } from "./landed.mjs";
-import { appendRunLog } from "./results.mjs";
+import { appendRunLog } from "./runlog-append.mjs";
 import { STALE_AFTER_MS } from "./stale-lock.mjs";
 
 export const ADD_ATTEMPTS = 3;

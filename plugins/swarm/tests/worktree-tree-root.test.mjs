@@ -188,7 +188,7 @@ test("two concurrent writer leaves in one run each leave their own record", asyn
     const [moduleUrl, repo, results, root, name, base] = process.argv.slice(1);
     const { prepareIsolation, WORKTREE_ADD_TIMEOUT_MS } = await import(moduleUrl);
     const cfg = { worktreeBranchPrefix: "swarm/", treeRoot: root };
-    prepareIsolation({ id: name, originalCwd: repo, cwd: repo }, cfg, results,
+    await prepareIsolation({ id: name, originalCwd: repo, cwd: repo }, cfg, results,
       { addTimeoutMs: WORKTREE_ADD_TIMEOUT_MS, base });
   `;
   const paths = ["alpha", "beta"].map((name) => treeDirFor(results, name, cfgWith(root)));

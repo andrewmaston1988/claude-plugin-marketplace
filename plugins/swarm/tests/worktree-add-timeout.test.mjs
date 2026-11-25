@@ -59,12 +59,14 @@ function resultsDir() {
   return mkdtempSync(join(tmpdir(), "swarm-wt-res-"));
 }
 
-// A first-run-only slow post-checkout hook: the killed attempt's hook outlives the
-// timeout, then every later invocation returns at once.
-function firstRunSlowHook(dir, doneMarker, delayMs = 1400) {
-  const done = hookPath(doneMarker);
-  const script = `#!/bin/sh\nif [ ! -f '${done}' ]; then\n  node -e "setTimeout(() => require('fs').writeFileSync('${done}', ''), ${delayMs})"\nfi\n`;
+// A post-checkout hook that hangs only while its flag file exists, removing the flag as
+// it starts: the killed attempt's hook outlives the timeout, later invocations return at
+// once, and a test can watch the flag go to know the branch ref is already written.
+function hangOnceHook(dir, flagMarker, hangMs = 3000) {
+  const flag = hookPath(flagMarker);
+  const script = `#!/bin/sh\nif [ -f '${flag}' ]; then\n  rm -f '${flag}'\n  node -e "setTimeout(() => {}, ${hangMs})"\nfi\n`;
   writeFileSync(join(dir, "post-checkout"), script, { mode: 0o755 });
+  writeFileSync(flagMarker, "");
 }
 
 // ---- the retry loop
@@ -73,21 +75,20 @@ test("a timed-out add retries and yields a ready tree, recording the retry", { t
   const repo = initRepo();
   const hooks = hooksDir();
   const results = resultsDir();
-  const done = join(hooks, "done");
+  const flag = join(hooks, "hang");
   try {
-    firstRunSlowHook(hooks, done);
+    hangOnceHook(hooks, flag);
     git(["config", "core.hooksPath", hooks], repo);
     const wt = await prepareIsolation({ id: "slow", originalCwd: repo }, CFG, results,
-      { addTimeoutMs: 800, base: git(["rev-parse", "HEAD"], repo) });
+      { addTimeoutMs: 2000, base: git(["rev-parse", "HEAD"], repo) });
 
     equal(wt.reused, false);
     ok(existsSync(join(wt.path, "a.txt")), "the retried add produced a real tree");
     const retries = readLog(results).filter((e) => e.event === "worktree-add-retry");
     equal(retries.length, 1, "one timeout, one retry");
     equal(retries[0].attempt, 2);
-    equal(retries[0].timeoutMs, 1600, "the retry's budget is double the first attempt's");
+    equal(retries[0].timeoutMs, 4000, "the retry's budget is double the first attempt's");
   } finally {
-    waitUntil(() => existsSync(done), 20000);
     for (const d of [results, hooks, repo]) removeEventually(d);
   }
 });
@@ -142,20 +143,21 @@ test("an old 0-byte lock and the half-made tree are cleared before the retry", {
   const repo = initRepo();
   const hooks = hooksDir();
   const results = resultsDir();
-  const done = join(hooks, "done");
+  const flag = join(hooks, "hang");
   const lock = lockPathFor(repo, "swarm/slow");
   const tree = treeDirFor(results, "slow", CFG);
   try {
-    firstRunSlowHook(hooks, done);
+    hangOnceHook(hooks, flag);
     git(["config", "core.hooksPath", hooks], repo);
 
     const pending = prepareIsolation({ id: "slow", originalCwd: repo }, CFG, results,
-      { addTimeoutMs: 800, base: git(["rev-parse", "HEAD"], repo) });
-    // Once the attempt has made its tree, the ref is written and its lock is free:
-    // seed the debris a killed add is known to leave.
-    waitUntil(() => existsSync(tree), 10000);
+      { addTimeoutMs: 2000, base: git(["rev-parse", "HEAD"], repo) });
+    // The flag going means the hook is running, so git has written the branch ref and
+    // released its lock: seed the debris a killed add leaves while nothing holds it.
+    waitUntil(() => !existsSync(flag), 20000);
     writeFileSync(lock, "");
     ageLock(lock, STALE_AFTER_MS + 5000);
+    ok(existsSync(tree), "precondition: the killed attempt made a half tree");
 
     const wt = await pending;
     equal(wt.reused, false);
@@ -163,7 +165,6 @@ test("an old 0-byte lock and the half-made tree are cleared before the retry", {
     ok(existsSync(join(wt.path, "a.txt")), "the retry produced a real tree");
     equal(readLog(results).filter((e) => e.event === "worktree-add-retry").length, 1);
   } finally {
-    waitUntil(() => existsSync(done), 20000);
     for (const d of [results, hooks, repo]) removeEventually(d);
   }
 });

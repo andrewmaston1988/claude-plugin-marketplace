@@ -90,7 +90,7 @@ test("row 12: a removal git refuses is reported kept with git's reason, never fr
   const f = pruneFixture();
   try {
     const base = gitOut(["rev-parse", "HEAD"], f.repo);
-    const wt = prepareIsolation(
+    const wt = await prepareIsolation(
       { id: "locked", originalCwd: f.repo, cwd: f.repo, branchScope: runScopeKey(f.resultsDir) },
       cfgFor(f.dir), f.resultsDir, { addTimeoutMs: WORKTREE_ADD_TIMEOUT_MS, base },
     );
