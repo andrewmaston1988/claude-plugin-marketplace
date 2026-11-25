@@ -6,10 +6,14 @@
 // and fills a lock within milliseconds.
 const STALE_AFTER_MS = 60_000;
 const EMPTY_BYTES = 0;
+// A hung tasklist/pgrep would block prune after its removals are already made; a probe
+// that gives up reads as unknown, which reads as held.
+const PROBE_TIMEOUT_MS = 5_000;
 
 // git's own refusal carries the path — `error: could not delete reference ...: Unable to
-// create '<path>': File exists.` Both quote styles appear: git C-quotes paths that need it.
-const REFUSAL = /Unable to create ['"](.+?)['"]: File exists/;
+// create '<path>': File exists.` The path is inserted raw inside single quotes: git 2.53
+// does not C-quote it, even for a path holding a space, an apostrophe or non-ASCII bytes.
+const REFUSAL = /Unable to create '(.+?)': File exists/;
 
 export function lockPath(reason) {
   const found = REFUSAL.exec(reason ?? "");
@@ -44,7 +48,7 @@ export function gitRunning(spawnSync, platform = process.platform) {
   const [command, args] = windows
     ? ["tasklist", ["/FI", "IMAGENAME eq git.exe", "/NH"]]
     : ["pgrep", ["-x", "git"]];
-  const result = spawnSync(command, args, { encoding: "utf8", windowsHide: true });
+  const result = spawnSync(command, args, { encoding: "utf8", windowsHide: true, timeout: PROBE_TIMEOUT_MS });
   if (!result || result.error || result.status == null) return null;
   if (windows) {
     // tasklist exits 0 either way; its no-match line says so in prose.

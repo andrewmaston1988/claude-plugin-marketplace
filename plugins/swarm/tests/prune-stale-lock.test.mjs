@@ -1,6 +1,4 @@
-// A planted, back-dated `.git/packed-refs.lock` reproduces the refusal a killed git leaves
-// behind. Prune must name that lock as stale instead of leaving the operator to guess
-// whether removing it is safe.
+// Fixtures plant a `.git/packed-refs.lock`, which is the exact refusal a killed git leaves.
 import "./helpers/isolate-home.mjs";
 import childProcess from "node:child_process";
 import { syncBuiltinESMExports } from "node:module";
@@ -18,12 +16,14 @@ const REAL_SPAWN_SYNC = childProcess.spawnSync;
 
 // The suite runs test files in parallel, so a real tasklist/pgrep would find another file's
 // git process and the diagnosis would depend on the weather. Pin the probe's answer.
-function probeIsIdle() {
+function pinProbe(answer) {
   childProcess.spawnSync = (cmd, args, opts) => {
-    if (cmd === "tasklist") {
-      return { status: 0, stdout: "INFO: No tasks are running which match the specified criteria.\n", stderr: "" };
-    }
-    if (cmd === "pgrep") return { status: 1, stdout: "", stderr: "" };
+    if (cmd === "tasklist") return answer === "busy"
+      ? { status: 0, stdout: "git.exe                       1234 Console                    1     12,345 K\n", stderr: "" }
+      : { status: 0, stdout: "INFO: No tasks are running which match the specified criteria.\n", stderr: "" };
+    if (cmd === "pgrep") return answer === "busy"
+      ? { status: 0, stdout: "4242\n", stderr: "" }
+      : { status: 1, stdout: "", stderr: "" };
     return REAL_SPAWN_SYNC(cmd, args, opts);
   };
   syncBuiltinESMExports();
@@ -33,9 +33,9 @@ function probeIsIdle() {
   };
 }
 
-// A landed branch-only row — it sits at the base the default branch already holds — with the
-// 0-byte lock a killed git leaves at the end of a merge.
-function staleLockRun() {
+// A landed branch-only row — it sits at the base the default branch already holds — with a
+// back-dated lock file of `bytes` length.
+function lockRun({ bytes = 0 } = {}) {
   const f = pruneFixture();
   const scope = runScopeKey(f.resultsDir);
   const branch = `swarm/${scope}/landed`;
@@ -43,7 +43,7 @@ function staleLockRun() {
   equal(made.status, 0, String(made.stderr));
   writeFinishedRun(f.resultsDir, []);
   const lock = join(f.repo, ".git", "packed-refs.lock");
-  writeFileSync(lock, "");
+  writeFileSync(lock, "x".repeat(bytes));
   const when = new Date(Date.now() - 120_000);
   utimesSync(lock, when, when);
   return { f, branch, lock };
@@ -54,18 +54,25 @@ const pruneOpts = (f) => ({ cwd: f.dir, env: { SWARM_HOME: join(f.dir, "home") }
 // git prints the path with forward slashes on every platform.
 const gitSpelling = (path) => path.replaceAll("\\", "/");
 
-test("a stale lock is named as safe to remove, and the summary points at it", async () => {
-  const { f, branch, lock } = staleLockRun();
-  const restore = probeIsIdle();
+test("a stale lock is named against this host, and the summary points at it", async () => {
+  const { f, branch, lock } = lockRun();
+  const restore = pinProbe("idle");
   try {
     const r = await runCliInProcess(pruneArgs(f), pruneOpts(f));
     equal(r.status, 1, r.stdout + r.stderr);
     ok(!/freed/.test(r.stdout), `a refused row is never printed as freed: ${r.stdout}`);
     ok(r.stderr.includes(gitSpelling(lock)), `the lock path is named: ${r.stderr}`);
     ok(/stale git lock/.test(r.stderr), `the lock is named as stale: ${r.stderr}`);
-    ok(/safe to remove/.test(r.stderr), `the remedy is spelled out: ${r.stderr}`);
+    // A remote writer is invisible to this host's probe, so the remedy needs its own
+    // confirmation step rather than reading "no local git = safe".
+    ok(/no git process is running on this host/.test(r.stderr), `the observation is scoped to the host: ${r.stderr}`);
+    ok(/confirm every writer has stopped/.test(r.stderr), `removal needs confirmation: ${r.stderr}`);
+    ok(!/safe to remove/.test(r.stderr), `the host check alone never says safe: ${r.stderr}`);
     ok(/the stale lock .*packed-refs\.lock/.test(r.stderr),
       `the summary names the lock rather than "clear what git names above": ${r.stderr}`);
+    const summaryLine = r.stderr.split("\n").find((line) => /the stale lock/.test(line)) ?? "";
+    ok(/confirm every writer has stopped/.test(summaryLine),
+      `the summary carries the confirmation too: ${r.stderr}`);
     ok(!/clear what git names above/.test(r.stderr), r.stderr);
     ok(gitOut(["branch", "--list", branch], f.repo), "prune never deletes the lock or the row");
   } finally {
@@ -74,9 +81,40 @@ test("a stale lock is named as safe to remove, and the summary points at it", as
   }
 });
 
+test("a lock behind a running git is reported as unverified, not owned by that git", async () => {
+  const { f } = lockRun();
+  const restore = pinProbe("busy");
+  try {
+    const r = await runCliInProcess(pruneArgs(f), pruneOpts(f));
+    equal(r.status, 1, r.stdout + r.stderr);
+    ok(/git is running on this host/.test(r.stderr), `the probe's answer is named: ${r.stderr}`);
+    ok(/unverified/.test(r.stderr), `an unrelated git does not own the lock: ${r.stderr}`);
+    ok(!/stale git lock/.test(r.stderr), `no stale claim while git runs: ${r.stderr}`);
+    ok(!/the stale lock/.test(r.stderr), `the summary stays generic: ${r.stderr}`);
+  } finally {
+    restore();
+    dropSnapPrune(f);
+  }
+});
+
+test("a lock with content points at its owner instead of a retry that changes nothing", async () => {
+  const { f } = lockRun({ bytes: 12 });
+  const restore = pinProbe("idle");
+  try {
+    const r = await runCliInProcess(pruneArgs(f), pruneOpts(f));
+    equal(r.status, 1, r.stdout + r.stderr);
+    ok(/12 bytes/.test(r.stderr), `the size is reported: ${r.stderr}`);
+    ok(/check whether that writer is alive/.test(r.stderr), `the remedy is to verify the owner: ${r.stderr}`);
+    ok(!/wait a minute/.test(r.stderr), `a timed wait cannot change the content verdict: ${r.stderr}`);
+  } finally {
+    restore();
+    dropSnapPrune(f);
+  }
+});
+
 test("once the lock is removed the same prune exits 0 and removes the row", async () => {
-  const { f, branch, lock } = staleLockRun();
-  const restore = probeIsIdle();
+  const { f, branch, lock } = lockRun();
+  const restore = pinProbe("idle");
   try {
     const first = await runCliInProcess(pruneArgs(f), pruneOpts(f));
     equal(first.status, 1, first.stdout + first.stderr);

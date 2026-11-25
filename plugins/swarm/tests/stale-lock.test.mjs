@@ -29,6 +29,9 @@ test("lockPath: git's refusal names the lock, Windows drive paths included", () 
   equal(lockPath(windows), "C:/Users/x/repo/.git/packed-refs.lock");
   equal(lockPath("fatal: Unable to create '/repo/.git/refs/heads/victim.lock': File exists."),
     "/repo/.git/refs/heads/victim.lock");
+  // The path is raw, not escaped, so an apostrophe in a directory name stays part of it.
+  equal(lockPath("error: could not delete reference r: Unable to create "
+    + "'C:/tmp/it's repo/.git/packed-refs.lock': File exists."), "C:/tmp/it's repo/.git/packed-refs.lock");
 });
 
 test("lockPath: a refusal that names no lock returns null", () => {
@@ -102,6 +105,18 @@ test("gitRunning: win32 asks tasklist, elsewhere pgrep -x git", () => {
   deepEqual(calls.at(-1), { cmd: "tasklist", args: ["/FI", "IMAGENAME eq git.exe", "/NH"] });
   equal(gitRunning(busy, "linux"), true);
   deepEqual(calls.at(-1), { cmd: "pgrep", args: ["-x", "git"] });
+});
+
+test("gitRunning: the probe is bounded so a hung tasklist cannot stall prune", () => {
+  let seen;
+  const opts = (cmd, args, options) => {
+    seen = options;
+    return { status: 1, stdout: "" };
+  };
+  gitRunning(opts, "linux");
+  ok(Number.isFinite(seen?.timeout) && seen.timeout > 0 && seen.timeout <= 30_000, `timeout reads ${seen?.timeout}`);
+  // What spawnSync returns once that bound fires: no status, an error.
+  equal(gitRunning(() => ({ status: null, stdout: "", error: Object.assign(new Error("ETIMEDOUT"), { code: "ETIMEDOUT" }) }), "linux"), null);
 });
 
 test("gitRunning: tasklist's no-match line is idle, and a failure to run is unknown", () => {

@@ -101,8 +101,6 @@ export async function cmdPrune(rest, { usage }) {
     if (probed === undefined) probed = gitRunning(spawnSync, process.platform);
     return probed;
   };
-  // git's refusal text names the lockfile, so a killed git's leftovers can be described
-  // instead of leaving the operator to guess whether removing one is safe.
   const lockOf = [];
   for (const { row, reason } of refused) {
     err(`  ${rowLabel(row)}: ${workCounts(row).join(", ") || firstLine(reason) || "still present"}`);
@@ -129,7 +127,7 @@ export async function cmdPrune(rest, { usage }) {
     const allStale = lockOf.every((info) => info?.state === "stale");
     if (allStale) {
       const locks = [...new Set(lockOf.map((info) => info.path))].join(", ");
-      err(`swarm: kept ${rowCount(refused.length)} that git refused to remove — the stale lock ${locks} is blocking ${refused.length === 1 ? "it" : "them"}; remove the lock and prune again`);
+      err(`swarm: kept ${rowCount(refused.length)} that git refused to remove — the stale lock ${locks} is blocking ${refused.length === 1 ? "it" : "them"}; confirm every writer has stopped, then remove the lock and prune again`);
     } else {
       err(`swarm: kept ${rowCount(refused.length)} that git refused to remove — clear what git names above and prune again`);
     }
@@ -150,18 +148,19 @@ const dirCount = (n, word = "directory", plural = `${word}s`) => `${n} ${n === 1
 const firstLine = (text) => (text || "").split(/\r?\n/).map((s) => s.trim()).find(Boolean) || "";
 
 // One line per diagnosed lock: what it is, how big and how old, and what to do about it.
-// Prune never removes one — a lock a live writer holds is the ref store.
+// The process check sees this host only, so no line authorises removal on its own — prune
+// never removes one, and a lock a writer on another machine holds is the ref store.
 function lockLine(info) {
   if (info.state === "gone") return `${info.path} is a git lock that is already gone — prune again`;
   if (info.state === "stale") {
     return `${info.path} is a stale git lock (${info.size} bytes, ${Math.round(info.ageMs / 1000)} s old)`
-      + " — no git process is running, so it is safe to remove that file and prune again";
+      + " — no git process is running on this host; confirm every writer has stopped, then remove that file and prune again";
   }
   if (info.cause === "unreadable") return `${info.path} is a git lock that could not be read — check for a git process, then prune again`;
   const what = `${info.path} is a git lock (${info.size} bytes, ${Math.round(info.ageMs / 1000)} s old)`;
-  if (info.cause === "process") return `${what} and a git process is running — wait for it to finish, then prune again`;
-  if (info.cause === "unknown") return `${what}; the git process check could not run — check for a git process, then prune again`;
-  if (info.cause === "content") return `${what} and it has content, so a writer may still hold it — wait a minute, then prune again`;
+  if (info.cause === "process") return `${what} and git is running on this host, so this lock's owner is unverified — wait for that git to finish, then prune again`;
+  if (info.cause === "unknown") return `${what}; the git process check could not run, so its owner is unverified — check for a git process, then prune again`;
+  if (info.cause === "content") return `${what} and it has content, so a writer may still hold it — check whether that writer is alive before removing it, then prune again`;
   return `${what} and it is too new to tell — wait a minute, then prune again`;
 }
 

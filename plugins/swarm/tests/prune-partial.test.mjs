@@ -107,7 +107,11 @@ test("row 12: a removal git refuses is reported kept with git's reason, never fr
     ok(!/freed/.test(r.stdout), `a row git refused must never read as freed: ${r.stdout}`);
     ok(r.stderr.includes(wt.path), r.stderr);
     ok(/locked working tree/i.test(r.stderr), `git's own reason is what is printed: ${r.stderr}`);
-    ok(/kept 1 row that git refused to remove/.test(r.stderr), `a refused removal is named as git's refusal: ${r.stderr}`);
+    // A locked worktree is no lockfile, so the generic remedy is the whole line — the
+    // prefix alone also opens the stale-lock summary, which would hide a wrong diagnosis.
+    ok(/kept 1 row that git refused to remove — clear what git names above and prune again/.test(r.stderr),
+      `a refused removal is named as git's refusal: ${r.stderr}`);
+    ok(!/is a git lock/.test(r.stderr), `no lock diagnosis for a lockfile-free refusal: ${r.stderr}`);
     ok(!r.stderr.includes("--discard-unlanded"),
       `the flag retries the same removal — it is never the remedy for a refused row: ${r.stderr}`);
     ok(existsSync(wt.path), "the tree git refused to remove is still there");
@@ -117,7 +121,8 @@ test("row 12: a removal git refuses is reported kept with git's reason, never fr
     // this row down the same removal git just refused.
     const discarded = await runCliInProcess(["prune", f.resultsDir, "--discard-unlanded"], { cwd: f.dir, env: { SWARM_HOME: join(f.dir, "home") } });
     equal(discarded.status, 1, discarded.stdout + discarded.stderr);
-    ok(/kept 1 row that git refused to remove/.test(discarded.stderr), discarded.stderr);
+    ok(/kept 1 row that git refused to remove — clear what git names above and prune again/.test(discarded.stderr),
+      discarded.stderr);
     ok(!discarded.stderr.includes("--discard-unlanded"), `never suggest the flag that was just passed: ${discarded.stderr}`);
     ok(existsSync(wt.path), "the locked tree survives --discard-unlanded too");
   } finally {
@@ -134,8 +139,9 @@ test("row 13: a run with both kinds of kept row prints both remedies", async () 
     equal(r.status, 1, r.stdout + r.stderr);
     ok(/kept 1 row that still holds work — .*--discard-unlanded/.test(r.stderr),
       `the work row keeps the landing advice: ${r.stderr}`);
-    ok(/kept 1 row that git refused to remove/.test(r.stderr),
+    ok(/kept 1 row that git refused to remove — clear what git names above and prune again/.test(r.stderr),
       `the refused row gets its own line: ${r.stderr}`);
+    ok(!/is a git lock/.test(r.stderr), `no lock diagnosis here either: ${r.stderr}`);
     ok(existsSync(landed.path) && existsSync(held.path), "both kinds of row survive");
   } finally {
     dropSnapPrune(f);
