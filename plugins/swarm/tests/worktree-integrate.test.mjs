@@ -7,21 +7,21 @@ import { spawnSync } from "node:child_process";
 import { prepareIsolation, integrate } from "../src/worktree.mjs";
 import { initRepo, cleanup, commitAll, CFG, ADD } from "./helpers/worktree-fixtures.mjs";
 
-test("integrate merges sibling branches into the target tree", () => {
+test("integrate merges sibling branches into the target tree", async () => {
   const repo = initRepo();
   const results = mkdtempSync(join(tmpdir(), "swarm-wt-int-"));
   try {
-    const base = prepareIsolation({ id: "helper", originalCwd: repo, worktreeName: "feat" }, CFG, results, ADD(repo));
+    const base = await prepareIsolation({ id: "helper", originalCwd: repo, worktreeName: "feat" }, CFG, results, ADD(repo));
     writeFileSync(join(base.path, "helper.txt"), "helper\n");
     commitAll(base.path, "helper");
 
     for (const id of ["x", "y"]) {
-      const wt = prepareIsolation({ id, originalCwd: repo, worktreeName: id }, CFG, results, ADD(repo));
+      const wt = await prepareIsolation({ id, originalCwd: repo, worktreeName: id }, CFG, results, ADD(repo));
       writeFileSync(join(wt.path, `${id}.txt`), `${id} work\n`);
       commitAll(wt.path, `${id} work`);
     }
 
-    const out = integrate(
+    const out = await integrate(
       { id: "join", worktreeName: "feat", sources: ["swarm/x", "swarm/y"] }, CFG, results, { repo, ...ADD(repo) });
 
     equal(out.conflicts.length, 0, "disjoint files merge cleanly");
@@ -30,7 +30,7 @@ test("integrate merges sibling branches into the target tree", () => {
   } finally { cleanup(repo, results); }
 });
 
-test("integrate leaves conflict markers in place and reports the paths", () => {
+test("integrate leaves conflict markers in place and reports the paths", async () => {
   const repo = initRepo();
   const results = mkdtempSync(join(tmpdir(), "swarm-wt-int2-"));
   try {
@@ -38,15 +38,15 @@ test("integrate leaves conflict markers in place and reports the paths", () => {
     // conflict genuinely lands on the last.
     writeFileSync(join(repo, "shared.txt"), "original\n");
     commitAll(repo, "shared base");
-    prepareIsolation({ id: "feat", originalCwd: repo, worktreeName: "feat" }, CFG, results, ADD(repo));
+    await prepareIsolation({ id: "feat", originalCwd: repo, worktreeName: "feat" }, CFG, results, ADD(repo));
 
     for (const [id, text] of [["x", "x version\n"], ["y", "y version\n"]]) {
-      const wt = prepareIsolation({ id, originalCwd: repo, worktreeName: id }, CFG, results, ADD(repo));
+      const wt = await prepareIsolation({ id, originalCwd: repo, worktreeName: id }, CFG, results, ADD(repo));
       writeFileSync(join(wt.path, "shared.txt"), text);
       commitAll(wt.path, `${id} edits shared`);
     }
 
-    const out = integrate(
+    const out = await integrate(
       { id: "join", worktreeName: "feat", sources: ["swarm/x", "swarm/y"] }, CFG, results, { repo, ...ADD(repo) });
 
     deepEqual(out.conflicts, ["shared.txt"], "the conflicting path is reported");
@@ -60,12 +60,12 @@ test("integrate leaves conflict markers in place and reports the paths", () => {
 
 // A conflicting middle source: every later merge would fail against the merge still
 // in progress, so the sequence stops there and only genuine ancestry is reported.
-function threeSourceTrees(repo, results) {
+async function threeSourceTrees(repo, results) {
   writeFileSync(join(repo, "shared.txt"), "original\n");
   commitAll(repo, "shared base");
-  prepareIsolation({ id: "feat", originalCwd: repo, worktreeName: "feat" }, CFG, results, ADD(repo));
+  await prepareIsolation({ id: "feat", originalCwd: repo, worktreeName: "feat" }, CFG, results, ADD(repo));
   for (const [id, file, text] of [["x", "shared.txt", "x version\n"], ["y", "shared.txt", "y version\n"], ["z", "other.txt", "z work\n"]]) {
-    const wt = prepareIsolation({ id, originalCwd: repo, worktreeName: id }, CFG, results, ADD(repo));
+    const wt = await prepareIsolation({ id, originalCwd: repo, worktreeName: id }, CFG, results, ADD(repo));
     writeFileSync(join(wt.path, file), text);
     commitAll(wt.path, `${id} edits ${file}`);
   }
@@ -74,13 +74,13 @@ function threeSourceTrees(repo, results) {
 const isAncestor = (src, cwd) =>
   spawnSync("git", ["merge-base", "--is-ancestor", src, "HEAD"], { cwd, windowsHide: true }).status === 0;
 
-test("integrate stops at its first conflict and reports only what merged", () => {
+test("integrate stops at its first conflict and reports only what merged", async () => {
   const repo = initRepo();
   const results = mkdtempSync(join(tmpdir(), "swarm-wt-int3-"));
   try {
-    threeSourceTrees(repo, results);
+    await threeSourceTrees(repo, results);
 
-    const out = integrate(
+    const out = await integrate(
       { id: "join", worktreeName: "feat", sources: ["swarm/x", "swarm/y", "swarm/z"] }, CFG, results, { repo, ...ADD(repo) });
 
     deepEqual(out.merged, ["swarm/x"], "only the source whose work is in the tree is merged");
@@ -90,13 +90,13 @@ test("integrate stops at its first conflict and reports only what merged", () =>
   } finally { cleanup(repo, results); }
 });
 
-test("integrate's merged list is ancestry, not the input list", () => {
+test("integrate's merged list is ancestry, not the input list", async () => {
   const repo = initRepo();
   const results = mkdtempSync(join(tmpdir(), "swarm-wt-int4-"));
   try {
-    threeSourceTrees(repo, results);
+    await threeSourceTrees(repo, results);
 
-    const out = integrate(
+    const out = await integrate(
       { id: "join", worktreeName: "feat", sources: ["swarm/x", "swarm/y", "swarm/z"] }, CFG, results, { repo, ...ADD(repo) });
 
     for (const src of out.merged) ok(isAncestor(src, out.path), `${src} is reported merged and must be an ancestor of the tree's HEAD`);
@@ -105,18 +105,18 @@ test("integrate's merged list is ancestry, not the input list", () => {
   } finally { cleanup(repo, results); }
 });
 
-test("a clean integrate reports every source merged and nothing pending", () => {
+test("a clean integrate reports every source merged and nothing pending", async () => {
   const repo = initRepo();
   const results = mkdtempSync(join(tmpdir(), "swarm-wt-int5-"));
   try {
-    prepareIsolation({ id: "feat", originalCwd: repo, worktreeName: "feat" }, CFG, results, ADD(repo));
+    await prepareIsolation({ id: "feat", originalCwd: repo, worktreeName: "feat" }, CFG, results, ADD(repo));
     for (const id of ["x", "y", "z"]) {
-      const wt = prepareIsolation({ id, originalCwd: repo, worktreeName: id }, CFG, results, ADD(repo));
+      const wt = await prepareIsolation({ id, originalCwd: repo, worktreeName: id }, CFG, results, ADD(repo));
       writeFileSync(join(wt.path, `${id}.txt`), `${id} work\n`);
       commitAll(wt.path, `${id} work`);
     }
 
-    const out = integrate(
+    const out = await integrate(
       { id: "join", worktreeName: "feat", sources: ["swarm/x", "swarm/y", "swarm/z"] }, CFG, results, { repo, ...ADD(repo) });
 
     deepEqual(out.merged, ["swarm/x", "swarm/y", "swarm/z"]);
@@ -126,22 +126,22 @@ test("a clean integrate reports every source merged and nothing pending", () => 
   } finally { cleanup(repo, results); }
 });
 
-test("integrate reports an empty merged when its first source conflicts", () => {
+test("integrate reports an empty merged when its first source conflicts", async () => {
   const repo = initRepo();
   const results = mkdtempSync(join(tmpdir(), "swarm-wt-int6-"));
   try {
     writeFileSync(join(repo, "shared.txt"), "original\n");
     commitAll(repo, "shared base");
-    const feat = prepareIsolation({ id: "feat", originalCwd: repo, worktreeName: "feat" }, CFG, results, ADD(repo));
+    const feat = await prepareIsolation({ id: "feat", originalCwd: repo, worktreeName: "feat" }, CFG, results, ADD(repo));
     writeFileSync(join(feat.path, "shared.txt"), "feat version\n");
     commitAll(feat.path, "feat edits shared");
     for (const [id, file, text] of [["x", "shared.txt", "x version\n"], ["y", "other.txt", "y work\n"]]) {
-      const wt = prepareIsolation({ id, originalCwd: repo, worktreeName: id }, CFG, results, ADD(repo));
+      const wt = await prepareIsolation({ id, originalCwd: repo, worktreeName: id }, CFG, results, ADD(repo));
       writeFileSync(join(wt.path, file), text);
       commitAll(wt.path, `${id} edits ${file}`);
     }
 
-    const out = integrate(
+    const out = await integrate(
       { id: "join", worktreeName: "feat", sources: ["swarm/x", "swarm/y"] }, CFG, results, { repo, ...ADD(repo) });
 
     deepEqual(out.merged, [], "a first-source conflict merges nothing");
@@ -150,37 +150,37 @@ test("integrate reports an empty merged when its first source conflicts", () => 
   } finally { cleanup(repo, results); }
 });
 
-test("integrate refuses a kept tree holding an unfinished merge", () => {
+test("integrate refuses a kept tree holding an unfinished merge", async () => {
   const repo = initRepo();
   const results = mkdtempSync(join(tmpdir(), "swarm-wt-int7-"));
   try {
     writeFileSync(join(repo, "shared.txt"), "original\n");
     commitAll(repo, "shared base");
-    prepareIsolation({ id: "feat", originalCwd: repo, worktreeName: "feat" }, CFG, results, ADD(repo));
+    await prepareIsolation({ id: "feat", originalCwd: repo, worktreeName: "feat" }, CFG, results, ADD(repo));
     for (const [id, text] of [["x", "x version\n"], ["y", "y version\n"]]) {
-      const wt = prepareIsolation({ id, originalCwd: repo, worktreeName: id }, CFG, results, ADD(repo));
+      const wt = await prepareIsolation({ id, originalCwd: repo, worktreeName: id }, CFG, results, ADD(repo));
       writeFileSync(join(wt.path, "shared.txt"), text);
       commitAll(wt.path, `${id} edits shared`);
     }
     const task = { id: "join", worktreeName: "feat", sources: ["swarm/x", "swarm/y"] };
-    const first = integrate(task, CFG, results, { repo, ...ADD(repo) });
+    const first = await integrate(task, CFG, results, { repo, ...ADD(repo) });
     equal(first.conflict.branch, "swarm/y", "precondition: the first attempt stops mid-merge");
 
     let threw = null;
-    try { integrate(task, CFG, results, { repo, ...ADD(repo) }); } catch (e) { threw = e; }
+    try { await integrate(task, CFG, results, { repo, ...ADD(repo) }); } catch (e) { threw = e; }
     ok(threw, "re-entering a tree mid-merge must throw");
     ok(threw.message.includes(first.path), `the error names the tree: ${threw.message}`);
     ok(/unfinished merge/.test(threw.message), `the error says the merge is unfinished: ${threw.message}`);
   } finally { cleanup(repo, results); }
 });
 
-test("integrate fails when git cannot answer whether a source merged", () => {
+test("integrate fails when git cannot answer whether a source merged", async () => {
   const repo = initRepo();
   const results = mkdtempSync(join(tmpdir(), "swarm-wt-int8-"));
   try {
-    prepareIsolation({ id: "feat", originalCwd: repo, worktreeName: "feat" }, CFG, results, ADD(repo));
+    await prepareIsolation({ id: "feat", originalCwd: repo, worktreeName: "feat" }, CFG, results, ADD(repo));
     for (const id of ["x", "y"]) {
-      const wt = prepareIsolation({ id, originalCwd: repo, worktreeName: id }, CFG, results, ADD(repo));
+      const wt = await prepareIsolation({ id, originalCwd: repo, worktreeName: id }, CFG, results, ADD(repo));
       writeFileSync(join(wt.path, `${id}.txt`), `${id} work\n`);
       commitAll(wt.path, `${id} work`);
     }
@@ -194,7 +194,7 @@ test("integrate fails when git cannot answer whether a source merged", () => {
 
     let threw = null;
     try {
-      integrate(
+      await integrate(
         { id: "join", worktreeName: "feat", sources: ["swarm/x", "swarm/y"] }, CFG, results,
         { repo, ...ADD(repo), _git: badGit });
     } catch (e) { threw = e; }
@@ -203,13 +203,13 @@ test("integrate fails when git cannot answer whether a source merged", () => {
   } finally { cleanup(repo, results); }
 });
 
-test("integrate reports merged from ancestry, not from a merge that exited 0", () => {
+test("integrate reports merged from ancestry, not from a merge that exited 0", async () => {
   const repo = initRepo();
   const results = mkdtempSync(join(tmpdir(), "swarm-wt-int9-"));
   try {
-    prepareIsolation({ id: "feat", originalCwd: repo, worktreeName: "feat" }, CFG, results, ADD(repo));
+    await prepareIsolation({ id: "feat", originalCwd: repo, worktreeName: "feat" }, CFG, results, ADD(repo));
     for (const id of ["x", "y"]) {
-      const wt = prepareIsolation({ id, originalCwd: repo, worktreeName: id }, CFG, results, ADD(repo));
+      const wt = await prepareIsolation({ id, originalCwd: repo, worktreeName: id }, CFG, results, ADD(repo));
       writeFileSync(join(wt.path, `${id}.txt`), `${id} work\n`);
       commitAll(wt.path, `${id} work`);
     }
@@ -222,7 +222,7 @@ test("integrate reports merged from ancestry, not from a merge that exited 0", (
       ? { status: 1, stdout: "", stderr: "" }
       : realGit(args, cwd, opts));
 
-    const out = integrate(
+    const out = await integrate(
       { id: "join", worktreeName: "feat", sources: ["swarm/x", "swarm/y"] }, CFG, results,
       { repo, ...ADD(repo), _git: deniesX });
 

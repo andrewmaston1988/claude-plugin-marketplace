@@ -248,7 +248,7 @@ test("R6: --force still resets the tree and clears every session", async () => {
       ts: new Date().toISOString(), id: "impl", event: "session",
       sessionId: OLLAMA_SID, provider: "ollama", runner: "claude",
     });
-    const wt = prepareIsolation({ id: "impl", worktreeName: "wt", cwd: repo, originalCwd: repo }, CFG, p.resultsDir, { addTimeoutMs: WORKTREE_ADD_TIMEOUT_MS, base: repoHeadNow(repo) });
+    const wt = await prepareIsolation({ id: "impl", worktreeName: "wt", cwd: repo, originalCwd: repo }, CFG, p.resultsDir, { addTimeoutMs: WORKTREE_ADD_TIMEOUT_MS, base: repoHeadNow(repo) });
     writeFileSync(join(wt.path, "partial.txt"), "kept partial work\n");
 
     const spawn = fakeSpawnFactory(writesInTree);

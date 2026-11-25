@@ -95,13 +95,13 @@ export function createDeterministicSteps(ctx) {
   // Agentless merge: fold the named tasks' branches into the target worktree.
   // A conflict is NOT a failure — the markers stay in the tree and the paths are
   // reported, because the next link is a model that can read and resolve them.
-  const runIntegrate = (task) => {
+  const runIntegrate = async (task) => {
     ctx.record(task, "running");
     const t0 = io.now();
     let result;
     try {
       const sources = ctx.resolveIntegrateFrom(task.integrate.from).map(ctx.branchOf);
-      const out = ctx.worktree.integrate(
+      const out = await ctx.worktree.integrate(
         { ...task, worktreeName: task.integrate.into, sources }, cfg, plan.resultsDir,
         { repo: task.originalCwd || plan.cwd, base: ctx.baseFor(task.originalCwd || plan.cwd) });
       // A conflict stops the merge at that source; `pending` is what the next

@@ -109,7 +109,7 @@ export function createLaunch(ctx) {
       const wtName = ctx.nameOf(task);
       if (wtName !== undefined) {
         try {
-          wt = ctx.worktree.prepareIsolation({ ...task, worktreeName: wtName }, cfg, plan.resultsDir, {
+          wt = await ctx.worktree.prepareIsolation({ ...task, worktreeName: wtName }, cfg, plan.resultsDir, {
             reset: ctx.force && ctx.groupFirst.get(wtName) === task.id,
             addTimeoutMs: defaultWorktree.WORKTREE_ADD_TIMEOUT_MS,
             // The commit the run pinned at dispatch, not whatever HEAD says now.

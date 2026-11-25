@@ -312,7 +312,7 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), {
     let progressed = false;
     let launched = 0;
     if (!ctx.stopRequested) {
-      const seats = settleInline(tasks, {
+      const seats = await settleInline(tasks, {
         pending: (t) => ctx.state.get(t.id) === "pending",
         depsSatisfied: ctx.depsSatisfied, passesWhen: ctx.passesWhen,
         expandForEach: ctx.expandForEach, expandManifest: ctx.expandManifest,
@@ -327,8 +327,9 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), {
         if (ctx.running.size > 0 && ctx.memLow(cfg.minFreeMemMb)) { ctx.parkForMemory(t); continue; }
         ctx.launch(t);
         launched++;
-        // A launch blocks the loop in prepareIsolation (git worktree add is sync), so
-        // without a turn between seats a running leaf's armed callbacks starve.
+        // An integrate awaits its own add, so a slow one no longer blocks the loop
+        // (the turn between seats below is what keeps callbacks armed); a launch's
+        // add is async for the same reason.
         await new Promise((resume) => setImmediate(resume));
         // A stop landing in that turn kills only the children that exist, so a seat
         // launched after it would outlive the sweep that ends the run.

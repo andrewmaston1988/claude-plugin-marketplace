@@ -7,11 +7,11 @@ import { tmpdir } from "node:os";
 import { collect, prepareIsolation, treeDirFor } from "../src/worktree.mjs";
 import { git, initRepo, cleanup, commitAll, dropWorktree, CFG, ADD } from "./helpers/worktree-fixtures.mjs";
 
-test("collect counts every path in an untracked directory and commits ahead", () => {
+test("collect counts every path in an untracked directory and commits ahead", async () => {
   const repo = initRepo();
   const results = mkdtempSync(join(tmpdir(), "swarm-wt-uncommitted-"));
   try {
-    const wt = prepareIsolation({ id: "impl", originalCwd: repo }, CFG, results, ADD(repo));
+    const wt = await prepareIsolation({ id: "impl", originalCwd: repo }, CFG, results, ADD(repo));
     writeFileSync(join(wt.path, "committed.txt"), "commit\n");
     commitAll(wt.path, "leaf commit");
     mkdirSync(join(wt.path, "new-dir", "nested"), { recursive: true });
@@ -28,11 +28,11 @@ test("collect counts every path in an untracked directory and commits ahead", ()
   }
 });
 
-test("collect reports zero uncommitted files for a clean committed tree", () => {
+test("collect reports zero uncommitted files for a clean committed tree", async () => {
   const repo = initRepo();
   const results = mkdtempSync(join(tmpdir(), "swarm-wt-uncommitted-"));
   try {
-    const wt = prepareIsolation({ id: "impl", originalCwd: repo }, CFG, results, ADD(repo));
+    const wt = await prepareIsolation({ id: "impl", originalCwd: repo }, CFG, results, ADD(repo));
     writeFileSync(join(wt.path, "committed.txt"), "commit\n");
     commitAll(wt.path, "leaf commit");
 
@@ -44,11 +44,11 @@ test("collect reports zero uncommitted files for a clean committed tree", () => 
     cleanup(results, repo);
   }
 });
-test("collect reports an unmeasured tree, not zero files, when git status cannot answer", () => {
+test("collect reports an unmeasured tree, not zero files, when git status cannot answer", async () => {
   const repo = initRepo();
   const results = mkdtempSync(join(tmpdir(), "swarm-wt-uncommitted-"));
   try {
-    const wt = prepareIsolation({ id: "impl", originalCwd: repo }, CFG, results, ADD(repo));
+    const wt = await prepareIsolation({ id: "impl", originalCwd: repo }, CFG, results, ADD(repo));
     writeFileSync(join(wt.path, "committed.txt"), "commit\n");
     commitAll(wt.path, "leaf commit");
     // A corrupt index makes every `git status` in the tree exit non-zero.

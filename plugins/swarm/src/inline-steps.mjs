@@ -2,7 +2,7 @@ import { seatOrder } from "./waves.mjs";
 
 // Settle every ready inline step before any seat is spent, re-scanning until a pass
 // settles nothing (an expansion can unlock more), then return the ready leaves in wave order.
-export function settleInline(tasks, hooks) {
+export async function settleInline(tasks, hooks) {
   let readyLeaves = [];
   let progressed = false;
   let settling;
@@ -17,7 +17,7 @@ export function settleInline(tasks, hooks) {
       if (t.aggregate) { hooks.runAggregate(t); settling = progressed = true; continue; }
       if (t.aggregateManifest) { hooks.runManifestAggregate(t); settling = progressed = true; continue; }
       if (t.compute) { hooks.runCompute(t); settling = progressed = true; continue; }
-      if (t.integrate) { hooks.runIntegrate(t); settling = progressed = true; continue; }
+      if (t.integrate) { await hooks.runIntegrate(t); settling = progressed = true; continue; }
       readyLeaves.push(t);
     }
   } while (settling);

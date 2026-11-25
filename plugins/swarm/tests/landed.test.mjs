@@ -435,7 +435,7 @@ test("row 23: the default base comes from any remote's HEAD, not only origin's",
   equal(unlandedCount("swarm/leaf", repo, { prefix: PREFIX, gitRunner: git, extraBases: [] }), 0);
 }));
 
-test("row 12: collect destroys a tree whose branch the squash absorbed, and keeps one it did not", () => {
+test("row 12: collect destroys a tree whose branch the squash absorbed, and keeps one it did not", async () => {
   const repo = initRepo();
   const results = mkdtempSync(join(tmpdir(), "swarm-landed-res-"));
   const treeRoot = mkdtempSync(join(tmpdir(), "swarm-landed-trees-"));
@@ -443,24 +443,24 @@ test("row 12: collect destroys a tree whose branch the squash absorbed, and keep
   const add = () => ({ addTimeoutMs: WORKTREE_ADD_TIMEOUT_MS, base: must(["rev-parse", "HEAD"], repo) });
   try {
     const p1 = { id: "p1", worktreeName: "absorbed", originalCwd: repo, cwd: repo };
-    const wt1 = prepareIsolation(p1, cfg, results, add());
+    const wt1 = await prepareIsolation(p1, cfg, results, add());
     writeFileSync(join(wt1.path, "feat.txt"), "phase 1\n");
     commitAll(wt1.path, "phase 1");
     writeFileSync(join(repo, "feat.txt"), "phase 1\n");
     commitAll(repo, "squash phase 1");
     const p2 = { id: "p2", worktreeName: "absorbed", originalCwd: repo, cwd: repo };
-    const wt2 = prepareIsolation(p2, cfg, results, add());
+    const wt2 = await prepareIsolation(p2, cfg, results, add());
     const swept = collect(p2, cfg, wt2);
     equal(swept.kept, false, "an absorbed branch is destroyed with its tree");
     ok(!existsSync(wt2.path));
     ok(!must(["branch", "--list", "swarm/absorbed"], repo).includes("swarm/absorbed"));
 
     const p3 = { id: "p3", worktreeName: "carried", originalCwd: repo, cwd: repo };
-    const wt3 = prepareIsolation(p3, cfg, results, add());
+    const wt3 = await prepareIsolation(p3, cfg, results, add());
     writeFileSync(join(wt3.path, "carried.txt"), "unlanded\n");
     commitAll(wt3.path, "unlanded work");
     const p4 = { id: "p4", worktreeName: "carried", originalCwd: repo, cwd: repo };
-    const wt4 = prepareIsolation(p4, cfg, results, add());
+    const wt4 = await prepareIsolation(p4, cfg, results, add());
     const kept = collect(p4, cfg, wt4);
     equal(kept.kept, true, "a branch carrying unlanded work is kept");
     ok(existsSync(wt4.path));
@@ -469,26 +469,26 @@ test("row 12: collect destroys a tree whose branch the squash absorbed, and keep
   } finally { cleanup(results, treeRoot, repo); }
 });
 
-test("row 12: the stale reset refuses unabsorbed work and reuses an absorbed branch", () => {
+test("row 12: the stale reset refuses unabsorbed work and reuses an absorbed branch", async () => {
   const repo = initRepo();
   const results = mkdtempSync(join(tmpdir(), "swarm-landed-reset-"));
   const treeRoot = mkdtempSync(join(tmpdir(), "swarm-landed-trees-"));
   const cfg = { provider: { mode: "env", url: "http://127.0.0.1:1", authToken: "x", allowedRoots: [] }, resultInlineCap: 4000, worktreeBranchPrefix: PREFIX, treeRoot };
   const add = () => ({ addTimeoutMs: WORKTREE_ADD_TIMEOUT_MS, base: must(["rev-parse", "HEAD"], repo) });
   try {
-    const stale = prepareIsolation({ id: "s1", worktreeName: "sq", originalCwd: repo }, cfg, results, add());
+    const stale = await prepareIsolation({ id: "s1", worktreeName: "sq", originalCwd: repo }, cfg, results, add());
     writeFileSync(join(stale.path, "sq.txt"), "squashed work\n");
     commitAll(stale.path, "sq work");
     dropWorktree(repo, stale.path);
 
     let refused;
-    try { prepareIsolation({ id: "s2", worktreeName: "sq", originalCwd: repo }, cfg, results, add()); }
+    try { await prepareIsolation({ id: "s2", worktreeName: "sq", originalCwd: repo }, cfg, results, add()); }
     catch (e) { refused = e; }
     ok(refused && /unlanded commit/.test(refused.message), `unabsorbed work must refuse the reset: ${refused?.message}`);
 
     writeFileSync(join(repo, "sq.txt"), "squashed work\n");
     commitAll(repo, "squashed sq");
-    const reused = prepareIsolation({ id: "s3", worktreeName: "sq", originalCwd: repo }, cfg, results, add());
+    const reused = await prepareIsolation({ id: "s3", worktreeName: "sq", originalCwd: repo }, cfg, results, add());
     ok(existsSync(reused.path), "a squash-absorbed branch is reusable");
     dropWorktree(repo, treeDirFor(results, "sq", cfg));
   } finally { cleanup(results, treeRoot, repo); }

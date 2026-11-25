@@ -21,7 +21,7 @@ test("prune --dry-run: a finished run with a kept worktree prints the table and 
   try {
     const resultsDir = join(dir, "out");
     mkdirSync(resultsDir, { recursive: true });
-    const wt = prepareIsolation({ id: "impl", originalCwd: repo, cwd: repo }, cliCfg(dir), resultsDir, { addTimeoutMs: WORKTREE_ADD_TIMEOUT_MS, base: gitOut(["rev-parse", "HEAD"], repo) });
+    const wt = await prepareIsolation({ id: "impl", originalCwd: repo, cwd: repo }, cliCfg(dir), resultsDir, { addTimeoutMs: WORKTREE_ADD_TIMEOUT_MS, base: gitOut(["rev-parse", "HEAD"], repo) });
     writeFileSync(join(wt.path, "work.txt"), "x\n");
     commitAll(wt.path, "work");
     spawnSync("git", ["merge", "-q", "swarm/impl"], { cwd: repo, windowsHide: true });
@@ -49,7 +49,7 @@ test("prune: removes the worktree and branch, prints freed, leaves the run recor
   try {
     const resultsDir = join(dir, "out");
     mkdirSync(resultsDir, { recursive: true });
-    const wt = prepareIsolation({ id: "impl", originalCwd: repo, cwd: repo }, cliCfg(dir), resultsDir, { addTimeoutMs: WORKTREE_ADD_TIMEOUT_MS, base: gitOut(["rev-parse", "HEAD"], repo) });
+    const wt = await prepareIsolation({ id: "impl", originalCwd: repo, cwd: repo }, cliCfg(dir), resultsDir, { addTimeoutMs: WORKTREE_ADD_TIMEOUT_MS, base: gitOut(["rev-parse", "HEAD"], repo) });
     writeFileSync(join(wt.path, "work.txt"), "x\n");
     commitAll(wt.path, "work");
     spawnSync("git", ["merge", "-q", "swarm/impl"], { cwd: repo, windowsHide: true });
@@ -99,7 +99,7 @@ test("prune: a real prune rewrites worktreesKept to drop the pruned entry; a sec
     const resultsDir = join(dir, "out");
     mkdirSync(resultsDir, { recursive: true });
     writeFileSync(join(resultsDir, "manifest.json"), JSON.stringify({ resultsDir, cwd: repo, tasks: [] }));
-    const wt = prepareIsolation({ id: "impl", originalCwd: repo, cwd: repo }, cliCfg(dir), resultsDir, { addTimeoutMs: WORKTREE_ADD_TIMEOUT_MS, base: gitOut(["rev-parse", "HEAD"], repo) });
+    const wt = await prepareIsolation({ id: "impl", originalCwd: repo, cwd: repo }, cliCfg(dir), resultsDir, { addTimeoutMs: WORKTREE_ADD_TIMEOUT_MS, base: gitOut(["rev-parse", "HEAD"], repo) });
     writeFileSync(join(wt.path, "work.txt"), "x\n");
     commitAll(wt.path, "work");
     spawnSync("git", ["merge", "-q", "swarm/impl"], { cwd: repo, windowsHide: true });
@@ -127,7 +127,7 @@ test("prune --dry-run: summary.json is left byte-identical", async () => {
   try {
     const resultsDir = join(dir, "out");
     mkdirSync(resultsDir, { recursive: true });
-    const wt = prepareIsolation({ id: "impl", originalCwd: repo, cwd: repo }, cliCfg(dir), resultsDir, { addTimeoutMs: WORKTREE_ADD_TIMEOUT_MS, base: gitOut(["rev-parse", "HEAD"], repo) });
+    const wt = await prepareIsolation({ id: "impl", originalCwd: repo, cwd: repo }, cliCfg(dir), resultsDir, { addTimeoutMs: WORKTREE_ADD_TIMEOUT_MS, base: gitOut(["rev-parse", "HEAD"], repo) });
     writeFileSync(join(wt.path, "work.txt"), "x\n");
     commitAll(wt.path, "work");
     spawnSync("git", ["merge", "-q", "swarm/impl"], { cwd: repo, windowsHide: true });
@@ -167,7 +167,7 @@ test("prune: refuses a live run (fresh heartbeat, no summary) — exit 1, nothin
   try {
     const resultsDir = join(dir, "out");
     mkdirSync(resultsDir, { recursive: true });
-    const wt = prepareIsolation({ id: "impl", originalCwd: repo, cwd: repo }, cliCfg(dir), resultsDir, { addTimeoutMs: WORKTREE_ADD_TIMEOUT_MS, base: gitOut(["rev-parse", "HEAD"], repo) });
+    const wt = await prepareIsolation({ id: "impl", originalCwd: repo, cwd: repo }, cliCfg(dir), resultsDir, { addTimeoutMs: WORKTREE_ADD_TIMEOUT_MS, base: gitOut(["rev-parse", "HEAD"], repo) });
     writeFileSync(join(resultsDir, "run.log"), JSON.stringify({ ts: new Date().toISOString(), event: "run-start", tasks: [{ id: "impl", provider: "claude", model: "claude-haiku-4-5-20251001" }] }) + "\n");
     writeFileSync(join(resultsDir, "heartbeat"), `${new Date().toISOString()} 1234\n`);
 
@@ -191,7 +191,7 @@ test("prune --dry-run: a dead-engine-stopped run with no kept worktree still fin
     const resultsDir = join(dir, "out");
     mkdirSync(resultsDir, { recursive: true });
     writeFileSync(join(resultsDir, "manifest.json"), JSON.stringify({ resultsDir, cwd: repo, tasks: [] }));
-    const wt = prepareIsolation({ id: "impl", originalCwd: repo, cwd: repo }, cliCfg(dir), resultsDir, { addTimeoutMs: WORKTREE_ADD_TIMEOUT_MS, base: gitOut(["rev-parse", "HEAD"], repo) });
+    const wt = await prepareIsolation({ id: "impl", originalCwd: repo, cwd: repo }, cliCfg(dir), resultsDir, { addTimeoutMs: WORKTREE_ADD_TIMEOUT_MS, base: gitOut(["rev-parse", "HEAD"], repo) });
     writeFileSync(join(wt.path, "work.txt"), "x\n");
     commitAll(wt.path, "work");
     spawnSync("git", ["merge", "-q", "swarm/impl"], { cwd: repo, windowsHide: true });
@@ -238,7 +238,7 @@ test("prune: a run that ended normally still has its leftover tree removed — t
 test("prune: unlanded commit and dirty tree are preserved until explicit discard", async () => {
   const f = pruneFixture();
   try {
-    const wt = prepareIsolation({ id: "impl", originalCwd: f.repo, cwd: f.repo }, cliCfg(f.dir), f.resultsDir, { addTimeoutMs: WORKTREE_ADD_TIMEOUT_MS, base: gitOut(["rev-parse", "HEAD"], f.repo) });
+    const wt = await prepareIsolation({ id: "impl", originalCwd: f.repo, cwd: f.repo }, cliCfg(f.dir), f.resultsDir, { addTimeoutMs: WORKTREE_ADD_TIMEOUT_MS, base: gitOut(["rev-parse", "HEAD"], f.repo) });
     writeFileSync(join(wt.path, "a.txt"), "unlanded\n");
     commitAll(wt.path, "unlanded work");
     writeFileSync(join(wt.path, "new.txt"), "dirty\n");
@@ -262,7 +262,7 @@ test("prune: unlanded commit and dirty tree are preserved until explicit discard
 test("prune: a squash-landed branch measures landed and is pruned", async () => {
   const f = pruneFixture();
   try {
-    const wt = prepareIsolation({ id: "impl", originalCwd: f.repo, cwd: f.repo }, cliCfg(f.dir), f.resultsDir, { addTimeoutMs: WORKTREE_ADD_TIMEOUT_MS, base: gitOut(["rev-parse", "HEAD"], f.repo) });
+    const wt = await prepareIsolation({ id: "impl", originalCwd: f.repo, cwd: f.repo }, cliCfg(f.dir), f.resultsDir, { addTimeoutMs: WORKTREE_ADD_TIMEOUT_MS, base: gitOut(["rev-parse", "HEAD"], f.repo) });
     writeFileSync(join(wt.path, "a.txt"), "landed\n");
     commitAll(wt.path, "landed work");
     // Squash-land: the branch's patch is on master but its commit sha is not, so a
@@ -283,7 +283,7 @@ test("prune: a squash-landed branch measures landed and is pruned", async () => 
 test("prune: an unlanded-only row on a clean tree is refused, and the worktree and branch both survive", async () => {
   const f = pruneFixture();
   try {
-    const wt = prepareIsolation({ id: "impl", originalCwd: f.repo, cwd: f.repo }, cliCfg(f.dir), f.resultsDir, { addTimeoutMs: WORKTREE_ADD_TIMEOUT_MS, base: gitOut(["rev-parse", "HEAD"], f.repo) });
+    const wt = await prepareIsolation({ id: "impl", originalCwd: f.repo, cwd: f.repo }, cliCfg(f.dir), f.resultsDir, { addTimeoutMs: WORKTREE_ADD_TIMEOUT_MS, base: gitOut(["rev-parse", "HEAD"], f.repo) });
     writeFileSync(join(wt.path, "a.txt"), "unlanded\n");
     commitAll(wt.path, "unlanded work"); // committed — the tree itself is clean
     writeFinishedRun(f.resultsDir, [{ branch: wt.branch, path: wt.path }]);
@@ -306,7 +306,7 @@ test("prune: an unlanded-only row on a clean tree is refused, and the worktree a
 test("prune: a dirty-only row on a landed branch is refused, and the uncommitted file survives", async () => {
   const f = pruneFixture();
   try {
-    const wt = prepareIsolation({ id: "impl", originalCwd: f.repo, cwd: f.repo }, cliCfg(f.dir), f.resultsDir, { addTimeoutMs: WORKTREE_ADD_TIMEOUT_MS, base: gitOut(["rev-parse", "HEAD"], f.repo) });
+    const wt = await prepareIsolation({ id: "impl", originalCwd: f.repo, cwd: f.repo }, cliCfg(f.dir), f.resultsDir, { addTimeoutMs: WORKTREE_ADD_TIMEOUT_MS, base: gitOut(["rev-parse", "HEAD"], f.repo) });
     writeFileSync(join(wt.path, "a.txt"), "landed\n");
     commitAll(wt.path, "landed work");
     spawnSync("git", ["merge", "-q", wt.branch], { cwd: f.repo, windowsHide: true });
@@ -402,7 +402,7 @@ test("row 10: prune from the porting worktree frees a cherry-picked run; from th
   const f = pruneFixture();
   const portTree = join(f.dir, "porting");
   try {
-    const wt = prepareIsolation({ id: "impl", originalCwd: f.repo, cwd: f.repo }, cliCfg(f.dir), f.resultsDir, { addTimeoutMs: WORKTREE_ADD_TIMEOUT_MS, base: gitOut(["rev-parse", "HEAD"], f.repo) });
+    const wt = await prepareIsolation({ id: "impl", originalCwd: f.repo, cwd: f.repo }, cliCfg(f.dir), f.resultsDir, { addTimeoutMs: WORKTREE_ADD_TIMEOUT_MS, base: gitOut(["rev-parse", "HEAD"], f.repo) });
     writeFileSync(join(wt.path, "a.txt"), "ported\n");
     commitAll(wt.path, "leaf work");
     // A feature branch in its own worktree receives the leaf's patch as a new SHA:
@@ -439,7 +439,7 @@ test("row 10: prune from the porting worktree frees a cherry-picked run; from th
 test("row 17: prune from inside a leaf worktree still refuses the leaf's unlanded branch", async () => {
   const f = pruneFixture();
   try {
-    const wt = prepareIsolation({ id: "impl", originalCwd: f.repo, cwd: f.repo }, cliCfg(f.dir), f.resultsDir, { addTimeoutMs: WORKTREE_ADD_TIMEOUT_MS, base: gitOut(["rev-parse", "HEAD"], f.repo) });
+    const wt = await prepareIsolation({ id: "impl", originalCwd: f.repo, cwd: f.repo }, cliCfg(f.dir), f.resultsDir, { addTimeoutMs: WORKTREE_ADD_TIMEOUT_MS, base: gitOut(["rev-parse", "HEAD"], f.repo) });
     writeFileSync(join(wt.path, "a.txt"), "unlanded\n");
     commitAll(wt.path, "leaf work");
     writeFinishedRun(f.resultsDir, [{ branch: wt.branch, path: wt.path }]);

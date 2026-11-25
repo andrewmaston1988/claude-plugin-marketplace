@@ -44,19 +44,19 @@ function finishRun(dir, { kept = [], summary = {} } = {}) {
 
 // A tree the run created through the resolver, with its per-tree record dropped —
 // the "killed add / lost record" case the scratch-dir scan exists for.
-function treeWithoutRecord(repo, dir, name = "impl") {
+async function treeWithoutRecord(repo, dir, name = "impl") {
   mkdirSync(dir, { recursive: true });
-  const wt = prepareIsolation({ id: name, originalCwd: repo, cwd: repo }, CFG, dir, ADD(repo));
+  const wt = await prepareIsolation({ id: name, originalCwd: repo, cwd: repo }, CFG, dir, ADD(repo));
   rmSync(join(dir, "trees"), { recursive: true, force: true });
   return wt;
 }
 
-test("prune finds a tree in the run's scratch dir that neither a record nor summary.json names", () => {
+test("prune finds a tree in the run's scratch dir that neither a record nor summary.json names", async () => {
   const repo = initRepo();
   const dir = runDir("prune-scratch-discovery");
   let wt;
   try {
-    wt = treeWithoutRecord(repo, dir);
+    wt = await treeWithoutRecord(repo, dir);
     equal(wt.path, scratchTree("prune-scratch-discovery", "impl"), "the tree must be under treeRoot, not the run dir");
     finishRun(dir, { kept: [] });
 
@@ -72,12 +72,12 @@ test("prune finds a tree in the run's scratch dir that neither a record nor summ
   }
 });
 
-test("prune's refusal is unchanged: unlanded work in a scratch-dir tree still blocks the destroy", () => {
+test("prune's refusal is unchanged: unlanded work in a scratch-dir tree still blocks the destroy", async () => {
   const repo = initRepo();
   const dir = runDir("prune-scratch-unlanded");
   let wt;
   try {
-    wt = treeWithoutRecord(repo, dir);
+    wt = await treeWithoutRecord(repo, dir);
     writeFileSync(join(wt.path, "a.txt"), "unlanded\n");
     commitAll(wt.path, "unlanded work");
     finishRun(dir, { kept: [] });
@@ -113,12 +113,12 @@ test("prune still discovers and removes a legacy <run>/wt-* tree — the pre-upg
   }
 });
 
-test("the nudge counts a finished run's scratch-dir tree even when summary.json lists none", () => {
+test("the nudge counts a finished run's scratch-dir tree even when summary.json lists none", async () => {
   const repo = initRepo();
   const dir = runDir("nudge-scratch");
   let wt;
   try {
-    wt = treeWithoutRecord(repo, dir);
+    wt = await treeWithoutRecord(repo, dir);
     finishRun(dir, { kept: [] });
 
     const runs = projectRunsHoldingWorktrees({ home: swarmHome(), toplevel: "C--code-lifecycle", sessionId: SESSION });
@@ -131,12 +131,12 @@ test("the nudge counts a finished run's scratch-dir tree even when summary.json 
   }
 });
 
-test("the nudge stays silent for a live run holding a scratch-dir tree", () => {
+test("the nudge stays silent for a live run holding a scratch-dir tree", async () => {
   const repo = initRepo();
   const dir = runDir("nudge-live");
   let wt;
   try {
-    wt = treeWithoutRecord(repo, dir);
+    wt = await treeWithoutRecord(repo, dir);
     // A run with no summary at all: runLiveness reads it as live and prune would refuse it.
     writeFileSync(join(dir, "run.log"), JSON.stringify({ ts: Date.now(), event: "run-start", launcher: SESSION, tasks: [] }) + "\n");
     writeFileSync(join(dir, "heartbeat"), `${new Date().toISOString()} 1234\n`);
@@ -154,7 +154,7 @@ test("prune (CLI) removes an unrecorded new-layout run's tree and branch", async
   const dir = runDir("cli-prune-scratch");
   let wt;
   try {
-    wt = treeWithoutRecord(repo, dir);
+    wt = await treeWithoutRecord(repo, dir);
     finishRun(dir, { kept: [] , summary: {} });
     writeFileSync(join(dir, "manifest.json"), JSON.stringify({ resultsDir: dir, cwd: repo, tasks: [] }));
 
@@ -183,7 +183,7 @@ test("prune (CLI) removes a recorded tree's record and empty treeRoot parents", 
   try {
     mkdirSync(dir, { recursive: true });
     writeFileSync(outsideCanary, "keep");
-    wt = prepareIsolation({ id: "impl", originalCwd: repo, cwd: repo }, CFG, dir, ADD(repo));
+    wt = await prepareIsolation({ id: "impl", originalCwd: repo, cwd: repo }, CFG, dir, ADD(repo));
     equal(resolve(wt.path), resolve(join(runTreeDir, "impl")), "the tree must sit under the default treeRoot");
     finishRun(dir, { kept: [] });
     writeFileSync(join(dir, "manifest.json"), JSON.stringify({ resultsDir: dir, cwd: repo, tasks: [] }));
@@ -211,7 +211,7 @@ test("swarm stop on a dead engine records the scratch-dir tree and prints its pr
   const dir = runDir("cli-stop-scratch");
   let wt;
   try {
-    wt = treeWithoutRecord(repo, dir);
+    wt = await treeWithoutRecord(repo, dir);
     writeFileSync(join(dir, "manifest.json"), JSON.stringify({ resultsDir: dir, cwd: repo, tasks: [] }));
     const line = (o) => JSON.stringify({ ts: new Date().toISOString(), ...o }) + "\n";
     const runLog = join(dir, "run.log");
@@ -261,12 +261,12 @@ test("a kept tree whose root is gone leaves the run's results, summary and dashb
   }
 });
 
-test("treeDirFor and prune agree on where a recorded tree lives", () => {
+test("treeDirFor and prune agree on where a recorded tree lives", async () => {
   const repo = initRepo();
   const dir = runDir("agree-on-path");
   let wt;
   try {
-    wt = treeWithoutRecord(repo, dir);
+    wt = await treeWithoutRecord(repo, dir);
     finishRun(dir, { kept: [] });
     deepEqual(resolve(treeDirFor(dir, "impl", CFG)), resolve(wt.path),
       "prune's discovery and the resolver must name the same path, or one of them is looking in the old place");

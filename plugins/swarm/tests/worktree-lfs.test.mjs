@@ -18,7 +18,7 @@ const skip = lfs.status !== 0 && "git-lfs is not installed";
 
 // A tree of an LFS repo must hold pointers: smudging every object into every tree
 // filled the disk (2026-11-18, ~1.7 GB of concept art per tree of the CLAUDE repo).
-test("a tree cut from an LFS repo holds pointers and reads clean", { skip, timeout: 60000 }, () => {
+test("a tree cut from an LFS repo holds pointers and reads clean", { skip, timeout: 60000 }, async () => {
   const repo = mkdtempSync(join(tmpdir(), "swarm-lfs-repo-"));
   const resultsDir = mkdtempSync(join(tmpdir(), "swarm-lfs-res-"));
   const git = (...args) => spawnSync("git", args, { cwd: repo, windowsHide: true, encoding: "utf8" });
@@ -32,7 +32,7 @@ test("a tree cut from an LFS repo holds pointers and reads clean", { skip, timeo
     git("-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false", "commit", "-q", "-m", "init");
     const base = git("rev-parse", "HEAD").stdout.trim();
 
-    tree = prepareIsolation({ id: "lfs", originalCwd: repo }, CFG, resultsDir, { addTimeoutMs: 30000, base });
+    tree = await prepareIsolation({ id: "lfs", originalCwd: repo }, CFG, resultsDir, { addTimeoutMs: 30000, base });
 
     const file = join(tree.path, "a.bin");
     ok(statSync(file).size < 200, `a.bin is ${statSync(file).size} bytes; the object was smudged into the tree`);

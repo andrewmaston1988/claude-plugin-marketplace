@@ -62,12 +62,12 @@ test("runOfTree is treeDirFor's inverse for a new-layout tree, and the run dir f
   } finally { cleanup(root); }
 });
 
-test("prepareIsolation creates the tree under treeRoot, not inside the run dir", () => {
+test("prepareIsolation creates the tree under treeRoot, not inside the run dir", async () => {
   const repo = initRepo();
   const results = runDir("run-create");
   const root = treesDir();
   try {
-    const wt = prepareIsolation({ id: "impl", originalCwd: repo, cwd: repo }, cfgWith(root), results, ADD(repo));
+    const wt = await prepareIsolation({ id: "impl", originalCwd: repo, cwd: repo }, cfgWith(root), results, ADD(repo));
     equal(wt.path, resolve(join(root, "C--code-repo", "run-create", "impl")));
     ok(existsSync(join(wt.path, "a.txt")), "the tree is a real checkout");
     ok(!existsSync(join(results, "wt-impl")), "no wt- dir is left in the run dir");
@@ -77,13 +77,13 @@ test("prepareIsolation creates the tree under treeRoot, not inside the run dir",
   }
 });
 
-test("prepareIsolation records the tree — 'ready' after the add, with name/path/branch/repo", () => {
+test("prepareIsolation records the tree — 'ready' after the add, with name/path/branch/repo", async () => {
   const repo = initRepo();
   const results = runDir("run-record");
   const root = treesDir();
   let wt;
   try {
-    wt = prepareIsolation({ id: "impl", originalCwd: repo, cwd: repo }, cfgWith(root), results, ADD(repo));
+    wt = await prepareIsolation({ id: "impl", originalCwd: repo, cwd: repo }, cfgWith(root), results, ADD(repo));
     const rec = readTreeRecord(results, "impl");
     ok(rec, "the run must record where it put the tree");
     equal(rec.state, "ready");
@@ -97,14 +97,14 @@ test("prepareIsolation records the tree — 'ready' after the add, with name/pat
   }
 });
 
-test("the record is written BEFORE the add: a failed add still leaves a 'creating' record", () => {
+test("the record is written BEFORE the add: a failed add still leaves a 'creating' record", async () => {
   const repo = initRepo();
   const results = runDir("run-crash");
   const root = treesDir();
   try {
     let threw = null;
     try {
-      prepareIsolation({ id: "impl", originalCwd: repo, cwd: repo }, cfgWith(root), results,
+      await prepareIsolation({ id: "impl", originalCwd: repo, cwd: repo }, cfgWith(root), results,
         { addTimeoutMs: WORKTREE_ADD_TIMEOUT_MS, base: "0000000000000000000000000000000000000000" });
     } catch (e) { threw = e; }
     ok(threw, "an unresolvable base must fail the add");
@@ -115,7 +115,7 @@ test("the record is written BEFORE the add: a failed add still leaves a 'creatin
   } finally { cleanup(root, results, repo); }
 });
 
-test("the resolver reuses a legacy <run>/wt-<name> tree that is still registered", () => {
+test("the resolver reuses a legacy <run>/wt-<name> tree that is still registered", async () => {
   const repo = initRepo();
   const results = runDir("run-legacy");
   const root = treesDir();
@@ -126,7 +126,7 @@ test("the resolver reuses a legacy <run>/wt-<name> tree that is still registered
     ok(existsSync(join(legacy, "a.txt")), "legacy tree registered");
     writeFileSync(join(legacy, "partial.txt"), "kept work\n");
 
-    const wt = prepareIsolation({ id: "impl", originalCwd: repo, cwd: repo }, cfgWith(root), results, ADD(repo));
+    const wt = await prepareIsolation({ id: "impl", originalCwd: repo, cwd: repo }, cfgWith(root), results, ADD(repo));
     equal(wt.path, resolve(legacy), "resuming a legacy run must re-enter its tree, not compute the new path");
     equal(wt.reused, true);
     ok(existsSync(join(wt.path, "partial.txt")), "the legacy tree's work survives the resume");
@@ -136,7 +136,7 @@ test("the resolver reuses a legacy <run>/wt-<name> tree that is still registered
   }
 });
 
-test("the record outranks the legacy scan and the formula — a moved tree is still found", () => {
+test("the record outranks the legacy scan and the formula — a moved tree is still found", async () => {
   const repo = initRepo();
   const results = runDir("run-moved");
   const root = treesDir();
@@ -150,7 +150,7 @@ test("the record outranks the legacy scan and the formula — a moved tree is st
     writeFileSync(recordPath(results, "impl"),
       JSON.stringify({ name: "impl", path: moved, branch: "swarm/impl", repo, state: "ready" }));
 
-    const wt = prepareIsolation({ id: "impl", originalCwd: repo, cwd: repo }, cfgWith(root), results, ADD(repo));
+    const wt = await prepareIsolation({ id: "impl", originalCwd: repo, cwd: repo }, cfgWith(root), results, ADD(repo));
     equal(wt.path, resolve(moved), "the record is authoritative — recomputing would point at a tree that does not exist");
   } finally {
     dropWorktree(repo, moved);
@@ -158,16 +158,16 @@ test("the record outranks the legacy scan and the formula — a moved tree is st
   }
 });
 
-test("a branch held by another run's tree names that RUN dir, not the tree under treeRoot", () => {
+test("a branch held by another run's tree names that RUN dir, not the tree under treeRoot", async () => {
   const repo = initRepo();
   const runA = runDir("run-holder-a");
   const runB = runDir("run-holder-b");
   const root = treesDir();
   let first;
   try {
-    first = prepareIsolation({ id: "x", originalCwd: repo, cwd: repo }, cfgWith(root), runA, ADD(repo));
+    first = await prepareIsolation({ id: "x", originalCwd: repo, cwd: repo }, cfgWith(root), runA, ADD(repo));
     let error = null;
-    try { prepareIsolation({ id: "x", originalCwd: repo, cwd: repo }, cfgWith(root), runB, ADD(repo)); }
+    try { await prepareIsolation({ id: "x", originalCwd: repo, cwd: repo }, cfgWith(root), runB, ADD(repo)); }
     catch (e) { error = e; }
     ok(error, "a branch already checked out elsewhere must throw");
     equal(error.message.match(/swarm prune ([^)]+)\)/)?.[1], resolve(runA).replaceAll("\\", "/"),
@@ -216,14 +216,14 @@ test("two concurrent writer leaves in one run each leave their own record", asyn
     cleanup(root, results, repo);
   }
 });
-test("two writer leaves in one run each get their own record file", () => {
+test("two writer leaves in one run each get their own record file", async () => {
   const repo = initRepo();
   const results = runDir("run-two");
   const root = treesDir();
   const paths = [];
   try {
     for (const name of ["alpha", "beta"]) {
-      paths.push(prepareIsolation({ id: name, originalCwd: repo, cwd: repo }, cfgWith(root), results, ADD(repo)).path);
+      paths.push((await prepareIsolation({ id: name, originalCwd: repo, cwd: repo }, cfgWith(root), results, ADD(repo))).path);
     }
     equal(paths[0] === paths[1], false, "distinct names are distinct trees");
     deepEqual(readdirSync(join(results, "trees")).sort(), ["alpha.json", "beta.json"],
@@ -262,19 +262,19 @@ test("legacyTreeDirs finds the wt-* trees a pre-upgrade run left in its run dir"
   } finally { cleanup(results); }
 });
 
-test("collect drops the record of a swept tree, and keeps the record of a kept one", () => {
+test("collect drops the record of a swept tree, and keeps the record of a kept one", async () => {
   const repo = initRepo();
   const results = runDir("run-collect");
   const root = treesDir();
   try {
     const task = { id: "noop", originalCwd: repo, cwd: repo };
-    const wt = prepareIsolation(task, cfgWith(root), results, ADD(repo));
+    const wt = await prepareIsolation(task, cfgWith(root), results, ADD(repo));
     collect(task, cfgWith(root), wt);
     equal(readTreeRecord(results, "noop"), null,
       "a swept tree's record must go too — a stale 'ready' path is a tree prune would try to delete twice");
 
     const keep = { id: "edit", originalCwd: repo, cwd: repo };
-    const wt2 = prepareIsolation(keep, cfgWith(root), results, ADD(repo));
+    const wt2 = await prepareIsolation(keep, cfgWith(root), results, ADD(repo));
     writeFileSync(join(wt2.path, "new.txt"), "work\n");
     equal(collect(keep, cfgWith(root), wt2).kept, true);
     equal(readTreeRecord(results, "edit").state, "ready", "a kept tree stays recorded");
@@ -284,7 +284,7 @@ test("collect drops the record of a swept tree, and keeps the record of a kept o
   }
 });
 
-test("a record naming a tree that is gone is still honoured, and the tree is re-created there", () => {
+test("a record naming a tree that is gone is still honoured, and the tree is re-created there", async () => {
   const repo = initRepo();
   const results = runDir("run-stale");
   const root = treesDir();
@@ -293,7 +293,7 @@ test("a record naming a tree that is gone is still honoured, and the tree is re-
     mkdirSync(join(results, "trees"), { recursive: true });
     writeFileSync(recordPath(results, "impl"),
       JSON.stringify({ name: "impl", path: stale, branch: "swarm/impl", repo, state: "ready" }));
-    const wt = prepareIsolation({ id: "impl", originalCwd: repo, cwd: repo }, cfgWith(root), results, ADD(repo));
+    const wt = await prepareIsolation({ id: "impl", originalCwd: repo, cwd: repo }, cfgWith(root), results, ADD(repo));
     equal(wt.path, resolve(stale), "the record wins even when nothing is on disk yet — recomputing would strand the tree");
     ok(existsSync(join(wt.path, "a.txt")), "the tree is re-created where the record says");
   } finally {

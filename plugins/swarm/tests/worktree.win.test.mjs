@@ -13,17 +13,17 @@ import { tmpdir } from "node:os";
 import { prepareIsolation, runScopeKey } from "../src/worktree.mjs";
 import { initRepo, cleanup, dropWorktree, CFG, ADD } from "./helpers/worktree-fixtures.mjs";
 
-test("prepareIsolation re-enters a registered worktree named with different case", { skip: process.platform !== "win32" && "win32-only path casing" }, () => {
+test("prepareIsolation re-enters a registered worktree named with different case", { skip: process.platform !== "win32" && "win32-only path casing" }, async () => {
   const repo = initRepo();
   const results = mkdtempSync(join(tmpdir(), "swarm-wt-CASE-"));
   const task = { id: "impl", originalCwd: repo, worktreeName: "feat" };
   try {
-    const first = prepareIsolation(task, CFG, results, ADD(repo));
+    const first = await prepareIsolation(task, CFG, results, ADD(repo));
     equal(first.reused, false);
 
     // The chain's next link, asking for the SAME tree via a differently-cased results dir.
     const swapped = results.replace(/swarm-wt-CASE-/, (m) => m.toUpperCase());
-    const second = prepareIsolation({ ...task, id: "rev" }, CFG, swapped, ADD(repo));
+    const second = await prepareIsolation({ ...task, id: "rev" }, CFG, swapped, ADD(repo));
     equal(second.reused, true, "the second link must re-enter the tree, not re-create it");
 
     dropWorktree(repo, first.path);
