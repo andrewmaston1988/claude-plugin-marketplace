@@ -394,15 +394,17 @@ test("a branch carrying unlanded commits is never deleted or reset by the clear"
 
 // Two reads taken back to back agree on anything, so the lock has to be WATCHED for the
 // whole window before it can be called dead.
-test("an old 0-byte lock is watched for the whole window before it is removed", { timeout: 30000 }, async () => {
+test("an old 0-byte lock is watched for the whole window before it is removed", { timeout: 60000 }, async () => {
   const repo = initRepo();
   const dir = scratch();
-  const window = 4000;
+  // Well above the few seconds the clear's own git calls cost, so the window is what
+  // the elapsed time measures.
+  const window = 20000;
   try {
     const lock = lockPathFor(repo, "swarm/mine");
     mkdirSync(resolve(lock, ".."), { recursive: true });
     writeFileSync(lock, "");
-    ageLock(lock, 5000);
+    ageLock(lock, window + 2000);
     const started = Date.now();
     await clearTaskDebris({ repo, path: join(dir, "tree"), branch: "swarm/mine", branchDerived: true, existedBefore: false, git: gitRun, lockWindowMs: window });
     ok(!existsSync(lock), "the dead lock was removed");
