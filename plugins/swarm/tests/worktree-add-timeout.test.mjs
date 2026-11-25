@@ -6,7 +6,7 @@ import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { spawnSync } from "node:child_process";
 import { prepareIsolation, treeDirFor } from "../src/worktree.mjs";
-import { addWorktree, clearTaskDebris, slowHook, timeoutMessage } from "../src/worktree-add.mjs";
+import { addWorktree, clearTaskDebris, gitRunAsync, slowHook, timeoutMessage } from "../src/worktree-add.mjs";
 import { STALE_AFTER_MS } from "../src/stale-lock.mjs";
 import { initRepo, cleanup, git, CFG } from "./helpers/worktree-fixtures.mjs";
 
@@ -165,26 +165,32 @@ test("the add inherits the parent's git configuration", { timeout: 30000 }, asyn
   }
 });
 
-// A hook that outlives git keeps the pipes open, so `close` alone would let one hung
-// hook hold the whole retry ladder open past every deadline.
-test("a hook that outlives git cannot hold the attempt past its deadline", { timeout: 120000 }, async () => {
+// A hook's orphaned child inherits git's pipes, so `close` alone would let one such
+// child hold a call open far past its own budget.
+test("a hook's orphan cannot hold the call past its deadline", { timeout: 120000 }, async () => {
   const repo = initRepo();
   const hooks = hooksDir();
-  const results = resultsDir();
+  const dir = scratch();
+  const release = hookPath(dir, "release");
   try {
-    writeFileSync(join(hooks, "post-checkout"), '#!/bin/sh\nnode -e "setTimeout(() => {}, 30000)"\n', { mode: 0o755 });
+    // The child sleeps elsewhere so it pins nothing git touched, and exits on the flag
+    // so cleanup is not left waiting on it.
+    writeFileSync(join(hooks, "post-checkout"),
+      `#!/bin/sh\n(cd '${hookPath(dir)}' && node -e "` +
+      `const fs=require('fs'),until=Date.now()+40000,t=setInterval(()=>{` +
+      `if(fs.existsSync('${release}')||Date.now()>until){clearInterval(t);process.exit(0)}},100)") &\nexit 0\n`,
+      { mode: 0o755 });
     git(["config", "core.hooksPath", hooks], repo);
     const started = Date.now();
-    let error;
-    try {
-      await prepareIsolation({ id: "stuck", originalCwd: repo }, CFG, results,
-        { addTimeoutMs: 500, base: git(["rev-parse", "HEAD"], repo) });
-    } catch (e) { error = e; }
-    ok(error, "the add still ends in a timeout error");
-    ok(/3 attempts/.test(error.message), error.message);
-    // The hook alone would hold one attempt for 30s; three of those is the failure.
-    ok(Date.now() - started < 60000, `the ladder settled at its own deadlines, not the hook's: ${Date.now() - started}ms`);
-  } finally { for (const d of [results, hooks, repo]) removeEventually(d); }
+    const r = await gitRunAsync(["checkout", "-b", "held-open"], repo, { timeout: 500 });
+    const took = Date.now() - started;
+    equal(r.timedOut, true, "the call reports a timeout");
+    ok(took < 6000, `the call settled at its deadline, not when the orphan let go: ${took}ms`);
+  } finally {
+    writeFileSync(release, "");
+    for (const d of [hooks, repo]) removeEventually(d);
+    removeEventually(dir);
+  }
 });
 
 test("a stop request aborts the add instead of waiting out its budget", { timeout: 30000 }, async () => {
@@ -230,6 +236,7 @@ test("a clear that fails still reports the timed-out attempt", { timeout: 60000 
     ok(error, "the retry stops rather than deleting a lock it cannot prove dead");
     ok(/has content/.test(error.message), error.message);
     ok(/timed out after 1\.5s/.test(error.message), `the timeout that led to it is still named: ${error.message}`);
+    ok(/the timed-out attempt said: Preparing worktree/.test(error.message), `its own output survives the clear's failure: ${error.message}`);
   } finally { rmSync(dir, { recursive: true, force: true }); for (const d of [results, hooks, repo]) removeEventually(d); }
 });
 
@@ -387,10 +394,10 @@ test("a branch carrying unlanded commits is never deleted or reset by the clear"
 
 // Two reads taken back to back agree on anything, so the lock has to be WATCHED for the
 // whole window before it can be called dead.
-test("an old 0-byte lock is watched for the whole window before it is removed", { timeout: 20000 }, async () => {
+test("an old 0-byte lock is watched for the whole window before it is removed", { timeout: 30000 }, async () => {
   const repo = initRepo();
   const dir = scratch();
-  const window = 600;
+  const window = 4000;
   try {
     const lock = lockPathFor(repo, "swarm/mine");
     mkdirSync(resolve(lock, ".."), { recursive: true });
