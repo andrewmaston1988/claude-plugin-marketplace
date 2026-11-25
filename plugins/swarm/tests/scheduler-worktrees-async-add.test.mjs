@@ -51,3 +51,42 @@ test("a held-open worktree add does not freeze another leaf or a stop request", 
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+// The stop sweep kills the children that exist; a leaf still waiting on its tree has
+// none, so nothing else would stop it reaching its provider.
+test("a leaf still waiting on its tree never reaches its provider after a stop", { timeout: 20000 }, async () => {
+  const dir = tmp();
+  try {
+    let release;
+    let reached;
+    const held = new Promise((resume) => { release = resume; });
+    const atAdd = new Promise((resume) => { reached = resume; });
+    const spawned = [];
+    const io = makeIo(fakeSpawnFactory((call) => {
+      spawned.push(promptOf(call));
+      return { output: "done" };
+    }), {
+      worktree: {
+        prepareIsolation: async (t, cfg, resultsDir) => {
+          reached();
+          await held;
+          return { path: treeDirFor(resultsDir, t.id, CFG), branch: `swarm/${t.id}`, name: t.id, head: "h", repo: resultsDir, reused: false };
+        },
+        collect: (t, cfg, wt) => ({ kept: true, branch: wt.branch, path: wt.path, diffstat: "d" }),
+      },
+    });
+    const p = plan(dir, [
+      task("slow", { worktreeName: "slow", allowedTools: "Read,Edit,Bash", cwd: dir, checkoutToplevel: dir }),
+    ], { concurrency: 1 });
+    const runPromise = runPlan(p, CFG, io);
+    await atAdd;
+    process.emit("SIGINT");
+    release();
+    const r = await runPromise;
+
+    equal(spawned.includes("do slow"), false, "no provider was launched after the stop");
+    equal(r.summary.tasks.find((t) => t.id === "slow").state, "failed:stopped", "the leaf is recorded stopped, not run");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

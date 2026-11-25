@@ -5,7 +5,7 @@ import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "nod
 import { swarmHome } from "./config.mjs";
 import { unlandedCount } from "./landed.mjs";
 import { isUnderRoot } from "./roots.mjs";
-import { addWorktree, timeoutMessage } from "./worktree-add.mjs";
+import { addWorktree, timeoutMessage, gitRunAsync } from "./worktree-add.mjs";
 
 export const WORKTREE_ADD_TIMEOUT_MS = 180000;
 
@@ -188,7 +188,7 @@ function removeTreeRecord(resultsDir, name) {
 //
 // `base` is REQUIRED — the run's pinned dispatch commit for this repo (run-bases.mjs),
 // never a live HEAD read; defaulting it is how a caller silently keeps the old behaviour.
-export async function prepareIsolation(task, cfg, resultsDir, { reset = false, addTimeoutMs, base } = {}) {
+export async function prepareIsolation(task, cfg, resultsDir, { reset = false, addTimeoutMs, base, isCancelled, lockWindowMs } = {}) {
   if (!(Number.isFinite(addTimeoutMs) && addTimeoutMs > 0)) throw new Error("prepareIsolation requires a positive addTimeoutMs");
   if (typeof base !== "string" || !base.trim()) {
     throw new Error("prepareIsolation requires the run's pinned base commit — reading the live HEAD here would cut the tree from a commit the run never saw");
@@ -235,10 +235,14 @@ export async function prepareIsolation(task, cfg, resultsDir, { reset = false, a
   const existedBefore = existsSync(path);
   // LFS files stay pointers: smudging every object into every tree filled the disk.
   // A leaf that needs one runs `git lfs pull --include=<path>`.
-  const { add, attempts, timeoutMs } = await addWorktree({
+  const { add, attempts, timeoutMs, cancelled } = await addWorktree({
     repo, path, branch, base, addTimeoutMs, env: { GIT_LFS_SKIP_SMUDGE: "1" },
-    task, cfg, resultsDir, reset, git, existedBefore,
+    task, cfg, resultsDir, reset, git, existedBefore, isCancelled, lockWindowMs,
   });
+  // A stop mid-add is not a failed add: the caller records it as stopped, not broken.
+  if (cancelled) {
+    throw Object.assign(new Error("the run was stopped while the worktree was being created"), { stopped: true });
+  }
   if (add.status !== 0) {
     // A branch live in another worktree is not a retryable add failure: the message
     // git gives names the tree, and nothing else does. A run that re-enters a kept
@@ -257,9 +261,10 @@ export async function prepareIsolation(task, cfg, resultsDir, { reset = false, a
         `finish or prune that run (swarm prune ${runDir || "…"}), or name a different branch/workspace`);
     }
     if (add.timedOut) {
-      throw new Error(timeoutMessage({ repo, task, attempts, timeoutMs, git }));
+      throw new Error(await timeoutMessage({ repo, task, attempts, timeoutMs, git: gitRunAsync }));
     }
-    throw new Error(`git worktree add failed for '${task.id}': ${add.stderr}`);
+    // A spawn error carries no stderr, so name it rather than printing an empty tail.
+    throw new Error(`git worktree add failed for '${task.id}': ${add.stderr || add.error || "git exited without a message"}`);
   }
 
   writeTreeRecord(resultsDir, { name, path, branch, repo, state: "ready" });

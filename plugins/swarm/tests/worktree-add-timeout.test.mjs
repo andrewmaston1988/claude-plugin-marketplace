@@ -6,7 +6,7 @@ import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { spawnSync } from "node:child_process";
 import { prepareIsolation, treeDirFor } from "../src/worktree.mjs";
-import { ADD_ATTEMPTS, clearTaskDebris, slowHook, timeoutMessage } from "../src/worktree-add.mjs";
+import { addWorktree, clearTaskDebris, slowHook, timeoutMessage } from "../src/worktree-add.mjs";
 import { STALE_AFTER_MS } from "../src/stale-lock.mjs";
 import { initRepo, cleanup, git, CFG } from "./helpers/worktree-fixtures.mjs";
 
@@ -77,17 +77,19 @@ test("a timed-out add retries and yields a ready tree, recording the retry", { t
   const results = resultsDir();
   const flag = join(hooks, "hang");
   try {
-    hangOnceHook(hooks, flag);
+    // The hook hangs far longer than the first budget, so the retry's own budget has
+    // real headroom: a slow second attempt is still a second attempt.
+    hangOnceHook(hooks, flag, 30000);
     git(["config", "core.hooksPath", hooks], repo);
     const wt = await prepareIsolation({ id: "slow", originalCwd: repo }, CFG, results,
-      { addTimeoutMs: 2000, base: git(["rev-parse", "HEAD"], repo) });
+      { addTimeoutMs: 6000, base: git(["rev-parse", "HEAD"], repo) });
 
     equal(wt.reused, false);
     ok(existsSync(join(wt.path, "a.txt")), "the retried add produced a real tree");
     const retries = readLog(results).filter((e) => e.event === "worktree-add-retry");
     equal(retries.length, 1, "one timeout, one retry");
     equal(retries[0].attempt, 2);
-    equal(retries[0].timeoutMs, 4000, "the retry's budget is double the first attempt's");
+    equal(retries[0].timeoutMs, 12000, "the retry's budget is double the first attempt's");
   } finally {
     for (const d of [results, hooks, repo]) removeEventually(d);
   }
@@ -110,8 +112,7 @@ test("every attempt timing out throws after the last, with doubling budgets", { 
     } catch (e) { error = e; }
 
     ok(error, "a permanently slow add throws");
-    ok(/timed out after 1\.6s/.test(error.message), error.message);
-    ok(new RegExp(`\\(${ADD_ATTEMPTS} attempts\\)`).test(error.message), error.message);
+    ok(/timed out for 'hung' after 3 attempts, the last with a 1\.6s budget/.test(error.message), error.message);
     ok(/post-checkout/.test(error.message), `the present hook is named: ${error.message}`);
     const retries = readLog(results).filter((e) => e.event === "worktree-add-retry");
     equal(retries.length, 2, "two retries between three attempts");
@@ -139,6 +140,99 @@ test("a non-timeout add failure throws on the first attempt with no retry", { ti
   } finally { removeEventually(results); cleanup(repo); }
 });
 
+// The add is a child process, so it inherits what the sync runner inherits. Git settings
+// reach a user's git through the environment (`GIT_CONFIG_*`), and a bare env map drops
+// them along with PATH and HOME.
+test("the add inherits the parent's git configuration", { timeout: 30000 }, async () => {
+  const repo = initRepo();
+  const hooks = hooksDir();
+  const results = resultsDir();
+  const marker = join(hooks, "ran");
+  try {
+    writeFileSync(join(hooks, "post-checkout"), `#!/bin/sh\nprintf x > '${hookPath(marker)}'\n`, { mode: 0o755 });
+    process.env.GIT_CONFIG_COUNT = "1";
+    process.env.GIT_CONFIG_KEY_0 = "core.hooksPath";
+    process.env.GIT_CONFIG_VALUE_0 = hooks;
+    const wt = await prepareIsolation({ id: "env", originalCwd: repo }, CFG, results,
+      { addTimeoutMs: 20000, base: git(["rev-parse", "HEAD"], repo) });
+    ok(existsSync(join(wt.path, "a.txt")), "the add produced a real tree");
+    ok(existsSync(marker), "a git setting the parent holds in its environment reached the add");
+  } finally {
+    delete process.env.GIT_CONFIG_COUNT;
+    delete process.env.GIT_CONFIG_KEY_0;
+    delete process.env.GIT_CONFIG_VALUE_0;
+    for (const d of [results, hooks, repo]) removeEventually(d);
+  }
+});
+
+// A hook that outlives git keeps the pipes open, so `close` alone would let one hung
+// hook hold the whole retry ladder open past every deadline.
+test("a hook that outlives git cannot hold the attempt past its deadline", { timeout: 120000 }, async () => {
+  const repo = initRepo();
+  const hooks = hooksDir();
+  const results = resultsDir();
+  try {
+    writeFileSync(join(hooks, "post-checkout"), '#!/bin/sh\nnode -e "setTimeout(() => {}, 30000)"\n', { mode: 0o755 });
+    git(["config", "core.hooksPath", hooks], repo);
+    const started = Date.now();
+    let error;
+    try {
+      await prepareIsolation({ id: "stuck", originalCwd: repo }, CFG, results,
+        { addTimeoutMs: 500, base: git(["rev-parse", "HEAD"], repo) });
+    } catch (e) { error = e; }
+    ok(error, "the add still ends in a timeout error");
+    ok(/3 attempts/.test(error.message), error.message);
+    // The hook alone would hold one attempt for 30s; three of those is the failure.
+    ok(Date.now() - started < 60000, `the ladder settled at its own deadlines, not the hook's: ${Date.now() - started}ms`);
+  } finally { for (const d of [results, hooks, repo]) removeEventually(d); }
+});
+
+test("a stop request aborts the add instead of waiting out its budget", { timeout: 30000 }, async () => {
+  const repo = initRepo();
+  const hooks = hooksDir();
+  const results = resultsDir();
+  const dir = scratch();
+  try {
+    writeFileSync(join(hooks, "post-checkout"), '#!/bin/sh\nnode -e "setTimeout(() => {}, 30000)"\n', { mode: 0o755 });
+    git(["config", "core.hooksPath", hooks], repo);
+    let stopped = false;
+    setTimeout(() => { stopped = true; }, 200);
+    const started = Date.now();
+    const out = await addWorktree({
+      repo, path: join(dir, "tree"), branch: "swarm/stopped", base: git(["rev-parse", "HEAD"], repo),
+      addTimeoutMs: 30000, env: {}, task: { id: "stopped" }, cfg: CFG, resultsDir: results, git: gitRun,
+      isCancelled: () => stopped,
+    });
+    ok(out.cancelled, "a stopped add reports itself cancelled");
+    equal(out.attempts, 1, "a stop is not retried");
+    ok(Date.now() - started < 10000, `the add did not run out its 30s budget: ${Date.now() - started}ms`);
+  } finally { rmSync(dir, { recursive: true, force: true }); for (const d of [results, hooks, repo]) removeEventually(d); }
+});
+
+test("a clear that fails still reports the timed-out attempt", { timeout: 60000 }, async () => {
+  const repo = initRepo();
+  const hooks = hooksDir();
+  const results = resultsDir();
+  const dir = scratch();
+  const flag = join(hooks, "hang");
+  const lock = lockPathFor(repo, "swarm/held");
+  try {
+    hangOnceHook(hooks, flag, 30000);
+    git(["config", "core.hooksPath", hooks], repo);
+    const pending = prepareIsolation({ id: "held", originalCwd: repo }, CFG, results,
+      { addTimeoutMs: 1500, base: git(["rev-parse", "HEAD"], repo) });
+    // The hook running means the branch ref is written, so a lock seeded now is a
+    // writer's lock and the clear must refuse it.
+    waitUntil(() => !existsSync(flag), 20000);
+    writeFileSync(lock, "0123456789abcdef\n");
+    let error;
+    try { await pending; } catch (e) { error = e; }
+    ok(error, "the retry stops rather than deleting a lock it cannot prove dead");
+    ok(/has content/.test(error.message), error.message);
+    ok(/timed out after 1\.5s/.test(error.message), `the timeout that led to it is still named: ${error.message}`);
+  } finally { rmSync(dir, { recursive: true, force: true }); for (const d of [results, hooks, repo]) removeEventually(d); }
+});
+
 test("an old 0-byte lock and the half-made tree are cleared before the retry", { timeout: 60000 }, async () => {
   const repo = initRepo();
   const hooks = hooksDir();
@@ -146,17 +240,18 @@ test("an old 0-byte lock and the half-made tree are cleared before the retry", {
   const flag = join(hooks, "hang");
   const lock = lockPathFor(repo, "swarm/slow");
   const tree = treeDirFor(results, "slow", CFG);
+  const window = 300;
   try {
     hangOnceHook(hooks, flag);
     git(["config", "core.hooksPath", hooks], repo);
 
     const pending = prepareIsolation({ id: "slow", originalCwd: repo }, CFG, results,
-      { addTimeoutMs: 2000, base: git(["rev-parse", "HEAD"], repo) });
+      { addTimeoutMs: 2000, base: git(["rev-parse", "HEAD"], repo), lockWindowMs: window });
     // The flag going means the hook is running, so git has written the branch ref and
     // released its lock: seed the debris a killed add leaves while nothing holds it.
     waitUntil(() => !existsSync(flag), 20000);
     writeFileSync(lock, "");
-    ageLock(lock, STALE_AFTER_MS + 5000);
+    ageLock(lock, window + 2000);
     ok(existsSync(tree), "precondition: the killed attempt made a half tree");
 
     const wt = await pending;
@@ -171,7 +266,7 @@ test("an old 0-byte lock and the half-made tree are cleared before the retry", {
 
 // ---- the per-task debris clear
 
-test("a lock with content is left in place and named in the error", () => {
+test("a lock with content is left in place and named in the error", async () => {
   const repo = initRepo();
   const dir = scratch();
   try {
@@ -179,7 +274,7 @@ test("a lock with content is left in place and named in the error", () => {
     mkdirSync(resolve(lock, ".."), { recursive: true });
     writeFileSync(lock, "0123456789abcdef\n");
     let error;
-    try { clearTaskDebris({ repo, path: join(dir, "tree"), branch: "swarm/mine", branchDerived: true, existedBefore: false, git: gitRun }); }
+    try { await clearTaskDebris({ repo, path: join(dir, "tree"), branch: "swarm/mine", branchDerived: true, existedBefore: false, git: gitRun }); }
     catch (e) { error = e; }
     ok(error, "a content lock refuses the clear");
     ok(error.message.includes(lock), `the error names the lock: ${error.message}`);
@@ -187,7 +282,7 @@ test("a lock with content is left in place and named in the error", () => {
   } finally { rmSync(dir, { recursive: true, force: true }); cleanup(repo); }
 });
 
-test("a 0-byte lock written inside the staleness window is left in place", () => {
+test("a 0-byte lock written inside the staleness window is left in place", async () => {
   const repo = initRepo();
   const dir = scratch();
   try {
@@ -195,7 +290,7 @@ test("a 0-byte lock written inside the staleness window is left in place", () =>
     mkdirSync(resolve(lock, ".."), { recursive: true });
     writeFileSync(lock, "");
     let error;
-    try { clearTaskDebris({ repo, path: join(dir, "tree"), branch: "swarm/mine", branchDerived: true, existedBefore: false, git: gitRun }); }
+    try { await clearTaskDebris({ repo, path: join(dir, "tree"), branch: "swarm/mine", branchDerived: true, existedBefore: false, git: gitRun }); }
     catch (e) { error = e; }
     ok(error, "a young lock refuses the clear");
     ok(error.message.includes(lock), error.message);
@@ -203,19 +298,19 @@ test("a 0-byte lock written inside the staleness window is left in place", () =>
   } finally { rmSync(dir, { recursive: true, force: true }); cleanup(repo); }
 });
 
-test("a lock on another branch is left untouched", () => {
+test("a lock on another branch is left untouched", async () => {
   const repo = initRepo();
   const dir = scratch();
   try {
     const other = lockPathFor(repo, "swarm/other");
     mkdirSync(resolve(other, ".."), { recursive: true });
     writeFileSync(other, "");
-    clearTaskDebris({ repo, path: join(dir, "tree"), branch: "swarm/mine", branchDerived: true, existedBefore: false, git: gitRun });
+    await clearTaskDebris({ repo, path: join(dir, "tree"), branch: "swarm/mine", branchDerived: true, existedBefore: false, git: gitRun });
     ok(existsSync(other), "another task's branch lock is none of this task's business");
   } finally { rmSync(dir, { recursive: true, force: true }); cleanup(repo); }
 });
 
-test("a lock on a manifest-declared branch is left in place and named", () => {
+test("a lock on a manifest-declared branch is left in place and named", async () => {
   const repo = initRepo();
   const dir = scratch();
   try {
@@ -224,7 +319,7 @@ test("a lock on a manifest-declared branch is left in place and named", () => {
     writeFileSync(lock, "");
     ageLock(lock, STALE_AFTER_MS + 5000);
     let error;
-    try { clearTaskDebris({ repo, path: join(dir, "tree"), branch: "feature/shared", branchDerived: false, existedBefore: false, git: gitRun }); }
+    try { await clearTaskDebris({ repo, path: join(dir, "tree"), branch: "feature/shared", branchDerived: false, existedBefore: false, git: gitRun }); }
     catch (e) { error = e; }
     ok(error, "a declared branch's lock is not this task's alone");
     ok(error.message.includes(lock), error.message);
@@ -232,32 +327,32 @@ test("a lock on a manifest-declared branch is left in place and named", () => {
   } finally { rmSync(dir, { recursive: true, force: true }); cleanup(repo); }
 });
 
-test("a registered, locked half-made tree is removed", () => {
+test("a registered, locked half-made tree is removed", async () => {
   const repo = initRepo();
   const dir = scratch();
   const tree = join(dir, "tree");
   try {
     git(["worktree", "add", "-b", "swarm/locked", tree, "--no-track", "HEAD"], repo);
     git(["worktree", "lock", tree], repo);
-    clearTaskDebris({ repo, path: tree, branch: "swarm/locked", branchDerived: true, existedBefore: true, git: gitRun });
+    await clearTaskDebris({ repo, path: tree, branch: "swarm/locked", branchDerived: true, existedBefore: true, git: gitRun });
     ok(!existsSync(tree), "only -f -f can remove a locked tree, and it must go");
     ok(!git(["worktree", "list", "--porcelain"], repo).includes("swarm/locked"), "its registration is gone too");
   } finally { rmSync(dir, { recursive: true, force: true }); cleanup(repo); }
 });
 
-test("an unregistered directory created by this attempt is removed", () => {
+test("an unregistered directory created by this attempt is removed", async () => {
   const repo = initRepo();
   const dir = scratch();
   const leftover = join(dir, "half");
   try {
     mkdirSync(leftover);
     writeFileSync(join(leftover, "partial.txt"), "half-checked-out\n");
-    clearTaskDebris({ repo, path: leftover, branch: "swarm/half", branchDerived: true, existedBefore: false, git: gitRun });
+    await clearTaskDebris({ repo, path: leftover, branch: "swarm/half", branchDerived: true, existedBefore: false, git: gitRun });
     ok(!existsSync(leftover), "the attempt's own half-made directory is debris");
   } finally { rmSync(dir, { recursive: true, force: true }); cleanup(repo); }
 });
 
-test("a directory that existed before the attempt is not removed", () => {
+test("a directory that existed before the attempt is not removed", async () => {
   const repo = initRepo();
   const dir = scratch();
   const held = join(dir, "mine");
@@ -265,7 +360,7 @@ test("a directory that existed before the attempt is not removed", () => {
     mkdirSync(held);
     writeFileSync(join(held, "notes.txt"), "user data\n");
     let error;
-    try { clearTaskDebris({ repo, path: held, branch: "swarm/mine", branchDerived: true, existedBefore: true, git: gitRun }); }
+    try { await clearTaskDebris({ repo, path: held, branch: "swarm/mine", branchDerived: true, existedBefore: true, git: gitRun }); }
     catch (e) { error = e; }
     ok(error, "the clear refuses a directory it did not create");
     ok(error.message.includes(held), error.message);
@@ -273,7 +368,7 @@ test("a directory that existed before the attempt is not removed", () => {
   } finally { rmSync(dir, { recursive: true, force: true }); cleanup(repo); }
 });
 
-test("a branch carrying unlanded commits is never deleted or reset by the clear", () => {
+test("a branch carrying unlanded commits is never deleted or reset by the clear", async () => {
   const repo = initRepo();
   const dir = scratch();
   const tree = join(dir, "keep");
@@ -285,36 +380,90 @@ test("a branch carrying unlanded commits is never deleted or reset by the clear"
     const tip = git(["rev-parse", "swarm/keep"], repo);
     git(["worktree", "remove", "--force", tree], repo);
 
-    clearTaskDebris({ repo, path: tree, branch: "swarm/keep", branchDerived: true, existedBefore: false, git: gitRun });
+    await clearTaskDebris({ repo, path: tree, branch: "swarm/keep", branchDerived: true, existedBefore: false, git: gitRun });
     equal(git(["rev-parse", "swarm/keep"], repo), tip, "the branch and its commit survive the clear");
   } finally { rmSync(dir, { recursive: true, force: true }); cleanup(repo); }
 });
 
+// Two reads taken back to back agree on anything, so the lock has to be WATCHED for the
+// whole window before it can be called dead.
+test("an old 0-byte lock is watched for the whole window before it is removed", { timeout: 20000 }, async () => {
+  const repo = initRepo();
+  const dir = scratch();
+  const window = 600;
+  try {
+    const lock = lockPathFor(repo, "swarm/mine");
+    mkdirSync(resolve(lock, ".."), { recursive: true });
+    writeFileSync(lock, "");
+    ageLock(lock, 5000);
+    const started = Date.now();
+    await clearTaskDebris({ repo, path: join(dir, "tree"), branch: "swarm/mine", branchDerived: true, existedBefore: false, git: gitRun, lockWindowMs: window });
+    ok(!existsSync(lock), "the dead lock was removed");
+    ok(Date.now() - started >= window, `the lock was observed for its window: ${Date.now() - started}ms`);
+  } finally { rmSync(dir, { recursive: true, force: true }); cleanup(repo); }
+});
+
+test("a lock still being written during the window is left in place", { timeout: 20000 }, async () => {
+  const repo = initRepo();
+  const dir = scratch();
+  const window = 800;
+  try {
+    const lock = lockPathFor(repo, "swarm/mine");
+    mkdirSync(resolve(lock, ".."), { recursive: true });
+    writeFileSync(lock, "");
+    ageLock(lock, 5000);
+    const writing = setTimeout(() => writeFileSync(lock, "0123\n"), Math.round(window / 2));
+    let error;
+    try { await clearTaskDebris({ repo, path: join(dir, "tree"), branch: "swarm/mine", branchDerived: true, existedBefore: false, git: gitRun, lockWindowMs: window }); }
+    catch (e) { error = e; }
+    clearTimeout(writing);
+    ok(error, "a lock that changed mid-window refuses the clear");
+    ok(/changed while it was checked/.test(error.message), error.message);
+    ok(existsSync(lock), "the writer's lock survives");
+  } finally { rmSync(dir, { recursive: true, force: true }); cleanup(repo); }
+});
+
+// A 60-second synchronous git call in a retry path freezes every other leaf's
+// callbacks for as long as it blocks.
+test("the debris clear yields to the event loop while git runs", { timeout: 20000 }, async () => {
+  const repo = initRepo();
+  const dir = scratch();
+  let ticked = false;
+  const timer = setTimeout(() => { ticked = true; }, 40);
+  const slowGit = (args, cwd) => new Promise((resume) => setTimeout(() => resume(gitRun(args, cwd)), 150));
+  try {
+    const started = Date.now();
+    await clearTaskDebris({ repo, path: join(dir, "tree"), branch: "swarm/mine", branchDerived: true, existedBefore: false, git: slowGit });
+    ok(ticked, "a pending timer ran while the clear's git call was outstanding");
+    ok(Date.now() - started >= 400, `every git call was awaited: ${Date.now() - started}ms`);
+  } finally { clearTimeout(timer); rmSync(dir, { recursive: true, force: true }); cleanup(repo); }
+});
+
 // ---- the timeout message names a hook only when the repo has one
 
-test("with no hooks the timeout names contention, not a hook", () => {
+test("with no hooks the timeout names contention, not a hook", async () => {
   const repo = initRepo();
   try {
     git(["config", "core.hooksPath", join(repo, ".git", "hooks")], repo);
-    const message = timeoutMessage({ repo, task: { id: "t" }, attempts: 3, timeoutMs: 720000, git: gitRun });
-    ok(/timed out after 720s/.test(message), message);
+    const message = await timeoutMessage({ repo, task: { id: "t" }, attempts: 3, timeoutMs: 720000, git: gitRun });
+    ok(/timed out for 't' after 3 attempts, the last with a 720s budget/.test(message), message);
     ok(/contention|large object store/.test(message), message);
     ok(!/post-checkout|reference-transaction/.test(message), `no hook is named: ${message}`);
-    equal(slowHook(repo, { git: gitRun }), null, "only *.sample files are present");
+    equal(await slowHook(repo, { git: gitRun }), null, "only *.sample files are present");
   } finally { cleanup(repo); }
 });
 
-test("a hook with no execute bits is still detected", () => {
+test("a hook with no execute bits is still detected", async () => {
   const repo = initRepo();
   const hooks = hooksDir();
   try {
     writeFileSync(join(hooks, "post-checkout"), "#!/bin/sh\n", { mode: 0o644 });
     git(["config", "core.hooksPath", hooks], repo);
-    equal(slowHook(repo, { git: gitRun }), "post-checkout", "presence, not an execute bit, is the test");
+    equal(await slowHook(repo, { git: gitRun }), "post-checkout", "presence, not an execute bit, is the test");
   } finally { removeEventually(hooks); cleanup(repo); }
 });
 
-test("a hook in a linked worktree's common dir is detected", () => {
+test("a hook in a linked worktree's common dir is detected", async () => {
   const repo = initRepo();
   const dir = scratch();
   const linked = join(dir, "linked");
@@ -323,17 +472,17 @@ test("a hook in a linked worktree's common dir is detected", () => {
     mkdirSync(join(common, "hooks"), { recursive: true });
     writeFileSync(join(common, "hooks", "reference-transaction"), "#!/bin/sh\n", { mode: 0o644 });
     git(["worktree", "add", linked, "-b", "linked", "--no-track", "HEAD"], repo);
-    equal(slowHook(linked, { git: gitRun }), "reference-transaction", "the common dir's hooks are the worktree's hooks");
+    equal(await slowHook(linked, { git: gitRun }), "reference-transaction", "the common dir's hooks are the worktree's hooks");
   } finally { removeEventually(dir); cleanup(repo); }
 });
 
-test("a reference-transaction hook is named in the timeout", () => {
+test("a reference-transaction hook is named in the timeout", async () => {
   const repo = initRepo();
   const hooks = hooksDir();
   try {
     writeFileSync(join(hooks, "reference-transaction"), "#!/bin/sh\n", { mode: 0o755 });
     git(["config", "core.hooksPath", hooks], repo);
-    const message = timeoutMessage({ repo, task: { id: "t" }, attempts: 3, timeoutMs: 720000, git: gitRun });
+    const message = await timeoutMessage({ repo, task: { id: "t" }, attempts: 3, timeoutMs: 720000, git: gitRun });
     ok(/reference-transaction/.test(message), message);
   } finally { removeEventually(hooks); cleanup(repo); }
 });
