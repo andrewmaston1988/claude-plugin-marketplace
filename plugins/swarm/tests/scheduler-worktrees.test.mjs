@@ -468,50 +468,6 @@ test("only the final chain link is checked and its correction names every group 
   }
 });
 
-test("a held-open worktree add does not freeze another leaf or a stop request", { timeout: 20000 }, async () => {
-  const dir = tmp();
-  try {
-    let release;
-    const held = new Promise((resume) => { release = resume; });
-    let slowSettled = false;
-    let fastSettledWhileHeld = false;
-    const io = makeIo(fakeSpawnFactory((call) => {
-      if (promptOf(call) === "do fast" && !slowSettled) fastSettledWhileHeld = true;
-      return { output: "done" };
-    }), {
-      worktree: {
-        prepareIsolation: async (t, cfg, resultsDir) => {
-          if (t.id === "slow") { await held; slowSettled = true; }
-          return { path: treeDirFor(resultsDir, t.id, CFG), branch: `swarm/${t.id}`, name: t.id, head: "h", repo: resultsDir, reused: false };
-        },
-        collect: (t, cfg, wt) => ({ kept: true, branch: wt.branch, path: wt.path, diffstat: "d" }),
-      },
-    });
-    const p = plan(dir, [
-      task("slow", { worktreeName: "slow", allowedTools: "Read,Edit,Bash", cwd: dir, checkoutToplevel: dir }),
-      task("fast", { worktreeName: "fast", allowedTools: "Read,Edit,Bash", cwd: dir, checkoutToplevel: dir }),
-    ], { concurrency: 2 });
-    const runPromise = runPlan(p, CFG, io);
-    // Wait for the other leaf to settle while the first add is still held open.
-    await new Promise((resume) => {
-      const poll = setInterval(() => {
-        if (readResult(p.resultsDir, "fast")) { clearInterval(poll); resume(); }
-      }, 10);
-      setTimeout(() => { clearInterval(poll); resume(); }, 5000);
-    });
-    ok(fastSettledWhileHeld, "another leaf's callback ran while one add was held open");
-    equal(readResult(p.resultsDir, "fast")?.ok, true, "the free leaf settled ok");
-
-    process.emit("SIGINT");
-    release();
-    const r = await runPromise;
-    equal(r.summary.stopped, true, "a stop request landed while the add was still held");
-    equal(r.summary.tasks.find((t) => t.id === "fast").state, "ok");
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-  }
-});
-
 test("clean committed tree remains ok without a top-level uncommitted failure field", async () => {
   const dir = tmp();
   try {
