@@ -1,7 +1,6 @@
 // A git process killed mid-write leaves a zero-byte `<x>.lock` behind, and every later ref
 // write in that repo refuses. Prune only DIAGNOSES such a lock: removing one a live process
 // holds corrupts the ref store, so the reader is told what it is and decides.
-import { platform as hostPlatform } from "node:process";
 
 // A lock older than this with no bytes written cannot belong to a live writer: git creates
 // and fills a lock within milliseconds.
@@ -40,7 +39,7 @@ export function classifyLock(path, { fs, now = Date.now(), gitRunning } = {}) {
 
 // Is a git process running? win32 answers with tasklist because MSYS `pgrep` sees only MSYS
 // processes, never a native git. Null means the check could not be made — never "idle".
-export function gitRunning(spawnSync, platform = hostPlatform) {
+export function gitRunning(spawnSync, platform = process.platform) {
   const windows = platform === "win32";
   const [command, args] = windows
     ? ["tasklist", ["/FI", "IMAGENAME eq git.exe", "/NH"]]
