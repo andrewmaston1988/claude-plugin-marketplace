@@ -9,6 +9,7 @@ import { readTaken } from "../src/taken.mjs";
 import { runLiveness } from "../src/runlog.mjs";
 import { writeSummary } from "../src/results.mjs";
 import { plan as planPrune, execute as executePrune, formatPrune, workCounts, blockers as pruneBlockers, isHeldBack, makeGit, runForPrune, checkoutBase } from "../src/prune.mjs";
+import { lockPath, classifyLock, gitRunning } from "../src/stale-lock.mjs";
 import { out, err } from "../src/ui.mjs";
 
 export async function cmdPrune(rest, { usage }) {
@@ -93,8 +94,20 @@ export async function cmdPrune(rest, { usage }) {
   // The report follows execute: a removal git refused is kept, never printed as freed.
   if (removed.length) out(formatPrune(removed));
   for (const row of stay) err(`  ${rowLabel(row)}: ${keptDetail(row)}`);
+  // One probe per prune: every refused row asks the same question, and a second spawnSync
+  // cannot change the answer inside one run.
+  let probed;
+  const anyGitRunning = () => {
+    if (probed === undefined) probed = gitRunning(spawnSync, process.platform);
+    return probed;
+  };
+  const lockOf = [];
   for (const { row, reason } of refused) {
     err(`  ${rowLabel(row)}: ${workCounts(row).join(", ") || firstLine(reason) || "still present"}`);
+    const path = lockPath(reason);
+    const info = path ? classifyLock(path, { fs, gitRunning: anyGitRunning }) : null;
+    lockOf.push(info);
+    if (info) err(`  ${lockLine(info)}`);
   }
   // Two unrelated causes, two remedies: `stay` rows hold work the operator must land or
   // take, and `--discard-unlanded` is the word that overrides that. A `refused` row is one
@@ -109,7 +122,15 @@ export async function cmdPrune(rest, { usage }) {
     err(`swarm: ${rowCount(heldBack.length)} kept with a leftover directory prune will not clear — inspect and remove by hand: ${heldBack.map((row) => row.path).join(", ")}`);
   }
   if (refused.length) {
-    err(`swarm: kept ${rowCount(refused.length)} that git refused to remove — clear what git names above and prune again`);
+    // Every refused row blocked by the same diagnosable cause is one instruction, not a
+    // riddle: name the lock instead of the generic "clear what git names above".
+    const allStale = lockOf.every((info) => info?.state === "stale");
+    if (allStale) {
+      const locks = [...new Set(lockOf.map((info) => info.path))].join(", ");
+      err(`swarm: kept ${rowCount(refused.length)} that git refused to remove — the stale lock ${locks} is blocking ${refused.length === 1 ? "it" : "them"}; confirm every writer has stopped, then remove the lock and prune again`);
+    } else {
+      err(`swarm: kept ${rowCount(refused.length)} that git refused to remove — clear what git names above and prune again`);
+    }
   }
   return stay.length || refused.length ? 1 : 0;
 }
@@ -125,6 +146,23 @@ const keptDetail = (row) => [
 const rowCount = (n) => `${n} row${n === 1 ? "" : "s"}`;
 const dirCount = (n, word = "directory", plural = `${word}s`) => `${n} ${n === 1 ? word : plural}`;
 const firstLine = (text) => (text || "").split(/\r?\n/).map((s) => s.trim()).find(Boolean) || "";
+
+// One line per diagnosed lock: what it is, how big and how old, and what to do about it.
+// The process check sees this host only, so no line authorises removal on its own — prune
+// never removes one, and a lock a writer on another machine holds is the ref store.
+function lockLine(info) {
+  if (info.state === "gone") return `${info.path} is a git lock that is already gone — prune again`;
+  if (info.state === "stale") {
+    return `${info.path} is a stale git lock (${info.size} bytes, ${Math.round(info.ageMs / 1000)} s old)`
+      + " — no git process is running on this host; confirm every writer has stopped, then remove that file and prune again";
+  }
+  if (info.cause === "unreadable") return `${info.path} is a git lock that could not be read — check for a git process, then prune again`;
+  const what = `${info.path} is a git lock (${info.size} bytes, ${Math.round(info.ageMs / 1000)} s old)`;
+  if (info.cause === "process") return `${what} and git is running on this host, so this lock's owner is unverified — wait for that git to finish, then prune again`;
+  if (info.cause === "unknown") return `${what}; the git process check could not run, so its owner is unverified — check for a git process, then prune again`;
+  if (info.cause === "content") return `${what} and it has content, so a writer may still hold it — check whether that writer is alive before removing it, then prune again`;
+  return `${what} and it is too new to tell — wait a minute, then prune again`;
+}
 
 // A row is gone when its tree left the disk, or a branch-only row's ref no longer resolves.
 function gone(row, git, fs) {

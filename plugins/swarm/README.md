@@ -461,7 +461,12 @@ detach option; push a branch under a name outside `swarm/` to preserve its remot
 kept and named, not refused: every row with unlanded commits or uncommitted changes stays, named on
 stderr with its counts, and the command exits 1; a later prune takes the rest once its work
 lands. `--dry-run` previews which rows would go and which would stay and removes nothing;
-`--discard-unlanded` destroys the blocked work too, whether or not the branch landed. A kept
+`--discard-unlanded` destroys the blocked work too, whether or not the branch landed. A
+removal git refuses because a killed git left a `<x>.lock` behind — a `packed-refs.lock`, say
+— is diagnosed from git's own refusal: prune names the lock with its size and age and whether
+a git process is running on this host, and never removes the file itself. An empty lock over a
+minute old with no local git is a stalled writer's leftover, but the probe sees this host only,
+so confirm every writer has stopped before removing the lock and pruning again. A kept
 tree whose directory lost its `.git` link — a prune that failed part-way can leave one — is
 measured by its branch in the repo the run recorded, never by the repo enclosing that directory.
 An empty leftover is cleared with the row in execute, and `--dry-run` says `would clear` and
