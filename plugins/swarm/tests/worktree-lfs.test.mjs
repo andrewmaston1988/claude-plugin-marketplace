@@ -18,7 +18,8 @@ const skip = lfs.status !== 0 && "git-lfs is not installed";
 
 // A tree of an LFS repo must hold pointers: smudging every object into every tree
 // filled the disk (2026-11-18, ~1.7 GB of concept art per tree of the CLAUDE repo).
-test("a tree cut from an LFS repo holds pointers and reads clean", { skip, timeout: 60000 }, async () => {
+// The 60s default is under one add's ladder (30s, then doubling) on a loaded machine.
+test("a tree cut from an LFS repo holds pointers and reads clean", { skip, timeout: 180000 }, async () => {
   const repo = mkdtempSync(join(tmpdir(), "swarm-lfs-repo-"));
   const resultsDir = mkdtempSync(join(tmpdir(), "swarm-lfs-res-"));
   const git = (...args) => spawnSync("git", args, { cwd: repo, windowsHide: true, encoding: "utf8" });
