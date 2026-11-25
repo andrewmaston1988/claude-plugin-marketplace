@@ -104,6 +104,9 @@ export async function cmdPrune(rest, { usage }) {
   const lockOf = [];
   for (const { row, reason } of refused) {
     err(`  ${rowLabel(row)}: ${workCounts(row).join(", ") || firstLine(reason) || "still present"}`);
+    // git's refusal can carry a second line naming the remedy; stderr is where the
+    // operator reads it, so every line is printed, not just the first.
+    for (const extra of restLines(reason)) err(`    ${extra}`);
     const path = lockPath(reason);
     const info = path ? classifyLock(path, { fs, gitRunning: anyGitRunning }) : null;
     lockOf.push(info);
@@ -146,6 +149,7 @@ const keptDetail = (row) => [
 const rowCount = (n) => `${n} row${n === 1 ? "" : "s"}`;
 const dirCount = (n, word = "directory", plural = `${word}s`) => `${n} ${n === 1 ? word : plural}`;
 const firstLine = (text) => (text || "").split(/\r?\n/).map((s) => s.trim()).find(Boolean) || "";
+const restLines = (text) => (text || "").split(/\r?\n/).map((s) => s.trim()).filter(Boolean).slice(1);
 
 // One line per diagnosed lock: what it is, how big and how old, and what to do about it.
 // The process check sees this host only, so no line authorises removal on its own — prune

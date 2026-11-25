@@ -54,23 +54,32 @@ function subdirs(dir) {
 }
 
 // The one parser for `git worktree list --porcelain` — `head` is what a missing detached
-// tree has left to measure. Null when git cannot answer.
-export function worktreeList(git, repo) {
+// tree has left to measure, and `lock` is why the tree is locked (null when it is not;
+// "" for a lock git was given no reason for). Null when git cannot answer, which is not
+// the same as "no tree is locked". A `memo` shares one listing across a single pass.
+export function worktreeList(git, repo, memo = null) {
+  const key = normalizeForCompare(repo);
+  if (memo?.has(key)) return memo.get(key);
   const r = git(["worktree", "list", "--porcelain"], repo);
-  if (r.status !== 0) return null;
-  const rows = [];
-  let cur = null;
-  for (const line of r.stdout.split("\n")) {
-    if (line.startsWith("worktree ")) {
-      if (cur) rows.push(cur);
-      cur = { path: resolve(line.slice("worktree ".length).trim()), branch: null, head: null };
-    } else if (cur && line.startsWith("branch ")) {
-      cur.branch = line.slice("branch ".length).trim().replace(/^refs\/heads\//, "");
-    } else if (cur && line.startsWith("HEAD ")) {
-      cur.head = line.slice("HEAD ".length).trim();
+  let rows = null;
+  if (r.status === 0) {
+    rows = [];
+    let cur = null;
+    for (const line of r.stdout.split("\n")) {
+      if (line.startsWith("worktree ")) {
+        if (cur) rows.push(cur);
+        cur = { path: resolve(line.slice("worktree ".length).trim()), branch: null, head: null, lock: null };
+      } else if (cur && line.startsWith("branch ")) {
+        cur.branch = line.slice("branch ".length).trim().replace(/^refs\/heads\//, "");
+      } else if (cur && line.startsWith("HEAD ")) {
+        cur.head = line.slice("HEAD ".length).trim();
+      } else if (cur && line.startsWith("locked")) {
+        cur.lock = line.slice("locked".length).trim();
+      }
     }
+    if (cur) rows.push(cur);
   }
-  if (cur) rows.push(cur);
+  memo?.set(key, rows);
   return rows;
 }
 
@@ -78,8 +87,8 @@ export function worktreeList(git, repo) {
 // not a prefix test: a tree lives under <treeRoot>/<project>/<run> now, so "starts with
 // resultsDir" stopped matching the moment creation moved — and would meanwhile sweep a
 // sibling run's tree into this run's prune.
-export function registeredForRun(git, repo, resultsDir, { cfg } = {}) {
-  const rows = worktreeList(git, repo);
+export function registeredForRun(git, repo, resultsDir, { cfg, memo = null } = {}) {
+  const rows = worktreeList(git, repo, memo);
   if (!rows) return [];
   const dir = resolve(resultsDir);
   const runsRoot = dirname(dirname(dir));
@@ -91,7 +100,7 @@ export function registeredForRun(git, repo, resultsDir, { cfg } = {}) {
 
 // git resolves a junction or symlink on the way to its toplevel; a recorded path keeps the
 // spelling swarm created it under. A path that no longer exists keeps its own spelling.
-function canonicalPath(path) {
+export function canonicalPath(path) {
   try { return realpathSync.native(path); } catch { return path; }
 }
 
@@ -164,6 +173,9 @@ export function* discoveredLanes(run, git, fs, { cfg } = {}) {
   // One verdict per directory for this pass: discovery and the facts probe ask the same
   // tree, and the answer cannot change mid-pass.
   const linkMemo = new Map();
+  // One listing per repo for this pass, shared by the registered-tree scan and the
+  // held-branch set below — both ask git the same question about the same repo.
+  const listMemo = new Map();
   const laneKey = (repo, branch) => `${normalizeForCompare(repo)}\n${branch}`;
   const freshTree = (path) => {
     const key = normalizeForCompare(path);
@@ -213,7 +225,7 @@ export function* discoveredLanes(run, git, fs, { cfg } = {}) {
   }
   for (const repo of run.repos || []) {
     if (!fs.existsSync(repo)) continue;
-    for (const reg of registeredForRun(git, repo, run.resultsDir, { cfg })) {
+    for (const reg of registeredForRun(git, repo, run.resultsDir, { cfg, memo: listMemo })) {
       if (!freshTree(reg.path)) continue;
       // Registered but gone from disk: a missing directory holds no uncommitted work,
       // and its registration must go before `branch -D` can take the branch.
@@ -238,7 +250,7 @@ export function* discoveredLanes(run, git, fs, { cfg } = {}) {
       if (listed.status !== 0) continue;
       // A branch a tree holds is either already a tree lane or checked out somewhere
       // prune does not own; `branch -D` would refuse it either way.
-      const held = new Set((worktreeList(git, repo) || []).map((t) => t.branch).filter(Boolean));
+      const held = new Set((worktreeList(git, repo, listMemo) || []).map((t) => t.branch).filter(Boolean));
       for (const branch of listed.stdout.split(/\r?\n/).map((s) => s.trim()).filter(Boolean)) {
         if (held.has(branch) || lanes.has(laneKey(repo, branch))) continue;
         yield lane({ branch, repo });

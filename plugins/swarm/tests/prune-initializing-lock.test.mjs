@@ -66,7 +66,7 @@ test("a tree locked for another reason is kept, and the failure names the reason
     const reason = failed[0].reason;
     ok(/cannot remove a locked working tree/.test(reason), `git's own refusal is kept: ${reason}`);
     ok(reason.includes("operator hold"), `the reason is named: ${reason}`);
-    ok(reason.includes(`git worktree unlock ${t.tree}`), `the unlock is named: ${reason}`);
+    ok(reason.includes(`git worktree unlock "${t.tree}"`), `the unlock is named: ${reason}`);
     ok(nodeFs.existsSync(t.tree), "a lock set on purpose is never overridden");
     ok(gitOut(["branch", "--list", t.branch], f.repo), "and its branch survives");
   } finally {
@@ -83,7 +83,7 @@ test("a tree locked with no reason is kept, and the failure says the lock carrie
     const reason = failed[0].reason;
     ok(/cannot remove a locked working tree/.test(reason), `git's own refusal is kept: ${reason}`);
     ok(/no reason recorded/.test(reason), `a bare lock is reported as such: ${reason}`);
-    ok(reason.includes(`git worktree unlock ${t.tree}`), `the unlock is named: ${reason}`);
+    ok(reason.includes(`git worktree unlock "${t.tree}"`), `the unlock is named: ${reason}`);
     ok(nodeFs.existsSync(t.tree), "a reasonless lock is never overridden");
   } finally {
     dropSnapPrune(f);
@@ -96,8 +96,66 @@ test("a detached tree locked for another reason is kept, not swept by the double
     const t = addLockedTree(f, { name: "detached", branch: false, reason: "operator hold" });
     const { failed } = pruneRows(f, [rowOf(f, t)]);
     equal(failed.length, 1);
-    ok(failed[0].reason.includes(`git worktree unlock ${t.tree}`), `the unlock is named: ${failed[0].reason}`);
+    ok(failed[0].reason.includes(`git worktree unlock "${t.tree}"`), `the unlock is named: ${failed[0].reason}`);
     ok(nodeFs.existsSync(t.tree), "a detached tree a user locked on purpose survives");
+  } finally {
+    dropSnapPrune(f);
+  }
+});
+
+test("a tree locked for another reason survives when git cannot list the locks", () => {
+  const f = pruneFixture();
+  try {
+    const t = addLockedTree(f, { name: "detached", branch: false, reason: "operator hold" });
+    const real = makeGit(spawnSync);
+    // A listing git cannot answer is not an unlocked tree: the removal still reaches the
+    // real repo and git still refuses it, so the row is kept.
+    const blind = (args, cwd, opts) => (args[0] === "worktree" && args[1] === "list"
+      ? { status: 128, stdout: "", stderr: "fatal: unable to read worktrees" }
+      : real(args, cwd, opts));
+    const { failed } = execute([rowOf(f, t)], blind, nodeFs, { resultsDir: f.resultsDir, cfg: cfgOf(f) });
+    equal(failed.length, 1, "the removal is reported as failed");
+    ok(nodeFs.existsSync(t.tree), "a lock prune could not read is never overridden");
+  } finally {
+    dropSnapPrune(f);
+  }
+});
+
+test("a lock is found when the row spells the tree's path through a link", (t) => {
+  const f = pruneFixture();
+  try {
+    const tree = addLockedTree(f, { name: "detached", branch: false, reason: "operator hold" });
+    const alias = join(f.dir, "alias");
+    try {
+      nodeFs.symlinkSync(tree.tree, alias, process.platform === "win32" ? "junction" : "dir");
+    } catch (e) {
+      t.skip(`cannot link a directory here: ${e.code || e.message}`);
+      return;
+    }
+    const { failed } = execute([{ ...rowOf(f, tree), path: alias }], makeGit(spawnSync), nodeFs,
+      { resultsDir: f.resultsDir, cfg: cfgOf(f) });
+    equal(failed.length, 1);
+    ok(failed[0].reason.includes("operator hold"), `the lock is read through the link: ${failed[0].reason}`);
+    ok(nodeFs.existsSync(tree.tree), "the tree survives");
+  } finally {
+    dropSnapPrune(f);
+  }
+});
+
+test("the CLI names the lock, and quotes the unlock for a path with a space", async () => {
+  const f = pruneFixture();
+  try {
+    const t = addLockedTree(f, { name: "impl tree", branch: false, reason: "operator hold" });
+    writeFinishedRun(f.resultsDir, [{ branch: t.branch, path: t.tree, repo: f.repo }]);
+    const r = await runCliInProcess(["prune", f.resultsDir], {
+      cwd: f.dir,
+      env: { SWARM_HOME: join(f.dir, "home") },
+      config: cfgOf(f),
+    });
+    equal(r.status, 1, r.stdout + r.stderr);
+    ok(r.stderr.includes("operator hold"), `the reason reaches stderr: ${r.stderr}`);
+    ok(r.stderr.includes(`git worktree unlock "${t.tree}"`), `the quoted unlock reaches stderr: ${r.stderr}`);
+    ok(nodeFs.existsSync(t.tree), "the tree is kept");
   } finally {
     dropSnapPrune(f);
   }

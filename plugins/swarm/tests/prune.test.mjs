@@ -133,14 +133,14 @@ test("formatPrune: one line per row with size, then the freed/would-free closing
   ok(/would free 1\.50 GB across 2 worktrees/.test(dry), dry);
 });
 
-test("execute: a branchless snapshot row is removed with -f -f and never gets a branch -D", () => {
+test("execute: a branchless row with no lock read is removed with one force and never gets a branch -D", () => {
   const calls = [];
   const git = (args, cwd) => { calls.push({ args, cwd }); return { status: 0, stdout: "", stderr: "" }; };
   const fs = { existsSync: () => true, rmSync: () => {} };
   execute([{ path: "/r/wt-snapshot-abc", branch: null, bytes: 1, repo: "/repo" }], git, fs);
   deepEqual(calls, [
     { args: ["worktree", "list", "--porcelain"], cwd: "/repo" },
-    { args: ["worktree", "remove", "-f", "-f", "/r/wt-snapshot-abc"], cwd: "/repo" },
+    { args: ["worktree", "remove", "--force", "/r/wt-snapshot-abc"], cwd: "/repo" },
   ]);
 });
 
