@@ -10,9 +10,9 @@
     "check:file-size": "node scripts/check-file-size.mjs"
   },
   "devDependencies": {
+    "@andrewmaston1988/test-runner": "github:andrewmaston1988/test-runner#v0.2.1",
     "@eslint/js": "^9.0.0",
     "eslint": "^9.0.0",
-    "globals": "^15.0.0",
-    "@andrewmaston1988/test-runner": "github:andrewmaston1988/test-runner#v0.2.0"
+    "globals": "^15.0.0"
   }
 }
