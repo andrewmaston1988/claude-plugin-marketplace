@@ -466,7 +466,11 @@ removal git refuses because a killed git left a `<x>.lock` behind — a `packed-
 — is diagnosed from git's own refusal: prune names the lock with its size and age and whether
 a git process is running on this host, and never removes the file itself. An empty lock over a
 minute old with no local git is a stalled writer's leftover, but the probe sees this host only,
-so confirm every writer has stopped before removing the lock and pruning again. A kept
+so confirm every writer has stopped before removing the lock and pruning again. A kept tree
+locked with git's own `initializing` reason — what a killed `worktree add` leaves — is removed
+with the double force that overriding it takes. Any other lock, and any lock prune could not
+read, keeps the tree: the failure names the lock's reason and prints the
+`git worktree unlock "<path>"` that frees it, for the operator to decide. A kept
 tree whose directory lost its `.git` link — a prune that failed part-way can leave one — is
 measured by its branch in the repo the run recorded, never by the repo enclosing that directory.
 An empty leftover is cleared with the row in execute, and `--dry-run` says `would clear` and

@@ -3,7 +3,7 @@ import { unlandedCount, isSwarmRef, defaultCommits } from "./landed.mjs";
 import { takenKey, takenVerdict } from "./taken.mjs";
 import { listTreeRecords, treeRecordPath, treeRootFor } from "./worktree.mjs";
 import { isUnderRoot, normalizeForCompare } from "./roots.mjs";
-import { discoveredLanes, isWorktreeRoot, repoFromRecords, runScratchDir, treeCfg } from "./prune-discover.mjs";
+import { canonicalPath, discoveredLanes, isWorktreeRoot, repoFromRecords, runScratchDir, treeCfg, worktreeList } from "./prune-discover.mjs";
 
 // Discovery moved to prune-discover.mjs; re-exported so every existing import of these
 // names from prune.mjs keeps working.
@@ -349,6 +349,40 @@ function clearUnlinked(row, git, fs) {
   return failed;
 }
 
+// `initializing` is git's own marker for a `worktree add` that never finished. It is the one
+// lock reason prune overrides: every other lock — or one with no reason — was set on purpose.
+const INITIALIZING_LOCK = "initializing";
+
+// A tree's lock state from `git worktree list --porcelain`, read once per repo per execute.
+// The listing is git's stable surface; the .git/worktrees/<id>/locked file is internal.
+// `known: false` is a git that could not answer, which is NOT an unlocked tree: a lock
+// prune never saw is a lock it leaves alone.
+function lockReader(git) {
+  const byRepo = new Map();
+  const locksOf = (repo) => {
+    const key = normalizeForCompare(repo);
+    if (!byRepo.has(key)) {
+      const rows = worktreeList(git, repo);
+      byRepo.set(key, rows && new Map(rows.map((row) => [normalizeForCompare(canonicalPath(row.path)), row.lock])));
+    }
+    return byRepo.get(key);
+  };
+  return (repo, path) => {
+    const locks = locksOf(repo);
+    if (!locks) return { known: false, reason: null };
+    const reason = locks.get(normalizeForCompare(canonicalPath(path)));
+    return { known: true, reason: reason ?? null };
+  };
+}
+
+// git's refusal names the lock but not the way out of it. Quoted, so a path with a space
+// is one argument in every shell the operator may paste it into.
+function withUnlockHint(reason, lock, path) {
+  if (!lock.known || lock.reason === null) return reason;
+  const why = lock.reason ? `lock reason: ${lock.reason}` : "no reason recorded";
+  return `${reason}\n  the tree is locked (${why}) — git worktree unlock "${path}" frees it, if you mean to`;
+}
+
 // Destroy in order: the worktree directory, then the branch it sat on — a row
 // whose repo is gone skips git entirely and is just removed from disk. Returns the
 // rows git refused with its own words, so a caller reports what happened, not what
@@ -357,6 +391,8 @@ export function execute(rows, git, fs, { resultsDir, cfg } = {}) {
   const records = resultsDir ? listTreeRecords(resultsDir) : [];
   const failed = [];
   const fail = (row, r) => failed.push({ row, reason: r.stderr || r.stdout || `git exited ${r.status}` });
+  const failText = (row, reason) => failed.push({ row, reason });
+  const lockOf = lockReader(git);
   // A tree record naming a path now gone records nothing.
   const dropRecord = (path) => {
     if (!resultsDir || fs.existsSync(path)) return;
@@ -391,15 +427,16 @@ export function execute(rows, git, fs, { resultsDir, cfg } = {}) {
         if (del.status !== 0) fail(row, del);
       }
     } else {
-      // A detached tree has no branch, and may be left locked by a killed `worktree add`.
+      const lock = lockOf(row.repo, row.path);
+      // Only a lock positively read as `initializing` earns the double force. Every other
+      // lock — and every lock prune could not read — keeps the single force git refuses
+      // under, and the failure names the unlock.
+      const double = lock.known && lock.reason === INITIALIZING_LOCK;
+      const rm = git(["worktree", "remove", ...(double ? ["-f", "-f"] : ["--force"]), row.path], row.repo);
+      if (rm.status !== 0) { failText(row, withUnlockHint(rm.stderr || rm.stdout || `git exited ${rm.status}`, lock, row.path)); continue; }
       if (row.branch) {
-        const rm = git(["worktree", "remove", "--force", row.path], row.repo);
-        if (rm.status !== 0) { fail(row, rm); continue; }
         const del = git(["branch", "-D", row.branch], row.repo);
         if (del.status !== 0) fail(row, del);
-      } else {
-        const rm = git(["worktree", "remove", "-f", "-f", row.path], row.repo);
-        if (rm.status !== 0) fail(row, rm);
       }
     }
     dropRecord(row.path);
