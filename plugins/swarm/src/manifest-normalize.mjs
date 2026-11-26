@@ -219,6 +219,7 @@ export function normalizeTasks(rawTasks, { cwd, resultsDir, cfg, defaultTimeoutM
       ...forEachBlock,
       ...(!isCompute && !isManifest && t.returns && typeof t.returns === "object" && !Array.isArray(t.returns) && { returns: t.returns }),
       ...(!isCompute && !isManifest && !isIntegrate && Array.isArray(t.mustRead) && { mustRead: t.mustRead }),
+      ...(!isCompute && !isManifest && !isIntegrate && Array.isArray(t.check) && { check: [...t.check] }),
       ...(!isCompute && !isManifest && !isIntegrate && t.contextWindow !== undefined && { contextWindow: t.contextWindow }),
       ...(typeof t.verifyCitations === "boolean" && { verifyCitations: t.verifyCitations }),
       ...(t.settings && typeof t.settings === "object" && !Array.isArray(t.settings) && { settings: t.settings }),

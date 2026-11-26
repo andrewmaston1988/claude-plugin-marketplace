@@ -408,7 +408,7 @@ export function effectivePlanDoc(plan) {
     // `workspace` and `branch` are recorded as authored — a derived tree is not authored,
     // and there is no longer any normalised form to project back.
     if (t.branchName !== undefined) o.branch = t.branchName;
-    for (const k of ["provider", "fallbackModel", "fallbackProvider", "effort", "allowedTools", "after", "when", "forEach", "compute", "returns", "verifyCitations", "workspace", "outputDir", "mustRead", "contextWindow", "role"]) {
+    for (const k of ["provider", "fallbackModel", "fallbackProvider", "effort", "allowedTools", "after", "when", "forEach", "compute", "returns", "verifyCitations", "workspace", "outputDir", "mustRead", "check", "contextWindow", "role"]) {
       if (t[k] !== undefined && t[k] !== "" && !(Array.isArray(t[k]) && t[k].length === 0)) o[k] = t[k];
     }
     if (t.childPlan) o.child = t.childPlan.tasks.map(strip);

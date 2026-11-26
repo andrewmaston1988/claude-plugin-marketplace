@@ -286,5 +286,17 @@ export function validateTaskRelations(rawTasks, errors, label, { itemAllowed = f
     if (t.verifyCitations !== undefined && typeof t.verifyCitations !== "boolean") {
       errors.push(`${l}: verifyCitations must be true or false (got ${JSON.stringify(t.verifyCitations)}) — citation-shaped returns are verified by default; false opts out`);
     }
+    // The check is an argv command, never a shell line: quoting rules differ by
+    // platform and a path with spaces would split. Without {output} the command
+    // has nothing of the leaf's to judge.
+    const agentless = t.manifest !== undefined || t.compute !== undefined || t.integrate !== undefined;
+    if (t.check !== undefined && !agentless) {
+      const example = '["node", "check-report.mjs", "{output}"]';
+      if (!Array.isArray(t.check) || !t.check.length || !t.check.every((arg) => typeof arg === "string" && arg)) {
+        errors.push(`${l}: check must be a non-empty array of strings — the command and its arguments, run without a shell; e.g. "check": ${example}`);
+      } else if (!t.check.some((arg) => arg.includes("{output}"))) {
+        errors.push(`${l}: check needs {output} in at least one element — the file the engine writes this task's output to; e.g. "check": ${example}`);
+      }
+    }
   }
 }

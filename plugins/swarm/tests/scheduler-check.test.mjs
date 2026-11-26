@@ -121,7 +121,7 @@ test("row 4: a rejection with no session id, and a re-ask process that fails, ea
       [{ output: streamOut("first", null) }],
       () => ({ exit: 1, output: "no Findings" }),
     );
-    const p = plan(dir, [{ ...task("a", { cwd: dir, check: CHECK }) }, task("b", { cwd: dir, check: CHECK })]);
+    const p = plan(dir, [task("a", { cwd: dir, check: CHECK })]);
     await runPlan(p, { ...CFG, concurrency: 1 }, makeIo(noSession.spawn));
     const a = readResult(p.resultsDir, "a");
     equal(a.ok, false);

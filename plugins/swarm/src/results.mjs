@@ -17,9 +17,11 @@ export { appendRunLog };
 //                       (forEach/child expansion is runtime — reconstruct from run.log + per-leaf prompt)
 //   bases.json          { [repoTop]: sha } — the commit every tree of this run is cut from, pinned at
 //                       dispatch and reused by a resume; --force recaptures it (run-bases.mjs)
-//   results/<id>.json   { id, provider?, runner?, model, ok, exit, durationMs, tokens?, costUsd?, numTurns?, prompt?, output, outputJson?, rawOutput?, schemaRetried?, schemaErrors?, citations?, citationRefuted?, coverage?, worktree?, asks?, checkoutToplevel?, key? }
-//                       (rawOutput = the leaf's own output on a schema failure — `output` then holds
-//                        the validator's text; a re-run re-asks from it instead of redoing the work)
+//   results/<id>.json   { id, provider?, runner?, model, ok, exit, durationMs, tokens?, costUsd?, numTurns?, prompt?, output, outputJson?, rawOutput?, schemaRetried?, schemaErrors?, citations?, citationRefuted?, coverage?, checkFailed?, worktree?, asks?, checkoutToplevel?, key? }
+//                       (rawOutput = the leaf's own output on a schema or check failure — `output` then holds
+//                        the validator's or the checker's text; a re-run re-asks from it instead of redoing the work)
+//                       (checkFailed = the author-named `check` command rejected the output after its re-asks,
+//                        or was itself broken; the diagnostic is in `output`)
 //                       (coverage = { status: "complete"|"incomplete"|"unparseable", required, read, missed[] }
 //                        when the task declared mustRead — zero credited reads fails; partial reads remain warnings)
 //                       (asks = [{question, answer, ok, provider?, runner?, model, tokens?, sessionId?}] — `swarm ask` follow-ups;
