@@ -27,6 +27,8 @@ export { appendRunLog };
 //                       (asks = [{question, answer, ok, provider?, runner?, model, tokens?, sessionId?}] — `swarm ask` follow-ups;
 //                        the leaf's own ok/output never change because a later ask failed)
 //   results/<id>.ask.log  plain-text Q/A transcript, appended on every ask against this leaf
+//   results/<id>.check.txt  the exact text last handed to a task's `check` command — kept after
+//                       the run so a rejection can be reproduced; rewritten on every attempt
 //                       (prompt = the exact final string sent to the leaf; absent on compute/aggregate rows; key = the task-definition hash resume reuses this result against — task-key.mjs)
 //                       (citations = { checked, drifted, refuted } when N3 verified them; each cited finding is
 //                        annotated citation:"verified"|"drift"|"refuted" in output. citationRefuted = [{path,reason}]
@@ -45,7 +47,7 @@ export { appendRunLog };
 //                         { ts, event: "expand-manifest", id, children: [{id, provider?, runner?, model}] }    child-manifest splice
 //                       (child-manifest task ids are namespaced "<node>~<childId>")
 //                         { ts, event: "truncate-prompt", id, depId, kept, total }   {{result:}} cut to the inline cap
-//                         { ts, event: "leaf-contract-retry", id, attempt }   a corrective re-ask fired — schema/citation/coverage, or the 2nd/3rd schema-only turn
+//                         { ts, event: "leaf-contract-retry", id, attempt }   a corrective re-ask fired — schema/citation/coverage/check (`reason: "check"` names the last; a check re-ask spends neither of the other budgets)
 //                         { ts, event: "leaf-contract-retry", id, attempt, reason: "uncommitted", files }   the commit re-ask of an Edit/Write writer's dirty tree (files: null = tree not measurable)
 //                         { ts, event: "citations", id, checked, drifted, refuted }   N3 mechanical verification
 //                         { ts, event: "coverage", id, status, required, read, missed, retried }   mustRead read-coverage check

@@ -309,11 +309,14 @@ Three declarative keys cover the logic between leaves that never needed an LLM. 
 
 ### Deeper manifest fields — read on demand
 
-Three features have field-by-field semantics too long to carry here. Read
+Four features have field-by-field semantics too long to carry here. Read
 [manifest-fields.md](../swarm/manifest-fields.md) when you are writing one of them:
 
 - **`returns`** — JSON-Schema validation of a leaf's output, up to three corrective re-asks, and
   the mechanical citation check. Read it before schema'ing any finder that cites code.
+- **`check`** — an argv command that judges a leaf's output where no schema can (a required
+  report section, a length floor): exit 1 re-asks the leaf with the checker's own message, then
+  fails it. Read it before writing a review-gate leaf whose report has a structural contract.
 - **`manifest`** — running a saved child manifest as one node, `forEach` over it, and what
   the node may and may not carry.
 - **Named manifests + `{{args.<key>}}`** — saving a recurring shape and re-running it by

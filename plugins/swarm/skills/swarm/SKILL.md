@@ -238,7 +238,8 @@ The red flags above are about a *healthy* run. The other failure class (2026-07-
     "when": { "from": "find-sites", "expr": "length(value) > 20" },        // run only if true; else completes as skipped
     "compute": "unique_by(deps['find-sites'].sites, 'file')",              // agentless expression step — replaces model+prompt
     "returns": { "type": "object", "required": ["sites"] },            // schema-validated output (see Schema-guaranteed leaf output)
-    "mustRead": ["principles.md", { "path": "shard.diff", "lines": [[1, 1000]] }]  // engine proves the leaf Read these from its transcript (see manifest-fields.md)
+    "mustRead": ["principles.md", { "path": "shard.diff", "lines": [[1, 1000]] }], // engine proves the leaf Read these from its transcript (see manifest-fields.md)
+    "check": ["node", "check-report.mjs", "{output}"]  // a command that rejects the output (exit 1) — corrective re-asks, then fails (see manifest-fields.md)
   }],
   "digest": {
     "provider": "ollama", "model": "glm-5.2:cloud",                  // recommended ≥3 tasks

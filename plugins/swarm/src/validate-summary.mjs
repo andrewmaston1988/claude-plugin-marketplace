@@ -1,9 +1,21 @@
 // The contract lines of the validate approval surface: which tasks are held to a
 // shape, to their citations, to their reading, and to an author-named check.
 import { citationPaths } from "./citations.mjs";
+import { CONTRACT_CHECK_REASKS } from "./scheduler/leaf-contract.mjs";
+
+// Child-manifest leaves are spliced into the run as `<node>~<childId>`, so the
+// approval names them the way the run will.
+function withChildLeaves(tasks, prefix = "") {
+  return tasks.flatMap((t) => {
+    const id = prefix ? `${prefix}~${t.id}` : t.id;
+    const self = { ...t, id };
+    return t.childPlan ? [self, ...withChildLeaves(t.childPlan.tasks, id)] : [self];
+  });
+}
 
 export function contractSummaryLines(tasks) {
   const lines = [];
+  tasks = withChildLeaves(tasks);
   // returns schemas are part of the approval surface: say which tasks are
   // guaranteed shape, and what the guarantee costs when output misses.
   const ret = tasks.filter((t) => t.returns);
@@ -31,7 +43,7 @@ export function contractSummaryLines(tasks) {
   // a task carrying only `check` is announced here too.
   const checked = tasks.filter((t) => t.check?.length);
   if (checked.length) {
-    lines.push(`output check: ${checked.map((t) => t.id).join(", ")} (the named command runs on the output; a rejection gets up to 3 corrective re-asks with the checker's own output, then fails the leaf — a broken or timed-out checker fails it at once)`);
+    lines.push(`output check: ${checked.map((t) => t.id).join(", ")} (the named command runs on the output; a rejection gets up to ${CONTRACT_CHECK_REASKS} corrective re-asks with the checker's own output, then fails the leaf — a broken or timed-out checker fails it at once)`);
   }
   return lines;
 }

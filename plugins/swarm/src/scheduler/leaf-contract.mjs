@@ -9,7 +9,7 @@ import { extractCitations, verifyCitations, citationErrorLines, annotateCitation
 import { parseReadCalls, computeCoverage, coverageRetryBlock, uncoveredLines } from "../coverage.mjs";
 import { addTokens, emptyTokens } from "../stream.mjs";
 import { substituteTemplates } from "./run-task.mjs";
-import { runCheck, CHECK_PASS, CHECK_BROKEN, CHECK_DEADLINE_MS } from "./check-run.mjs";
+import { runCheck, CHECK_PASS, CHECK_BROKEN, CHECK_CANCELLED, CHECK_DEADLINE_MS } from "./check-run.mjs";
 
 export function tryParseJson(output) {
   const trimmed = String(output || "").trim();
@@ -39,7 +39,7 @@ const CONTRACT_SCHEMA_REASKS = 3;
 const CONTRACT_COVERAGE_REASKS = 4;
 // The author's output check holds a fourth budget of its own: a rejection is a
 // correction to a command's answer, so it must neither starve nor be starved.
-const CONTRACT_CHECK_REASKS = 3;
+export const CONTRACT_CHECK_REASKS = 3;
 
 // The coverage stamp a result carries. `missedItems` is the count a summary reads
 // (a three-range item is one item, not three); `uncoverable` names the requirements
@@ -185,12 +185,17 @@ export async function enforceLeafContract(task, r, taskCwd, resultsDir, cfg, io,
   };
   // A rejection that cannot be re-asked, a re-ask that died, and an exhausted
   // budget all land here: never `ok: true`, and the leaf's answer is kept so a
-  // re-run resumes on the correction instead of redoing the work.
-  const failCheck = (res, text) => ({
-    ...res, ok: false, checkFailed: true,
-    output: `output check failed:\n${text}`,
-    rawOutput: res.output,
-  });
+  // re-run resumes on the correction instead of redoing the work. What the engine
+  // already learned about the answer — citations, read coverage — rides along, so a
+  // failed leaf does not lose its diagnostics.
+  const failCheck = (res, a, text, retried = false) => {
+    const out = finish(res, a, retried);
+    return {
+      ...out, ok: false, checkFailed: true,
+      output: `output check failed:\n${text}`,
+      rawOutput: res.output,
+    };
+  };
   // The command judges what the leaf was asked to produce: the validated JSON for a
   // `returns` task — the same bytes the result stores, before citation annotation —
   // and its own answer for a prose task.
@@ -208,6 +213,36 @@ export async function enforceLeafContract(task, r, taskCwd, resultsDir, cfg, io,
   let checkAttempt = 0;    // output-check re-asks spent
   let turns = 0;           // schema/coverage/citation re-asks, for the retry log
   let uncoveredAtAsk = null; // the gap when the last coverage re-ask was granted
+  // Every otherwise-successful exit passes through here: an author-named check is
+  // the last word, so an answer that never ran it must not be recorded ok. Returns
+  // `{ done }` with the final result, or `{ next: { cur, a } }` after a re-ask.
+  const checkGate = async (at, assessment, retried, { canReask = true } = {}) => {
+    if (!checkEnabled) return { done: finish(at, assessment, retried) };
+    const verdict = await runCheck(task, checkInput(at, assessment), {
+      cwd: taskCwd, resultsDir, cfg, io, deadlineMs: CHECK_DEADLINE_MS,
+      isCancelled: runtime?.isCancelled,
+    });
+    if (verdict.outcome === CHECK_PASS) return { done: finish(at, assessment, retried) };
+    // An operator stop judged nothing: it must classify as failed:stopped, never
+    // as a check failure a re-run would resume from.
+    if (verdict.outcome === CHECK_CANCELLED) return { done: { ...at, ok: false, output: verdict.text } };
+    // A broken command is not the model's doing, and re-asking cannot repair it.
+    if (verdict.outcome === CHECK_BROKEN) return { done: failCheck(at, assessment, verdict.text, retried) };
+    if (!at.sessionId) return { done: failCheck(at, assessment, `${verdict.text}\n(no session id — re-ask unavailable)`, retried) };
+    if (!canReask) return { done: failCheck(at, assessment, `${verdict.text}\n(previous re-ask failed — not re-asked again)`, retried) };
+    if (checkAttempt >= CONTRACT_CHECK_REASKS) return { done: failCheck(at, assessment, verdict.text, retried) };
+    checkAttempt += 1;
+    const retryPrompt = `The task's output check rejected your answer:\n${verdict.text}\n` +
+      `The command is authoritative, not your own reading of it.\n${closing}`;
+    const { next, combined } = await reaskLeaf(task, at, retryPrompt, {
+      taskCwd, resultsDir, cfg, io, hooks, runtime, runTask,
+      log: { attempt: turns + checkAttempt, reason: "check" },
+    });
+    if (!next.ok) {
+      return { done: failCheck(combined, assessment, `${verdict.text}\n(re-ask failed (exit ${next.exit}): ${next.output.slice(0, 200)})`, retried) };
+    }
+    return { next: { cur: { ...combined, ok: true, output: next.output }, a: assess(next.output) } };
+  };
   for (;;) {
     const schemaErrs = a.schemaErrs?.length ? a.schemaErrs : null;
     const refuted = a.cite?.refuted.length || 0;
@@ -227,35 +262,21 @@ export async function enforceLeafContract(task, r, taskCwd, resultsDir, cfg, io,
       // check must not launder that into an ok result.
       if (idling) return failCoverage(cur, a, turns > 0);
       // The shape, its citations and its reading hold. The check is the last word.
-      if (!checkEnabled) return finish(cur, a, turns > 0);
-      const verdict = await runCheck(task, checkInput(cur, a), {
-        cwd: taskCwd, resultsDir, cfg, io, deadlineMs: CHECK_DEADLINE_MS,
-        isCancelled: runtime?.isCancelled,
-      });
-      if (verdict.outcome === CHECK_PASS) return finish(cur, a, turns > 0 || checkAttempt > 0);
-      // A broken command is not the model's doing, and re-asking cannot repair it.
-      if (verdict.outcome === CHECK_BROKEN) return failCheck(cur, verdict.text);
-      if (!cur.sessionId) return failCheck(cur, `${verdict.text}\n(no session id — re-ask unavailable)`);
-      if (checkAttempt >= CONTRACT_CHECK_REASKS) return failCheck(cur, verdict.text);
-      checkAttempt += 1;
-      const retryPrompt = `The task's output check rejected your answer:\n${verdict.text}\n` +
-        `The command is authoritative, not your own reading of it.\n${closing}`;
-      const { next, combined } = await reaskLeaf(task, cur, retryPrompt, {
-        taskCwd, resultsDir, cfg, io, hooks, runtime, runTask,
-        log: { attempt: turns + checkAttempt, reason: "check" },
-      });
-      if (!next.ok) {
-        return failCheck(combined, `${verdict.text}\n(re-ask failed (exit ${next.exit}): ${next.output.slice(0, 200)})`);
-      }
-      cur = { ...combined, ok: true, output: next.output };
-      a = assess(next.output);
+      const g = await checkGate(cur, a, turns > 0);
+      if (g.done) return g.done;
+      ({ cur, a } = g.next);
       continue;
     }
 
     if (!cur.sessionId) {
       if (idling) return failCoverage(cur, a, turns > 0);
       if (schemaErrs) return failSchema(cur, schemaErrs, "\n(no session id — re-ask unavailable)");
-      return finish(cur, a, turns > 0);
+      // A refuted citation or a coverage shortfall nothing can re-ask still owes
+      // the check its say: the answer must not ship unchecked.
+      const g = await checkGate(cur, a, turns > 0);
+      if (g.done) return g.done;
+      ({ cur, a } = g.next);
+      continue;
     }
     if (schemaErrs && schemaAttempt >= CONTRACT_SCHEMA_REASKS) return failSchemaIdle(cur, schemaErrs, "", a, turns > 0);
     if (schemaErrs) schemaAttempt += 1;
@@ -294,7 +315,11 @@ export async function enforceLeafContract(task, r, taskCwd, resultsDir, cfg, io,
       if (schemaErrs) return failSchemaIdle(combined, [`re-ask failed (exit ${next.exit}): ${next.output.slice(0, 200)}`], "", a, true);
       // The correction never ran, so the FIRST pass is the verdict — and if that pass
       // read nothing, a re-ask that failed cannot launder it into a completed leaf.
-      return idling ? failCoverage(combined, a, true) : finish(combined, a, true);
+      if (idling) return failCoverage(combined, a, true);
+      // The first pass still owes the check its say, but the session just failed to
+      // answer: a rejection here fails the leaf rather than spending another turn.
+      const g = await checkGate(combined, a, true, { canReask: false });
+      return g.done;
     }
     cur = { ...combined, ok: true, output: next.output };
     a = assess(next.output);

@@ -38,6 +38,26 @@ export function measurablePrompt(prompt, cfg) {
 export const readFileCeiling = () =>
   Array.from({ length: READS_PART_CEILING }, () => "x".repeat(RESULT_PATH_MEASURE_LEN));
 
+// win32 only: a check whose executable resolves to an opaque .cmd/.bat cannot be
+// spawned without cmd.exe re-parsing its arguments (a quoted checker message comes
+// out mangled), so it is refused before the leaf has spent anything on the answer.
+export function validateCheckExecutables(tasks, io, errors, label) {
+  if (io.platform !== "win32") return;
+  const resolveCache = new Map();
+  const all = tasks.flatMap((t) => [t, ...(t.childPlan?.tasks ?? []).map((c) => ({ ...c, id: `${t.id}~${c.id}` }))]);
+  for (const t of all) {
+    if (!t.check?.length || typeof t.check[0] !== "string") continue;
+    try {
+      toSpawnable([t.check[0]], { _platform: io.platform, _cache: resolveCache });
+    } catch {
+      errors.push(
+        `${label(t)}: check[0] '${t.check[0]}' is a Windows wrapper that cannot be spawned without ` +
+        `re-parsing its arguments — name the real executable it wraps in the check array`
+      );
+    }
+  }
+}
+
 // win32 only: the command line the scheduler would spawn for each leaf, the
 // engine's own notice included — measured through buildDispatch + toSpawnable in
 // CreateProcess quoting, so what validates is what spawns.

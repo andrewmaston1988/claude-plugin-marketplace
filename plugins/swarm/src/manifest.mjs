@@ -10,7 +10,7 @@ import { manifestCwd, checkChildTopKeys } from "./manifest-top.mjs";
 import { defaultManifestIo, projectFor } from "./manifest-leaf-guard.mjs";
 import { leafMcpOff } from "./leaf-mcp.mjs";
 import { normalizeTasks } from "./manifest-normalize.mjs";
-import { checkCommandLineLengths, measurablePrompt } from "./manifest-dispatch-budget.mjs";
+import { checkCommandLineLengths, measurablePrompt, validateCheckExecutables } from "./manifest-dispatch-budget.mjs";
 import { validateTaskShapes } from "./manifest-task-shape.mjs";
 import { detectCycle, validateTaskRelations, validateWorktreeGroups } from "./manifest-relations.mjs";
 import { validateMustRead, validateMustReadRunners } from "./manifest-must-read.mjs";
@@ -302,6 +302,7 @@ export function loadManifest(path, cfg, cwd = process.cwd(), { args, fromRegistr
     defaultTimeoutMs: raw.timeoutMs ?? cfg.timeoutMs ?? DEFAULT_TIMEOUT_MS,
   });
   checkCommandLineLengths(tasks, cfg, resolvedIo, errors, label);
+  validateCheckExecutables(tasks, resolvedIo, errors, label);
   validateMustReadRunners(tasks, cfg, resolvedIo, errors, label, providerRegistry);
   validateContextFit(tasks, { cache, errors, warnings, label });
 
