@@ -14,7 +14,7 @@ import { costBands, meterCostRows } from "../src/cost-settings.mjs";
 import { seatCheck, launchableRoster } from "../src/seat-check.mjs";
 import { defaultProviderRegistry } from "../src/default-providers.mjs";
 import { loadCorpus, estimateRun, formatEstimate, leafCounts, integrateCaps } from "../src/estimate.mjs";
-import { citationPaths } from "../src/citations.mjs";
+import { contractSummaryLines } from "../src/validate-summary.mjs";
 import { listLeaves, displayIdentity } from "../src/results.mjs";
 import { identityKey } from "../src/contracts.mjs";
 import { dim, out, err, setSink } from "../src/ui.mjs";
@@ -211,29 +211,8 @@ async function cmdValidate(rest) {
     const label = composed.length ? "expansion" : "forEach expansion";
     out(`worst case: up to ${leaves} leaves${caps ? ` after ${label} (${caps})` : ""}${computes.length ? ` · ${computes.length} compute step(s), zero tokens` : ""}`);
   }
-  // returns schemas are part of the approval surface: say which tasks are
-  // guaranteed shape, and what the guarantee costs when output misses.
-  const ret = plan.tasks.filter((t) => t.returns);
-  if (ret.length) {
-    out(`returns validated: ${ret.map((t) => t.id).join(", ")} (invalid output gets up to 3 corrective re-asks, then fails)`);
-  }
-  // N3: mechanical verification is approval-surface behavior — say which tasks
-  // will have their {file,line,quote} citations checked against real files.
-  const cited = ret.filter((t) => t.verifyCitations !== false && citationPaths(t.returns).length);
-  if (cited.length) {
-    out(`citations verified mechanically: ${cited.map((t) => t.id).join(", ")} (file/line/quote checked against the task cwd; a refuted citation gets one corrective re-ask, then is annotated — never fails the leaf)`);
-  }
-  // Read coverage is approval-surface too, and independent of returns: name the
-  // tasks whose transcript will be checked against their mustRead declaration.
-  const mustRead = plan.tasks.filter((t) => t.mustRead);
-  if (mustRead.length) {
-    const describe = (t) => {
-      const n = t.mustRead.length;
-      const index = t.mustRead.some((e) => e && typeof e === "object" && e.index !== undefined);
-      return `${t.id} (${n} ${n === 1 ? "entry" : "entries"}${index ? ", index" : ""})`;
-    };
-    out(`must-read enforced: ${mustRead.map(describe).join(", ")} (transcript checked against mustRead; re-asks continue while the leaf closes lines, a shortfall is recorded, but a leaf that read none of its inputs fails)`);
-  }
+  // The contract the approval is buying: shape, citations, reading and output check.
+  for (const line of contractSummaryLines(plan.tasks)) out(line);
   // The consent line: worst-case leaves × historical per-model medians.
   out(formatEstimate(estimateRun(plan.tasks, plan.digest, loadCorpus(join(swarmHome(), "runs")))));
   for (const line of seats.lines) out(line);

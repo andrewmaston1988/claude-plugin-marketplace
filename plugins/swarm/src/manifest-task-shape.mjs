@@ -14,14 +14,14 @@ const KNOWN_TASK_KEYS = new Set([
   "id", "prompt", "model", "provider", "seatReason", "role", "fallbackModel", "fallbackProvider", "effort", "allowedTools", "cwd",
   "workspace", "branch", "outputDir", "timeoutMs", "after", "compute", "when", "forEach",
   "returns", "verifyCitations", "manifest", "integrate", "settings", "leafGuard",
-  "mustRead", "contextWindow",
+  "mustRead", "check", "contextWindow",
 ]);
 
 // A manifest task is an agentless container for its child's tasks — every
 // leaf-shaped key on the node itself is an authoring mistake.
 const MANIFEST_BANNED_KEYS = [
   "prompt", "model", "compute", "returns", "workspace", "branch", "allowedTools",
-  "outputDir", "effort", "fallbackModel", "mustRead", "contextWindow", "role",
+  "outputDir", "effort", "fallbackModel", "mustRead", "check", "contextWindow", "role",
 ];
 
 // The scheduler spreads these last so a task's own `env` can't override them;
@@ -74,7 +74,7 @@ export function validateTaskShapes(rawTasks, errors, label) {
     } else if (t.compute !== undefined) {
       // Agentless: a compute step never spawns a leaf, so leaf-only keys are
       // authoring mistakes worth naming individually.
-      const agentKeys = ["model", "prompt", "fallbackModel", "effort", "allowedTools", "workspace", "branch", "outputDir", "contextWindow", "role"]
+      const agentKeys = ["model", "prompt", "fallbackModel", "effort", "allowedTools", "workspace", "branch", "outputDir", "check", "contextWindow", "role"]
         .filter((k) => t[k] !== undefined);
       if (agentKeys.length) {
         errors.push(`${l}: compute tasks are agentless — remove ${agentKeys.join("/")}; the expression runs in the engine, no leaf is spawned`);
@@ -86,7 +86,7 @@ export function validateTaskShapes(rawTasks, errors, label) {
       // Agentless like compute: the engine merges, no leaf is spawned.
       // `workspace`/`branch` too: an integrate node's tree is `integrate.into`, so naming
       // one here would validate and be silently ignored.
-      const agentKeys = ["model", "prompt", "fallbackModel", "effort", "allowedTools", "returns", "workspace", "branch", "outputDir", "contextWindow", "role"]
+      const agentKeys = ["model", "prompt", "fallbackModel", "effort", "allowedTools", "returns", "workspace", "branch", "outputDir", "check", "contextWindow", "role"]
         .filter((k) => t[k] !== undefined);
       if (agentKeys.length) {
         errors.push(`${l}: integrate tasks are agentless — remove ${agentKeys.join("/")}; the merge runs in the engine, no leaf is spawned`);

@@ -10,7 +10,7 @@ import { manifestCwd, checkChildTopKeys } from "./manifest-top.mjs";
 import { defaultManifestIo, projectFor } from "./manifest-leaf-guard.mjs";
 import { leafMcpOff } from "./leaf-mcp.mjs";
 import { normalizeTasks } from "./manifest-normalize.mjs";
-import { checkCommandLineLengths, measurablePrompt } from "./manifest-dispatch-budget.mjs";
+import { checkCommandLineLengths, measurablePrompt, validateCheckExecutables } from "./manifest-dispatch-budget.mjs";
 import { validateTaskShapes } from "./manifest-task-shape.mjs";
 import { detectCycle, validateTaskRelations, validateWorktreeGroups } from "./manifest-relations.mjs";
 import { validateMustRead, validateMustReadRunners } from "./manifest-must-read.mjs";
@@ -302,6 +302,7 @@ export function loadManifest(path, cfg, cwd = process.cwd(), { args, fromRegistr
     defaultTimeoutMs: raw.timeoutMs ?? cfg.timeoutMs ?? DEFAULT_TIMEOUT_MS,
   });
   checkCommandLineLengths(tasks, cfg, resolvedIo, errors, label);
+  validateCheckExecutables(tasks, resolvedIo, errors, label);
   validateMustReadRunners(tasks, cfg, resolvedIo, errors, label, providerRegistry);
   validateContextFit(tasks, { cache, errors, warnings, label });
 
@@ -408,7 +409,7 @@ export function effectivePlanDoc(plan) {
     // `workspace` and `branch` are recorded as authored — a derived tree is not authored,
     // and there is no longer any normalised form to project back.
     if (t.branchName !== undefined) o.branch = t.branchName;
-    for (const k of ["provider", "fallbackModel", "fallbackProvider", "effort", "allowedTools", "after", "when", "forEach", "compute", "returns", "verifyCitations", "workspace", "outputDir", "mustRead", "contextWindow", "role"]) {
+    for (const k of ["provider", "fallbackModel", "fallbackProvider", "effort", "allowedTools", "after", "when", "forEach", "compute", "returns", "verifyCitations", "workspace", "outputDir", "mustRead", "check", "contextWindow", "role"]) {
       if (t[k] !== undefined && t[k] !== "" && !(Array.isArray(t[k]) && t[k].length === 0)) o[k] = t[k];
     }
     if (t.childPlan) o.child = t.childPlan.tasks.map(strip);

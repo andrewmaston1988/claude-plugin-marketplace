@@ -164,9 +164,11 @@ export function createLaunch(ctx) {
       // manifest is new spend — and on rawOutput, absent from rows written before it
       // was kept. An UNCOMMITTED_WORK failure rides the same path: its answer is done, the
       // tree is dirty, and the commit gate below asks the resumed session to commit.
-      const corrective = Boolean((prior?.schemaErrors?.length || prior?.coverageFailed
+      const corrective = Boolean((prior?.schemaErrors?.length || prior?.coverageFailed || prior?.checkFailed
         || prior?.errorCode === UNCOMMITTED_WORK) && prior.rawOutput != null
         && prior.key === taskKey(task) && resumeId);
+      // A stop must not leave a hung checker holding the run open.
+      const contractRuntime = { ...ctx.runtime, isCancelled: () => ctx.stopRequested === true };
       let r;
       if (corrective) {
         // Built field by field, never spread from prior: the failure's errors, cost
@@ -176,7 +178,7 @@ export function createLaunch(ctx) {
           provider: prior.provider, runner: prior.runner,
           ...(prior.modelAlias && { realModel: prior.model }),
           tokens: emptyTokens(), durationMs: 0,
-        }, taskCwd, plan.resultsDir, cfg, io, ctx.streamHooks(task), ctx.runtime, runTask);
+        }, taskCwd, plan.resultsDir, cfg, io, ctx.streamHooks(task), contractRuntime, runTask);
       } else {
         // Resume appends: a resumed leaf's session holds every earlier Read, so its
         // transcript must too (coverage checks the whole attempt history). A fresh
@@ -187,8 +189,8 @@ export function createLaunch(ctx) {
           ...(resumeId && { resume: resumeId }),
           ...(resumeProvider && { provider: resumeProvider }),
         }, prompt, cfg, io, leafLog, ctx.streamHooks(task), ctx.runtime);
-        if ((task.returns || task.mustRead) && r.ok) {
-          r = await enforceLeafContract(task, r, taskCwd, plan.resultsDir, cfg, io, ctx.streamHooks(task), ctx.runtime, runTask);
+        if ((task.returns || task.mustRead || task.check?.length) && r.ok) {
+          r = await enforceLeafContract(task, r, taskCwd, plan.resultsDir, cfg, io, ctx.streamHooks(task), contractRuntime, runTask);
         }
       }
 
@@ -266,6 +268,9 @@ export function createLaunch(ctx) {
       // A leaf that engaged with nothing it was required to read. Not a shortfall to
       // annotate: it never did the task. What a corrective re-run re-asks from.
       if (r.coverageFailed) result.coverageFailed = true;
+      // The check's diagnostic already rides `output`; the flag is what makes the
+      // failure resumable and tells it apart from a leaf the provider failed.
+      if (r.checkFailed) result.checkFailed = true;
       if (r.errorCode === UNCOMMITTED_WORK) {
         result.errorCode = UNCOMMITTED_WORK;
         result.uncommitted = r.uncommitted;
@@ -284,7 +289,7 @@ export function createLaunch(ctx) {
       ctx.memoryStopped.delete(task.id);
       const st = isMemoryStop ? "memory"
         : r.ok ? "ok"
-        : r.schemaErrors || r.coverageFailed || r.errorCode === "schema_error" || r.errorCode === UNCOMMITTED_WORK ? "failed"
+        : r.schemaErrors || r.coverageFailed || r.checkFailed || r.errorCode === "schema_error" || r.errorCode === UNCOMMITTED_WORK ? "failed"
         // The authored provider, not a registry resolve: a leaf whose dispatch failed
         // must classify without throwing a second time.
         : classifyFailure({ timedOut: r.timedOut, output: r.raw, stopped: ctx.stopRequested, provider: String(task.provider || "").toLowerCase() }, cfg.quotaPatterns);

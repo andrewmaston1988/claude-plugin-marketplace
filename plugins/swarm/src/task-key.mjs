@@ -15,7 +15,7 @@ import { writeResult, appendRunLog } from "./results.mjs";
 const KEY_FIELDS = [
   "prompt", "model", "provider", "fallbackModel", "fallbackProvider", "effort",
   "allowedTools", "cwd", "outputDir", "workspace", "worktreeName", "branchName",
-  "contextWindow", "verifyCitations", "returns", "mustRead", "settings",
+  "contextWindow", "verifyCitations", "returns", "mustRead", "check", "settings",
   "compute", "depAliases", "integrate", "forEach", "childPlan",
   "manifestItem", "manifestIndex", "leafGuard",
 ];
@@ -50,11 +50,14 @@ export function writeTaskResult(resultsDir, task, result) {
 
 // Reusable only when the recorded key matches. A result carrying NO key predates
 // keying — keep it, so an upgrade never re-spends an in-flight run; only a
-// recorded MISMATCH is evidence the work changed. Pure, so a reader that must not
-// write to the run log (`resume-preview.mjs`) applies the same rule.
+// recorded MISMATCH is evidence the work changed. A checked task is the exception:
+// its result predates the check, so its output was never held to it. Pure, so a
+// reader that must not write to the run log (`resume-preview.mjs`) applies the
+// same rule.
 export function reusable(prior, task) {
   if (!prior || prior.ok !== true) return false;
-  return prior.key === undefined || prior.key === taskKey(task);
+  if (prior.key === undefined) return !task?.check?.length;
+  return prior.key === taskKey(task);
 }
 
 // The cache-miss line is what `status` reads to say why a task re-ran, so it fires
