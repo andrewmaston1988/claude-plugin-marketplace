@@ -8,6 +8,9 @@ import { dirname, join } from "node:path";
 export const CHECK_DEADLINE_MS = 120_000;
 // A killed tree can keep its pipes open through a grandchild, so a kill settles here.
 const KILL_GRACE_MS = 5000;
+// A tree kill can lose its race — taskkill gives up under load — so it is retried.
+const KILL_RETRY_MS = 1000;
+const KILL_RETRIES = 3;
 const STOP_POLL_MS = 100;
 
 export const CHECK_PASS = "pass";
@@ -50,6 +53,7 @@ export async function runCheck(task, output, { cwd, resultsDir, cfg, io, deadlin
     let timer = null;
     let poll = null;
     let grace = null;
+    let retries = null;
     const text = () => [stdout, stderr].filter(Boolean).join("\n").trim().slice(0, cap);
     const finish = (outcome, message) => {
       if (settled) return;
@@ -57,6 +61,11 @@ export async function runCheck(task, output, { cwd, resultsDir, cfg, io, deadlin
       if (timer) clearTimeout(timer);
       if (poll) clearInterval(poll);
       if (grace) clearTimeout(grace);
+      if (retries) clearInterval(retries);
+      // A straggler holding our pipes must never keep the engine alive.
+      try { child?.stdout?.destroy(); } catch { /* gone */ }
+      try { child?.stderr?.destroy(); } catch { /* gone */ }
+      try { child?.unref?.(); } catch { /* gone */ }
       resolve({ outcome, text: message });
     };
     const killed = () => finish(CHECK_BROKEN, `${stopReason}\n${text()}`.trim());
@@ -77,6 +86,17 @@ export async function runCheck(task, output, { cwd, resultsDir, cfg, io, deadlin
       if (settled || stopReason) return;
       stopReason = message;
       killTree(child, io);
+      // Keep killing while it lives: a taskkill that timed out under load leaves the
+      // tree running, and an orphaned checker is worse than a slow one.
+      let attempts = 0;
+      retries = setInterval(() => {
+        attempts += 1;
+        if (settled || child.exitCode !== null || child.signalCode !== null || attempts > KILL_RETRIES) {
+          clearInterval(retries);
+          return;
+        }
+        killTree(child, io);
+      }, KILL_RETRY_MS);
       // A surviving grandchild holds the pipes open, so `close` may never arrive.
       grace = setTimeout(killed, KILL_GRACE_MS);
     };

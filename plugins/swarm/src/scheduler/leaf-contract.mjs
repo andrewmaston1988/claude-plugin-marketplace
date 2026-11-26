@@ -223,8 +223,11 @@ export async function enforceLeafContract(task, r, taskCwd, resultsDir, cfg, io,
     const chaseable = Boolean(schemaErrs) || covAllowed || Boolean(refuted && turns === 0);
 
     if (!chaseable) {
+      // A leaf that engaged with none of its inputs has failed already: a green
+      // check must not launder that into an ok result.
+      if (idling) return failCoverage(cur, a, turns > 0);
       // The shape, its citations and its reading hold. The check is the last word.
-      if (!checkEnabled) return idling ? failCoverage(cur, a, turns > 0) : finish(cur, a, turns > 0);
+      if (!checkEnabled) return finish(cur, a, turns > 0);
       const verdict = await runCheck(task, checkInput(cur, a), {
         cwd: taskCwd, resultsDir, cfg, io, deadlineMs: CHECK_DEADLINE_MS,
         isCancelled: runtime?.isCancelled,
