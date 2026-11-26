@@ -155,7 +155,7 @@ test("a leaf launched after the live checkout moved is still cut from the dispat
   } finally { rmSync(dir, { recursive: true, force: true }); rmSync(repo, { recursive: true, force: true }); }
 });
 
-test("a tree cut through baseFor sits on the pinned sha, not the checkout's later HEAD", () => {
+test("a tree cut through baseFor sits on the pinned sha, not the checkout's later HEAD", async () => {
   const repo = initGitRepo();
   const dir = tmp();
   try {
@@ -166,7 +166,7 @@ test("a tree cut through baseFor sits on the pinned sha, not the checkout's late
     commitAllInRepo(repo, "mid-run merge");
     ok(heads(repo) !== dispatch, "precondition: HEAD moved after capture");
 
-    const wt = prepareIsolation({ id: "late", originalCwd: repo, worktreeName: "late" }, CFG, dir,
+    const wt = await prepareIsolation({ id: "late", originalCwd: repo, worktreeName: "late" }, CFG, dir,
       { addTimeoutMs: WORKTREE_ADD_TIMEOUT_MS, base: dispatch });
 
     equal(gitInRepo(["rev-parse", "HEAD"], wt.path), dispatch,

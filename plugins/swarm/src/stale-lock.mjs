@@ -4,7 +4,7 @@
 
 // A lock older than this with no bytes written cannot belong to a live writer: git creates
 // and fills a lock within milliseconds.
-const STALE_AFTER_MS = 60_000;
+export const STALE_AFTER_MS = 60_000;
 const EMPTY_BYTES = 0;
 // A hung tasklist/pgrep would block prune after its removals are already made; a probe
 // that gives up reads as unknown, which reads as held.

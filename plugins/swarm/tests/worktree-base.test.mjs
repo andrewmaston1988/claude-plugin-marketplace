@@ -9,7 +9,7 @@ import { git, initRepo, cleanup, commitAll, dropWorktree, CFG, ADD } from "./hel
 
 // ---- the dispatch-commit base: one per repo, fixed when the run starts ----
 
-test("prepareIsolation cuts from the base IT WAS GIVEN, not the live HEAD", () => {
+test("prepareIsolation cuts from the base IT WAS GIVEN, not the live HEAD", async () => {
   const repo = initRepo();
   const results = mkdtempSync(join(tmpdir(), "swarm-wt-base-"));
   try {
@@ -20,7 +20,7 @@ test("prepareIsolation cuts from the base IT WAS GIVEN, not the live HEAD", () =
     const moved = git(["rev-parse", "HEAD"], repo);
     ok(moved !== dispatch, "precondition: HEAD moved");
 
-    const wt = prepareIsolation({ id: "late", originalCwd: repo, worktreeName: "late" }, CFG, results,
+    const wt = await prepareIsolation({ id: "late", originalCwd: repo, worktreeName: "late" }, CFG, results,
       { addTimeoutMs: WORKTREE_ADD_TIMEOUT_MS, base: dispatch });
 
     equal(git(["rev-parse", "HEAD"], wt.path), dispatch,
@@ -28,30 +28,30 @@ test("prepareIsolation cuts from the base IT WAS GIVEN, not the live HEAD", () =
   } finally { cleanup(repo, results); }
 });
 
-test("prepareIsolation requires the pinned base and names it in the error", () => {
+test("prepareIsolation requires the pinned base and names it in the error", async () => {
   // A throwaway repo: the guard must fire before any tree is made, and a caller
   // that forgets `base` must never fall back to reading the live HEAD instead.
   const repo = initRepo();
   const results = mkdtempSync(join(tmpdir(), "swarm-wt-nobase-"));
   try {
     let error;
-    try { prepareIsolation({ id: "x", originalCwd: repo, worktreeName: "x" }, CFG, results, { addTimeoutMs: WORKTREE_ADD_TIMEOUT_MS }); }
+    try { await prepareIsolation({ id: "x", originalCwd: repo, worktreeName: "x" }, CFG, results, { addTimeoutMs: WORKTREE_ADD_TIMEOUT_MS }); }
     catch (e) { error = e; }
     ok(error, "a missing base must throw rather than silently reading HEAD");
     ok(/base/.test(error.message), error.message);
   } finally { cleanup(repo, results); }
 });
 
-test("a branch checked out in another worktree fails with a guided error naming that tree", () => {
+test("a branch checked out in another worktree fails with a guided error naming that tree", async () => {
   const repo = initRepo();
   const a = mkdtempSync(join(tmpdir(), "swarm-wt-inuse-a-"));
   const b = mkdtempSync(join(tmpdir(), "swarm-wt-inuse-b-"));
   try {
-    const first = prepareIsolation({ id: "a", originalCwd: repo, worktreeName: "x" }, CFG, a, ADD(repo));
+    const first = await prepareIsolation({ id: "a", originalCwd: repo, worktreeName: "x" }, CFG, a, ADD(repo));
     equal(first.branch, "swarm/x");
 
     let error;
-    try { prepareIsolation({ id: "b", originalCwd: repo, worktreeName: "x" }, CFG, b, ADD(repo)); }
+    try { await prepareIsolation({ id: "b", originalCwd: repo, worktreeName: "x" }, CFG, b, ADD(repo)); }
     catch (e) { error = e; }
     ok(error, "a branch already checked out elsewhere must throw");
     ok(/checked out in another worktree/.test(error.message), error.message);
@@ -70,14 +70,14 @@ test("a branch checked out in another worktree fails with a guided error naming 
 // `unlandedCount` asks whether work has landed on the branch the operator is on
 // NOW, not on the run's pinned base: a stale branch whose patch already reached
 // the live checkout must be reusable, even though the pinned base predates it.
-test("unlandedCount measures landfall against the LIVE checkout, not the pinned base", () => {
+test("unlandedCount measures landfall against the LIVE checkout, not the pinned base", async () => {
   const repo = initRepo();
   const results = mkdtempSync(join(tmpdir(), "swarm-wt-unlanded-"));
   const other = mkdtempSync(join(tmpdir(), "swarm-wt-unlanded2-"));
   try {
     const dispatch = git(["rev-parse", "HEAD"], repo);
     // A prior run's branch, its tree removed: the stale-branch `-B` path.
-    const stale = prepareIsolation({ id: "p1", originalCwd: repo, worktreeName: "sq" }, CFG, results, ADD(repo));
+    const stale = await prepareIsolation({ id: "p1", originalCwd: repo, worktreeName: "sq" }, CFG, results, ADD(repo));
     writeFileSync(join(stale.path, "sq.txt"), "squashed work\n");
     commitAll(stale.path, "sq work");
     dropWorktree(repo, stale.path);
@@ -90,7 +90,7 @@ test("unlandedCount measures landfall against the LIVE checkout, not the pinned 
     let error;
     let reused;
     try {
-      reused = prepareIsolation({ id: "p2", originalCwd: repo, worktreeName: "sq" }, CFG, other,
+      reused = await prepareIsolation({ id: "p2", originalCwd: repo, worktreeName: "sq" }, CFG, other,
         { addTimeoutMs: WORKTREE_ADD_TIMEOUT_MS, base: dispatch });
     } catch (e) { error = e; }
     ok(!error, `a branch whose patch already landed on the live checkout is reusable: ${error?.message}`);

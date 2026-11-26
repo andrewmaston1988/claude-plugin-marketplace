@@ -109,11 +109,13 @@ export function createLaunch(ctx) {
       const wtName = ctx.nameOf(task);
       if (wtName !== undefined) {
         try {
-          wt = ctx.worktree.prepareIsolation({ ...task, worktreeName: wtName }, cfg, plan.resultsDir, {
+          wt = await ctx.worktree.prepareIsolation({ ...task, worktreeName: wtName }, cfg, plan.resultsDir, {
             reset: ctx.force && ctx.groupFirst.get(wtName) === task.id,
             addTimeoutMs: defaultWorktree.WORKTREE_ADD_TIMEOUT_MS,
             // The commit the run pinned at dispatch, not whatever HEAD says now.
             base: ctx.baseFor(task.originalCwd || task.cwd),
+            // A stop must abort the add and its retry pause, not wait the ladder out.
+            isCancelled: () => ctx.stopRequested === true,
           });
           // Every tree-holding leaf sits at its declared depth. Unconditionally: the old
           // mode test skipped this for a hand-written tree and landed it at the root.
@@ -123,11 +125,21 @@ export function createLaunch(ctx) {
             reset: ctx.force, session: resumeId ? "resumed" : "fresh", ...(declined && { declined }),
           });
         } catch (e) {
-          const result = { id: task.id, model: task.model, ...ctx.durableIdentity(task), ok: false, exit: null, durationMs: 0, output: `worktree setup failed: ${e.message}` };
+          const stopped = ctx.stopRequested || e?.stopped === true;
+          const result = { id: task.id, model: task.model, ...ctx.durableIdentity(task), ok: false, exit: null, durationMs: 0, output: `worktree setup ${stopped ? "stopped" : "failed"}: ${e.message}` };
           writeResult(plan.resultsDir, task.id, result);
-          ctx.record(task, "failed", 0);
+          ctx.record(task, stopped ? "failed:stopped" : "failed", 0);
           return task.id;
         }
+      }
+
+      // A stop that landed while the add was awaited must not reach the provider: the
+      // stop sweep kills children that exist, and this leaf has none yet.
+      if (ctx.stopRequested) {
+        const result = { id: task.id, model: task.model, ...ctx.durableIdentity(task), ok: false, exit: null, durationMs: 0, output: "stopped before dispatch: the run was stopped while the worktree was being prepared" };
+        writeResult(plan.resultsDir, task.id, result);
+        ctx.record(task, "failed:stopped", 0);
+        return task.id;
       }
 
       // promptFinal is a forEach clone, substituted at clone time; the engine's

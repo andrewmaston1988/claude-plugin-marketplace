@@ -270,7 +270,7 @@ test("row 15: the CLI measures through a custom worktreeBranchPrefix, so a sibli
   const cfg = { worktreeBranchPrefix: "agents/", treeRoot: join(f.dir, "home", "worktrees") };
   let wt;
   try {
-    wt = prepareIsolation({ id: "impl", originalCwd: f.repo, cwd: f.repo }, cfg, f.resultsDir,
+    wt = await prepareIsolation({ id: "impl", originalCwd: f.repo, cwd: f.repo }, cfg, f.resultsDir,
       { addTimeoutMs: WORKTREE_ADD_TIMEOUT_MS, base: gitOut(["rev-parse", "HEAD"], f.repo) });
     writeFileSync(join(wt.path, "work.txt"), "x\n");
     commitAll(wt.path, "work");

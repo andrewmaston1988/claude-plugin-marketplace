@@ -18,7 +18,7 @@ const skip = process.platform === "win32" ? false : "Windows-only: path case and
 test("A7: a recorded path with backslashes and a different case is still a worktree root", { skip }, async () => {
   const f = pruneFixture();
   try {
-    const wt = prepareIsolation({ id: "impl", originalCwd: f.repo, cwd: f.repo }, cliCfg(f.dir), f.resultsDir,
+    const wt = await prepareIsolation({ id: "impl", originalCwd: f.repo, cwd: f.repo }, cliCfg(f.dir), f.resultsDir,
       { addTimeoutMs: WORKTREE_ADD_TIMEOUT_MS, base: f.sha });
     writeFileSync(join(wt.path, "scratch.txt"), "uncommitted\n");
     // A killed run wrote no summary: the per-tree record is the only name for this row, so

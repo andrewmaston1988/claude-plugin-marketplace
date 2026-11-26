@@ -15,7 +15,7 @@ const cfgFor = (dir) => ({ worktreeBranchPrefix: "swarm/", treeRoot: join(dir, "
 
 // One finished run holding: a landed clean tree, a tree whose commit never landed,
 // and a landed branch the run made that no tree holds.
-function partialRun() {
+async function partialRun() {
   const f = pruneFixture();
   const cfg = cfgFor(f.dir);
   const base = gitOut(["rev-parse", "HEAD"], f.repo);
@@ -24,12 +24,12 @@ function partialRun() {
     { id, originalCwd: f.repo, cwd: f.repo, branchScope: scope },
     cfg, f.resultsDir, { addTimeoutMs: WORKTREE_ADD_TIMEOUT_MS, base },
   );
-  const landed = tree("landed");
+  const landed = await tree("landed");
   writeFileSync(join(landed.path, "landed.txt"), "landed\n");
   commitAll(landed.path, "landed work");
   spawnSync("git", ["merge", "-q", landed.branch], { cwd: f.repo, windowsHide: true });
 
-  const held = tree("held");
+  const held = await tree("held");
   writeFileSync(join(held.path, "held.txt"), "held\n");
   commitAll(held.path, "held work");
 
@@ -45,7 +45,7 @@ function partialRun() {
 }
 
 test("row 10: a partial prune removes the landed rows and keeps the unlanded one", async () => {
-  const { f, landed, held, orphan } = partialRun();
+  const { f, landed, held, orphan } = await partialRun();
   try {
     const env = { SWARM_HOME: join(f.dir, "home") };
     const first = await runCliInProcess(["prune", f.resultsDir], { cwd: f.dir, env });
@@ -69,7 +69,7 @@ test("row 10: a partial prune removes the landed rows and keeps the unlanded one
 });
 
 test("row 11: partial --dry-run lists what would go and what would stay, removing nothing", async () => {
-  const { f, landed, held, orphan } = partialRun();
+  const { f, landed, held, orphan } = await partialRun();
   try {
     const r = await runCliInProcess(["prune", f.resultsDir, "--dry-run"], { cwd: f.dir, env: { SWARM_HOME: join(f.dir, "home") } });
     equal(r.status, 0, r.stdout + r.stderr);
@@ -90,7 +90,7 @@ test("row 12: a removal git refuses is reported kept with git's reason, never fr
   const f = pruneFixture();
   try {
     const base = gitOut(["rev-parse", "HEAD"], f.repo);
-    const wt = prepareIsolation(
+    const wt = await prepareIsolation(
       { id: "locked", originalCwd: f.repo, cwd: f.repo, branchScope: runScopeKey(f.resultsDir) },
       cfgFor(f.dir), f.resultsDir, { addTimeoutMs: WORKTREE_ADD_TIMEOUT_MS, base },
     );
@@ -131,7 +131,7 @@ test("row 12: a removal git refuses is reported kept with git's reason, never fr
 });
 
 test("row 13: a run with both kinds of kept row prints both remedies", async () => {
-  const { f, landed, held } = partialRun();
+  const { f, landed, held } = await partialRun();
   try {
     // The landed tree is locked, so git refuses it; the held tree is blocked on work.
     equal(spawnSync("git", ["worktree", "lock", landed.path], { cwd: f.repo, windowsHide: true }).status, 0);
