@@ -1,10 +1,12 @@
 // The leaf contract: parse a leaf's output, validate it, verify its citations and
 // coverage, and re-ask a leaf that missed. runTask is injected so this holds no cycle.
-import { readFileSync, createWriteStream } from "node:fs";
+import { readFileSync, createWriteStream, existsSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { transcriptPath, appendRunLog } from "../results.mjs";
 import { validateValue } from "../schema.mjs";
-import { dropNullOptionals } from "../native-schema.mjs";
+import { dropNullOptionals, strictSchema } from "../native-schema.mjs";
+import { toSpawnable, windowsCommandLineLength } from "../dispatch.mjs";
+import { WIN_CMDLINE_MAX } from "../manifest-dispatch-budget.mjs";
 import { extractCitations, verifyCitations, citationErrorLines, annotateCitations } from "../citations.mjs";
 import { parseReadCalls, computeCoverage, coverageRetryBlock, uncoveredLines } from "../coverage.mjs";
 import { addTokens, emptyTokens } from "../stream.mjs";
@@ -68,6 +70,53 @@ export async function reaskLeaf(task, cur, retryPrompt, { taskCwd, resultsDir, c
     sessionId: next.sessionId ?? cur.sessionId,
   };
   return { next, combined };
+}
+
+// Executable lookups spawn `where` on win32; a re-ask must not pay that each time.
+const resolveCache = new Map();
+
+function schemaReaskIo(io, { prompt, schemaErrors, closing, returns, schemaPath }) {
+  return {
+    ...io,
+    // Inspect the actual invocation so runner flags, resume ids and settings all count.
+    spawn(cmd, args, opts) {
+      const promptIndex = args.indexOf(prompt);
+      if (promptIndex < 0) throw new Error("schema re-ask prompt is missing from runner argv");
+      const bound = args.includes("--json-schema") || args.includes("--output-schema");
+      let correction = bound ? prompt : prompt.replace(schemaErrors,
+        () => schemaErrors + "\nThe required schema is:\n" + JSON.stringify(returns));
+      const argv = [cmd, ...args];
+      argv[promptIndex + 1] = "";
+      const platform = io.platform ?? process.platform;
+      const resolved = toSpawnable(argv, { _platform: platform, _cache: resolveCache });
+      const fixedLength = windowsCommandLineLength([resolved.cmd, ...resolved.args]) - windowsCommandLineLength([""]);
+      const fits = (text) => fixedLength + windowsCommandLineLength([text]) <= WIN_CMDLINE_MAX;
+
+      if (!fits(correction)) {
+        // Everything after the schema errors (citation and coverage blocks, closing) is kept whole.
+        const readSchema = "\nRead the required schema at: " + schemaPath + prompt.slice(schemaErrors.length);
+        correction = schemaErrors + readSchema;
+        if (!fits(correction)) {
+          const omitted = "… (validation errors truncated)" + readSchema;
+          if (!fits(omitted)) throw new Error("schema re-ask cannot fit the " + WIN_CMDLINE_MAX + "-character dispatch budget");
+          let low = 0;
+          let high = Math.min(schemaErrors.length, WIN_CMDLINE_MAX);
+          while (low < high) {
+            const mid = Math.ceil((low + high) / 2);
+            if (fits(schemaErrors.slice(0, mid) + omitted)) low = mid;
+            else high = mid - 1;
+          }
+          correction = schemaErrors.slice(0, low).toWellFormed() + omitted;
+        }
+        // Schemas that cannot be bound by Codex have no strict file.
+        if (!existsSync(schemaPath) || !strictSchema(returns)) {
+          writeFileSync(schemaPath, JSON.stringify(returns));
+        }
+      }
+      args[promptIndex] = correction;
+      return io.spawn(cmd, args, opts);
+    },
+  };
 }
 
 export async function enforceLeafContract(task, r, taskCwd, resultsDir, cfg, io, hooks, runtime, runTask) {
@@ -282,23 +331,23 @@ export async function enforceLeafContract(task, r, taskCwd, resultsDir, cfg, io,
     if (schemaErrs) schemaAttempt += 1;
     if (covAllowed) { covAttempt += 1; uncoveredAtAsk = uncovered; }
     turns += 1;
-    // Each re-ask carries the class that earned it: schema (with the schema itself —
-    // "expected object" alone doesn't name fields), a coverage block naming each unread
-    // range as a literal Read call, or a first-turn citation list. A coverage block
-    // rides EVERY coverage re-ask, not just the first: the leaf is told once more each
-    // time, and only the class that stopped earning turns goes quiet.
+    // Each correction includes the diagnostics that earned this turn.
     const blocks = [];
-    if (schemaErrs) blocks.push(
-      `Your output did not match the task's returns schema:\n  - ${schemaErrs.join("\n  - ")}\n` +
-      `The required schema is:\n${JSON.stringify(task.returns, null, 2)}`,
-    );
+    const schemaErrors = schemaErrs
+      ? `Your output did not match the task's returns schema:\n  - ${schemaErrs.join("\n  - ")}`
+      : null;
+    if (schemaErrors) blocks.push(schemaErrors);
     if (refuted && turns === 1) blocks.push(
       `Some citations in your output could not be verified against the actual files:\n  - ${citationErrorLines(a.cite.refuted).join("\n  - ")}`,
     );
     if (covAllowed) blocks.push(coverageRetryBlock(a.cov.gaps, { indexErrors: a.cov.errors, runner }));
     const retryPrompt = `${blocks.join("\n\n")}\n${closing}`;
+    const retryIo = schemaErrors ? schemaReaskIo(io, {
+      prompt: retryPrompt, schemaErrors, closing, returns: task.returns,
+      schemaPath: join(resultsDir, `${task.id}.schema.json`),
+    }) : io;
     const { next, combined } = await reaskLeaf(task, cur, retryPrompt, {
-      taskCwd, resultsDir, cfg, io, hooks, runtime, runTask,
+      taskCwd, resultsDir, cfg, io: retryIo, hooks, runtime, runTask,
       log: {
         attempt: turns,
         reason: schemaErrs ? "schema" : covAllowed ? "coverage" : "citations",
