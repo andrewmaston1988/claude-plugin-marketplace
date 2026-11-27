@@ -93,7 +93,8 @@ function schemaReaskIo(io, { prompt, schemaErrors, closing, returns, schemaPath 
       const fits = (text) => fixedLength + windowsCommandLineLength([text]) <= WIN_CMDLINE_MAX;
 
       if (!fits(correction)) {
-        const readSchema = "\nRead the required schema at: " + schemaPath + "\n" + closing;
+        // Everything after the schema errors (citation and coverage blocks, closing) is kept whole.
+        const readSchema = "\nRead the required schema at: " + schemaPath + prompt.slice(schemaErrors.length);
         correction = schemaErrors + readSchema;
         if (!fits(correction)) {
           const omitted = "… (validation errors truncated)" + readSchema;

@@ -41,14 +41,14 @@ function codexOutput(output) {
   ].map((event) => JSON.stringify(event)).join("\n") + "\n";
 }
 
-async function reask(t, { returns, runner, output = "[{}]", corrected = '[{"findings":[]}]', spawnLimit }) {
+async function reask(t, { returns, runner, output = "[{}]", corrected = '[{"findings":[]}]', spawnLimit, extra = {} }) {
   const dir = tmp();
   t.after(() => rmSync(dir, { force: true, recursive: true }));
   const resultsDir = join(dir, "run");
   initResultsDir(resultsDir);
   const codex = runner === "codex";
   const id = "leaf";
-  const leaf = task(id, { cwd: dir, returns, ...(codex && { provider: "codex", model: "gpt-5-codex" }) });
+  const leaf = task(id, { cwd: dir, returns, ...extra, ...(codex && { provider: "codex", model: "gpt-5-codex" }) });
   const cfg = codex
     ? { ...CFG, providers: { codex: { enabled: true, path: process.execPath, allowedRoots: [dir] } } }
     : { ...CFG, claudePath: process.execPath };
@@ -147,6 +147,19 @@ test("Codex omits inline JSON when the strict file is passed via the native flag
   equal(call.args[flag + 1], schemaPath);
   match(sentPrompt(call), /output: missing required field 'findings'/);
   ok(!sentPrompt(call).includes(schemaHeading), "the prompt repeats the bound schema");
+});
+
+test("An oversized re-ask keeps the coverage block beside the schema path", async (t) => {
+  const returns = { type: "string", enum: ['a"'.repeat(9000)] };
+  const mustRead = [join(tmp(), "needed-file.md")];
+  const { call, schemaPath } = await reask(t, {
+    returns, runner: "codex", output: "false", corrected: JSON.stringify(returns.enum[0]),
+    spawnLimit: 32767, extra: { mustRead },
+  });
+  const prompt = sentPrompt(call);
+  ok(prompt.includes(schemaPath), "the correction needs the schema path");
+  ok(prompt.includes("needed-file.md"), "the coverage block must survive the overflow");
+  ok(argvLength(call) <= dispatchBudget.WIN_CMDLINE_MAX);
 });
 
 test("An oversized field error keeps a teaching prefix and the bound schema path", async (t) => {
