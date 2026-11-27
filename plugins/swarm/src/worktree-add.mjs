@@ -177,7 +177,15 @@ export async function clearTaskDebris({
   const registered = listed.status === 0 && samePathRecorded(listed.stdout, path);
   if (registered) {
     // A tree a killed add left registered may still be locked; only -f -f removes one.
-    await removeRegistered(repo, path, git);
+    try {
+      await removeRegistered(repo, path, git);
+    } catch (e) {
+      // A killed add can leave the admin entry without the tree's gitfile, which git will
+      // not remove; the directory is deleted and pruned instead, if it is this attempt's.
+      if (!existsSync(path)) throw e;
+      if (existedBefore) throw new Error(`the directory at ${path} existed before this attempt — refusing to delete it`);
+      await removeDirectory(path);
+    }
   } else if (existsSync(path)) {
     if (existedBefore) throw new Error(`the directory at ${path} existed before this attempt — refusing to delete it`);
     await removeDirectory(path);
