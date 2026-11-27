@@ -1,6 +1,6 @@
 import "./helpers/isolate-home.mjs";
 import { test } from "node:test";
-import { equal, ok } from "node:assert/strict";
+import { deepEqual, equal, ok } from "node:assert/strict";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { tmpdir } from "node:os";
@@ -258,7 +258,7 @@ function brokenTree(repo, name) {
   const path = join(scratch(), name);
   git(["worktree", "add", path, "-b", `swarm/${name}`, "--no-track", git(["rev-parse", "HEAD"], repo)], repo);
   rmSync(join(path, ".git"), { force: true });
-  for (const f of ["a.txt"]) rmSync(join(path, f), { force: true });
+  rmSync(join(path, "a.txt"), { force: true });
   mkdirSync(join(path, "lfs"), { recursive: true });
   return path;
 }
@@ -305,7 +305,14 @@ test("a normal registered tree is still removed through git", { timeout: 60000 }
   const path = join(scratch(), "normal");
   try {
     git(["worktree", "add", path, "-b", "swarm/normal", "--no-track", git(["rev-parse", "HEAD"], repo)], repo);
-    await clearTaskDebris({ repo, path, branch: "swarm/normal", git: gitRunAsync });
+    const removals = [];
+    const spy = async (args, cwd, opts) => {
+      const result = await gitRunAsync(args, cwd, opts);
+      if (args[0] === "worktree" && args[1] === "remove") removals.push(result.status);
+      return result;
+    };
+    await clearTaskDebris({ repo, path, branch: "swarm/normal", git: spy });
+    deepEqual(removals, [0], "git removed it on the first call, no fallback");
     ok(!existsSync(path));
     ok(!listsPath(repo, path));
   } finally { removeEventually(dirname(path)); removeEventually(repo); }
