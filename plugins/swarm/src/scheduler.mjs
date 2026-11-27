@@ -12,7 +12,8 @@ import {
   renderProvenance, stopPath, recordedSessionRecords,
 } from "./results.mjs";
 import { formatEstimate } from "./estimate.mjs";
-import { cacheHit } from "./task-key.mjs";
+import { cacheHit, cachedClosure, reusable } from "./task-key.mjs";
+import { childId } from "./leaf-ids.mjs";
 import { addTokens, emptyTokens } from "./stream.mjs";
 import { defaultProviderRegistry } from "./default-providers.mjs";
 import { createDispatchRegistry } from "./dispatch.mjs";
@@ -136,7 +137,22 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), {
   // a clear message when it is unreachable.
   // Preflights must see composed leaves too — a manifest node's children are
   // known statically even though they splice in at run time.
-  const leafView = tasks.flatMap((t) => (t.childPlan ? t.childPlan.tasks : [t]));
+  const leafView = tasks.flatMap((t) => (t.childPlan ? t.childPlan.tasks.map((c) => ({ ...c, id: childId(t.id, c.id), parentId: t.id })) : [t]));
+  // A resume dispatches nothing for a leaf whose saved result is reusable and whose
+  // upstream stays cached, so such a leaf must not drag its provider into a preflight
+  // (or an exhausted-usage abort). Same closure the resume below applies, but pure:
+  // cacheHit would write cache-miss lines ahead of run-start.
+  const resuming = !force && !ask;
+  const settled = resuming
+    ? cachedClosure(tasks, (t) => reusable(readResult(plan.resultsDir, t.id), t))
+    : new Set();
+  const depsByTask = new Map(tasks.map((t) => [t.id, t.after]));
+  const willDispatch = (t) => {
+    if (!resuming) return true;
+    const own = reusable(readResult(plan.resultsDir, t.id), t);
+    if (t.parentId === undefined) return !settled.has(t.id);
+    return !own || depsByTask.get(t.parentId).some((d) => !settled.has(d));
+  };
   const providerGroups = new Map();
   // Both preflights can throw to abort the run before dispatch — caught here
   // just to remove the signal handlers first; the leaked-listener bug (a later
@@ -144,7 +160,7 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), {
   // than the throw itself, since it corrupts unrelated tests.
   try {
     for (const task of leafView) {
-      if (isAgentless(task) || task.model === "manifest") continue;
+      if (isAgentless(task) || task.model === "manifest" || !willDispatch(task)) continue;
       const identity = providerRegistry.resolve(task, {
         cache: cfg.modelCache || cfg.models || [],
         config: cfg,
@@ -260,21 +276,9 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), {
       ctx.record(t, priorRow?.state ?? "skipped", priorRow?.durationMs ?? null, priorRow?.tokens ?? null);
     }
   } else if (!force) {
-    for (const t of tasks) {
-      if (cacheHit(plan.resultsDir, t, readResult(plan.resultsDir, t.id))) cachedIds.add(t.id);
-    }
-    // `after` is the complete dependency graph: validation rejects a {{result:}}
-    // or forEach.from/when.from reference to a non-dependency, so nothing can
-    // consume an output it does not declare. Fixed-point over it.
-    for (let changed = true; changed;) {
-      changed = false;
-      for (const t of tasks) {
-        if (cachedIds.has(t.id) && t.after.some((d) => !cachedIds.has(d))) {
-          cachedIds.delete(t.id);
-          changed = true;
-        }
-      }
-    }
+    // Validation rejects a {{result:}} or forEach.from/when.from reference to a
+    // non-dependency, so `after` is the whole graph the closure runs over.
+    cachedIds = cachedClosure(tasks, (t) => cacheHit(plan.resultsDir, t, readResult(plan.resultsDir, t.id)));
     for (const t of tasks) {
       if (!cachedIds.has(t.id)) continue;
       const prior = readResult(plan.resultsDir, t.id);
