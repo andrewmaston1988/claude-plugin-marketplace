@@ -15,7 +15,7 @@ import { isSentinelModel } from "./manifest-task-policy.mjs";
 // that path would be bound by at runtime. FOREACH_ITEM_MAX bounds a forEach
 // template's {{item}}/{{index}} — a result-inline cap says nothing about how
 // long a forEach item can be, so it gets its own named ceiling.
-const WIN_CMDLINE_MAX = 32000;
+export const WIN_CMDLINE_MAX = 32000;
 export const RESULT_PATH_MEASURE_LEN = 260;
 export const FOREACH_ITEM_MAX = 4000;
 
