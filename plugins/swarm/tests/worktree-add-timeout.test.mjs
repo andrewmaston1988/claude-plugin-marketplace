@@ -2,10 +2,10 @@ import "./helpers/isolate-home.mjs";
 import { test } from "node:test";
 import { equal, ok } from "node:assert/strict";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { prepareIsolation, treeDirFor } from "../src/worktree.mjs";
-import { addWorktree, gitRunAsync, slowHook, timeoutMessage } from "../src/worktree-add.mjs";
+import { addWorktree, clearTaskDebris, gitRunAsync, slowHook, timeoutMessage } from "../src/worktree-add.mjs";
 import { initRepo, cleanup, git, CFG } from "./helpers/worktree-fixtures.mjs";
 import { ageLock, gitRun, lockPathFor, scratch } from "./helpers/worktree-add-fixtures.mjs";
 
@@ -249,6 +249,66 @@ test("an old 0-byte lock and the half-made tree are cleared before the retry", {
   } finally {
     for (const d of [results, hooks, repo]) removeEventually(d);
   }
+});
+
+// ---- a listed tree git refuses to remove
+
+// Registered, then its gitfile deleted and only an lfs/ dir left: what a killed add leaves.
+function brokenTree(repo, name) {
+  const path = join(scratch(), name);
+  git(["worktree", "add", path, "-b", `swarm/${name}`, "--no-track", git(["rev-parse", "HEAD"], repo)], repo);
+  rmSync(join(path, ".git"), { force: true });
+  for (const f of ["a.txt"]) rmSync(join(path, f), { force: true });
+  mkdirSync(join(path, "lfs"), { recursive: true });
+  return path;
+}
+
+const listsPath = (repo, path) =>
+  git(["worktree", "list", "--porcelain"], repo).toLowerCase().replaceAll("\\", "/").includes(path.toLowerCase().replaceAll("\\", "/"));
+
+test("a listed tree git refuses to remove is deleted and the next add succeeds", { timeout: 60000 }, async () => {
+  const repo = initRepo();
+  const path = brokenTree(repo, "broken1");
+  try {
+    await clearTaskDebris({ repo, path, branch: "swarm/broken1", git: gitRunAsync });
+    ok(!existsSync(path), "the broken directory is gone");
+    git(["branch", "-D", "swarm/broken1"], repo);
+    git(["worktree", "add", path, "-b", "swarm/broken1", "--no-track", git(["rev-parse", "HEAD"], repo)], repo);
+    ok(existsSync(join(path, "a.txt")), "a fresh add at the path succeeds");
+  } finally { removeEventually(dirname(path)); removeEventually(repo); }
+});
+
+test("after the cleanup the worktree list no longer names the path", { timeout: 60000 }, async () => {
+  const repo = initRepo();
+  const path = brokenTree(repo, "broken2");
+  try {
+    ok(listsPath(repo, path), "precondition: git still lists the broken tree");
+    await clearTaskDebris({ repo, path, branch: "swarm/broken2", git: gitRunAsync });
+    ok(!listsPath(repo, path), "the admin entry was pruned");
+  } finally { removeEventually(dirname(path)); removeEventually(repo); }
+});
+
+test("a broken tree at a path that existed before the attempt is refused, naming the path", { timeout: 60000 }, async () => {
+  const repo = initRepo();
+  const path = brokenTree(repo, "broken3");
+  try {
+    let error;
+    try { await clearTaskDebris({ repo, path, branch: "swarm/broken3", existedBefore: true, git: gitRunAsync }); } catch (e) { error = e; }
+    ok(error, "refused");
+    ok(error.message.includes(path), error.message);
+    ok(existsSync(join(path, "lfs")), "nothing was deleted");
+  } finally { removeEventually(dirname(path)); removeEventually(repo); }
+});
+
+test("a normal registered tree is still removed through git", { timeout: 60000 }, async () => {
+  const repo = initRepo();
+  const path = join(scratch(), "normal");
+  try {
+    git(["worktree", "add", path, "-b", "swarm/normal", "--no-track", git(["rev-parse", "HEAD"], repo)], repo);
+    await clearTaskDebris({ repo, path, branch: "swarm/normal", git: gitRunAsync });
+    ok(!existsSync(path));
+    ok(!listsPath(repo, path));
+  } finally { removeEventually(dirname(path)); removeEventually(repo); }
 });
 
 // ---- the timeout message names a hook only when the repo has one
