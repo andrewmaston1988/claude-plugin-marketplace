@@ -60,6 +60,22 @@ export function reusable(prior, task) {
   return prior.key === taskKey(task);
 }
 
+// Ids of the tasks that stay cached: a cached task whose dependency re-executes is
+// invalidated too, transitively. `after` is the complete dependency graph.
+export function cachedClosure(tasks, isCached) {
+  const cached = new Set(tasks.filter(isCached).map((t) => t.id));
+  for (let changed = true; changed;) {
+    changed = false;
+    for (const t of tasks) {
+      if (cached.has(t.id) && t.after.some((d) => !cached.has(d))) {
+        cached.delete(t.id);
+        changed = true;
+      }
+    }
+  }
+  return cached;
+}
+
 // The cache-miss line is what `status` reads to say why a task re-ran, so it fires
 // only on the one state reusable() refuses for a recorded definition: a key mismatch.
 export function cacheHit(resultsDir, task, prior) {

@@ -120,6 +120,19 @@ test("5: a fresh run preflights every provider seated by any leaf", async () => 
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
+test("7: a reusable dependent of a re-running upstream is still preflighted", async () => {
+  const dir = tmp();
+  try {
+    const { io, calls, providerRegistry } = setUp(dir);
+    const b = leaf("b", dir, { after: ["a"] });
+    const plan = planOf(dir, [leaf("a", dir, { prompt: "edited" }), b]);
+    saved(plan, leaf("a", dir));
+    saved(plan, b);
+    await runPlan(plan, cfgFor(dir), io, { providerRegistry });
+    equal(calls[0].join(","), "a,b", "b re-runs because a does, so its provider is checked");
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
 test("6: a composed child with a reusable result is left out of its provider's group", async () => {
   const dir = tmp();
   try {
