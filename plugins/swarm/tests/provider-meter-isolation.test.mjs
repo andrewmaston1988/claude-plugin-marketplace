@@ -1,7 +1,8 @@
 import "./helpers/isolate-home.mjs";
 import { test } from "node:test";
 import { equal, ok } from "node:assert/strict";
-import { accessSync, constants, existsSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { accessSync, constants, existsSync, statSync } from "node:fs";
 import { delimiter, dirname, join, resolve } from "node:path";
 import { createCodexProviderAdapter } from "../src/codex.mjs";
 import { defaultProviderAdapters } from "../src/providers.mjs";
@@ -33,6 +34,17 @@ test("Codex preflight resolves the test stub and dispatches without a client", a
     tasks: [{ id: "unmetered" }],
   });
   equal(result.ok, true);
+});
+
+test("the Windows codex stub is a small binary, not a copy of node", { skip: process.platform !== "win32" }, () => {
+  const stub = join(process.env.SWARM_HOME, "bin", "codex.exe");
+  ok(statSync(stub).size < 1024 * 1024, `codex stub is ${statSync(stub).size} bytes`);
+});
+
+test("the codex stub exits non-zero on app-server", () => {
+  const result = spawnSync("codex", ["app-server", "--listen", "stdio://"], { encoding: "utf8" });
+  equal(result.error, undefined);
+  ok(result.status !== 0 && result.status !== null, `stub exited ${result.status}`);
 });
 
 test("Claude preflight credentials resolve inside the throwaway test home", async () => {
