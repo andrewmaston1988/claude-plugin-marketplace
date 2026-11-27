@@ -70,7 +70,8 @@ test("returns: invalid output gets one teaching re-ask via session resume, then 
     equal(retry.args[ri + 1], "s-1");
     const rp = promptOf(retry);
     ok(rp.includes("expected object"), rp);        // the validator's teaching error
-    ok(rp.includes(JSON.stringify(SITES_SCHEMA, null, 2)), rp); // the schema itself — the original prompt may have underspecified the shape
+    ok(retry.args.includes("--json-schema"), "the runner binds the schema natively");
+    ok(!rp.includes('"required"'), rp);            // so the re-ask carries no second copy of it
     ok(/only.*json/i.test(rp), rp);                // corrective instruction
 
     const res = readResult(p.resultsDir, "a");

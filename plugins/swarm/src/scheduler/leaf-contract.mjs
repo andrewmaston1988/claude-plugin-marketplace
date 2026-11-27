@@ -72,6 +72,9 @@ export async function reaskLeaf(task, cur, retryPrompt, { taskCwd, resultsDir, c
   return { next, combined };
 }
 
+// Executable lookups spawn `where` on win32; a re-ask must not pay that each time.
+const resolveCache = new Map();
+
 function schemaReaskIo(io, { prompt, schemaErrors, closing, returns, schemaPath }) {
   return {
     ...io,
@@ -85,7 +88,7 @@ function schemaReaskIo(io, { prompt, schemaErrors, closing, returns, schemaPath 
       const argv = [cmd, ...args];
       argv[promptIndex + 1] = "";
       const platform = io.platform ?? process.platform;
-      const resolved = toSpawnable(argv, { _platform: platform });
+      const resolved = toSpawnable(argv, { _platform: platform, _cache: resolveCache });
       const fixedLength = windowsCommandLineLength([resolved.cmd, ...resolved.args]) - windowsCommandLineLength([""]);
       const fits = (text) => fixedLength + windowsCommandLineLength([text]) <= WIN_CMDLINE_MAX;
 
