@@ -12,7 +12,8 @@ import {
   renderProvenance, stopPath, recordedSessionRecords,
 } from "./results.mjs";
 import { formatEstimate } from "./estimate.mjs";
-import { cacheHit } from "./task-key.mjs";
+import { cacheHit, reusable } from "./task-key.mjs";
+import { childId } from "./leaf-ids.mjs";
 import { addTokens, emptyTokens } from "./stream.mjs";
 import { defaultProviderRegistry } from "./default-providers.mjs";
 import { createDispatchRegistry } from "./dispatch.mjs";
@@ -136,7 +137,11 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), {
   // a clear message when it is unreachable.
   // Preflights must see composed leaves too — a manifest node's children are
   // known statically even though they splice in at run time.
-  const leafView = tasks.flatMap((t) => (t.childPlan ? t.childPlan.tasks : [t]));
+  const leafView = tasks.flatMap((t) => (t.childPlan ? t.childPlan.tasks.map((c) => ({ ...c, id: childId(t.id, c.id) })) : [t]));
+  // A resume dispatches nothing for a leaf whose saved result is reusable, so such a
+  // leaf must not drag its provider into a preflight (or an exhausted-usage abort).
+  const resuming = !force && !ask;
+  const willDispatch = (t) => !resuming || !reusable(readResult(plan.resultsDir, t.id), t);
   const providerGroups = new Map();
   // Both preflights can throw to abort the run before dispatch — caught here
   // just to remove the signal handlers first; the leaked-listener bug (a later
@@ -144,7 +149,7 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), {
   // than the throw itself, since it corrupts unrelated tests.
   try {
     for (const task of leafView) {
-      if (isAgentless(task) || task.model === "manifest") continue;
+      if (isAgentless(task) || task.model === "manifest" || !willDispatch(task)) continue;
       const identity = providerRegistry.resolve(task, {
         cache: cfg.modelCache || cfg.models || [],
         config: cfg,
