@@ -1,7 +1,7 @@
 // Imported first by every test file: points SWARM_HOME, HOME and USERPROFILE at a
 // throwaway dir so a run cannot read or write the real ~/.swarm or ~/.claude.
 // Child processes (node --test workers, CLI spawns) inherit it.
-import { copyFileSync, linkSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { delimiter, join } from "node:path";
 import { after } from "node:test";
 import { swarmTempDir } from "../../src/temp-dir.mjs";
@@ -44,10 +44,14 @@ if (!process.env.SWARM_HOME || process.env.SWARM_TEST_HOME !== "1") {
   process.env.SWARM_CREDENTIALS = join(dir, "claude-credentials.json");
   process.env.PATH = `${binDir}${delimiter}${process.env.PATH || ""}`;
   // Keep tests off the live Codex meter with a PATH-first stub. Bare win32 spawn
-  // resolves only .exe/.com, so node.exe treats app-server as a script and exits 1.
+  // resolves only .exe/.com, so hostname.exe (40 KB) rejects app-server's arguments
+  // and exits 1. A node copy would cost ~90 MB per home.
   if (process.platform === "win32") {
-    const stub = join(binDir, "codex.exe");
-    try { linkSync(process.execPath, stub); } catch { copyFileSync(process.execPath, stub); }
+    const systemBinary = join(process.env.SystemRoot || "C:\\Windows", "System32", "hostname.exe");
+    if (!existsSync(systemBinary)) {
+      throw new Error(`test codex stub source missing: ${systemBinary}`);
+    }
+    copyFileSync(systemBinary, join(binDir, "codex.exe"));
   } else {
     writeFileSync(join(binDir, "codex"), "#!/bin/sh\nexit 1\n", { mode: 0o755 });
   }
